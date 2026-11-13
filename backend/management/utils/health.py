@@ -14,6 +14,10 @@ def install_health_contract(app: FastAPI) -> None:
 
     @app.get("/health/ready", include_in_schema=False)
     async def health_ready(response: Response) -> dict[str, str | int]:
+        coordinator = getattr(app.state, 'sandbox_coordinator', None)
+        if coordinator is not None and coordinator.lost_coordination.is_set():
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {'status': 'not_ready', 'reason': 'coordination_unknown'}
         manager = getattr(app.state, "thread_manager", None)
         if manager is None:
             return {"status": "ready"}

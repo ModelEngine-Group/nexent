@@ -15,6 +15,12 @@ _upload_cleanup_tasks: set[asyncio.Task] = set()
 
 def recover_runtime_tasks() -> dict[str, int]:
     """Fail work that was owned by the previous runtime process."""
+    from runtime.identity import uses_distributed_runtime
+
+    if uses_distributed_runtime():
+        from runtime.sandbox_runtime import get_runtime_recovery
+
+        return get_runtime_recovery().recover()
     from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
     from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
     from management.db.conversation.repository import fail_streaming_assistant_messages

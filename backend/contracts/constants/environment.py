@@ -37,9 +37,25 @@ MAX_KNOWLEDGE_FILE_SIZE_MB = parse_positive_int(os.getenv('MAX_KNOWLEDGE_FILE_SI
 MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
+NEXENT_SANDBOX_PROVIDER = os.getenv('NEXENT_SANDBOX_PROVIDER', 'docker').strip().lower()
+NEXENT_SANDBOX_ENABLED = os.getenv('NEXENT_SANDBOX_ENABLED', 'true').strip().lower() == 'true'
 NEXENT_SANDBOX_WORKSPACE_MODE = os.getenv('NEXENT_SANDBOX_WORKSPACE_MODE', 'legacy')
 NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT = os.getenv('NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT', '')
-NEXENT_SANDBOX_FAILURE_POLICY = os.getenv('NEXENT_SANDBOX_FAILURE_POLICY', 'local')
+NEXENT_SANDBOX_FAILURE_POLICY = os.getenv(
+    'NEXENT_SANDBOX_FAILURE_POLICY', 'error' if NEXENT_SANDBOX_PROVIDER == 'kubernetes' else 'local'
+)
+# Kubernetes identity is injected only into the trusted Runtime Pod.
+NEXENT_RUNTIME_DEPLOYMENT_ID = os.getenv('NEXENT_RUNTIME_DEPLOYMENT_ID', '')
+NEXENT_RUNTIME_POD_NAMESPACE = os.getenv('NEXENT_RUNTIME_POD_NAMESPACE', '')
+NEXENT_RUNTIME_POD_NAME = os.getenv('NEXENT_RUNTIME_POD_NAME', '')
+NEXENT_RUNTIME_POD_UID = os.getenv('NEXENT_RUNTIME_POD_UID', '')
+NEXENT_RUNTIME_POD_IP = os.getenv('NEXENT_RUNTIME_POD_IP', '')
+NEXENT_RUNTIME_CONTAINER_NAME = os.getenv('NEXENT_RUNTIME_CONTAINER_NAME', 'nexent-runtime')
+NEXENT_SANDBOX_WORKSPACE_CLAIM = os.getenv('NEXENT_SANDBOX_WORKSPACE_CLAIM', '')
+NEXENT_SANDBOX_WORKSPACE_MOUNT = os.getenv('NEXENT_SANDBOX_WORKSPACE_MOUNT', '/mnt/nexent')
+NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT = os.getenv('NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT', 'false').lower() == 'true'
+NEXENT_SANDBOX_EXECUTION_UID = int(os.getenv('NEXENT_SANDBOX_EXECUTION_UID', '1000'))
+NEXENT_SANDBOX_EXECUTION_GID = int(os.getenv('NEXENT_SANDBOX_EXECUTION_GID', '1000'))
 ROOT_DIR = os.getenv('ROOT_DIR')
 PER_WAVE_TIMEOUT = int(os.getenv('DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S', '30'))
 MAX_TIMEOUT = int(os.getenv('DP_SPLIT_WAIT_TIMEOUT_MAX_S', '1800'))
@@ -431,7 +447,7 @@ APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 NEXENT_TOOL_FASTPATH_ENABLED = os.getenv('NEXENT_TOOL_FASTPATH_ENABLED', 'true').strip().lower() == 'true'
 NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip()))
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv('NEXENT_SANDBOX_DEFAULT_LEVEL', 'local').lower()
-# Default sandbox isolation level: local / docker / wasm.
+# Default sandbox level: local / docker / kubernetes / wasm.
 #    Default 'local' preserves backward-compatibility for existing deployments.
 NEXENT_SANDBOX_DEFAULT_SCOPE = os.getenv('NEXENT_SANDBOX_DEFAULT_SCOPE', 'system').lower()
 # Default sandbox container lifecycle scope: session / system.

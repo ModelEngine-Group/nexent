@@ -12,7 +12,7 @@ from nexent.core.agents.resources import workspace as workspace_resources
 import pytest
 
 from nexent.core.agents.cores.smolagents import agent as agent_module
-from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.sandbox.execution import execution as sandbox
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.utils.observer import MessageObserver
@@ -162,6 +162,25 @@ def test_deferred_strict_warmup_failure_releases_executor(construction, mocker, 
     release.assert_called_once_with(c.executor, workspace_resources.logger, timeout=5.0)
     wrapper.cleanup()
     release.assert_called_once()
+
+
+def test_kubernetes_cold_path_and_cleanup_never_initialize_unavailable_backend(construction):
+    c = construction
+    c.factory.sandbox_config.level = sandbox.SandboxLevel.KUBERNETES
+    c.factory.sandbox_config.scope = sandbox.SandboxScope.SYSTEM
+    c.factory.tool_fastpath_enabled = True
+    c.factory.workspace_mapping = None
+    c.build.side_effect = sandbox.SandboxBackendUnavailableError('T02 backend unavailable')
+    c.factory.create_single_agent(c.config)
+    wrapper = c.core.call_args.kwargs['executor']
+    wrapper.send_tools({})
+    wrapper('print("cold")')
+    c.build.assert_not_called()
+    with pytest.raises(sandbox.SandboxBackendUnavailableError, match='T02'):
+        wrapper('import math')
+    assert wrapper.remote is None
+    wrapper.cleanup()
+    c.build.assert_called_once()
 
 
 def test_deferred_strict_mode_rejects_local_executor(construction, mocker):

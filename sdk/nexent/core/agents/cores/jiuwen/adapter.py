@@ -260,6 +260,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             workspace_path=info.workspace_path, workspace_run_id=info.workspace_run_id, minio_files=info.minio_files,
             cancellation_scope=self.scope, user_context=info.user_context,
             child_invocation_factory=child_invocation_factory(info),
+            runtime_lifecycle=info.__dict__.get("_runtime_run_lifecycle"),
         )
         self.resources.core_run_info = info
         native_tools = []
@@ -566,12 +567,21 @@ class JiuwenAdapter(AgentCoreAdapter):
         config = self.run_info.sandbox_config
         if config is None or config.level == SandboxLevel.LOCAL:
             return
+        self.resources._sandbox_scope = config.scope.value
         executor = build_python_executor(config, logger, host_tools_exist=True, cancellation_scope=self.scope)
         self.resources._sandbox_executors.append(executor)
         self.resources.agent.python_executor = executor
-        runner = SandboxSkillScriptRunner(
+        runner_type = SandboxSkillScriptRunner
+        runner_options = {}
+        if config.level == SandboxLevel.KUBERNETES:
+            from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+            runner_type = KubernetesSkillScriptRunner
+            runner_options["workspace_access"] = config.workspace_access
+        runner = runner_type(
             executor, timeout_seconds=int(config.timeout_seconds), workspace_path=self.run_info.workspace_path,
             network_enabled=not config.network_disabled, workspace_mapping=self.resources.workspace_mapping,
+            **runner_options,
         )
         self.resources._sandbox_skill_runners.append(runner)
         for tool in self.business_tools.values():

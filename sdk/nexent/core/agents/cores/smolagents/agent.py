@@ -354,7 +354,9 @@ class NexentAgent(AgentResources):
             if self.sandbox_config is not None:
                 from nexent.core.agents.sandbox.config import SandboxLevel
 
-                deferred = self.tool_fastpath_enabled and self.sandbox_config.level == SandboxLevel.DOCKER
+                deferred = self.tool_fastpath_enabled and self.sandbox_config.level in {
+                    SandboxLevel.DOCKER, SandboxLevel.KUBERNETES,
+                }
                 self._sandbox_scope = self.sandbox_config.scope.value
 
                 def release_executor(executor):
@@ -422,12 +424,20 @@ class NexentAgent(AgentResources):
                                     and not isinstance(configured_timeout, bool)
                                     else 300
                                 )
-                                script_runner = SandboxSkillScriptRunner(
+                                runner_type = SandboxSkillScriptRunner
+                                runner_options = {}
+                                if self.sandbox_config.level == SandboxLevel.KUBERNETES:
+                                    from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+                                    runner_type = KubernetesSkillScriptRunner
+                                    runner_options['workspace_access'] = self.sandbox_config.workspace_access
+                                script_runner = runner_type(
                                     python_executor,
                                     timeout_seconds=skill_timeout,
                                     workspace_path=self.workspace_path,
                                     network_enabled=not self.sandbox_config.network_disabled,
                                     workspace_mapping=getattr(self, "workspace_mapping", None),
+                                    **runner_options,
                                 )
                                 for tool in tool_list:
                                     bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -1061,6 +1071,7 @@ class NexentAgent(AgentResources):
             cancellation_scope=scope, user_context=self.user_context,
             tool_fastpath_enabled=self.tool_fastpath_enabled,
             tool_fastpath_allowed_tools=self.tool_fastpath_allowed_tools,
+            runtime_lifecycle=self.runtime_lifecycle,
         )
         runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
         try:

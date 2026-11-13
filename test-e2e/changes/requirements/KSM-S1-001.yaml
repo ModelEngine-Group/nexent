@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "KSM-S1-001",
+    "change_type": "requirement",
+    "requirement_id": "KSM-S1-001",
+    "title": "Implement S1 Kubernetes SYSTEM execution and safe Runtime lifecycle",
+    "description": "Complete T02-T07 against the approved S1 SPEC, retaining Docker and public contracts with no new database tables.",
+    "affected_features": {
+      "existing": [
+        "KSM-CONFIG",
+        "SAI-001",
+        "TFP-001"
+      ],
+      "added": [
+        "KSM-SYSTEM"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "SAI-D3-001",
+        "TFP-D3-001"
+      ],
+      "added": [
+        "KSM-EXECUTION-D3-001",
+        "KSM-FILES-D3-001",
+        "KSM-DOWNLOAD-D4-001",
+        "KSM-SECURITY-D5-001",
+        "KSM-MULTIRUNTIME-D5-001"
+      ],
+      "modified": [],
+      "retired": [
+        "KSM-DRAIN-D2-001"
+      ]
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "test_selectors": [
+        "test/backend/agents/test_distributed_execution_registry.py",
+        "test/backend/agents/test_kubernetes_workspace.py",
+        "test/backend/agents/test_kubernetes_workspace_materials.py",
+        "test/backend/agents/test_owned_evaluation_admission.py",
+        "test/backend/agents/test_runtime_distributed_admission.py",
+        "test/backend/agents/test_sandbox_coordination.py",
+        "test/backend/agents/test_sandbox_deployment_config.py",
+        "test/backend/agents/test_sandbox_owner.py",
+        "test/backend/agents/test_sandbox_recovery.py",
+        "test/backend/agents/test_sandbox_run_lifecycle.py",
+        "test/backend/agents/test_sandbox_stream_state.py",
+        "test/backend/app/test_agent_evaluation_runtime_app.py",
+        "test/backend/app/test_health_app.py",
+        "test/backend/apps/test_sandbox_callbacks.py",
+        "test/backend/database/test_runtime_owned_recovery.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_callbacks.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_contracts.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_exec.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_lifetime.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_pool.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_resources.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_runner.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_startup.py",
+        "test/sdk/core/agents/test_sandbox_channel_readiness.py",
+        "test/sdk/core/agents/test_subagent_resource_ownership.py",
+        "test/sdk/scheduler/test_core.py",
+        "test/backend/agents/test_runtime_cancel_generation.py",
+        "test/backend/agents/test_runtime_config_cancel.py",
+        "test/backend/apps/test_runtime_admission_api.py",
+        "test/backend/agents/test_runtime_admission.py"
+      ],
+      "behaviors": [
+        "Pod identity/profile/conflict/response-loss and pinned TLS generation.",
+        "Owner/run workspace permissions, protected exact associations and scoped cleanup.",
+        "Kernel/script compatibility, callback authentication/context lifetime and no replay.",
+        "Redis compare-token admission/renewal/generation, both recovery paths and existing shutdown compatibility; graceful drain removed by user.",
+        "Keep reservation while real native children, callbacks, kernels or uncertain script exec can still act; definitive exit releases only its own holder."
+      ],
+      "reason": "Existing Docker SAI/TFP tests do not exercise Kubernetes, distributed reservation or coordination failure. Keep isolated tests in UT; no duplicate new D1."
+    },
+    "notes": "Primary responsibility sandbox. User confirmed single-node Docker Desktop validation on 2026-11-12; multi-node/CSI is outside this delivery scope. Same-node two-Runtime lifecycle proof remains required. The real NetworkPolicy negative probe FAILED: denied Pod HTTP still returned 200. No CNI change is authorized. The remaining D3-D5 still require owned preparation, fixed scripts, bindings and full acceptance evidence. Full-tree validator also has three pre-existing unrelated AIDP errors. No passing formal acceptance is claimed. On 2026-11-13 the user removed graceful scale-in/restart completion: restore uvicorn.run, remove dedicated drain/preStop/credential and scheduler pause/deadline, retire KSM-DRAIN-D2-001. Preserve live-run ownership and coordination failure protection. Historical drain passes are not current acceptance."
+  }
+}

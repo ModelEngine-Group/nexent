@@ -18,6 +18,7 @@ from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creator_execution import start_creation_turn
 from gateway.authentication.auth import get_current_user_info, get_current_user_id
 from gateway.authentication.auth import verify_internal_runtime_jwt
+from runtime.identity import uses_distributed_runtime
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -86,7 +87,7 @@ async def agent_run_api(
                 "current_version": e.current_version,
             },
         ) from e
-    except AppException:
+    except (AppException, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
@@ -136,7 +137,7 @@ async def northbound_agent_run_api(
         ) from exc
     except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
         return _runtime_overload_response(exc)
-    except AppException:
+    except (AppException, HTTPException):
         raise
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
@@ -154,6 +155,9 @@ async def nl2agent_run_api(
     _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
     """Run the shared NL2Agent with the same history path in every UI entrypoint."""
+    from runtime.sandbox_runtime import require_business_admission
+
+    require_business_admission()
     if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
@@ -216,7 +220,8 @@ async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None
     Stop an agent run by conversation ID or ephemeral debug run ID.
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
+    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id,
+                            **({'tenant_id': tenant_id} if uses_distributed_runtime() else {}))
 
 
 @agent_runtime_router.post(
@@ -230,7 +235,8 @@ async def northbound_agent_stop_api(
     """Stop a northbound agent run inside the runtime service."""
     try:
         user_id, tenant_id = verify_internal_runtime_jwt(authorization)
-        return stop_agent_tasks(conversation_id, user_id)
+        return stop_agent_tasks(conversation_id, user_id,
+                                **({'tenant_id': tenant_id} if uses_distributed_runtime() else {}))
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,

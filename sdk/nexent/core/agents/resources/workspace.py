@@ -256,6 +256,12 @@ class WorkspaceResources:
 
     def _push_file_workspace_to_sandbox(self, containers: Optional[List[Any]] = None) -> None:
         """Copy the prepared host workspace into every Docker sandbox."""
+        if getattr(getattr(self.sandbox_config, 'level', None), 'value', None) == 'kubernetes':
+            access = self.sandbox_config.workspace_access
+            if access is None or not self.workspace_path:
+                raise RuntimeError('Kubernetes sandbox requires trusted workspace preparation')
+            access.seal_materials(Path(self.workspace_path))
+            return
         if containers is None:
             containers = self._sandbox_containers()
         if not containers or not self.workspace_path:
@@ -303,7 +309,7 @@ class WorkspaceResources:
         candidates = self._sandbox_executors if executors is None else executors
         if not self.workspace_path or not any(
             getattr(executor, "_nexent_backend", None) != "local" and (
-                getattr(executor, "_nexent_backend", None) == "docker"
+                getattr(executor, "_nexent_backend", None) in ("docker", "kubernetes")
                 or getattr(executor, "container", None) is not None
             ) for executor in candidates
         ):
@@ -340,7 +346,7 @@ class WorkspaceResources:
             backend = getattr(executor, "_nexent_backend", None)
             if backend == "local":
                 continue
-            if backend != "docker" and getattr(executor, "container", None) is None:
+            if backend not in ("docker", "kubernetes") and getattr(executor, "container", None) is None:
                 continue
             register_bootstrap = None
             if (
@@ -358,9 +364,9 @@ class WorkspaceResources:
                 execute_bootstrap(bootstrap_code)
                 self._check_sandbox_cancelled()
                 logger.info(
-                    "Sandbox READY run_id=%s actual_backend=docker scope=%s container_id=%s kernel_id=%s "
+                    "Sandbox READY run_id=%s actual_backend=%s scope=%s container_id=%s kernel_id=%s "
                     "host_workspace=%s container_workspace=%s",
-                    self.workspace_run_id, getattr(getattr(self.sandbox_config, "scope", None), "value", None),
+                    self.workspace_run_id, backend, getattr(getattr(self.sandbox_config, "scope", None), "value", None),
                     getattr(getattr(executor, "container", None), "id", None),
                     getattr(executor, "kernel_id", None), self.workspace_path, workspace,
                 )

@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import hashlib
+import html
 import inspect
 import json
 import logging
@@ -15,12 +16,12 @@ from pathlib import Path
 import nexent.core.agents.sandbox as sandbox_package
 from nexent.core.agents.contracts import config as agent_configuration, run as agent_running
 from nexent.core.agents.cores.smolagents import agent as nexent_agent
-from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.sandbox.execution import execution as sandbox
 from nexent.core.agents.resources import subagents as subagent_wrapper
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
-from nexent.core.agents.sandbox import execution, config, compatibility, tls
+from nexent.core.agents.sandbox.execution import execution, config, compatibility, tls
 from nexent.core.concurrency import LanePolicy, ThreadManager, cancellation
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.concurrency.context import (
@@ -58,7 +59,7 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
                 raise ModelInvocationTerminalError(ModelErrorCode.TIMEOUT, attempts=1)
             self.calls += 1
             if self.calls > 1:
-                measurements = re.findall(r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', text)
+                measurements = re.findall(r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', html.unescape(text))
                 assert measurements, 'The real kernel must return its measured execution window'
                 return ChatMessage(role='assistant', content=f'<final_answer>{measurements[-1]}</final_answer>')
             marker = 'LEFT' if 'TASK_MARKER=LEFT' in text else 'RIGHT'
