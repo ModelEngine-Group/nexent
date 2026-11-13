@@ -87,9 +87,11 @@ Linux 的 Chromium 系统库需要另外由主机环境提供。依赖安装和�
 
 使用 GitHub Daily 时，若本机 `daily.env` 显式设置了 `NEXENT_REPO`，它必须与 `.github/workflows/nexent-daily-full-test.yml` 中的 `REPO_ROOT` 指向同一个产品 Git 仓库。迁移仓库路径时不能只改其中一个，还需核对启动入口和 SDK 引用，避免从一个仓库启动、却加载另一个仓库的代码。工作流修改只有提交并在实际运行的分支生效后才算完成入口切换；此前不要恢复可能混用新旧入口的 Runner。普通本地命令仍应从实际产品仓库根目录执行，不能仅靠修改该环境变量替代切换工作目录。
 
-普通部署失败留下恢复标记后，下一次 GitHub Daily 可以在持有 Daily 和仓库部署锁、确认旧进程已退出及旧批次终态、核验原始备份和 Local 配置后，保存旧证据并恢复配置，再同步最新 develop、构建部署。标记不会因允许同步而直接清除：服务预检、实际部署模式和 Local 恢复用例必须通过，才能开始普通用例；最终恢复验证完成后才解除本次标记。损坏备份、非预期配置改动、活跃锁、D5 故障恢复标记或未确认的 D5 超时/清理失败仍会阻断。普通定向执行和 resume 不具备这个自动恢复权限。详见[Daily 恢复流程](infra/tools/docs/daily-validation.md#retrying-a-failed-deployment)。
+普通部署失败留下恢复标记后，下一次 GitHub Daily 可以在持有 Daily 和仓库部署锁、确认旧进程已退出及旧批次终态、核验原始备份和 Local 配置后，保存旧证据并恢复配置，再同步最新 develop、构建部署。标记不会因允许同步而直接清除：服务预检和实际部署模式检查通过后开始普通用例；结束后同样按环境检查结果解除恢复标记。知识库等业务用例只在正常分组执行一次，失败不再阻断其他独立用例。损坏备份、非预期配置改动、活跃锁、D5 故障恢复标记或活跃故障操作锁仍会阻断。普通定向执行和 resume 不具备这个自动恢复权限。详见[Daily 恢复流程](infra/tools/docs/daily-validation.md#retrying-a-failed-deployment)。
 
-启用通知的 Daily 在成功、失败或可捕获中断时均发送终态报告；同步、资产校验、doctor 阻断也生成启动异常通知。报告注明未完成原因及环境恢复状态，配置还原不等于恢复用例通过。启动与执行批次通过显式关联共用发送回执，`SENDING`/`UNKNOWN` 不盲目重发。未完成批次的通知不会覆盖正式共享 latest，也不会改变用例结果或解除恢复标记。强杀、断电或发送通道不可用时不能保证进程内通知到达，需另行监控兜底。详见[终态通知](infra/tools/docs/daily-validation.md#terminal-reports-and-notifications)。
+启用通知的 Daily 在成功、失败或可捕获中断时均发送终态报告；同步、资产校验、doctor 阻断也生成启动异常通知。报告注明未完成原因及环境恢复状态，配置还原不等于环境检查通过。启动与执行批次通过显式关联共用发送回执，`SENDING`/`UNKNOWN` 不盲目重发。未完成批次的通知不会覆盖正式共享 latest，也不会改变用例结果或解除恢复标记。强杀、断电或发送通道不可用时不能保证进程内通知到达，需另行监控兜底。详见[终态通知](infra/tools/docs/daily-validation.md#terminal-reports-and-notifications)。
+
+正常通知直接发送本批次的正式 `report.md`。报告生成时统一写入终态、未完成原因及环境恢复状态，并脱敏；已有报告在发送前补齐最新终态并核对脱敏。仅在正式报告缺失、为空、不可读取或无法完成发送准备时，才生成 `notification-report.md` 异常通知，并明确详细报告不可用。正常报告不再复制一份通知报告；原始结果、日志、截图及 Trace 仍独立保留。
 
 专用 Ubuntu 测试机迁移后的目录分工：产品 Git 仓库是 `/home/jason/projects/nexent`，test-home 仍为 `/home/jason/nexent-test-suite`。旧 `/root/project/nexent` 保留用于回退，不再作为新入口；`/home/jason/nexent` 是容器工作目录，不是新的产品 Git 仓库，不能覆盖或删除。配置、历史结果、浏览器缓存及持久化数据均保留在原 test-home。专用机的本地命令应先执行 `cd /home/jason/projects/nexent`；其他开发者使用自己的仓库位置，不把上述机器路径写进通用 Case。
 
@@ -107,7 +109,11 @@ Windows Docker Desktop 的容器访问宿主机通常使用 `host.docker.interna
 uv pip check --python $TestPython
 ```
 
-遇到缺失资产或校验冲突时，按命令结果处理；不要拿空文件代替。`doctor` 按所选用例检查实际 jsdom/CSS 依赖导入及对应工具链的无头浏览器启动，`--live` 另外检查服务可达性；这些检查不代表所有账号、模型、业务流程已经通过。离线用例可省略 `--live`，并用 `--case <Case-ID>` 缩小检查范围。
+遇到缺失资产或校验冲突时，按命令结果处理；不要拿空文件代替。`doctor` 默认只检查公共环境，`--live` 另外检查服务可达性；需要完整诊断时加 `--full`，检查所选用例的实际 jsdom/CSS 依赖导入及对应工具链的无头浏览器启动。这些检查不代表所有账号、模型、业务流程已经通过。离线用例可省略 `--live`，并用 `--case <Case-ID>` 缩小检查范围。
+
+完整诊断的全部检查不作为整批执行的前置阻断。运行前只检查公共配置、专用 Python 环境和必要的部署条件；浏览器或 jsdom 工具链不可用时，仅将依赖该工具链的用例标记为 BLOCKED，其他独立用例继续。账号、模型及自定义脚本依赖由实际使用它们的用例检查。已知用例的执行声明错误也只阻断该用例，严格开发校验仍要求修正。并发锁、真实 D5 故障恢复标记、危险路径和执行中源码或配置变更仍会停止整批。旧批次业务结果文件缺失不再阻断已核验备份的重新部署；旧证据不会被清除。
+
+同步 develop 与执行测试使用独立 Python 进程：启动器持续持有 Daily 和仓库部署锁，新执行进程校验同步后的提交、工作区及继承锁，再重新核验恢复上下文。恢复工具不再提前导入部署执行器；异常退出仍保留恢复标记和原始报告。详见 [Daily 进程隔离](infra/tools/docs/daily-validation.md#fresh-execution-after-synchronization)。
 
 ## 3. 收到失败结果后如何修改
 

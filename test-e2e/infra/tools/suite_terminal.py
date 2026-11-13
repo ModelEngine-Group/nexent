@@ -3,7 +3,71 @@
 """Format terminal metadata independently of launcher modules cached before Git sync."""
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
+import re
+import tempfile
+
+ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+SECRET_KEY = re.compile(r"password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|app[_-]?key|jwt", re.I)
+
+
+def notification_environment(home):
+    """Read report credentials independently of product preflight availability."""
+    env = dict(os.environ)
+    for name in ("daily.env", "secrets.env"):
+        path = Path(home) / "config" / name
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            continue
+        for line in lines:
+            match = ENV_LINE.fullmatch(line.strip())
+            if match:
+                key, value = match.groups()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                if value:
+                    env[key] = value
+    return env
+
+
+def notification_text(text, env):
+    """Sanitize reading views while leaving raw receipts and Case evidence intact."""
+    for value in sorted({str(value) for key, value in env.items()
+                         if SECRET_KEY.search(key) and len(str(value)) >= 4}, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED]")
+    return re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~-]+", r"\1[REDACTED]", text)
+
+
+def write_report(path, text):
+    """Replace a report atomically so readers cannot observe a partial render."""
+    path = Path(path)
+    descriptor, temporary = tempfile.mkstemp(prefix=".report-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(text)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def current_report(body, directory, summary, *, environment=None):
+    """Refresh legacy or stale terminal metadata in the same report, without duplicating it."""
+    context = notification_text("\n".join(terminal_context(directory, summary)),
+                                os.environ if environment is None else environment)
+    if context in body:
+        return body
+    section = re.compile(r"^## 终态与环境恢复\r?\n(?:\r?\n)*.*?(?=\r?\n\r?\n|\Z)", re.M | re.S)
+    if section.search(body):
+        body = section.sub(lambda _: context.rstrip("\n"), body, count=1)
+    else:
+        body = "# Nexent Daily 终态报告\n\n" + context + "\n" + body
+    status = summary.get("status")
+    if status:
+        body = re.sub(r"^Status: [^\r\n]*", lambda _: "Status: " + status, body, count=1, flags=re.M)
+    return body
 
 
 def beijing_time(value):
@@ -30,6 +94,7 @@ def terminal_context(directory, summary, *, metadata_directory=None):
 
     state, provenance = snapshot("status.json"), snapshot("provenance.json")
     restoration = snapshot("restoration.json")
+    retry = snapshot("recovery.json")
     status = summary.get("status") or state.get("status") or "UNKNOWN"
     complete = summary.get("execution_complete")
     execution = "完整" if complete is True else "未完成" if complete is False else "未建立执行批次或未记录"
@@ -42,9 +107,11 @@ def terminal_context(directory, summary, *, metadata_directory=None):
         else:
             reason = "未记录具体原因，请核查启动、执行及恢复日志"
     if state.get("local_restored_and_verified") is True:
-        recovery = "Local 配置恢复及恢复用例验证通过"
+        recovery = "Local 配置恢复及部署模式、服务检查通过"
     elif restoration.get("status") == "RESTORED":
-        recovery = "Local 配置已还原；恢复用例未通过或尚未完成，环境可用性未验证"
+        recovery = "Local 配置已还原；环境恢复检查未通过或尚未完成，环境可用性未验证"
+    elif retry.get("status") == "PREPARED_FOR_REDEPLOY":
+        recovery = "Local 配置已还原；待重新部署及恢复验证，前批恢复标记仍待处理"
     elif provenance.get("deployment_campaign") or (metadata / "deployment-plan.json").exists():
         recovery = "Local 恢复未完成或未验证，请检查恢复记录；不能认为环境已恢复可用"
     else:

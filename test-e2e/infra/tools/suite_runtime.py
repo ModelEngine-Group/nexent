@@ -15,7 +15,7 @@ import signal
 import subprocess
 
 from report_ownership import git_label, responsibility_label
-from suite_terminal import beijing_time, terminal_context
+from suite_terminal import beijing_time, notification_text, terminal_context, write_report
 
 
 def now():
@@ -73,10 +73,10 @@ def deployment_lock(repo):
         yield
         return
     path = repo / ".git/nexent-e2e-deployment.lock"
-    with BatchLock(path):
+    with BatchLock(path) as lock:
         token = _DEPLOYMENT_LEASE.set((str(path.resolve()), os.getpid()))
         try:
-            yield
+            yield lock
         finally:
             _DEPLOYMENT_LEASE.reset(token)
 
@@ -126,7 +126,11 @@ def fingerprint(repo):
     """Pin actual worktree bytes as well as HEAD, excluding generated runtime files."""
     ignored = {"node_modules", "__pycache__", ".pytest_cache", "test-results", "runs", ".playwright-internal"}
     digest = hashlib.sha256()
-    for path in sorted((repo / "test-e2e").rglob("*")):
+    paths = []
+    for directory, children, files in os.walk(repo / "test-e2e"):
+        children[:] = sorted(name for name in children if name not in ignored)
+        paths.extend(Path(directory) / name for name in files)
+    for path in sorted(paths):
         relative = path.relative_to(repo)
         if not path.is_file() or set(relative.parts) & ignored:
             continue
@@ -172,7 +176,7 @@ def config_fingerprint(home):
     return digest.hexdigest()
 
 
-def finalize(directory, plan, rows, error=None):
+def finalize(directory, plan, rows, error=None, *, environment=None):
     """Account for every planned Case; interrupted work can never become PASS."""
     counts = Counter(row["case_id"] for row in rows)
     duplicates = sorted(key for key, count in counts.items() if count > 1)
@@ -209,7 +213,7 @@ def finalize(directory, plan, rows, error=None):
     (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "checkpoints/results.jsonl").write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
-    render_report(directory, plan, rows, summary)
+    render_report(directory, plan, rows, summary, environment=environment)
     return summary
 
 
@@ -274,14 +278,15 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
     if provenance.get("deployment_campaign"):
         lines += ["## 部署切换与 Local 恢复", "",
                   "- 部署例外和执行分组：`deployment-plan.json`；常规用例不重复计数。",
-                  "- Local 配置恢复及恢复用例验证：" +
+                  "- Local 配置恢复及部署模式、服务检查：" +
                   ("通过" if state.get("local_restored_and_verified") else "未完成或未通过，不能认为环境已恢复可用"),
-                  "- 恢复记录：`restoration.json`；恢复回归原始证据仅保留在执行机器：`profiles/restore-local/`。",
+                  "- 恢复记录：`restoration.json`；部署模式检查：`restore-local/mode-verification.json`。",
                   "- 原始配置备份仅保留在执行机器的私有 runtime 目录，不进入共享日志包。", ""]
     return lines
 
 
-def render_report(directory, plan, rows, summary, *, metadata_directory=None, evidence_root=None, sharing=None):
+def render_report(directory, plan, rows, summary, *, metadata_directory=None, evidence_root=None, sharing=None,
+                  environment=None):
     """Refresh the reading view only, preserving final receipts and batch timestamps."""
     metrics = report_metrics(plan, rows)
     def percent(value):
@@ -350,4 +355,5 @@ def render_report(directory, plan, rows, summary, *, metadata_directory=None, ev
         lines += ["", "No non-passing cases."]
     if summary.get("error"):
         lines += ["", "Batch ended before completion. Inspect status.json and local logs."]
-    (directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_report(directory / "report.md", notification_text("\n".join(lines) + "\n",
+                 os.environ if environment is None else environment))

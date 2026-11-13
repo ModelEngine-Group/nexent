@@ -67,7 +67,8 @@ def test_doctor_probes_selected_closures_without_installing(monkeypatch, tmp_pat
     assert "jsdom" in calls[0][0][2]
     assert [Path(argv[-2]).parent for argv, _ in calls[1:]] == [REPO / "frontend", REPO / "test-e2e/infra/automation/d4"]
     assert [argv[-1] for argv, _ in calls[1:]] == ["", "chromium"]
-    assert 'channel: "chromium"' in (REPO / 'test-e2e/infra/automation/d4/playwright.config.ts').read_text(encoding='utf-8')
+    assert 'channel: process.env.NEXENT_TEST_BROWSER_CHANNEL || "chromium"' in (
+        REPO / 'test-e2e/infra/automation/d4/playwright.config.ts').read_text(encoding='utf-8')
 
 
 @pytest.mark.parametrize("failure", ["resolution", "timeout", "permission"])
