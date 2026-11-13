@@ -365,12 +365,12 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         error = "Interrupted" if isinstance(exc, KeyboardInterrupt) else str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
         signal.signal(signal.SIGTERM, old_handler)
-        summary = finalize(directory, report_records, rows, error)
+        summary = finalize(directory, report_records, rows, error, environment=env)
         state.update(status=summary["status"], finished_at=now(), error=error, local_restored_and_verified=restoration_ok)
         state["stages"] = {f"D{i}": "COMPLETE" if summary["execution_complete"] else "INTERRUPTED" for i in range(7)}
         state["stages"]["D6"] = "COMPLETE"
         save(directory / "status.json", state)
-        render_report(directory, report_records, rows, summary)
+        render_report(directory, report_records, rows, summary, environment=env)
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
     if daily and summary["execution_complete"] and restoration_ok:
         if publish_latest:
@@ -384,7 +384,7 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 except OSError:
                     print("Publication failed; could not save local publication receipt", flush=True)
             try:
-                render_report(directory, report_records, rows, summary, sharing=publication)
+                render_report(directory, report_records, rows, summary, sharing=publication, environment=env)
             except OSError:
                 print("Could not refresh publication status in the finalized report", flush=True)
     if daily and settings.get("notify"):

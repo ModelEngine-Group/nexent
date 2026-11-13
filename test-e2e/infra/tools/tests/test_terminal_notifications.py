@@ -50,14 +50,15 @@ def test_every_terminal_state_sends_and_preserves_results(tmp_path, status):
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
     send.assert_called_once()
-    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert f"批次终态：{status}" in text
     assert "环境恢复状态：" in text
     assert "Original report" in text
     if status == "INTERRUPTED":
         assert "Interrupted" in text and "NOT_EXECUTED=1" in text
     assert (tmp_path / "summary.json").read_bytes() == original
-    assert send.call_args.args[0][-1] == "./notification-report.md"
+    assert send.call_args.args[0][-1] == "./report.md"
+    assert not (tmp_path / "notification-report.md").exists()
 
 
 @pytest.mark.parametrize("verified", [False, True])
@@ -69,7 +70,7 @@ def test_restored_configuration_is_not_mistaken_for_verified_recovery(tmp_path, 
     save(tmp_path / "status.json", state)
     with patch.object(suite_notify, "logged", return_value=0):
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
-    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "restore-local" in text
     assert ("部署模式、服务检查通过" in text) is verified
     assert ("环境恢复检查未通过或尚未完成" in text) is (not verified)
@@ -91,7 +92,7 @@ def test_prepared_launch_reports_pending_redeployment_instead_of_recovered_envir
     save(tmp_path / "recovery.json", {"status": "PREPARED_FOR_REDEPLOY"})
     with patch.object(suite_notify, "logged", return_value=0):
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
-    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "待重新部署及恢复验证" in text and "前批恢复标记仍待处理" in text
 
 
@@ -129,7 +130,7 @@ def test_notification_redacts_known_secret_without_rewriting_local_evidence(tmp_
     receipt(tmp_path, "INCOMPLETE", error="Service failed with fake-secret-value")
     with patch.object(suite_notify, "logged", return_value=0):
         assert suite_notify.send_report(tmp_path, {**ENV, "TEST_API_KEY": "fake-secret-value"}) == "SENT"
-    assert "fake-secret-value" not in (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    assert "fake-secret-value" not in (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "fake-secret-value" in (tmp_path / "summary.json").read_text(encoding="utf-8")
 
 
@@ -181,7 +182,7 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
     summary = json.loads((directory / "summary.json").read_text())
     assert code == (0 if failure in {None, "publish"} else 1)
     assert summary["execution_complete"] is (failure in {None, "publish", "case-timeout"})
-    text = (directory / "notification-report.md").read_text(encoding="utf-8")
+    text = (directory / "report.md").read_text(encoding="utf-8")
     if failure == "restore-local":
         publish.assert_not_called()
         assert prior_report.read_text(encoding="utf-8") == "previous complete batch"

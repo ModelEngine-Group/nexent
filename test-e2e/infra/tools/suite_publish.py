@@ -241,7 +241,7 @@ def publish_latest(batch, home, env=None, *, ownership_file=None):
         sharing = {"status": "PUBLISHED", "batch_id": batch.name,
                    "excluded_binary_count": len(excluded), "published_at": now()}
         render_report(staging, plan, rows, summary, metadata_directory=batch,
-                      evidence_root=batch.resolve().as_posix(), sharing=sharing)
+                      evidence_root=batch.resolve().as_posix(), sharing=sharing, environment=env)
         contents = {"report.md": redact_text((staging / "report.md").read_text(encoding="utf-8"), secrets).encode()}
         for name, value in (("summary.json", summary), ("status.json", state), ("provenance.json", provenance),
                             ("report-ownership.json", ownership), ("excluded-evidence.json", excluded)):

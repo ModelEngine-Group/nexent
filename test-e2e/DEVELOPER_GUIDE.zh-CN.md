@@ -91,6 +91,8 @@ Linux 的 Chromium 系统库需要另外由主机环境提供。依赖安装和�
 
 启用通知的 Daily 在成功、失败或可捕获中断时均发送终态报告；同步、资产校验、doctor 阻断也生成启动异常通知。报告注明未完成原因及环境恢复状态，配置还原不等于环境检查通过。启动与执行批次通过显式关联共用发送回执，`SENDING`/`UNKNOWN` 不盲目重发。未完成批次的通知不会覆盖正式共享 latest，也不会改变用例结果或解除恢复标记。强杀、断电或发送通道不可用时不能保证进程内通知到达，需另行监控兜底。详见[终态通知](infra/tools/docs/daily-validation.md#terminal-reports-and-notifications)。
 
+正常通知直接发送本批次的正式 `report.md`。报告生成时统一写入终态、未完成原因及环境恢复状态，并脱敏；已有报告在发送前补齐最新终态并核对脱敏。仅在正式报告缺失、为空、不可读取或无法完成发送准备时，才生成 `notification-report.md` 异常通知，并明确详细报告不可用。正常报告不再复制一份通知报告；原始结果、日志、截图及 Trace 仍独立保留。
+
 专用 Ubuntu 测试机迁移后的目录分工：产品 Git 仓库是 `/home/jason/projects/nexent`，test-home 仍为 `/home/jason/nexent-test-suite`。旧 `/root/project/nexent` 保留用于回退，不再作为新入口；`/home/jason/nexent` 是容器工作目录，不是新的产品 Git 仓库，不能覆盖或删除。配置、历史结果、浏览器缓存及持久化数据均保留在原 test-home。专用机的本地命令应先执行 `cd /home/jason/projects/nexent`；其他开发者使用自己的仓库位置，不把上述机器路径写进通用 Case。
 
 Windows Docker Desktop 的容器访问宿主机通常使用 `host.docker.internal`。容器内的 `127.0.0.1` 指向容器自身。按实际网络设置 `NEXENT_TEST_ASSETS_CONTAINER_HOST` 和 `NEXENT_TEST_MCP_CONTAINER_HOST`。

@@ -2,17 +2,13 @@
 
 """Notify terminal Daily outcomes independently of publication and recovery success."""
 import json
-import os
 from pathlib import Path
-import re
 import shutil
 
 from suite_runtime import BatchLock, logged, now, save
-from suite_terminal import terminal_context
+from suite_terminal import current_report, notification_environment, notification_text, terminal_context, write_report
 
 TERMINAL_STATES = frozenset({"PASSED", "FAILED", "INCOMPLETE", "INTERRUPTED", "CANCELLED"})
-ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
-SECRET_KEY = re.compile(r"password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|app[_-]?key|jwt", re.I)
 
 
 def snapshot(path):
@@ -21,35 +17,6 @@ def snapshot(path):
         return value if isinstance(value, dict) else {}
     except (OSError, ValueError):
         return {}
-
-
-def notification_environment(home):
-    """Read notification credentials even when unrelated product preflight is broken."""
-    env = dict(os.environ)
-    for name in ("daily.env", "secrets.env"):
-        path = Path(home) / "config" / name
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError):
-            continue
-        for line in lines:
-            match = ENV_LINE.fullmatch(line.strip())
-            if match:
-                key, value = match.groups()
-                value = value.strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-                    value = value[1:-1]
-                if value:
-                    env[key] = value
-    return env
-
-
-def notification_text(text, env):
-    """Keep known credentials out of new failure notifications; preserve raw local evidence."""
-    for value in sorted({str(value) for key, value in env.items()
-                         if SECRET_KEY.search(key) and len(str(value)) >= 4}, key=len, reverse=True):
-        text = text.replace(value, "[REDACTED]")
-    return re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~-]+", r"\1[REDACTED]", text)
 
 
 def send_report(directory: Path, env):
@@ -69,19 +36,24 @@ def send_report(directory: Path, env):
             if not chat or not cli:
                 save(marker, {"status": "NOT_CONFIGURED", "at": now()})
                 return "NOT_CONFIGURED"
-            context = "\n".join(terminal_context(directory, summary))
             report = directory / "report.md"
             try:
                 body = report.read_text(encoding="utf-8")
-            except OSError:
-                body = "详细报告未生成；本通知依据已保存的终态记录，不能视为完整验收报告。\n"
-            # The current state is authoritative even if report generation failed earlier.
-            message = body if context in body else "# Nexent Daily 终态报告\n\n" + context + "\n" + body
-            (directory / "notification-report.md").write_text(notification_text(message, env), encoding="utf-8")
+                if not body.strip():
+                    raise ValueError("Empty report")
+                ready = notification_text(current_report(body, directory, summary, environment=env), env)
+                if ready != body:
+                    write_report(report, ready)
+            except (OSError, UnicodeError, ValueError):
+                # A failed render/read cannot suppress the saved terminal outcome.
+                report = directory / "notification-report.md"
+                message = "# Nexent Daily 异常通知\n\n" + "\n".join(terminal_context(directory, summary))
+                message += "\n详细报告未生成或不可读取；本通知依据已保存的终态记录，不能视为完整验收报告。\n"
+                write_report(report, notification_text(message, env))
             save(marker, {"status": "SENDING", "at": now()})
             try:
                 code = logged([cli, "im", "+messages-send", "--as", "bot", "--chat-id", chat,
-                               "--file", "./notification-report.md"], directory, env,
+                               "--file", "./" + report.name], directory, env,
                               directory / "logs/notification.log", 120)
                 status = "SENT" if code == 0 else "UNKNOWN"
             except Exception:

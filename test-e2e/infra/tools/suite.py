@@ -536,7 +536,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     except Exception as exc:
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
-        summary = finalize(directory, report_records, rows, error)
+        summary = finalize(directory, report_records, rows, error, environment=env)
         for stage, status in state["stages"].items():
             if status in {"PENDING", "RUNNING"}:
                 state["stages"][stage] = "NOT_EXECUTED" if status == "PENDING" else "INTERRUPTED"
@@ -556,7 +556,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
             except OSError:
                 print("Publication failed; could not save local publication receipt", flush=True)
         try:
-            render_report(directory, report_records, rows, summary, sharing=sharing)
+            render_report(directory, report_records, rows, summary, sharing=sharing, environment=env)
         except OSError:
             # Keep the previously finalized report and continue the existing notification path.
             print("Could not refresh publication status in the finalized report", flush=True)

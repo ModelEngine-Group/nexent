@@ -3,7 +3,71 @@
 """Format terminal metadata independently of launcher modules cached before Git sync."""
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
+import re
+import tempfile
+
+ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+SECRET_KEY = re.compile(r"password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|app[_-]?key|jwt", re.I)
+
+
+def notification_environment(home):
+    """Read report credentials independently of product preflight availability."""
+    env = dict(os.environ)
+    for name in ("daily.env", "secrets.env"):
+        path = Path(home) / "config" / name
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            continue
+        for line in lines:
+            match = ENV_LINE.fullmatch(line.strip())
+            if match:
+                key, value = match.groups()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                if value:
+                    env[key] = value
+    return env
+
+
+def notification_text(text, env):
+    """Sanitize reading views while leaving raw receipts and Case evidence intact."""
+    for value in sorted({str(value) for key, value in env.items()
+                         if SECRET_KEY.search(key) and len(str(value)) >= 4}, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED]")
+    return re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~-]+", r"\1[REDACTED]", text)
+
+
+def write_report(path, text):
+    """Replace a report atomically so readers cannot observe a partial render."""
+    path = Path(path)
+    descriptor, temporary = tempfile.mkstemp(prefix=".report-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(text)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def current_report(body, directory, summary, *, environment=None):
+    """Refresh legacy or stale terminal metadata in the same report, without duplicating it."""
+    context = notification_text("\n".join(terminal_context(directory, summary)),
+                                os.environ if environment is None else environment)
+    if context in body:
+        return body
+    section = re.compile(r"^## 终态与环境恢复\r?\n(?:\r?\n)*.*?(?=\r?\n\r?\n|\Z)", re.M | re.S)
+    if section.search(body):
+        body = section.sub(lambda _: context.rstrip("\n"), body, count=1)
+    else:
+        body = "# Nexent Daily 终态报告\n\n" + context + "\n" + body
+    status = summary.get("status")
+    if status:
+        body = re.sub(r"^Status: [^\r\n]*", lambda _: "Status: " + status, body, count=1, flags=re.M)
+    return body
 
 
 def beijing_time(value):

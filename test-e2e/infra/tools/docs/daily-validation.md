@@ -167,9 +167,15 @@ the launcher uses that batch's notification receipt rather than an unrelated
 detailed report could not be rendered, the notification uses saved terminal
 metadata and labels the missing details explicitly.
 
-`notification-report.md` is the notification payload; original report and result
-evidence remain local and unchanged by sending. Known environment credentials are
-redacted from the payload. `notification.json` records `SENDING`, `SENT`,
+The formal `report.md` includes terminal metadata and known-credential redaction
+when generated, and is written atomically. Notifications send that same file;
+an already-current sanitized report is not rewritten and no duplicate payload is
+created. Older reports may have their terminal section refreshed and credentials
+redacted in place before sending. Only a missing, empty or unreadable report, or a
+failed preparation of that file, produces `notification-report.md`: a clearly
+labelled exception notification built from saved terminal records. Raw result
+receipts, logs, screenshots and Trace evidence remain unchanged.
+`notification.json` records `SENDING`, `SENT`,
 `UNKNOWN` or `NOT_CONFIGURED`. Concurrent sends use a per-record lock; existing
 or corrupt receipts are never blindly retried. Transport timeout or uncertainty
 does not change the test outcome. Explicit `notify: false` remains respected.
