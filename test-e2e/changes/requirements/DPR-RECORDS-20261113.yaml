@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-RECORDS-20261113
+  change_type: requirement
+  requirement_id: SI-REQ-002
+  title: Scoped key-addressed RecordStore foundation for durable tasks
+  description: >-
+    Add key-addressed create/get/patch/delete, integer revisions and local
+    transactions. No application repository or worker is switched yet.
+    Query, pagination, claim, soft deletion and audit/date mappings remain pending.
+  affected_features:
+    existing: [SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This adapter slice has isolated contract UT and a separate local PostgreSQL
+    protocol probe. Durable-job/API/runtime acceptance is still pending; no
+    duplicate D1 or unimplemented job Case is registered as completed.
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Enforce tenant/namespace/field scopes and reject key or revision rewrites.
+    - Perform revision CAS in one SQL statement and reject stale updates.
+    - Commit once, roll back on failure and retain unknown commit outcomes.
+    - Reject expired or escaped transactions and event-loop synchronous access.
+    reason: Existing catalog tests do not execute record writes and transaction ownership.
+    test_selectors:
+    - test/backend/infrastructure/test_record_store.py
+    - test/backend/infrastructure/test_storage_catalog.py
