@@ -2,6 +2,7 @@
 
 此页由结构化用例生成，不手工编辑。
 
+- D1 [WB-SKILL-PRECEDENCE-D1-001](../../cases/WB-SKILL-PRECEDENCE-D1-001/case.yaml) · active
 - D2 [WB-CREATION-CONFIRM-D2-001](../../cases/WB-CREATION-CONFIRM-D2-001/case.yaml) · active
 - D2 [WB-SKILL-SUMMARY-D2-001](../../cases/WB-SKILL-SUMMARY-D2-001/case.yaml) · active
 - D4 [WB-CONTROLS-D4-001](../../cases/WB-CONTROLS-D4-001/case.yaml) · active

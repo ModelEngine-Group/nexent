@@ -56,10 +56,16 @@ feature:
       Saved mounts retain their IDs, pinned versions and configuration when catalogs are unavailable. Skill mount catalogs opt into
       view=mount, omit full content and tool associations, and retain authorized metadata and configuration forms; full list and
       runtime resolution contracts remain unchanged.
+  - rule_id: WB-CONTROLS-RULE-008
+    description: Authorized explicit Skill mounts replace same-name published defaults as complete resources before configuration,
+      file capture and tool resolution. Ambiguous same-priority names and conflicting effective tool identifiers fail safely;
+      snapshot materialization rejects duplicate names before writing. Removing an override restores defaults without mutating definitions.
   required_test_stages:
+  - D1
   - D4
   source:
     requirement_ids:
+    - WB-SKILL-PRECEDENCE-20261113
     - WB-SKILL-SUMMARY-20261113
     - WB-RESOURCE-LAZY-20261113
     - WB-CREATION-INTENT-20261103
