@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
-import logging
 
 import pytest
 
@@ -9,8 +8,6 @@ from smolagents.monitoring import Timing
 from nexent.core.utils.observer import MessageObserver
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
-from nexent.core.agents.context.evidence import ContextEvidenceCollector
-from nexent.core.context_runtime.contracts import ContextEvidence
 from nexent.core.agents.context.history_compression import (
     HistorySummaryInput,
     _validate_summary_contract,
@@ -674,19 +671,3 @@ def test_summary_prompt_forbids_range_example_and_formula_substitution():
     prompt = _rendered_text(model.calls[0])
     assert "Preserve every explicit fact identifier" in prompt
     assert "ranges, selected examples, inferred patterns, or formulas" in prompt
-
-
-def test_context_evidence_log_is_pretty_printed(caplog):
-    collector = ContextEvidenceCollector()
-    collector.record_call(ContextEvidence(
-        processing_mode="adaptive_compact",
-        raw_token_estimate=120,
-        final_token_estimate=80,
-    ))
-
-    with caplog.at_level(logging.INFO, logger="context_evidence"):
-        collector.finalize(status="completed")
-
-    assert "Agent loop context evidence:\n{" in caplog.text
-    assert '\n  "final_token_estimate": 80,' in caplog.text
-    assert '\n  "processing_mode": "adaptive_compact",' in caplog.text

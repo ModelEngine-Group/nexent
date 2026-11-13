@@ -98,8 +98,6 @@ MODEL_CALL_LOGGERS = (
     "volc_tts_model",
     # Namespace for model-scoped loggers added on top (e.g. model_call.core_agent).
     "model_call",
-    # Run-level "Agent loop context evidence" record (sdk/core/agents/context/evidence.py).
-    "context_evidence",
 )
 
 
