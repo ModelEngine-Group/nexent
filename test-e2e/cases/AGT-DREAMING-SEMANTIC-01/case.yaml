@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-DREAMING-SEMANTIC-01
+  feature_id: F-122
+  business_rule_ids: [F-122-RULE-02]
+  title: Dreaming publishes a real model summary rather than a mechanical fallback
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise config API, persisted evidence, Dreaming worker, real model wrapper and active version together.
+  preconditions:
+    - Config service, worker, database and embedding infrastructure are available.
+    - Machine-local users.yaml contains super_admin; models.yaml and secrets.env contain real llm and embedding configurations.
+  test_data:
+    source: Two case-owned durable preference records with a unique marker; no shared memories or synthetic recall events.
+  steps:
+    - order: 1
+      action: Create an isolated tenant administrator and case-owned configured LLM and embedding models; set its empty defaults.
+      expected: Both concrete models are available in the owned tenant.
+    - order: 2
+      action: Store two indexed short-term evidence records through the real API and configure explicit zero-threshold summary-only selection.
+      expected: Exactly the owned source IDs are selected; no recall counters or timestamps are fabricated.
+    - order: 3
+      action: Enqueue a manual Dreaming run and wait for its terminal audit.
+      expected: The run completes, promotes both records and exposes no error.
+    - order: 4
+      action: Read the active user long-term version and inspect its generation audit, provenance and content.
+      expected: Status is summarized, fallback is false, both evidence IDs and the unique marker survive in nonempty Markdown.
+    - order: 5
+      action: Leave the owned model and tenant contexts and retain sanitized evidence.
+      expected: Owned resources are cleaned without touching shared tenants or credentials.
+  expected_results:
+    - A real-provider Dreaming summary is published and cannot pass by merely returning completed or mechanical_fallback.
+  forbidden_side_effects:
+    - Altering existing tenants, shared memory records, default models or caller credentials.
+  integration_boundary:
+    - HTTP config API to persisted memory and Dreaming worker to actual model provider and active version.
+  observations:
+    - run_id, source evidence IDs, generation_audit, fallback_details and summary marker.
+  cleanup:
+    - Case-owned model and isolated-account context managers clean their exact resources.
+  acceptance:
+    - id: AC-DREAMING-SEMANTIC
+      description: Provision only owned resources, select both evidence records, publish summarized content with their provenance, and clean them safely.
+      steps: [1, 2, 3, 4, 5]
+      expected_results: [1]
+      forbidden_side_effects: [1]
