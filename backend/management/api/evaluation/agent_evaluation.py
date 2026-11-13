@@ -6,11 +6,15 @@ from http import HTTPStatus
 from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, TypeAdapter, ValidationError
 
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import (
+    AppException,
+    RuntimeUpstreamError,
+    UnauthorizedError,
+)
 
 # AppException is caught by global middleware (maps ErrorCode to HTTP status)
 from management.db.evaluation.runs import update_annotation_schema_ids
@@ -552,6 +556,14 @@ async def trial_run_api(
 
     except UnauthorizedError:
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
+    except RuntimeUpstreamError as exc:
+        # Preserve the runtime's structured error (code/message/status) instead
+        # of collapsing a validation failure into a generic 500.
+        return Response(
+            content=exc.content,
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
     except Exception as exc:
         logger.exception(
             "trial_run_api ERROR: tenant=%s user=%s agent_id=%s version=%s "
