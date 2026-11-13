@@ -80,7 +80,6 @@ COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
-COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/start-backend.sh /opt/nexent/scripts/
@@ -97,7 +96,16 @@ EXPOSE 5010
 
 FROM backend-common AS management
 
+ARG TARGETARCH
+# Office preview runs locally in Management and needs no data-process HTTP hop.
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libreoffice-writer libreoffice-calc libreoffice-impress
+
 ENV NEXENT_SQL_STARTUP_MODE=migrate
+COPY infrastructure /opt/infrastructure
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
@@ -127,6 +135,7 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 FROM backend-common AS runtime
 
 ENV NEXENT_SQL_STARTUP_MODE=off
+COPY infrastructure /opt/infrastructure
 
 COPY backend/__init__.py /opt/backend/
 COPY backend/runtime /opt/backend/runtime

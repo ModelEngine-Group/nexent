@@ -2827,194 +2827,76 @@ class TestIsPdfCacheValid:
 
 
 class TestConvertOfficeToCachedPdf:
-    """Unit tests for _convert_office_to_cached_pdf helper."""
+    """Retain preview cache and error contracts after removing the HTTP hop."""
 
     @pytest.mark.asyncio
     async def test_skips_conversion_on_double_check_cache_hit(self):
-        """If another coroutine completes conversion while waiting for the lock, returns immediately."""
-        from management.services.file.service import _convert_office_to_cached_pdf
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=True):
-            result = await _convert_office_to_cached_pdf(
-                "docs/report.docx",
-                "preview/converted/docs/report_deadbeef.pdf",
-                "preview/converting/docs/report_deadbeef.pdf.tmp",
-            )
-            assert result is None
+        from management.services.file import preview
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=True), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock) as convert:
+            assert await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf') is None
+        convert.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_full_conversion_success(self):
-        """Happy path: calls data-process, copies result, deletes temp, returns None."""
-        from management.services.file.service import _convert_office_to_cached_pdf
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = ""
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        mock_http_ctx = MagicMock()
-        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=False), \
-             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
-             patch_import_context('management.services.file.service.copy_file',
-                   return_value={'success': True}), \
-             patch_import_context('management.services.file.service.delete_file') as mock_delete, \
-             patch_import_context('management.services.file.service.file_exists', return_value=False):
-
-            result = await _convert_office_to_cached_pdf(
-                "docs/report.docx",
-                "preview/converted/docs/report_deadbeef.pdf",
-                "preview/converting/docs/report_deadbeef.pdf.tmp",
-            )
-
-        assert result is None
-        mock_client.post.assert_called_once()
-        called_url = mock_client.post.call_args[0][0]
-        assert "convert_to_pdf" in called_url
-        mock_delete.assert_called_with("preview/converting/docs/report_deadbeef.pdf.tmp")
+        from management.services.file import preview
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=False), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock) as convert:
+            assert await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf') is None
+        convert.assert_awaited_once_with('docs/report.docx', 'preview/report.pdf')
 
     @pytest.mark.asyncio
-    async def test_http_error_re_raises_exception(self):
-        """Non-200 HTTP response from data-process raises a sanitized OfficeConversionException."""
-        from management.services.file.service import _convert_office_to_cached_pdf
+    async def test_storage_error_re_raises_exception(self):
+        from management.services.file import preview
         from contracts.errors.exceptions import OfficeConversionException
-
-        mock_response = MagicMock()
-        mock_response.status_code = 503
-        mock_response.text = "Service Unavailable"
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        mock_http_ctx = MagicMock()
-        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=False), \
-             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
-             patch_import_context('management.services.file.service.file_exists', return_value=False), \
-             patch_import_context('management.services.file.service.delete_file'):
-
-            with pytest.raises(OfficeConversionException) as exc_info:
-                await _convert_office_to_cached_pdf(
-                    "docs/report.docx",
-                    "preview/converted/docs/report_deadbeef.pdf",
-                    "preview/converting/docs/report_deadbeef.pdf.tmp",
-                )
-
-        assert "Office file conversion failed" in str(exc_info.value)
+        from nexent.storage.errors import Unavailable
+        error = Unavailable()
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=False), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock, side_effect=error):
+            with pytest.raises(OfficeConversionException) as caught:
+                await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf')
+        assert caught.value.__cause__ is error
 
     @pytest.mark.asyncio
-    async def test_copy_failure_re_raises_and_cleans_up_temp(self):
-        """copy_file failure raises a sanitized OfficeConversionException and cleans up temp file."""
-        from management.services.file.service import _convert_office_to_cached_pdf
+    async def test_copy_failure_re_raises_without_deleting_shared_cache(self):
+        from management.services.file import preview
         from contracts.errors.exceptions import OfficeConversionException
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = ""
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        mock_http_ctx = MagicMock()
-        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=False), \
-             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
-             patch_import_context('management.services.file.service.copy_file',
-                   return_value={'success': False, 'error': 'bucket full'}), \
-             patch_import_context('management.services.file.service.file_exists', return_value=True), \
-             patch_import_context('management.services.file.service.delete_file') as mock_delete:
-
-            with pytest.raises(OfficeConversionException) as exc_info:
-                await _convert_office_to_cached_pdf(
-                    "docs/report.docx",
-                    "preview/converted/docs/report_deadbeef.pdf",
-                    "preview/converting/docs/report_deadbeef.pdf.tmp",
-                )
-
-        assert "Office file conversion failed" in str(exc_info.value)
-        mock_delete.assert_called_with("preview/converting/docs/report_deadbeef.pdf.tmp")
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=False), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock, side_effect=RuntimeError('copy failed')), \
+             patch.object(preview, 'delete_file') as delete:
+            with pytest.raises(OfficeConversionException):
+                await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf')
+        # The conversion owner cleans only its unique attempt, never a shared final key.
+        delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_office_conversion_exception_passthrough(self):
-        """Existing OfficeConversionException should be re-raised without wrapping."""
-        from management.services.file.service import _convert_office_to_cached_pdf
+        from management.services.file import preview
         from contracts.errors.exceptions import OfficeConversionException
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=OfficeConversionException("upstream conversion failed"))
-
-        mock_http_ctx = MagicMock()
-        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=False), \
-             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
-             patch_import_context('management.services.file.service.file_exists', return_value=False), \
-             patch_import_context('management.services.file.service.delete_file'):
-
-            with pytest.raises(OfficeConversionException) as exc_info:
-                await _convert_office_to_cached_pdf(
-                    "docs/report.docx",
-                    "preview/converted/docs/report_deadbeef.pdf",
-                    "preview/converting/docs/report_deadbeef.pdf.tmp",
-                )
-
-        assert "upstream conversion failed" in str(exc_info.value)
+        error = OfficeConversionException('local conversion failed')
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=False), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock, side_effect=error):
+            with pytest.raises(OfficeConversionException) as caught:
+                await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf')
+        assert caught.value is error
 
     @pytest.mark.asyncio
     async def test_non_office_exception_is_wrapped(self):
-        """Unexpected exceptions should be wrapped as OfficeConversionException with cause."""
-        from management.services.file.service import _convert_office_to_cached_pdf
+        from management.services.file import preview
         from contracts.errors.exceptions import OfficeConversionException
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=RuntimeError("network broken"))
-
-        mock_http_ctx = MagicMock()
-        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=False), \
-             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
-             patch_import_context('management.services.file.service.file_exists', return_value=False), \
-             patch_import_context('management.services.file.service.delete_file'):
-
-            with pytest.raises(OfficeConversionException) as exc_info:
-                await _convert_office_to_cached_pdf(
-                    "docs/report.docx",
-                    "preview/converted/docs/report_deadbeef.pdf",
-                    "preview/converting/docs/report_deadbeef.pdf.tmp",
-                )
-
-        assert "Office file conversion failed" in str(exc_info.value)
-        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=False), \
+             patch.object(preview, 'convert_preview', new_callable=AsyncMock, side_effect=TimeoutError('deadline')):
+            with pytest.raises(OfficeConversionException) as caught:
+                await preview._convert_office_to_cached_pdf('docs/report.docx', 'preview/report.pdf')
+        assert 'Office file conversion failed' in str(caught.value)
+        assert isinstance(caught.value.__cause__, TimeoutError)
 
     @pytest.mark.asyncio
     async def test_reuses_existing_lock_for_same_object(self):
-        """If a lock for object_name already exists, it is reused."""
-        import asyncio as _asyncio
-        from management.services.file import service as _svc
-        from management.services.file.service import _convert_office_to_cached_pdf
-
-        existing_lock = _asyncio.Lock()
-        _svc._conversion_locks["docs/existing.docx"] = existing_lock
-
-        try:
-            with patch_import_context('management.services.file.service._is_pdf_cache_valid', return_value=True):
-                result = await _convert_office_to_cached_pdf(
-                    "docs/existing.docx",
-                    "preview/converted/docs/existing_aabbccdd.pdf",
-                    "preview/converting/docs/existing_aabbccdd.pdf.tmp",
-                )
-        finally:
-            _svc._conversion_locks.pop("docs/existing.docx", None)
-
-        assert result is None
+        import asyncio
+        from management.services.file import preview
+        existing = asyncio.Lock()
+        preview._conversion_locks['docs/existing.docx'] = existing
+        with patch.object(preview, '_is_pdf_cache_valid', return_value=True):
+            await preview._convert_office_to_cached_pdf('docs/existing.docx', 'preview/existing.pdf')
+            assert preview._conversion_locks['docs/existing.docx'] is existing

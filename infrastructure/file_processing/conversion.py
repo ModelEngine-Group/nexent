@@ -8,6 +8,8 @@ from pathlib import Path
 
 from nexent.core.concurrency import run_blocking
 
+from infrastructure.file_processing.process import run_conversion_process
+
 logger = logging.getLogger("management.services.file.upload")
 
 
@@ -19,8 +21,13 @@ def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
     return profile_path
 
 
-async def convert_office_to_pdf(
-    input_path: str, output_dir: str, timeout: int = 30, *, profile_dir: str
+def convert_office_to_pdf_sync(
+    input_path: str,
+    output_dir: str,
+    timeout: int = 30,
+    *,
+    profile_dir: str,
+    cancelled=None,
 ) -> str:
     """
     Convert Office document to PDF using LibreOffice.
@@ -55,16 +62,10 @@ async def convert_office_to_pdf(
             output_dir,
             input_path,
         ]
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return run_conversion_process(cmd, timeout=timeout, cancelled=cancelled)
 
     try:
-        # Run blocking subprocess in thread executor to avoid blocking event loop
-        result = await run_blocking(
-            "libreoffice-conversion",
-            _run_libreoffice_conversion,
-            lane="control-io",
-            owner="config",
-        )
+        result = _run_libreoffice_conversion()
 
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "Unknown conversion error"
@@ -87,7 +88,23 @@ async def convert_office_to_pdf(
 
     except FileNotFoundError as e:
         # LibreOffice executable not found in PATH
-        logger.error(f"LibreOffice not available: {str(e)}")
+        logger.error(f"LibreOffice not available: {e!s}")
         raise FileNotFoundError(
             "LibreOffice is not installed or not available in PATH. "
         ) from e
+
+
+async def convert_office_to_pdf(
+    input_path: str, output_dir: str, timeout: int = 30, *, profile_dir: str
+) -> str:
+    """Run the same converter through the service-owned blocking lane."""
+    return await run_blocking(
+        "libreoffice-conversion",
+        convert_office_to_pdf_sync,
+        input_path,
+        output_dir,
+        timeout,
+        profile_dir=profile_dir,
+        lane="control-io",
+        owner="config",
+    )

@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D3
+module: INFRA-STORAGE
+case:
+  case_id: SI-OBJECT-D3-001
+  feature_id: SI-STORAGE
+  requirement_ids: [SI-REQ-003, DPR-001]
+  business_rule_ids: [SI-STORAGE-RULE-02, SI-STORAGE-RULE-04]
+  title: Management Office conversion through a real scoped ObjectStore
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove source/version reads, local conversion, remote PDF validation and attempt cleanup using real MinIO and LibreOffice.
+  preconditions:
+  - Docker is available and the current Management image has been built locally.
+  - The pinned MinIO reference image is available locally.
+  test_data:
+    document: A generated DOCX containing a fixed synthetic paragraph.
+    resources: Dedicated internal Docker network, temporary object bucket and disposable containers.
+  steps:
+  - order: 1
+    action: Upload the DOCX through ObjectStore and read it with a pinned revision and byte range.
+    expected: Content and exclusive-end range bytes match, while an ungranted key is refused.
+  - order: 2
+    action: Run the actual Management conversion worker against the isolated MinIO.
+    expected: The final object has a PDF header, nontrivial size and no remaining attempt objects.
+  - order: 3
+    action: Shut down the service-owned worker and remove the dedicated containers and network.
+    expected: There are no stuck executions or surviving test containers.
+  - order: 4
+    action: Execute a synthetic converter launcher that forks a long-lived child and exceeds its deadline.
+    expected: The real process group is killed within seven seconds and no child continues running.
+  expected_results:
+  - Object access respects exact-key grants, pinned revisions and range semantics.
+  - Management produces and verifies an actual PDF through ObjectStore with no data-process HTTP hop.
+  - Temporary objects and managed executions are reclaimed.
+  - A timed-out converter process tree has no running descendants.
+  forbidden_side_effects:
+  - No application containers, volumes, credentials or data are used or modified.
+  integration_boundary:
+  - Real Management conversion, scoped S3 adapter, isolated MinIO HTTP and LibreOffice process; no model service is involved.
+  observations:
+  - Final PDF size/header, remaining bucket keys and ThreadManager shutdown status.
+  cleanup:
+  - Remove only uniquely named test containers and the test-owned internal network.
+  acceptance:
+  - id: AC-01
+    description: Scope, pinned reads and byte ranges use the real object protocol.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: The real conversion publishes a PDF and reclaims its attempt and worker.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: The conversion deadline reclaims real launcher descendants.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]

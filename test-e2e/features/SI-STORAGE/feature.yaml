@@ -4,7 +4,7 @@ module:
   name: Infrastructure
 feature:
   feature_id: SI-STORAGE
-  name: StorageInterface foundation and scoped KV access
+  name: StorageInterface foundation and scoped KV and object access
   status: active
   description: >-
     Lightweight storage ports, explicit scope and capability checks, a logical
@@ -17,7 +17,9 @@ feature:
     description: Trusted bindings enforce service, tenant, namespace and capability restrictions.
   - rule_id: SI-STORAGE-RULE-03
     description: KV revision and TTL updates are atomic and uncertain writes are not automatically replayed.
-  required_test_stages: []
+  - rule_id: SI-STORAGE-RULE-04
+    description: Managed object reads retain revision and range semantics; conversion uses ObjectStore and reclaims each attempt.
+  required_test_stages: [D3]
   source:
     notes: >-
       infrastructure-storage-access-interface SPEC, initial SI-P0/SI-P1 slice.

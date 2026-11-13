@@ -2,4 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-当前测试基线未保留关联用例。
+- D3 [SI-OBJECT-D3-001](../../cases/SI-OBJECT-D3-001/case.yaml) · active

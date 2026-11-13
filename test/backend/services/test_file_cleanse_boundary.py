@@ -14,7 +14,7 @@ def test_cleansing_uses_structure_only_and_checks_source(mocker):
     import hashlib
 
     from contracts.agentos_knowledge import ObjectReference
-    from management.services.file.cleanse import prepare_text_artifact
+    from management.services.file.cleanse import prepare_artifact
 
     source = ObjectReference(
         space="knowledge",
@@ -27,7 +27,7 @@ def test_cleansing_uses_structure_only_and_checks_source(mocker):
             return_value=([{"content": "one", "metadata": {"page_number": 1}}], [])
         )
     )
-    value = prepare_text_artifact(
+    value = prepare_artifact(
         b"source", "file.txt", source, "parser-1", parser=parser
     )
     assert value.blocks[0].content == "one"
@@ -35,7 +35,7 @@ def test_cleansing_uses_structure_only_and_checks_source(mocker):
     assert parser.file_process.call_args.kwargs["chunking_strategy"] == "none"
     parser.file_process.reset_mock()
     with pytest.raises(ValueError, match="checksum"):
-        prepare_text_artifact(b"changed", "file.txt", source, "parser-1", parser=parser)
+        prepare_artifact(b"changed", "file.txt", source, "parser-1", parser=parser)
     parser.file_process.assert_not_called()
 
 
@@ -84,8 +84,8 @@ async def test_conversion_keeps_failure_semantics(tmp_path, mocker, outcome):
     if outcome == "success":
         (tmp_path / "input.pdf").write_bytes(b"%PDF")
     process = mocker.patch.object(
-        conversion.subprocess,
-        "run",
+        conversion,
+        "run_conversion_process",
         return_value=SimpleNamespace(
             returncode=1 if outcome == "failed" else 0, stdout="", stderr="failure"
         ),
@@ -93,8 +93,10 @@ async def test_conversion_keeps_failure_semantics(tmp_path, mocker, outcome):
     if outcome == "timeout":
         process.side_effect = subprocess.TimeoutExpired("soffice", 1)
 
-    async def blocking(_name, function, **kwargs):
-        return function()
+    async def blocking(_name, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
 
     mocker.patch.object(conversion, "run_blocking", side_effect=blocking)
     if outcome == "success":

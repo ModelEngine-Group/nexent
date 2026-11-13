@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-OFFICE-20261113
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Move Office conversion into Management through ObjectStore
+  description: >-
+    Implement the ObjectStore subset needed by Office preview, a managed conversion
+    pipeline and the Management image dependency. Full data-process retirement,
+    parser workers, KB jobs and other storage adapters remain pending.
+  affected_features:
+    existing: [SI-STORAGE, F-103]
+    added: []
+    modified: [SI-STORAGE]
+    retired: []
+  affected_cases:
+    existing: [CTR-044, CTR-045, API-108, API-109]
+    added: [SI-OBJECT-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve preview cache, error and resource access behavior after removing the HTTP hop.
+    - Enforce exact grants, tenant prefixes, pinned revisions and exclusive-end range semantics.
+    - Do not retry uncertain writes or emulate unsupported atomic deletes.
+    - Close streams, reclaim temporary files and cancel only the current conversion attempt.
+    reason: >-
+      Existing preview UT mocks the retired HTTP service. Strengthen its actual
+      lookup sites and add isolated adapter and worker tests. The new D3 adds real
+      MinIO and LibreOffice evidence that these UT and the existing full-stack
+      scenario do not supply for the new StorageInterface path. No duplicate D1.
+    test_selectors:
+    - test/backend/infrastructure/test_object_store.py
+    - test/backend/infrastructure/test_conversion_process.py
+    - test/backend/services/test_office_preview.py
+    - test/backend/services/test_file_cleanse_boundary.py
+    - test/backend/services/test_file_cleanse_objects.py
+    - test/backend/services/test_file_management_service.py

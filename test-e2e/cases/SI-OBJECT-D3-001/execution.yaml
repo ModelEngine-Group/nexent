@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: SI-OBJECT-D3-001
+timeout_seconds: 210
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_management_office_object_protocol
+acceptance_bindings:
+  AC-01: [test_management_office_object_protocol]
+  AC-02: [test_management_office_object_protocol]
+  AC-03: [test_management_office_object_protocol]
