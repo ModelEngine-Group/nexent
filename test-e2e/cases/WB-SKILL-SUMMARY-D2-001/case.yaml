@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-SKILL-SUMMARY-D2-001
+  feature_id: WB-CONTROLS
+  requirement_ids:
+  - WB-SKILL-SUMMARY-20261113
+  business_rule_ids:
+  - WB-CONTROLS-RULE-007
+  title: Skill mount summary preserves authorization and configuration without full
+    payloads
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise the additive view=mount contract over a real loopback HTTP router
+    and Skill service with controlled external boundaries.
+  preconditions:
+  - Ephemeral loopback HTTP server runs the product Skill router/service with controlled
+    authentication and storage; no shared assets.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: GET /skills and /skills?view=mount as the fixture user.
+    expected: Both return the same visible skill IDs, ordering, permissions and configuration.
+      Only full mode returns content and tool_ids; mount payload is smaller.
+  - order: 2
+    action: Request mount mode without authentication, with an invalid view, and with
+      empty storage.
+    expected: Authentication failure is 401, invalid view is 422, and an authorized
+      empty catalog is a successful skills=[] response.
+  expected_results:
+  - The opt-in response omits full bodies and tool relations while preserving visible
+    selection/configuration metadata and the default full contract.
+  - Failure and empty responses retain explicit HTTP contracts.
+  forbidden_side_effects:
+  - No persistent writes, real external services, hidden skill disclosure or surviving
+    listener/thread.
+  contract:
+    protocol: HTTP API
+    method: GET
+    endpoint: /skills?view=mount
+    request_expectations:
+    - Optional view=full|mount, authorized fixture identity.
+    response_expectations:
+    - 200 skills metadata envelope; 401 for absent authorization and 422 for invalid
+      view.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Summary and full mode have equivalent authorized metadata with different
+      payload projection.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: HTTP errors, empty catalog and owned server cleanup are explicit.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

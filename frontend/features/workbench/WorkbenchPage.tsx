@@ -150,6 +150,8 @@ const HomeContent: FC = () => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
+  const [knowledgeRetryRevision, setKnowledgeRetryRevision] = useState(0);
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -401,9 +403,36 @@ const HomeContent: FC = () => {
   const genericAgentVersion = workbenchBootstrap?.generic_agent?.version_no;
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useConversationScopedState<KnowledgeCapabilities | null>(
-      JSON.stringify([genericAgentId, genericAgentVersion]),
+      JSON.stringify([
+        user?.tenantId,
+        user?.id,
+        genericAgentId,
+        genericAgentVersion,
+      ]),
       null
     );
+
+  const [knowledgeSettled, setKnowledgeSettled] = useConversationScopedState(
+    JSON.stringify([
+      user?.tenantId,
+      user?.id,
+      genericAgentId,
+      genericAgentVersion,
+    ]),
+    false
+  );
+  const onKnowledgeOpenChange = useCallback(
+    (open: boolean) => {
+      setKnowledgePickerOpen(open);
+      if (open && !knowledgeCapabilities) setKnowledgeSettled(false);
+    },
+    [knowledgeCapabilities, setKnowledgeSettled]
+  );
+
+  const onKnowledgeRetry = useCallback(() => {
+    setKnowledgeSettled(false);
+    setKnowledgeRetryRevision((revision) => revision + 1);
+  }, [setKnowledgeSettled]);
 
   const [restoredLocalSnapshot, setRestoredLocalSnapshot] =
     useState(localSnapshot);
@@ -477,17 +506,23 @@ const HomeContent: FC = () => {
 
   useEffect(() => {
     const agentId = genericAgentId;
-    if (!agentId) return;
+    if (!knowledgePickerOpen || !agentId || knowledgeCapabilities) return;
 
     let cancelled = false;
     const versionNo = genericAgentVersion;
     void conversationService
       .getKnowledgeCapabilities(agentId, versionNo)
       .then((capabilities) => {
-        if (!cancelled) setKnowledgeCapabilities(capabilities);
+        if (!cancelled) {
+          setKnowledgeCapabilities(capabilities);
+          setKnowledgeSettled(true);
+        }
       })
       .catch((error) => {
-        if (!cancelled) setKnowledgeCapabilities(null);
+        if (!cancelled) {
+          setKnowledgeCapabilities(null);
+          setKnowledgeSettled(true);
+        }
         log.error(
           "[HomeContent] Failed to load knowledge capabilities:",
           error
@@ -497,7 +532,15 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [genericAgentId, genericAgentVersion, setKnowledgeCapabilities]);
+  }, [
+    knowledgePickerOpen,
+    knowledgeRetryRevision,
+    genericAgentId,
+    genericAgentVersion,
+    knowledgeCapabilities,
+    setKnowledgeCapabilities,
+    setKnowledgeSettled,
+  ]);
 
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
@@ -610,7 +653,7 @@ const HomeContent: FC = () => {
         let restoredPreview =
           readKnowledgeCache(activeThreadId)?.preview ?? null;
         try {
-          restoredPreview = await restoreKnowledgeDisplay(restoredScope);
+          restoredPreview = await restoreKnowledgeDisplay(restoredScope, false);
         } catch (error) {
           log.warn("Knowledge display lookup failed", error);
         }
@@ -1500,6 +1543,8 @@ const HomeContent: FC = () => {
               runtimeMetadata={runtimeMetadata}
               onRuntimeMetadataChange={handleRuntimeMetadataChange}
               readOnly={
+                isLoadingModels ||
+                isLoadingWorkbenchBootstrap ||
                 !workbenchSendability.canSend ||
                 (workbenchState.config.mode === "agent_create" &&
                   isAgentCreationAwaitingDraft(
@@ -1514,11 +1559,11 @@ const HomeContent: FC = () => {
                   nl2AgentComposerDisabled)
               }
               readOnlyReason={
-                !isCreating && llmModels.length === 0
-                  ? isLoadingModels
-                    ? t("ui.localization.loadingModels")
-                    : t("ui.localization.noModels")
-                  : workbenchSendability.reason
+                isLoadingModels || isLoadingWorkbenchBootstrap
+                  ? t("common.loading")
+                  : !isCreating && llmModels.length === 0
+                    ? t("ui.localization.noModels")
+                    : workbenchSendability.reason
               }
               skillFiles={
                 workbenchState.config.mode === "skill_create" &&
@@ -1570,6 +1615,13 @@ const HomeContent: FC = () => {
               onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
               workbenchPresentation={{
                 mode: workbenchState.config.mode,
+                onKnowledgeOpenChange,
+                onKnowledgeRetry,
+                knowledgePending: knowledgePickerOpen && !knowledgeSettled,
+                knowledgeUnavailable:
+                  knowledgePickerOpen &&
+                  knowledgeSettled &&
+                  !knowledgeCapabilities,
                 onExitCreation: () => void changeCreationMode("generic_chat"),
                 actions: (
                   <CreationActions
@@ -1594,7 +1646,7 @@ const HomeContent: FC = () => {
           <AgentPicker
             disabled={isThreadRunning}
             open={agentPickerOpen}
-            agents={agents}
+            identity={JSON.stringify([user?.tenantId, user?.id])}
             selectedId={selectedAgent?.id}
             selectedIds={workbenchState.config.agent_mounts.map((mount) =>
               String(mount.agent_id)

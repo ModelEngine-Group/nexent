@@ -2,7 +2,6 @@
 
 "use client";
 
-
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -132,7 +131,7 @@ export const Chat: FC<ChatProps> = ({
   );
 
   if (!selectedAgent) {
-    if (isLoadingAgents) {
+    if (isLoadingAgents && !workbenchPresentation && !landingContent) {
       return <AgentsLoadingState />;
     }
     if (workbenchPresentation || landingContent) {

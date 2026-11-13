@@ -88,6 +88,9 @@ def _materialize_runtime_skill_snapshot(
 ) -> List[Dict[str, Any]]:
     """Materialize frozen Skill files below the run workspace without mutating input."""
     effective = copy.deepcopy(snapshot)
+    skill_names = [str(skill.get("name") or "") for skill in effective]
+    if len(skill_names) != len(set(skill_names)):
+        raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
     snapshot_root = (Path(workspace_path).resolve() / ".skill_snapshot").resolve()
     tenant_root = (snapshot_root / tenant_id).resolve()
     if not tenant_root.is_relative_to(snapshot_root):

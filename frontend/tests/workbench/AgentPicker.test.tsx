@@ -622,3 +622,43 @@ beforeEach(async () => {
     interpolation: { escapeValue: false },
   });
 });
+
+it("loads owned candidates only on opening and restores delayed selected IDs", async () => {
+  let finish!: (
+    value: Awaited<ReturnType<typeof fetchPublishedAgentList>>
+  ) => void;
+  vi.mocked(fetchPublishedAgentList).mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const confirm = vi.fn();
+  const props = {
+    selectedIds: ["8"],
+    multiple: true,
+    onSelect: vi.fn(),
+    onCancel: vi.fn(),
+    onConfirm: confirm,
+  };
+  const view = (open: boolean) => (
+    <QueryClientProvider client={client}>
+      <AgentPicker {...props} open={open} identity="lazy-test" />
+    </QueryClientProvider>
+  );
+  const page = render(view(false));
+  expect(fetchPublishedAgentList).not.toHaveBeenCalled();
+  page.rerender(view(true));
+  await waitFor(() => expect(fetchPublishedAgentList).toHaveBeenCalledOnce());
+  finish({ success: true, data: [agent], message: "" });
+  const option = await screen.findByRole("option", { name: /Agent A/ });
+  await waitFor(() => expect(option).toHaveAttribute("aria-selected", "true"));
+  await userEvent.click(screen.getByRole("button", { name: "确认" }));
+  expect(confirm).toHaveBeenCalledWith([agent]);
+  page.rerender(view(false));
+  page.rerender(view(true));
+  expect(fetchPublishedAgentList).toHaveBeenCalledOnce();
+  client.clear();
+});
