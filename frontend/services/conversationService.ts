@@ -6,6 +6,7 @@ import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
+  ApiMessageAnnotation,
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
@@ -333,6 +334,41 @@ export const conversationService = {
         conversation_id: conversationId,
         name,
         ...(onlyIfDefaultTitle ? { only_if_default_title: true } : {}),
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data;
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
+  // Branch a conversation into a new one up to and including the given turn
+  // (1-based). Returns the new conversation payload.
+  async branch(
+    conversationId: number,
+    turnIndex: number,
+    assistantMessageId?: string,
+    answerIndex?: number
+  ) {
+    // Restored messages carry database IDs; live messages carry runtime UUIDs.
+    const sourceMessageId =
+      assistantMessageId && /^[1-9]\d*$/.test(assistantMessageId)
+        ? Number(assistantMessageId)
+        : undefined;
+    const response = await fetch(API_ENDPOINTS.conversation.branch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        turn_index: turnIndex,
+        source_message_id: Number.isSafeInteger(sourceMessageId)
+          ? sourceMessageId
+          : undefined,
+        answer_index: answerIndex,
       }),
     });
 
@@ -1186,6 +1222,7 @@ export const conversationService = {
     params: {
       query: string;
       clarification_response?: ClarificationResponse;
+      annotations?: ApiMessageAnnotation[];
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1244,6 +1281,13 @@ export const conversationService = {
         params.clarification_response
       ) {
         requestParams.clarification_response = params.clarification_response;
+      }
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.annotations?.length
+      ) {
+        requestParams.annotations = params.annotations;
       }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
