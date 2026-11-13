@@ -1,0 +1,118 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+/*
+ * AIDP file detail shell.
+ *
+ * Colour, border and radius values come from the verified UCD record:
+ * left preview surface #F3F3F3 with a #DFDFDF divider, 16px outer radius,
+ * selected tab #0067D1, unselected tab #777777, tab row border #DFDFDF.
+ * The tab text token is Body/font-body-3 (16px / 24px, weight 400).
+ */
+.shell {
+  --aidp-detail-border: #dfdfdf;
+  --aidp-detail-primary: #0067d1;
+  --aidp-detail-muted: #777777;
+  --aidp-detail-text: #191919;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+}
+
+.split {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--aidp-detail-border);
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.previewPane {
+  display: none;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  border-right: 1px solid var(--aidp-detail-border);
+  background: #f3f3f3;
+}
+
+@media (min-width: 1024px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 48.67%);
+  }
+
+  .previewPane {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.panelPane {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+@media (min-width: 1024px) {
+  .panelPane {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+
+.tabRow {
+  display: flex;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  gap: 32px;
+  margin: 0 12px;
+  min-height: 52px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--aidp-detail-border);
+}
+
+.tab {
+  margin: 0;
+  color: var(--aidp-detail-primary);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+
+.readerHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #dfdfdf;
+  flex-shrink: 0;
+}
+.fileName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #191919;
+  font-size: 14px;
+}
+.readerContent {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  background: #f3f3f3;
+}
+.readerContent > div {
+  background: white;
+  box-shadow: 0 2px 8px #0000000a;
+}
