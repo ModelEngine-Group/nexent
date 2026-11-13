@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type {
@@ -39,6 +41,65 @@ interface UploadedFileMeta {
   size: number;
 }
 
+/**
+ * Marker for files whose bytes already live in storage (agent-generated
+ * artifacts added back into the composer). `send()` reuses the stashed
+ * metadata instead of uploading the same object a second time.
+ */
+export type ExistingUploadMeta = UploadedFileMeta;
+
+const EXISTING_UPLOAD_MARKER = "__nexentExistingUpload";
+
+type FileWithUploadMarker = File & {
+  [EXISTING_UPLOAD_MARKER]?: ExistingUploadMeta;
+};
+
+/** Stashes known storage metadata on a file so `send()` can skip the upload. */
+export const markFileWithExistingUpload = (
+  file: File,
+  meta: ExistingUploadMeta
+): File => {
+  (file as FileWithUploadMarker)[EXISTING_UPLOAD_MARKER] = meta;
+  return file;
+};
+
+const readExistingUploadMeta = (
+  file: File | undefined
+): ExistingUploadMeta | undefined =>
+  (file as FileWithUploadMarker | undefined)?.[EXISTING_UPLOAD_MARKER];
+
+const buildCompleteAttachment = (
+  attachment: PendingAttachment,
+  meta: UploadedFileMeta
+): CompleteAttachment => {
+  // Prefer the presigned URL (works for time-limited access); fall back to url.
+  const serverUrl = meta.presigned_url || meta.url;
+  const isImage = attachment.type === "image";
+
+  // Build the content part so the message attachment carries a usable
+  // reference for both UI rendering and downstream consumption.
+  const part: ThreadUserMessagePart = isImage
+    ? { type: "image", image: serverUrl }
+    : {
+        type: "file",
+        filename: attachment.name,
+        data: serverUrl,
+        mimeType: attachment.contentType || "application/octet-stream",
+      };
+
+  const completeAttachment: CompleteAttachment = {
+    id: attachment.id,
+    status: { type: "complete" },
+    type: attachment.type as "image" | "document" | "file",
+    name: attachment.name,
+    contentType: attachment.contentType,
+    content: [part],
+    // Carry upload metadata alongside the typed fields.
+    ...(meta as object),
+  };
+  return completeAttachment;
+};
+
 const createPendingAttachment = async ({
   file,
 }: {
@@ -68,12 +129,24 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
   },
 
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
+    // Agent-generated artifacts re-attached from the artifacts panel carry
+    // their storage metadata; reuse the existing object instead of uploading
+    // the same bytes a second time.
+    const existingMeta = readExistingUploadMeta(attachment.file);
+    if (existingMeta) {
+      log.log(
+        "[AttachmentAdapter] Reusing stored object for attachment:",
+        existingMeta.object_name
+      );
+      return buildCompleteAttachment(attachment, existingMeta);
+    }
+
     const file = attachment.file;
     log.log(
       "[AttachmentAdapter] Uploading file to MinIO:",
       file.name,
       "type:",
-      attachment.type,
+      attachment.type
     );
 
     try {
@@ -88,38 +161,18 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
         throw new Error(errorMessage);
       }
 
-      // Prefer the presigned URL (works for time-limited access); fall back to url.
-      const serverUrl = item.presigned_url || item.url;
-      const isImage = attachment.type === "image";
-
-      // Build the content part so the message attachment carries a usable
-      // reference for both UI rendering and downstream consumption.
-      const part: ThreadUserMessagePart = isImage
-        ? { type: "image", image: serverUrl }
-        : { type: "file", filename: file.name, data: serverUrl, mimeType: file.type || "application/octet-stream" };
-
       // Stash upload metadata on the attachment for the ChatModelAdapter to
       // forward as `minio_files`. Cast through unknown because the public
       // BaseAttachment type does not declare these fields.
       const meta: UploadedFileMeta = {
         object_name: item.object_name,
-        url: serverUrl,
+        url: item.presigned_url || item.url,
         presigned_url: item.presigned_url,
         type: file.type || attachment.type,
         size: item.file_size ?? file.size,
       };
 
-      const completeAttachment: CompleteAttachment = {
-        id: attachment.id,
-        status: { type: "complete" },
-        type: attachment.type as "image" | "document" | "file",
-        name: attachment.name,
-        contentType: attachment.contentType,
-        content: [part],
-        // Carry upload metadata alongside the typed fields.
-        ...(meta as object),
-      };
-      return completeAttachment;
+      return buildCompleteAttachment(attachment, meta);
     } catch (error) {
       log.error("[AttachmentAdapter] Upload error:", error);
       // Surface the error to the assistant-ui runtime so the user sees it.
@@ -168,7 +221,8 @@ export const createNewChatAttachmentAdapter = (): AttachmentAdapter => {
     },
 
     async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-      const completeAttachment = await compositeAttachmentAdapter.send(attachment);
+      const completeAttachment =
+        await compositeAttachmentAdapter.send(attachment);
       releaseAttachmentSlot();
       return completeAttachment;
     },

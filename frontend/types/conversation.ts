@@ -112,8 +112,15 @@ export interface ApiMessageItem {
   depth?: number;
 }
 
+export interface ApiMessageAnnotation {
+  quoted_text: string;
+  comment?: string | null;
+  source_excerpt?: string | null;
+}
+
 export interface ApiMessage {
   clarification_response?: unknown;
+  annotations?: ApiMessageAnnotation[];
   status?: "pending" | "streaming" | "completed" | "failed" | "stopped";
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;

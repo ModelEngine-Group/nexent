@@ -25,6 +25,10 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import MemoryPreparationException
 from contracts.agent import AgentRequest
+from contracts.conversation import (
+    format_annotations_for_llm,
+    normalize_message_annotations,
+)
 from management.services.agent.context import (
     build_agent_run_context,
     build_authorized_context_input,
@@ -136,7 +140,13 @@ async def prepare_agent_run(
     create_run_kwargs = {
         "agent_id": agent_request.agent_id,
         "minio_files": agent_request.minio_files,
-        "query": agent_request.query,
+        # Merge reply annotations into the model-facing task text only; the
+        # persisted message (save_conversation_user reads agent_request.query)
+        # keeps the clean user text.
+        "query": format_annotations_for_llm(
+            agent_request.query,
+            normalize_message_annotations(getattr(agent_request, "annotations", None)),
+        ),
         "history": agent_request.history,
         "tenant_id": tenant_id,
         "user_id": user_id,

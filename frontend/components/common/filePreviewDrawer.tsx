@@ -1426,6 +1426,18 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }
   };
 
+  // Inline hosts own their header, download action and responsive panel layout.
+  if (props.presentation === "inline") {
+    return open ? (
+      <div
+        data-slot="inline-file-preview"
+        className="h-full min-h-0 overflow-hidden"
+      >
+        {renderContent()}
+      </div>
+    ) : null;
+  }
+
   // Full-screen presentation: the document owns the viewport and the back arrow
   // returns to whatever opened it. It is portalled into `document.body` because
   // ancestor transforms (the page transition animates the content) turn such an
