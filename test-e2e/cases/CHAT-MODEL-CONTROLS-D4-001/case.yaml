@@ -55,6 +55,7 @@ case:
       select effort-B, enable thinking and select xhigh.
     expected: All four expose the shared controls and tenant LLM candidates; effort options match capability with correct
       localized labels, including high distinct from xhigh. NL2Agent initial welcome can select before the first message.
+      At 908x608 and wide viewports, effort labels, selected values, chevrons and reset remain readable without overlap. Reset with no inherited degree shows service default rather than a blank field; picker and summary agree without persisting a fabricated effort.
   - order: 2
     action: Send a fixed creation request, inspect the actual frontend POST, consume deterministic clarification/structured
       file events, then send a follow-up from the subsequent composer.

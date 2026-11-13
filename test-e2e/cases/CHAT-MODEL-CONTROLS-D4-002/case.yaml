@@ -52,11 +52,14 @@ case:
       own selection and retains messages, input, uploaded attachment and valid draft. Clicking the currently active Agent/Skill
       creation mode exits to ordinary conversation; clicking the other mode switches creation mode without altering input
       position or bypassing running guards.
+      At 908x608 in ordinary Workbench and Agent chat, missing inherited effort displays service default after reset,
+      matches the trigger summary and remains editable after advanced-panel dismissal. Selected text and all nested
+      controls stay within the viewport without overlap or unintended preference/configuration writes.
   - order: 2
     action: Load an existing Workbench creation snapshot, reset an independent Agent creation session, close/reopen a fresh
       Skill creation modal and resolve an asynchronously delayed default after a user has selected a model.
     expected: Workbench restores and validates controls from the shared conversation API; new independent sessions follow existing reset rules; delayed
-      default does not overwrite explicit user choice. Both chat modes restore model selection and per-model preferences from the common conversation API after refresh; independent ephemeral creators remain draft-only.
+      default does not overwrite explicit user choice. Both chat modes restore model selection and per-model preferences from the common conversation API after refresh; unsent creators bind their own persisted conversation after the first response, and later edits/history restore use that conversation’s selection and preferences.
   - order: 3
     action: Start a delayed run on each applicable entry, attempt to change model, reasoning and advanced settings, cancel,
       then select another model and explicitly send again.

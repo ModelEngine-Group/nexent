@@ -62,6 +62,71 @@ it("SU-AC-01 selects a model without creating a second parameter state", () => {
   expect(result.current.snapshot).toEqual({ model_id: 2 });
 });
 
+it("AC-005 retains a chosen draft model during server binding, then updates the persisted selection", async () => {
+  let release!: (value: { selected_model_id: number; version: number }) => void;
+  api.getConversationModelSelection.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      })
+  );
+  const { result, rerender } = renderHook(
+    ({ conversationId }: { conversationId?: number }) =>
+      useConversationModelControls(
+        models,
+        "first-turn-binding",
+        "1",
+        undefined,
+        conversationId
+      ),
+    {
+      initialProps: { conversationId: undefined } as {
+        conversationId?: number;
+      },
+      wrapper: Wrapper,
+    }
+  );
+  act(() => result.current.onModelChange("2"));
+  rerender({ conversationId: 51 });
+  expect(result.current.selectedModelId).toBe("2");
+  expect(result.current.canSend).toBe(false);
+  await act(async () => release({ selected_model_id: 2, version: 1 }));
+  await waitFor(() => expect(result.current.canSend).toBe(true));
+  act(() => result.current.onModelChange("1"));
+  await waitFor(() =>
+    expect(api.patchConversationModelSelection).toHaveBeenCalledWith(51, 1)
+  );
+  await waitFor(() => expect(result.current.selectedModelId).toBe("1"));
+});
+
+it("AC-005 honors an authoritative inherited selection instead of an old draft", async () => {
+  const { result, rerender } = renderHook(
+    ({ conversationId }: { conversationId?: number }) =>
+      useConversationModelControls(
+        models,
+        "binding-null",
+        "1",
+        undefined,
+        conversationId
+      ),
+    {
+      initialProps: { conversationId: undefined } as {
+        conversationId?: number;
+      },
+      wrapper: Wrapper,
+    }
+  );
+  act(() => result.current.onModelChange("2"));
+  api.getConversationModelSelection.mockResolvedValueOnce({
+    selected_model_id: null,
+    version: 1,
+  });
+  rerender({ conversationId: 52 });
+  await waitFor(() => expect(result.current.canSend).toBe(true));
+  expect(result.current.selectedModelId).toBe("1");
+  expect(api.patchConversationModelSelection).not.toHaveBeenCalled();
+});
+
 it("SU-AC-04 isolates selections by thread and keeps explicit choices through delayed defaults", () => {
   const { result, rerender } = renderHook(
     ({ scope }) => useConversationModelControls(models, scope, "1"),

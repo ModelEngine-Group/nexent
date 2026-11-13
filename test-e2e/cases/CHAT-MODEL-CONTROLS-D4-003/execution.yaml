@@ -7,7 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [CHAT-MODEL-CONTROLS-D4-003]
   AC-02: [CHAT-MODEL-CONTROLS-D4-003]
-timeout_seconds: 240
+timeout_seconds: 480
 preparation:
   families: []
   anchors: false

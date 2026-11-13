@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { expect, type Page } from "playwright/test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { prepareWorkbench } from "./workbench-controls";
 import { makeDraft, fulfillEditorReadFixture } from "./agent-editor-reads.mjs";
 
@@ -13,26 +15,33 @@ export async function prepareControls(page: Page, histories: Array<Record<string
   const base = await prepareWorkbench(page, 1, { reasoning: true, histories });
   const state = { ...base, requests: [] as Array<{ path: string; body: any; effective: any; explicit: any }>,
     unavailable: false, delayed: false, release: () => {}, configDelay: 0,
+    omitEffortDefault: false, omitSamplingDefaults: false,
+    preferencePatches: [] as Array<Record<string, any>>,
     configGate: undefined as Promise<void> | undefined,
     draft: { ...makeDraft(), model_ids: [1, 3], model_names: ["Default A", "Effort B"] },
   };
   const model = (id: number, name: string, capability: any) => ({
     model_id: id, display_name: name, model_name: name, model_factory: "openai", model_type: "llm",
     ...(id === 1 ? {temperature:0.6,top_p:0.85} : {}),
-    effective_sampling: id === 1 ? {temperature:0.6,top_p:0.85} : {temperature:1,top_p:1},
     profile_schema_version: 1, connect_status: "available", extra_params: { enable_thinking: false, reasoning_effort: "low" }, reasoning_capability: capability,
   });
   const effort = { status: "supported", source: "catalog", levels, controls: [{ type: "effort", values: levels }] };
   const snapshots = new Map<number, { selected_model_id: number | null; model_parameter_preferences: Record<string, any> }>();
   const resources = new Map<number, any>();
+  const recordRequests = () => {
+    if (process.env.RESULT_DIR)
+      writeFileSync(join(process.env.RESULT_DIR, "model-controls-requests.json"),
+        JSON.stringify({ requests: state.requests, preferencePatches: state.preferencePatches }, null, 2));
+  };
   let nextConversation = 501;
   const snapshot = (id: number) => {
     if (!snapshots.has(id)) snapshots.set(id, { selected_model_id: id === 91 ? 999 : id === 92 ? 3 : null,
       model_parameter_preferences: id === 92 ? { "3": { enable_thinking: true, reasoning_effort: "xhigh" } } : {} });
     return snapshots.get(id)!;
   };
-  const defaults = (id: number) => ({ temperature: id === 1 ? 0.6 : 1, top_p: id === 1 ? 0.85 : 1,
-    enable_thinking: false, ...(id === 4 ? { reasoning_budget_tokens: 2048 } : id !== 2 ? { reasoning_effort: "low" } : {}) });
+  const defaults = (id: number) => ({
+    ...(!state.omitSamplingDefaults ? { temperature: id === 1 ? 0.6 : 1, top_p: id === 1 ? 0.85 : 1 } : {}),
+    enable_thinking: false, ...(id === 4 ? { reasoning_budget_tokens: 2048 } : id !== 2 && !state.omitEffortDefault ? { reasoning_effort: "low" } : {}) });
   const rules = (id: number) => {
     const rule = (key: string, schema: any, editable = true) => ({ key, schema, visible: true, editable, required: false,
       allowed_scopes: ["conversation"], ui_group: "fixture", ...(key.startsWith("reasoning_") ? { condition: { key: "enable_thinking", op: "eq", value: true } } : {}) });
@@ -44,6 +53,14 @@ export async function prepareControls(page: Page, histories: Array<Record<string
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
     const json = (body: any, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/api/conversation/creator_histories")
+      return json({ code: 0, data: { items: [], total: 0 } });
+    if (path === "/api/conversation/agent_groups")
+      return json({ code: 0, data: { items: [{ group_key: "agent:42", agent_id: 42,
+        agent_name: state.draft.display_name, agent_available: true, last_activity_time: 0,
+        matched_conversation: false }], pinned_items: [], included_items: [], next_cursor: null } });
+    if (/^\/api\/conversation\/agent_groups\/[^/]+\/conversations$/.test(path))
+      return json({ code: 0, data: { items: [], pinned_items: [], next_cursor: null } });
     const selectionMatch = path.match(/^\/api\/conversation\/(\d+)\/model_preferences$/);
     const preferenceMatch = path.match(/^\/api\/conversation\/(\d+)\/model_preferences\/(\d+)$/);
     const outletMatch = path.match(/^\/api\/model\/outlets\/(\d+)$/);
@@ -56,12 +73,14 @@ export async function prepareControls(page: Page, histories: Array<Record<string
       const saved = snapshot(Number(match[1]));
       if (route.request().method() === "PATCH") {
         const patch = route.request().postDataJSON();
+        state.preferencePatches.push({ path, patch });
         if (selectionMatch) saved.selected_model_id = patch.selected_model_id;
         else {
           const values = { ...saved.model_parameter_preferences[match[2]], ...patch.parameter_values };
           (patch.delete_parameters || []).forEach((key: string) => delete values[key]);
           saved.model_parameter_preferences[match[2]] = values;
         }
+        recordRequests();
       }
       if (selectionMatch) return json({ code: 0, data: saved });
       const id = Number(match[2]);
@@ -87,6 +106,7 @@ export async function prepareControls(page: Page, histories: Array<Record<string
       const effective = { ...defaults(modelId), ...explicit };
       if (!effective.enable_thinking) { delete effective.reasoning_effort; delete effective.reasoning_budget_tokens; }
       state.requests.push({ path, body, explicit: { ...explicit }, effective });
+      recordRequests();
       if (state.unavailable) return json({ detail: { code: "model_unavailable" } }, 409);
       if (saved && !body.conversation_id) {
         saved.selected_model_id = modelId;

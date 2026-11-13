@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { AgentModelParameters } from "../../components/model/AgentModelParameters";
-import { ConversationModelParameters, ConversationModelParameterSummary } from "../../components/model/ConversationModelParameters";
+import {
+  ConversationModelParameters,
+  ConversationModelParameterSummary,
+} from "../../components/model/ConversationModelParameters";
 import {
   agentParameterValues,
   withAgentParameterValues,
@@ -50,7 +53,6 @@ beforeEach(() => {
     },
   });
   api.getConversationModelPreferences.mockResolvedValue({
-
     parameter_values: {},
     defaults: { temperature: 0.8 },
     field_specs: [rule("temperature")],
@@ -150,7 +152,6 @@ it("session displays Agent values above outlet defaults but saves only the expli
   fireEvent.blur(input);
   await waitFor(() =>
     expect(api.patchConversationModelPreferences).toHaveBeenCalledWith(11, 42, {
-
       parameter_values: { temperature: 0 },
       delete_parameters: [],
     })
@@ -281,7 +282,6 @@ it.each([
   "session enabling thinking prefills $key through the shared policy",
   async ({ key, schema, expected }) => {
     api.getConversationModelPreferences.mockResolvedValue({
-
       parameter_values: {},
       defaults: { enable_thinking: false },
       output_limit: 1024,
@@ -304,7 +304,6 @@ it.each([
         11,
         42,
         {
-
           parameter_values: { enable_thinking: true, [key]: expected },
           delete_parameters: [],
         }
@@ -385,27 +384,96 @@ it("restores inherited Agent thinking by clearing only the thinking overrides", 
   );
 });
 
-
 it("SCB-02 session advanced settings omit length limits while retaining sampling", async () => {
-  api.getConversationModelPreferences.mockResolvedValue({parameter_values:{},defaults:{temperature:.6,top_p:.9,max_output_tokens:1024},field_specs:[rule("temperature"),rule("top_p"),rule("max_output_tokens"),rule("context_window_tokens")],issues:[]});
-  setup(<ConversationModelParameters conversationId={11} modelId={42}/>);
-  const advanced=await screen.findByRole("button",{name:"workbench.controls.advanced"});
-  await waitFor(()=>expect(advanced).toBeEnabled());fireEvent.click(advanced);
-  const temperature = await screen.findByRole("spinbutton",{name:"workbench.controls.temperature"});
+  api.getConversationModelPreferences.mockResolvedValue({
+    parameter_values: {},
+    defaults: { temperature: 0.6, top_p: 0.9, max_output_tokens: 1024 },
+    field_specs: [
+      rule("temperature"),
+      rule("top_p"),
+      rule("max_output_tokens"),
+      rule("context_window_tokens"),
+    ],
+    issues: [],
+  });
+  setup(<ConversationModelParameters conversationId={11} modelId={42} />);
+  const advanced = await screen.findByRole("button", {
+    name: "workbench.controls.advanced",
+  });
+  await waitFor(() => expect(advanced).toBeEnabled());
+  fireEvent.click(advanced);
+  const temperature = await screen.findByRole("spinbutton", {
+    name: "workbench.controls.temperature",
+  });
   await waitFor(() => expect(temperature).toBeVisible());
-  expect(screen.queryByRole("spinbutton",{name:"max_output_tokens"})).not.toBeInTheDocument();
-  expect(screen.queryByRole("spinbutton",{name:"context_window_tokens"})).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("spinbutton", { name: "max_output_tokens" })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("spinbutton", { name: "context_window_tokens" })
+  ).not.toBeInTheDocument();
 });
 
 it("SCB-01 model trigger summary reflects effective Agent/session reasoning values", async () => {
-  api.getConversationModelPreferences.mockResolvedValue({parameter_values:{reasoning_effort:"high"},defaults:{enable_thinking:true,reasoning_effort:"low"},field_specs:[{...rule("reasoning_effort"),schema:{type:"string",enum:["low","medium","high"]}}],issues:[]});
-  setup(<ConversationModelParameterSummary conversationId={11} modelId={42} agentDefaults={{reasoning_effort:"medium"}}/>);
-  expect(await screen.findByText("modelProfile.thinkingLevel.high")).toBeVisible();
+  api.getConversationModelPreferences.mockResolvedValue({
+    parameter_values: { reasoning_effort: "high" },
+    defaults: { enable_thinking: true, reasoning_effort: "low" },
+    field_specs: [
+      {
+        ...rule("reasoning_effort"),
+        schema: { type: "string", enum: ["low", "medium", "high"] },
+      },
+    ],
+    issues: [],
+  });
+  setup(
+    <ConversationModelParameterSummary
+      conversationId={11}
+      modelId={42}
+      agentDefaults={{ reasoning_effort: "medium" }}
+    />
+  );
+  expect(
+    await screen.findByText("modelProfile.thinkingLevel.high")
+  ).toBeVisible();
+});
+
+it("AC-002 displays service default for an unset reasoning budget without saving a prefill", async () => {
+  api.getConversationModelPreferences.mockResolvedValue({
+    config_revision: 1,
+    parameter_values: {},
+    defaults: { enable_thinking: true },
+    field_specs: [
+      { ...rule("enable_thinking"), schema: { type: "boolean" } },
+      {
+        ...rule("reasoning_budget_tokens"),
+        schema: { type: "integer", minimum: 1, maximum: 4096 },
+      },
+    ],
+    issues: [],
+  });
+  setup(
+    <>
+      <ConversationModelParameters conversationId={11} modelId={42} />
+      <ConversationModelParameterSummary conversationId={11} modelId={42} />
+    </>
+  );
+  const budget = await screen.findByRole("spinbutton", {
+    name: "reasoning_budget_tokens",
+  });
+  expect(budget).toHaveAttribute(
+    "placeholder",
+    "modelProfile.thinkingModeOption.default"
+  );
+  expect(budget).toHaveValue("");
+  expect(
+    screen.getByText("modelProfile.thinkingModeOption.default")
+  ).toBeVisible();
+  expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
 });
 
 it("SYNC-02 shows a degree-only profile in session controls without writing a synthetic toggle", async () => {
   api.getConversationModelPreferences.mockResolvedValue({
-
     parameter_values: { reasoning_effort: "high" },
     defaults: { reasoning_effort: "low" },
     issues: [],
@@ -424,12 +492,9 @@ it("SYNC-02 shows a degree-only profile in session controls without writing a sy
   expect(screen.getByRole("switch")).toBeChecked();
   expect(screen.getByRole("switch")).toBeDisabled();
   fireEvent.mouseDown(effort);
-  fireEvent.click(
-    await screen.findByText("modelProfile.thinkingLevel.low")
-  );
+  fireEvent.click(await screen.findByText("modelProfile.thinkingLevel.low"));
   await waitFor(() =>
     expect(api.patchConversationModelPreferences).toHaveBeenCalledWith(11, 42, {
-
       parameter_values: { reasoning_effort: "low" },
       delete_parameters: [],
     })
@@ -438,7 +503,6 @@ it("SYNC-02 shows a degree-only profile in session controls without writing a sy
 
 it("SYNC-02 restores the degree-only profile summary from saved session parameters", async () => {
   api.getConversationModelPreferences.mockResolvedValue({
-
     parameter_values: { reasoning_effort: "high" },
     defaults: { reasoning_effort: "low" },
     issues: [],
@@ -455,7 +519,6 @@ it("SYNC-02 restores the degree-only profile summary from saved session paramete
   ).toBeVisible();
 });
 
-
 it("lets a conversation delete an inactive saved thinking budget after outlet defaults change", async () => {
   let values: Record<string, unknown> = { reasoning_budget_tokens: 512 };
   api.getConversationModelPreferences.mockImplementation(async () => ({
@@ -464,28 +527,53 @@ it("lets a conversation delete an inactive saved thinking budget after outlet de
     defaults: { enable_thinking: false },
     field_specs: [
       { ...rule("enable_thinking"), schema: { type: "boolean" } },
-      { ...rule("reasoning_budget_tokens"), schema: { type: "integer", minimum: 1 },
-        condition: { key: "enable_thinking", op: "eq", value: true } },
+      {
+        ...rule("reasoning_budget_tokens"),
+        schema: { type: "integer", minimum: 1 },
+        condition: { key: "enable_thinking", op: "eq", value: true },
+      },
     ],
     issues: Object.hasOwn(values, "reasoning_budget_tokens")
-      ? [{ category: "PARAMETER_DEPENDENCY", field: "/reasoning_budget_tokens" }] : [],
+      ? [
+          {
+            category: "PARAMETER_DEPENDENCY",
+            field: "/reasoning_budget_tokens",
+          },
+        ]
+      : [],
   }));
-  api.patchConversationModelPreferences.mockImplementation(async (_cid, _mid, patch) => {
-    values = { ...values, ...patch.parameter_values };
-    patch.delete_parameters.forEach((key: string) => delete values[key]);
-  });
+  api.patchConversationModelPreferences.mockImplementation(
+    async (_cid, _mid, patch) => {
+      values = { ...values, ...patch.parameter_values };
+      patch.delete_parameters.forEach((key: string) => delete values[key]);
+    }
+  );
   setup(<ConversationModelParameters conversationId={11} modelId={42} />);
-  const advanced = await screen.findByRole("button", { name: "workbench.controls.advanced" });
+  const advanced = await screen.findByRole("button", {
+    name: "workbench.controls.advanced",
+  });
   await waitFor(() => expect(advanced).toBeEnabled());
   expect(screen.getByRole("switch")).toBeDisabled();
   fireEvent.click(advanced);
-  await waitFor(() => expect(screen.getByText("reasoning_budget_tokens")).toBeVisible());
+  await waitFor(() =>
+    expect(screen.getByText("reasoning_budget_tokens")).toBeVisible()
+  );
   fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-  await waitFor(() => expect(api.patchConversationModelPreferences).toHaveBeenCalledWith(11, 42, {
-    parameter_values: {}, delete_parameters: ["reasoning_budget_tokens"],
-  }));
+  await waitFor(() =>
+    expect(api.patchConversationModelPreferences).toHaveBeenCalledWith(11, 42, {
+      parameter_values: {},
+      delete_parameters: ["reasoning_budget_tokens"],
+    })
+  );
   await waitFor(() => expect(values).toEqual({}));
-  await waitFor(() => expect(screen.queryByText("reasoning_budget_tokens")).not.toBeInTheDocument());
-  fireEvent.keyDown(screen.getByRole("region", { name: "workbench.controls.advanced" }), { key: "Escape" });
+  await waitFor(() =>
+    expect(
+      screen.queryByText("reasoning_budget_tokens")
+    ).not.toBeInTheDocument()
+  );
+  fireEvent.keyDown(
+    screen.getByRole("region", { name: "workbench.controls.advanced" }),
+    { key: "Escape" }
+  );
   await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
 });

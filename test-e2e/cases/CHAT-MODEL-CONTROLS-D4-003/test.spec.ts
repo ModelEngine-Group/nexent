@@ -2,6 +2,7 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
+import { expectReadablePlaceholder, expectWithinViewport } from "../../infra/automation/d4/fixtures/selector-interaction";
 import { creatorEntries, prepareControls, enter, chooseModel, send, openControls, settings, input } from "../../infra/automation/d4/fixtures/model-controls";
 
 journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
@@ -56,6 +57,50 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
       expect(inherited.explicit.temperature ?? null).toBeNull();
       expect(inherited.explicit.top_p ?? null).toBeNull();
     }
+    state.omitSamplingDefaults = true;
+    await page.setViewportSize({ width: 908, height: 608 });
+    for (const entry of creatorEntries) {
+      await enter(page, entry); await chooseModel(page, "Effort B"); await open();
+      await expectWithinViewport(page, panel);
+      await expect(temperature).toHaveValue(""); await expect(topP).toHaveValue("");
+      await expectReadablePlaceholder(temperature, "服务默认");
+      await expect(panel.getByRole("slider", { name: "温度 滑块", exact: true })).toHaveAttribute("aria-valuetext", "服务默认");
+      await expectWithinViewport(page, temperature);
+      await expectWithinViewport(page, topP);
+      const restore = panel.getByRole("button", { name: "恢复默认", exact: true });
+      await expectWithinViewport(page, restore);
+      const sliderControl = temperature.locator("..").locator(".ant-slider");
+      const box = (await sliderControl.boundingBox())!;
+      await sliderControl.click({ position: { x: box.width / 4, y: box.height / 2 } });
+      await expect(temperature).not.toHaveValue("");
+      await expect(temperature).toBeEnabled();
+      await expect(panel.getByRole("slider", { name: "温度 滑块", exact: true }))
+        .toHaveAttribute("aria-valuenow", await temperature.inputValue());
+      await restore.click();
+      await expect(temperature).toHaveValue(""); await expect(topP).toHaveValue("");
+      await expectReadablePlaceholder(temperature, "服务默认");
+      await expect(panel.getByRole("slider", { name: "温度 滑块", exact: true })).toHaveAttribute("aria-valuetext", "服务默认");
+      await page.keyboard.press("Escape");
+      await expect(panel).not.toBeVisible();
+      await expect(settings(page).getByRole("switch")).toBeEnabled();
+      await page.keyboard.press("Escape");
+    }
+    await page.goto(`${process.env.NEXENT_BASE_URL ?? "http://localhost:3000"}/en/workbench`);
+    await expect(input(page)).toBeVisible();
+    await chooseModel(page, "Effort B");
+    await openControls(page);
+    const englishAdvanced = settings(page).locator("[data-model-parameter-trigger]");
+    await englishAdvanced.focus(); await englishAdvanced.hover();
+    const englishPanel = page.locator("[data-model-parameter-panel]");
+    await expectWithinViewport(page, englishPanel);
+    await expect(englishPanel.locator("input[type=number]")).toHaveCount(2);
+    for (const field of await englishPanel.locator("input[type=number]").all()) {
+      await expect(field).toHaveValue("");
+      await expectReadablePlaceholder(field, "Service default");
+    }
+    await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+    state.omitSamplingDefaults = false;
+    await page.setViewportSize({ width: 1441, height: 1244 });
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
     for (const entry of creatorEntries) {

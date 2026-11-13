@@ -53,12 +53,28 @@ export function ModelParameterField({
       <Select
         className={
           inModelSelector
-            ? "!w-auto min-w-0 [&.ant-select-disabled]:!bg-transparent"
+            ? "!w-full min-w-0 [&.ant-select-disabled]:!bg-transparent"
             : undefined
         }
         variant={inModelSelector ? "borderless" : "outlined"}
+        placeholder={
+          inModelSelector
+            ? t("modelProfile.thinkingModeOption.default")
+            : undefined
+        }
+        popupMatchSelectWidth={inModelSelector ? false : undefined}
         styles={
-          inModelSelector ? { popup: { root: { zIndex: 1200 } } } : undefined
+          inModelSelector
+            ? {
+                popup: {
+                  root: {
+                    zIndex: 1200,
+                    minWidth: 160,
+                    maxWidth: "calc(100vw - 24px)",
+                  },
+                },
+              }
+            : undefined
         }
         getPopupContainer={(trigger) =>
           inModelSelector ? document.body : trigger.parentElement!
@@ -101,7 +117,9 @@ export function ModelParameterField({
         placeholder={
           optionalSampling
             ? t("modelProfile.serviceSamplingDefault")
-            : undefined
+            : inModelSelector && rule.key === "reasoning_budget_tokens"
+              ? t("modelProfile.thinkingModeOption.default")
+              : undefined
         }
         disabled={disabled}
         min={
@@ -174,7 +192,7 @@ export function ModelParameterField({
       <div
         className={
           inModelSelector
-            ? "flex min-h-8 items-center justify-end gap-2 [&>.ant-switch]:shrink-0"
+            ? "flex min-h-8 min-w-0 items-center justify-end gap-2 [&>.ant-select]:flex-1 [&>.ant-switch]:shrink-0"
             : "flex min-h-8 items-center gap-2 [&>.ant-select]:w-full [&>.ant-switch]:shrink-0"
         }
       >
