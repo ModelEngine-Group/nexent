@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: MODEL-LEGACY-VOICE-D5-001
+implementations:
+- framework: pytest
+  file: test_migration.py
+  selector: test_upgrade_retires_only_legacy_voice_settings_and_is_idempotent
+acceptance_bindings:
+  AC-01: [test_upgrade_retires_only_legacy_voice_settings_and_is_idempotent]
+  AC-02: [test_upgrade_retires_only_legacy_voice_settings_and_is_idempotent]
+timeout_seconds: 120
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The test creates and drops its own marked PostgreSQL scratch database and uses synthetic rows.

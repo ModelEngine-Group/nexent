@@ -8,7 +8,7 @@ import {
 } from "@/lib/modelParameterLayers";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Form, Spin } from "antd";
+import { Alert, App, Form, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   ModelParameterPopover,
@@ -22,7 +22,7 @@ import {
   thinkingDegreePrefill,
 } from "./ModelThinkingSettings";
 import { ModelThinkingToggle } from "@/components/chat/ModelThinkingToggle";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import {
   getModelOutlet,
   getConversationModelPreferences,
@@ -60,6 +60,7 @@ function usePreferenceView({
         issues: [],
         output_limit: outlet.profile.capabilities?.context?.output_limit,
         reasoning_status: outlet.profile.capabilities?.reasoning?.status,
+        reasoning_can_disable: outlet.profile.capabilities?.reasoning?.can_disable,
       } satisfies ConversationModelPreferenceView;
     },
     enabled: Boolean(conversationId || draftScope),
@@ -267,6 +268,7 @@ export function ConversationModelParameters({
           checked={enabled}
           disabled={
             state.alwaysOn ||
+            (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
             advancedOpen ||
             (!conversationId && !draftScope) ||
@@ -448,7 +450,10 @@ function PreferenceEditor({
                 rule.key === key &&
                 rule.visible &&
                 rule.allowed_scopes.includes("conversation") &&
-                parameterIsActive(rule.condition, { ...saved.defaults, ...values })
+                parameterIsActive(rule.condition, {
+                  ...saved.defaults,
+                  ...values,
+                })
             )
         )
         .map((key) => (
@@ -457,9 +462,7 @@ function PreferenceEditor({
             type="error"
             title={key}
             action={
-              <StandardButton onClick={() => update(key)}>
-                {t("common.delete")}
-              </StandardButton>
+              <Button onClick={() => update(key)}>{t("common.delete")}</Button>
             }
           />
         ))}

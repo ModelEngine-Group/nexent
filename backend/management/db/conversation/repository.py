@@ -1,8 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
-from contracts.conversation import ConversationHistory
-from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Set
@@ -10,11 +7,21 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
-from contracts.constants.constants import MESSAGE_ROLE
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.clarification import ClarificationResponse, normalize_form
+from contracts.constants.constants import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    CHAT_MODE_VALUES,
+    DEFAULT_TENANT_ID,
+    HISTORY_SUMMARY_UNIT_TYPE,
+    MESSAGE_ROLE,
+)
+from contracts.constants.environment import (
+    MAX_CONVERSATION_TURNS,
+    MAX_CONVERSATIONS_PER_USER,
+)
 from contracts.conversation import (
+    ConversationHistory,
     MESSAGE_ANNOTATIONS_UNIT_TYPE,
     MessageSource,
     decode_activity_cursor,
@@ -23,27 +30,41 @@ from contracts.conversation import (
     normalize_message_annotations,
     parse_message_annotation_unit,
 )
-from management.db.models import KnowledgeRecord
-
-from management.utils.orm import as_dict
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    HistorySummaryPersistenceError,
+    RuntimeMetadataVersionConflict,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
+from contracts.roles import has_any_role, roles_from_record
 from management.db.client import db_client, get_db_session
 from management.db.conversation.branch_titles import build_branch_title as _build_branch_title
+from management.db.conversation.classification import (
+    executor_system_key,
+    is_workbench_history,
+)
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.models import (
+    AgentAutomationProposal,
     ConversationMessage,
     ConversationMessageUnit,
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
+    KnowledgeRecord,
+    UserTenant,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
-from management.db.conversation.classification import executor_system_key, is_workbench_history
+from management.utils.orm import as_dict
 
 
 def load_execution_result_content(
     user_id: str, tenant_id: str, conversation_id: int, message_id: int, unit_index: int,
 ) -> str:
     """Load one execution unit in the caller's current conversation scope."""
-    from management.db.models import UserTenant
 
     membership = select(UserTenant.user_id).where(
         UserTenant.user_id == user_id,
@@ -109,19 +130,17 @@ def _parse_history_summary_content(content: Any) -> Optional[Dict[str, Any]]:
 
 def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
     """Resolve tenant ownership lazily to keep database modules decoupled."""
-    from management.db.identity.user_tenant import get_user_tenant_by_user_id
 
     return get_user_tenant_by_user_id(user_id)
 
 
 def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
     """Resolve legacy empty tenant fields consistently with authentication."""
-    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     tenant_id = user_tenant.get("tenant_id")
     if tenant_id:
         return tenant_id
-    if (user_tenant.get("user_role") or "").upper() == ASSET_OWNER_ROLE:
+    if has_any_role(roles_from_record(user_tenant), {ASSET_OWNER_ROLE}):
         return ASSET_OWNER_TENANT_ID
     return DEFAULT_TENANT_ID
 
@@ -407,7 +426,6 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
 
 def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
     """Resolve an owned latest form before writing either side of the response."""
-    from contracts.clarification import ClarificationResponse, normalize_form
 
     response = ClarificationResponse.model_validate(raw)
     if role != MESSAGE_ROLE['USER'] or not user_id:
@@ -973,7 +991,7 @@ def persist_assistant_run_batch(
             session.execute(insert(ConversationSourceImage), image_rows)
 
         if automation_proposals:
-            from management.db.models import AgentAutomationProposal
+            pass
 
         for proposal_link in automation_proposals:
             unit_index = int(proposal_link["unit_index"])

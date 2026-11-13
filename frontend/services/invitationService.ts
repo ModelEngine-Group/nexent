@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
 
@@ -6,6 +7,7 @@ export interface Invitation {
   invitation_id: number;
   invitation_code: string;
   code_type: string;
+  roles?: string[];
   group_ids?: number[];
   capacity: number;
   used_times: number; // Backend includes this in list response
@@ -38,7 +40,8 @@ export interface InvitationListResponse {
 
 export interface CreateInvitationRequest {
   tenant_id: string;
-  code_type: string;
+  code_type?: string;
+  roles?: string[];
   invitation_code?: string;
   group_ids?: number[];
   capacity: number;
@@ -64,9 +67,7 @@ export interface InvitationDetailResponse {
 /**
  * List invitations with pagination
  */
-export async function listInvitations(
-  request: InvitationListRequest
-): Promise<{
+export async function listInvitations(request: InvitationListRequest): Promise<{
   items: Invitation[];
   total: number;
   page: number;
@@ -156,11 +157,16 @@ export async function deleteInvitation(invitationCode: string): Promise<void> {
 /**
  * Check if invitation code already exists
  */
-export async function checkInvitationCodeExists(invitationCode: string): Promise<boolean> {
+export async function checkInvitationCodeExists(
+  invitationCode: string
+): Promise<boolean> {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.invitations.check(invitationCode), {
-      method: "GET",
-    });
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.invitations.check(invitationCode),
+      {
+        method: "GET",
+      }
+    );
 
     if (!response.ok) {
       // If 404, code doesn't exist

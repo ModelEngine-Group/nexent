@@ -1,12 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Modal, Spin } from "antd";
+import { Alert, Button, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
 import { getModelOutlet } from "@/services/modelProfileService";
 import { ModelOutletAddForm } from "./ModelOutletAddForm";
 
@@ -37,8 +37,9 @@ export function ModelOutletEditDialog({
     !!migration &&
     typeof migration === "object" &&
     (!("reviewed_revision" in migration) ||
-      migration.reviewed_revision !== outlet.data?.config_revision);
-  const admin = user?.role === "SU" || user?.role === "ADMIN";
+      typeof migration.reviewed_revision !== "number" ||
+      migration.reviewed_revision <= 0);
+  const admin = hasRole(user, "SU", "ADMIN");
   return (
     <Modal
       open
@@ -70,9 +71,9 @@ export function ModelOutletEditDialog({
           type="error"
           title={t("modelProfile.loadFailed")}
           action={
-            <StandardButton onClick={() => void outlet.refetch()}>
+            <Button onClick={() => void outlet.refetch()}>
               {t("common.retry")}
-            </StandardButton>
+            </Button>
           }
         />
       ) : (

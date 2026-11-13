@@ -5,6 +5,13 @@ import math
 from pathlib import Path
 
 
+def validate_deployment_version(value: str) -> str:
+    """Reject retired authentication modes instead of silently enabling a bypass."""
+    if value.strip().lower() == "speed":
+        raise ValueError("The speed deployment mode has been retired; configure standard authentication")
+    return value
+
+
 def parse_positive_int(raw_value: object, name: str, default: int) -> int:
     """Parse a positive integer, falling back to ``default`` when unset."""
     value = default if raw_value is None else raw_value

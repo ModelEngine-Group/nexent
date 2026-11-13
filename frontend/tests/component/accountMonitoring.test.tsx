@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   status: {
     telemetry_enabled: true,
     dashboard_url: "https://monitoring.nexent.test",
-    dashboard_allowed_roles: ["SU", "SPEED"],
+    dashboard_allowed_roles: ["SU"],
   } as null | {
     telemetry_enabled: boolean;
     dashboard_url: string;
@@ -38,7 +38,7 @@ beforeEach(() => {
   state.status = {
     telemetry_enabled: true,
     dashboard_url: "https://monitoring.nexent.test",
-    dashboard_allowed_roles: ["SU", "SPEED"],
+    dashboard_allowed_roles: ["SU"],
   };
   state.fetch.mockImplementation(async () => state.status);
 });
@@ -59,7 +59,7 @@ function renderHook() {
   return client;
 }
 
-test.each(["SU", "SPEED"])(
+test.each(["SU"])(
   "eligible %s monitoring keeps the configured destination",
   async (role) => {
     state.role = role;
@@ -96,11 +96,10 @@ test.each(["denied", "disabled", "missing-url", "null-status", "rejected"])(
   }
 );
 
-test("speed deployment retains SPEED eligibility without an ordinary user", async () => {
+test("retired deployment flag never authenticates an anonymous identity", () => {
   state.role = null;
   state.speed = true;
   renderHook();
-  expect(
-    await screen.findByText("https://monitoring.nexent.test")
-  ).toBeVisible();
+  expect(screen.getByText("hidden")).toBeVisible();
+  expect(state.fetch).not.toHaveBeenCalled();
 });

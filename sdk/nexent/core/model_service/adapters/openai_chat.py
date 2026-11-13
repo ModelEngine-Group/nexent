@@ -203,7 +203,10 @@ class OpenAIChatAdapter:
             validate_saved_parameter_values(rules, profile.parameter_values)
             bindings = validate_parameter_bindings(rules, parameter_transform_references())
             for key, binding in bindings.items():
-                if key in {"temperature", "top_p"} and getattr(profile.capabilities.sampling, key).status == "unsupported":
+                if key in {"temperature", "top_p"} and (
+                    getattr(profile.capabilities.sampling, key).status == "unsupported"
+                    or profile.parameter_values.get(key) is None
+                ):
                     continue
                 if key in profile.parameter_values:
                     _set(body, _tokens(binding["path"]), transform_parameter(binding, profile.parameter_values[key]),

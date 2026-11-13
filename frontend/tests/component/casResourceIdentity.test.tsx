@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/services/api";
 import UserList from "../../app/[locale]/resource-manage/components/resources/UserList";
 import GroupList from "../../app/[locale]/resource-manage/components/resources/GroupList";
 import ApiKeyList from "../../app/[locale]/resource-manage/components/resources/ApiKeyList";
@@ -19,6 +20,8 @@ const fixtures = vi.hoisted(() => ({
   updateGroup: vi.fn(),
   updateMembers: vi.fn(),
   refetch: vi.fn(),
+  authRefetch: vi.fn(async () => undefined),
+  viewerId: "viewer",
   users: [
     {
       id: "a",
@@ -38,7 +41,8 @@ const fixtures = vi.hoisted(() => ({
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
-    user: { authProvider: fixtures.provider },
+    user: { id: fixtures.viewerId, authProvider: fixtures.provider },
+    refetch: fixtures.authRefetch,
   }),
 }));
 vi.mock("react-i18next", () => ({
@@ -104,6 +108,12 @@ vi.mock("@/hooks/useConfirmModal", () => ({
 }));
 vi.mock("@/services/userService", () => ({
   updateUser: fixtures.updateUser,
+  getAssignableRoles: vi.fn(async () => ({
+    grantable_roles: ["ADMIN", "DEV", "USER", "OPS"],
+    revocable_roles: ["ADMIN", "DEV", "USER", "OPS"],
+    locked_roles: [],
+    reasons: {},
+  })),
   deleteUser: vi.fn(),
 }));
 vi.mock("@/services/groupService", () => ({
@@ -117,6 +127,7 @@ vi.mock("@/services/groupService", () => ({
 }));
 beforeEach(() => {
   fixtures.provider = "cas";
+  fixtures.viewerId = "viewer";
   vi.clearAllMocks();
 });
 function groupView() {
@@ -127,6 +138,55 @@ function groupView() {
   );
 }
 describe("resource identity operations", () => {
+  it("keeps user search and rows visible in read-only mode", () => {
+    render(<UserList tenantId="tenant" readOnly />);
+
+    expect(screen.getByPlaceholderText("tenantResources.users.searchUsernameOrEmail")).toBeVisible();
+    expect(screen.getAllByText("同名用户")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "tenantResources.users.editUser" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "tenantResources.users.deleteUser" })).toBeNull();
+  });
+
+  it("keeps the editor open and does not refresh identity when saving roles fails", async () => {
+    fixtures.viewerId = "a";
+    const detail = "Cannot remove the last active tenant administrator";
+    fixtures.updateUser.mockRejectedValueOnce(new ApiError(409, detail));
+    render(<UserList tenantId="tenant" />);
+    fireEvent.click(
+      within(screen.getAllByRole("row")[1]).getAllByRole("button")[0]
+    );
+    await screen.findByDisplayValue("同名用户");
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await screen.findByText("tenantResources.users.lastAdminRoleLocked");
+    expect(screen.queryByText(detail)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+    expect(fixtures.authRefetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["a", "viewer"])(
+    "refreshes the current identity only when saving that viewer's own roles (%s)",
+    async (viewerId) => {
+      fixtures.viewerId = viewerId;
+      render(<UserList tenantId="tenant" />);
+      fireEvent.click(
+        within(screen.getAllByRole("row")[1]).getAllByRole("button")[0]
+      );
+      await screen.findByDisplayValue("同名用户");
+      fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+      await waitFor(() =>
+        expect(fixtures.updateUser).toHaveBeenCalledWith("a", {
+          roles: ["USER"],
+        })
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+      );
+      expect(fixtures.authRefetch).toHaveBeenCalledTimes(
+        viewerId === "a" ? 1 : 0
+      );
+    }
+  );
+
   it("shows names in user rows, edit and confirmation but saves original user ID and role", async () => {
     render(<UserList tenantId="tenant" />);
     expect(
@@ -138,7 +198,7 @@ describe("resource identity operations", () => {
     expect(await screen.findByDisplayValue("同名用户")).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
     await waitFor(() =>
-      expect(fixtures.updateUser).toHaveBeenCalledWith("a", { role: "USER" })
+      expect(fixtures.updateUser).toHaveBeenCalledWith("a", { roles: ["USER"] })
     );
     fireEvent.click(within(row).getAllByRole("button")[1]);
     expect(fixtures.confirm.mock.calls[0][0].title).toContain("同名用户");

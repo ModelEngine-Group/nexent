@@ -5,8 +5,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { StandardModal } from "@/components/common/StandardModal";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button, Modal } from "antd";
 import HighFidelityTextArea from "./HighFidelityTextArea";
 
 interface HighFidelityPromptEditModalProps {
@@ -28,26 +27,27 @@ export default function HighFidelityPromptEditModal({
   const [editContent, setEditContent] = useState(content);
 
   return (
-    <StandardModal
+    <Modal
       open
       title={title}
       width={1000}
-      closeLabel={t("common.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      onOpenChange={(open) => {
-        if (!open) onClose();
+      centered
+      closable={{ "aria-label": t("common.close") }}
+      styles={{
+        body: { maxHeight: "50vh", overflowY: "auto", paddingBlock: 16 },
       }}
-      onConfirm={() => {
-        if (readOnly) return false;
+      cancelText={t("common.cancel")}
+      okText={t("common.confirm")}
+      onCancel={onClose}
+      onOk={() => {
+        if (readOnly) return;
         onSave(editContent);
+        onClose();
       }}
       footer={
         readOnly ? (
           <div className="flex justify-end">
-            <StandardButton onClick={onClose}>
-              {t("common.close")}
-            </StandardButton>
+            <Button onClick={onClose}>{t("common.close")}</Button>
           </div>
         ) : undefined
       }
@@ -64,6 +64,6 @@ export default function HighFidelityPromptEditModal({
           count: "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
         }}
       />
-    </StandardModal>
+    </Modal>
   );
 }

@@ -5,21 +5,22 @@ import argparse
 import json
 import sys
 
+from sqlalchemy import select
 
 from contracts.errors.exceptions import AccountConflictError
+from infrastructure.security.passwords import hash_password
+from management.db.client import get_db_session
+from management.db.identity.account import (
+    create_account,
+    get_account_by_email,
+    lock_account_keys,
+)
+from management.db.identity.user_tenant import insert_user_tenant
+from management.db.models import UserTenant
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
-    from management.db.client import get_db_session
-    from management.db.identity.account import (
-        create_account,
-        get_account_by_email,
-        lock_account_keys,
-    )
-    from management.db.identity.user_tenant import insert_user_tenant
-    from infrastructure.security.passwords import hash_password
-    from sqlalchemy import select
-    from management.db.models import UserTenant
+
 
     email = email.strip().lower()
     with get_db_session() as session:
@@ -39,7 +40,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             if (
                 account["delete_flag"] != "N"
                 or not members
-                or any(m.user_role != "SU" for m in members)
+                or any(tuple(m.roles or ()) != ("SU",) for m in members)
             ):
                 raise AccountConflictError(
                     "Bootstrap email belongs to an unavailable or non-SU identity"
@@ -48,11 +49,11 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         # A pre-cutover SU membership must be migrated, never replaced by a new ID.
         if session.execute(
             select(UserTenant.user_id).where(
-                UserTenant.user_role == "SU", UserTenant.delete_flag == "N"
+                UserTenant.roles.contains(["SU"]), UserTenant.delete_flag == "N"
             )
         ).first():
             raise AccountConflictError(
-                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
+                "An SU membership already exists. Verify its account and email; if not migrated, run bash deploy/sql/tools/supabase_to_postgres/migrate.sh --apply against this PostgreSQL database first"
             )
         # Historical inactive associations intentionally have no local account.
         # Only an available account can reserve the current SU identity.

@@ -1,0 +1,97 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-MULTI-ROLE-D2-003
+  feature_id: AUTH-MULTI-ROLE
+  requirement_ids:
+  - AUTH-MULTI-ROLE-20261031
+  business_rule_ids:
+  - AUTH-MULTI-ROLE-RULE-03
+  - AUTH-MULTI-ROLE-RULE-04
+  title: 多角色邀请码固定授予集合且不随创建者撤权失效
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 多角色邀请码固定授予集合且不随创建者撤权失效
+  preconditions:
+  - Current-source management and required operations permission entry shell are available in an isolated test deployment.
+  - Logical fixture accounts su, tenant_a_admin_1, tenant_a_admin_2, tenant_a_user and tenant_b_admin have isolated
+    owned data.
+  - No mutation touches shared users; cleanup uses the fixture SU account and keeps all evidence outside Git.
+  test_data:
+    tenants:
+    - tenant_a
+    - tenant_b
+    ordinary_roles:
+    - ADMIN
+    - DEV
+    - USER
+    - OPS
+  steps:
+  - order: 1
+    action: As tenant_a_admin_2 create /invitations with ADMIN plus OPS, tenant_a and valid group_ids; read the
+      returned invitation and try to update its roles.
+    expected: Creation succeeds under the same grant policy as user editing, roles are returned accurately, attempted
+      role mutation is rejected and stored roles remain fixed.
+  - order: 2
+    action: Revoke or deactivate the issuer using another administrator, check invitation availability, then delete
+      that invitation using a remaining tenant admin.
+    expected: Otherwise valid invitation stays available after issuer changes and becomes unavailable after explicit
+      deletion; already registered users do not change.
+  - order: 3
+    action: As ADMIN attempt another-tenant or SU-role invitation and as OPS attempt ordinary invitation; create
+      a legacy USER_INVITE fixture.
+    expected: Unauthorized creation returns 403 without a new invitation; legacy fixture resolves to USER only and
+      ordinary role/group defaults match the documented rules.
+  expected_results:
+  - Creation succeeds under the same grant policy as user editing, roles are returned accurately, attempted role
+    mutation is rejected and stored roles remain fixed.
+  - Otherwise valid invitation stays available after issuer changes and becomes unavailable after explicit deletion;
+    already registered users do not change.
+  - Unauthorized creation returns 403 without a new invitation; legacy fixture resolves to USER only and ordinary
+    role/group defaults match the documented rules.
+  forbidden_side_effects:
+  - Creating a SU invitation, editing existing invitation roles, exposing a foreign tenant invitation or silently
+    revoking an invite with its issuer.
+  acceptance:
+  - id: AC-01
+    description: Creation succeeds under the same grant policy as user editing, roles are returned accurately, attempted
+      role mutation is rejected and stored roles remain fixed.
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: Otherwise valid invitation stays available after issuer changes and becomes unavailable after explicit
+      deletion; already registered users do not change.
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: Unauthorized creation returns 403 without a new invitation; legacy fixture resolves to USER only
+      and ordinary role/group defaults match the documented rules.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  contract:
+    protocol: HTTP JSON
+    request_expectations:
+    - As tenant_a_admin_2 create /invitations with ADMIN plus OPS, tenant_a and valid group_ids; read the returned
+      invitation and try to update its roles.
+    - Revoke or deactivate the issuer using another administrator, check invitation availability, then disable that
+      invitation using a remaining tenant admin.
+    - As ADMIN attempt another-tenant or SU-role invitation and as OPS attempt ordinary invitation; create a legacy
+      USER_INVITE fixture.
+    response_expectations:
+    - Creation succeeds under the same grant policy as user editing, roles are returned accurately, attempted role
+      mutation is rejected and stored roles remain fixed.
+    - Otherwise valid invitation stays available after issuer changes and becomes unavailable after explicit deletion;
+      already registered users do not change.
+    - Unauthorized creation returns 403 without a new invitation; legacy fixture resolves to USER only and ordinary
+      role/group defaults match the documented rules.

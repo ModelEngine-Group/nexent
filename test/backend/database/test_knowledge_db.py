@@ -185,6 +185,7 @@ def mock_session():
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value.first.return_value = None
+    mock_query.filter.return_value.scalar.return_value = None
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
 
@@ -290,11 +291,11 @@ def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeyp
     assert knowledge_db._get_user_role_in_session(session, None, "tenant-1") == "USER"
 
     session.query.return_value.filter.return_value.scalar.return_value = "admin"
-    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "ADMIN"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == ("ADMIN",)
 
     session.query.side_effect = None
     session.query.return_value.filter.return_value.scalar.return_value = None
-    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == ("USER",)
 
     session.query.side_effect = RuntimeError("role lookup failed")
     assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"

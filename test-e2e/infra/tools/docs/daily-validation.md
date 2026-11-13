@@ -86,6 +86,48 @@ overall status is FAILED and coverage integrity is INCOMPLETE. BLOCKED Cases sta
 in the denominator and have acceptance_status=INCOMPLETE. No historical result is
 rewritten. D6 and the sanitized publication bundle retain the validation receipt.
 
+## Terminal reports and notifications
+
+Daily sends a terminal report when a run succeeds, fails or is interrupted. A
+failed recovery probe must not suppress notification. The report states the
+execution status, saved reason, result counts and recovery state, distinguishing
+restored configuration from a passed Local recovery probe. Missing recovery
+evidence is reported as unverified, never as a healthy environment. Partial runs
+retain `NOT_EXECUTED` and the original nonzero exit status.
+
+The launcher also covers synchronization, asset-validation and doctor failures
+before a batch exists, plus catchable interruption/SIGTERM. Once the executor
+creates a batch, an explicit callback records its directory in the launch receipt;
+the launcher uses that batch's notification receipt rather than an unrelated
+`repository-latest.json`. This prevents duplicate launch/batch messages. If the
+detailed report could not be rendered, the notification uses saved terminal
+metadata and labels the missing details explicitly.
+
+`notification-report.md` is the notification payload; original report and result
+evidence remain local and unchanged by sending. Known environment credentials are
+redacted from the payload. `notification.json` records `SENDING`, `SENT`,
+`UNKNOWN` or `NOT_CONFIGURED`. Concurrent sends use a per-record lock; existing
+or corrupt receipts are never blindly retried. Transport timeout or uncertainty
+does not change the test outcome. Explicit `notify: false` remains respected.
+Missing/invalid pipeline configuration does not prevent an alert if an existing
+notification destination and CLI can still be loaded from machine-local env.
+
+Only complete, safely restored campaigns may update the formal shared latest
+report. Notification of an incomplete run does not replace that report or imply
+all tests passed. SIGKILL, host power loss and unavailable credentials/transport
+cannot guarantee delivery from the terminated process; no external watchdog or
+automatic resend is introduced here.
+
+This framework-only change is covered by offline notification, launcher,
+orchestration, recovery and publication UT. It changes no product behavior or
+formal D1-D5 acceptance contract, so no product UT or formal Case is added just
+for a stage quota. Tests substitute message sending, deployment and remote Git;
+local process/Git mechanics use isolated temporary fixtures.
+
+```text
+python -m pytest -p no:nexent_formal_pytest test-e2e/infra/tools/tests/test_terminal_notifications.py
+```
+
 Offline checks:
 
 ```text

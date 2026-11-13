@@ -4,13 +4,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme {
+@theme inline {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
+  --color-ring: var(--color-brand);
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
-  --color-primary: hsl(var(--primary));
+  --color-primary: var(--color-brand);
+  --color-primary-hover: var(--color-brand-hover);
+  --color-primary-active: var(--color-brand-active);
+  --color-brand-soft: var(--color-select);
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-secondary: hsl(var(--secondary));
   --color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -32,9 +35,16 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
   --color-sidebar-ring: hsl(var(--sidebar-ring));
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --text-body-1: var(--font-body-1);
+  --text-body-2: var(--font-body-2);
+  --text-body-3: var(--font-body-3);
+  --radius-none: var(--brand-radius-none);
+  --radius-xs: var(--brand-radius-xs);
+  --radius-base: var(--brand-radius-base);
+  --radius-lg: var(--brand-radius-lg);
+  --radius-full: var(--brand-radius-full);
+  --radius-md: var(--radius-control);
+  --radius-sm: var(--radius-control);
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
 }
@@ -73,7 +83,7 @@
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 210 100% 50%;
-    --radius: 0.5rem;
+    --radius: var(--radius-control, 4px);
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
@@ -121,6 +131,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: var(--font-body-2, 14px);
   }
 }
 
@@ -295,7 +306,7 @@ button svg,
 
 ::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
-  border-radius: 5px;
+  border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
 }

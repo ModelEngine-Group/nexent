@@ -75,7 +75,7 @@ case:
   acceptance:
   - id: AC-01
     description: Complete supplemented draft is traceable and enforces effective parameter/instruction
-      contracts without external execution.
+      contracts, including explicit shutdown restrictions distinct from unknown capability, without external execution or changes to upstream source bytes.
     steps:
     - 1
     expected_results:

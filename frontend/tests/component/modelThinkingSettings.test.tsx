@@ -466,3 +466,53 @@ it("TD-02 keeps a read-only none-effort rule read-only", () => {
     screen.getByRole("combobox", { name: "modelProfile.thinkingDegree" })
   ).toBeDisabled();
 });
+
+it("AC-009 allows a compatible custom-provider toggle without inventing a degree", () => {
+  const onToggle = vi.fn();
+  const onModeChange = vi.fn();
+  showThinking({
+    rules: [
+      {
+        ...toggleRule,
+        source: { ref: "custom_provider_thinking_v1", version: 1 },
+      },
+    ],
+    values: {},
+    mode: "default",
+    reasoningSupported: true,
+    onToggle,
+    onModeChange,
+  });
+  expect(screen.getByRole("switch")).toBeChecked();
+  expect(screen.getByRole("switch")).toBeEnabled();
+  expect(onModeChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("switch"));
+  expect(onToggle).toHaveBeenCalledWith(false);
+});
+
+it("AC-010 prevents disabling an explicitly restricted model with a saved custom format", () => {
+  const onToggle = vi.fn();
+  showThinking({
+    rules: [toggleRule],
+    values: { enable_thinking: true },
+    canDisable: false,
+    onToggle,
+  });
+  expect(screen.getByRole("switch")).toBeChecked();
+  expect(screen.getByRole("switch")).toBeDisabled();
+  fireEvent.click(screen.getByRole("switch"));
+  expect(onToggle).not.toHaveBeenCalled();
+});
+
+it("AC-010 lets an old invalid off setting be corrected to on", () => {
+  const onToggle = vi.fn();
+  showThinking({
+    rules: [toggleRule],
+    values: { enable_thinking: false },
+    canDisable: false,
+    onToggle,
+  });
+  expect(screen.getByRole("switch")).toBeEnabled();
+  fireEvent.click(screen.getByRole("switch"));
+  expect(onToggle).toHaveBeenCalledWith(true);
+});

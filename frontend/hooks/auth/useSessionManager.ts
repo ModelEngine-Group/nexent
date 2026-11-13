@@ -47,7 +47,7 @@ export const refreshSession = async (): Promise<boolean> => false;
 // ============================================================================
 
 export function useSessionManager(user?: User | null) {
-  const { isSpeedMode, isDeploymentReady } = useDeployment();
+  const { isDeploymentReady } = useDeployment();
   const reconcileExpiryRef = useRef<() => void>(() => {});
   const lastHeartbeatAttemptAtRef = useRef(0);
   const heartbeatIntervalMsRef = useRef(getHeartbeatIntervalMs(300));
@@ -62,7 +62,7 @@ export function useSessionManager(user?: User | null) {
   }, [user?.authProvider, user?.id]);
 
   useEffect(() => {
-    if (isSpeedMode || !isDeploymentReady) return;
+    if (!isDeploymentReady) return;
 
     if (!hasAuthCookies()) {
       return;
@@ -73,14 +73,14 @@ export function useSessionManager(user?: User | null) {
     }
 
     handleSessionExpired();
-  }, [isSpeedMode, isDeploymentReady]);
+  }, [isDeploymentReady]);
 
   /**
    * Proactive session expiry watcher
    * Triggers session-expired even if user does not make any API request
    */
   useEffect(() => {
-    if (isSpeedMode || !isDeploymentReady) return;
+    if (!isDeploymentReady) return;
 
     let timeoutId: number | null = null;
     let intervalId: number | null = null;
@@ -152,14 +152,12 @@ export function useSessionManager(user?: User | null) {
       reconcileExpiryRef.current = () => {};
       clearTimers();
     };
-  }, [isSpeedMode, isDeploymentReady]);
+  }, [isDeploymentReady]);
 
   /**
    * Reconcile expiry and send CAS heartbeats on user activity
    */
   const setupTokenAutoRefresh = useCallback(() => {
-    if (isSpeedMode) return () => {};
-
     let lastActivityCheckAt = 0;
 
     const maybeRefreshOnActivity = async () => {
@@ -291,7 +289,7 @@ export function useSessionManager(user?: User | null) {
         window.removeEventListener(eventName, handler);
       });
     };
-  }, [isSpeedMode, user?.authProvider, user?.id]);
+  }, [user?.authProvider, user?.id]);
 
   useEffect(() => {
     const cleanupAutoRefresh = setupTokenAutoRefresh();

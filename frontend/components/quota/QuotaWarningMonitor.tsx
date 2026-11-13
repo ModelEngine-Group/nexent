@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
+
+import { hasRole } from "@/lib/roles";
 
 import { useCallback, useEffect, useRef } from "react";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useQuotaWarning } from "@/hooks/useQuotaWarning";
 import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
@@ -20,7 +23,7 @@ export function QuotaWarningMonitor({
   enabled = true,
 }: QuotaWarningMonitorProps) {
   const { user } = useAuthorizationContext();
-  const userRole = user?.role;
+  const userRole = user?.roles ?? user?.role;
   const tenantId = user?.tenantId;
   const {
     closeAllActiveNotifications,
@@ -37,7 +40,7 @@ export function QuotaWarningMonitor({
 
       inFlightRef.current = true;
       try {
-        if (userRole === USER_ROLES.SU || userRole === USER_ROLES.ASSET_OWNER) {
+        if (hasRole(userRole, "SU") || hasRole(userRole, "ASSET_OWNER")) {
           const overview = await quotaService.getPlatformOverview();
           processPlatformQuotaStatus(overview);
         } else if (tenantId) {

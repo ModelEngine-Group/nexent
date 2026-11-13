@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 // User type definition - contains only basic user information
 import type { USER_ROLES } from "@/const/auth";
 
@@ -8,6 +9,7 @@ export interface User {
   email: string;
   username?: string | null;
   role: UserRole;
+  roles?: UserRole[];
   avatarUrl?: string;
   tenantId?: string;
   authProvider?: "local" | "cas";

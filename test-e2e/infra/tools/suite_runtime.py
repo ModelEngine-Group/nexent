@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -15,6 +15,7 @@ import signal
 import subprocess
 
 from report_ownership import git_label, responsibility_label
+from suite_terminal import beijing_time, terminal_context
 
 
 def now():
@@ -243,15 +244,6 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
         except (OSError, ValueError):
             return {}
 
-    def beijing(value):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                return "未记录（原时间缺少时区）"
-            return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S +08:00")
-        except (AttributeError, TypeError, ValueError):
-            return "未记录"
-
     state = snapshot("status.json")
     provenance = snapshot("provenance.json")
     root = str(evidence_root).replace("\\", "/").rstrip("/") if evidence_root is not None else directory.resolve().as_posix()
@@ -259,14 +251,15 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
     lines = ["## 批次与本地证据", "",
             f"- 当前批次：`{batch_id}`",
             f"- 测试代码 HEAD：`{provenance.get('head') or '未记录'}`",
-            f"- 开始时间（北京时间）：{beijing(state.get('started_at'))}",
-            f"- 结束时间（北京时间）：{beijing(summary.get('finished_at') or state.get('finished_at'))}",
+            f"- 开始时间（北京时间）：{beijing_time(state.get('started_at'))}",
+            f"- 结束时间（北京时间）：{beijing_time(summary.get('finished_at') or state.get('finished_at'))}",
             f"- 证据根目录（执行机器本地）：`{root}`",
             f"- 完整报告：`{root}/report.md`",
             f"- 完整结果：`{root}/checkpoints/results.jsonl`",
             f"- 用例日志：`{root}/logs/<Case-ID>.log`",
             f"- 用例证据目录：`{root}/cases/<Case-ID>/`（截图、Trace 等仅在实际生成时存在）",
             "- 下表 Local evidence 中的相对路径均以此证据根目录为基准；文件保留在执行机器，不上传 GitHub。", ""]
+    lines += terminal_context(directory, summary, metadata_directory=metadata_directory)
     if sharing is not None:
         published = sharing.get("status") == "PUBLISHED"
         lines += ["## Syncthing 共享副本", "",

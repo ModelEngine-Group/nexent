@@ -39,7 +39,13 @@ interface UnifiedModelRow extends ModelOption {
   total_tokens?: number;
 }
 
-export default function ModelList({ tenantId }: { tenantId: string | null }) {
+export default function ModelList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
@@ -266,7 +272,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
                   className="text-yellow-500 cursor-pointer ml-1.5 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
-                    openEdit(record);
+                    if (!readOnly) openEdit(record);
                   }}
                 />
               </Tooltip>
@@ -458,31 +464,35 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               loading={checkingConnectivity.has(record.displayName)}
             />
           </Tooltip>
-          <Tooltip title={t("tenantResources.models.editModel")}>
-            <Button
-              type="text"
-              icon={<Edit className="h-4 w-4" />}
-              onClick={() => openEdit(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title={t("tenantResources.models.deleteModel")}>
-            <Button
-              type="text"
-              danger
-              icon={<Trash2 className="h-4 w-4" />}
-              size="small"
-              onClick={() =>
-                confirm({
-                  title: t("tenantResources.models.confirmDelete"),
-                  content: t("common.cannotBeUndone"),
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record.displayName, record.source),
-                })
-              }
-            />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("tenantResources.models.editModel")}>
+              <Button
+                type="text"
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
+                size="small"
+              />
+            </Tooltip>
+          )}
+          {!readOnly && (
+            <Tooltip title={t("tenantResources.models.deleteModel")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("tenantResources.models.confirmDelete"),
+                    content: t("common.cannotBeUndone"),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.displayName, record.source),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
         </div>
       ),
     },
@@ -518,9 +528,11 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               {t("monitoring.dashboard.refresh")}
             </Button>
           </div>
-          <Button type="primary" onClick={openCreate}>
-            + {t("modelConfig.button.addCustomModel")}
-          </Button>
+          {!readOnly && (
+            <Button type="primary" onClick={openCreate}>
+              + {t("modelConfig.button.addCustomModel")}
+            </Button>
+          )}
         </div>
       </div>
 

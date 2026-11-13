@@ -34,7 +34,7 @@ case:
       resolved outlet, then send normal and streaming requests through sync and async APIs; capture
       requests at the HTTP peer, including the resolved gateway asynchronous stream
       and authorized resource conversion after restoring a saved row snapshot.
-    expected: Exact root/path/body/auth and one physical request; custom gateway headers stay separate from model-specific Body parameters and credential values stay outside snapshots; content, reasoning,
+    expected: Exact root/path/body/auth and one physical request; empty temperature/top_p keys are absent and numeric zero is retained; custom gateway headers stay separate from model-specific Body parameters and credential values stay outside snapshots; content, reasoning,
       tool arguments and usage are preserved.
   - order: 2
     action: Serve multiline and fragmented SSE frames, including final tool calls
@@ -67,7 +67,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: Exact request reaches the real HTTP peer.
+    description: Exact request reaches the real HTTP peer, omitting empty temperature/top_p while preserving zero and configured numbers.
     steps:
     - 1
     expected_results:

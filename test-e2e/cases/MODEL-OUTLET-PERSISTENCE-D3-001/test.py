@@ -311,6 +311,6 @@ def test_explicit_profile_reselection_commits_one_identity_and_preserves_credent
     reset_snapshot = read(db, identifier)
     assert reset_snapshot.config_revision == 4 and reset_snapshot.outlet_id == identifier
     assert reset_snapshot.provenance.atomic_refs == custom.provenance.atomic_refs
-    assert reset_snapshot.parameter_values == {"temperature": 0.7, "top_p": 1.0}
+    assert reset_snapshot.parameter_values == {}
     with client.get_db_session() as session:
         assert session.execute(select(model.api_key).where(model.model_id == identifier)).scalar_one() == DUMMY

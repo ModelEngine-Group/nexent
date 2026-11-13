@@ -19,6 +19,10 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  operations: {
+    authorization: `${API_BASE_URL}/ops/authorization`,
+    scope: `${API_BASE_URL}/ops/scope`,
+  },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
   agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
@@ -849,6 +853,8 @@ export const API_ENDPOINTS = {
     personalSelf: `${API_BASE_URL}/capacity/personal/me`,
   },
   users: {
+    assignableRoles: (userId: string) =>
+      `${API_BASE_URL}/users/${encodeURIComponent(userId)}/assignable_roles`,
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
