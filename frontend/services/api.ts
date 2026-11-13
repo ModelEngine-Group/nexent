@@ -28,6 +28,7 @@ export const API_ENDPOINTS = {
     content: (id: string, contentId: string) =>
       `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/contents/${encodeURIComponent(contentId)}`,
     cleanup: `${API_BASE_URL}/trajectory/cleanup`,
+    cleanupSchedule: `${API_BASE_URL}/trajectory/cleanup/schedule`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,

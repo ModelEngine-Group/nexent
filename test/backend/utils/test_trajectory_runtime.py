@@ -257,5 +257,6 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
 def isolated_summary_database(mocker):
     from contextlib import nullcontext
     repository=mocker.patch("management.db.trajectory.repository.ExecutionRepository")
+    mocker.patch("management.db.trajectory.cleanup_schedule.CleanupScheduleRepository").return_value.read_all.return_value = {}
     repository.return_value.initialize.side_effect=lambda identity:nullcontext()
     return repository

@@ -6920,5 +6920,14 @@
   "trajectory.statisticsGlobal": "Global statistics",
   "trajectory.statisticsTenant": "Current tenant statistics",
   "trajectory.statisticsComputedAt": "Computed at: {{time}}",
-  "trajectory.statisticsPreparing": "Preparing statistics"
+  "trajectory.statisticsPreparing": "Preparing statistics",
+  "trajectory.scheduledCleanup": "Scheduled cleanup",
+  "trajectory.saveSchedule": "Save settings",
+  "trajectory.savingSchedule": "Saving",
+  "trajectory.scheduleSaved": "Settings saved. The worker will read the new interval within 30 seconds.",
+  "trajectory.cleanupIntervalMinutes": "Cleanup interval (minutes)",
+  "trajectory.schedulePolicy": "Remove traces older than {{days}} days for this tenant",
+  "trajectory.scheduleDisabled": "Scheduled cleanup is disabled in deployment settings",
+  "trajectory.scheduleHelp": "Use 1–525600 minutes, measured from the end of the tenant last scan. Changes take effect within 30 seconds; an active scan continues. Retention and the cleanup switch use deployment settings.",
+  "trajectory.scheduleSelectTenant": "Select a tenant to configure"
 }

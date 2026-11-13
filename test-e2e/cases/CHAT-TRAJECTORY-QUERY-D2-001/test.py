@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 from infrastructure.observability.trajectory_store import parse_time
+from management.services.trajectory.primitives import QueryError
 
 pytestmark = [
     pytest.mark.case_id("CHAT-TRAJECTORY-QUERY-D2-001"),
@@ -524,8 +525,9 @@ def test_trj_query_facets_and_only_declared_trajectory_routes(harness):
         for route in harness.app.routes
         if route.path.startswith("/trajectory/")
     ]
-    assert sum("GET" in methods for _, methods in routes) == 4
+    assert sum("GET" in methods for _, methods in routes) == 5
     assert sum("POST" in methods for _, methods in routes) == 1
+    assert sum("PUT" in methods for _, methods in routes) == 1
 
 
 def test_trj_query_existing_directory_admin_branch_and_user_reuse(harness):
@@ -941,11 +943,12 @@ def test_trj_query_private_validation_under_api_root(harness):
 
 def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch):
     """Controlled PG results cross the real HTTP boundary; detail still opens the actual archive."""
-    from unittest.mock import Mock
-    from management.db.trajectory.queries import ExecutionCatalog
-    from management.services.trajectory.projection import execution_values
-    from management.services.trajectory.cache import ByteCache
     from datetime import UTC, datetime
+    from unittest.mock import Mock
+
+    from management.db.trajectory.queries import ExecutionCatalog
+    from management.services.trajectory.cache import ByteCache
+    from management.services.trajectory.projection import execution_values
 
     original_manifest = harness.service.archive.manifest
     row = harness.catalog.resolve(["t1"], "123")
@@ -1056,3 +1059,50 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     )
     assert detail["executions"][0]["trajectory_id"] == harness.run.id
     assert snapshot(harness)["nodes"]
+
+
+def test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes(harness, monkeypatch):
+    from types import SimpleNamespace
+
+    from management.services.trajectory import cleanup_schedule as settings
+
+    values = {}
+    repository = SimpleNamespace(
+        read=lambda tenant: values.get(tenant),
+        save=lambda tenant, seconds, actor: values.update({tenant: seconds}),
+    )
+    monkeypatch.setattr(settings, "CleanupScheduleRepository", lambda: repository)
+    monkeypatch.setattr(settings, "TrajectoryCatalog", lambda: harness.catalog)
+    monkeypatch.setattr(settings.config, "TRAJECTORY_CLEANUP_INTERVAL_SECONDS", 3600)
+    monkeypatch.setattr(settings.config, "TRAJECTORY_CLEANUP_ENABLED", True)
+    monkeypatch.setattr(settings.config, "TRAJECTORY_RETENTION_DAYS", 30)
+    # Settings must remain available even when the trajectory file mount is unavailable.
+    from management.api.observability import trajectory as api
+    monkeypatch.setattr(api, "get_service", lambda: (_ for _ in ()).throw(OSError("unmounted")))
+    path = "/trajectory/cleanup/schedule"
+    assert data(get(harness, path))["interval_seconds"] == 3600
+    for actor, tenant, seconds in [("admin", "t1", 60), ("su", "t2", 31536000)]:
+        saved = harness.client.put(path, json={"tenant_id": tenant, "interval_seconds": seconds},
+                                   headers={"Authorization": actor})
+        assert data(saved) == {"tenant_id": tenant, "interval_seconds": seconds, "enabled": True, "retention_days": 30}
+        assert saved.headers["cache-control"] == "private,no-store"
+        assert data(get(harness, path, actor=actor, tenant_id=tenant))["interval_seconds"] == seconds
+    assert values == {"t1": 60, "t2": 31536000}
+    assert get(harness, path, actor="admin", tenant_id="t2").status_code == 404
+    assert harness.client.put(path, json={"tenant_id": "t2", "interval_seconds": 120},
+                              headers={"Authorization": "admin"}).status_code == 404
+    assert get(harness, path, actor="user").status_code == 403
+    assert harness.client.put(path, json={"interval_seconds": 120},
+                              headers={"Authorization": "user"}).status_code == 403
+    for value in [59, 31536001, 60.5, "60", True]:
+        invalid = harness.client.put(path, json={"interval_seconds": value}, headers={"Authorization": "admin"})
+        assert invalid.status_code == 422 and invalid.headers["cache-control"] == "private,no-store"
+    assert harness.client.put(path, json={"interval_seconds": 120, "path": "injected"},
+                              headers={"Authorization": "admin"}).status_code == 422
+    assert values == {"t1": 60, "t2": 31536000}
+    repository.save = lambda *args: (_ for _ in ()).throw(ConnectionError("private PG details"))
+    unavailable = harness.client.put(path, json={"interval_seconds": 120}, headers={"Authorization": "admin"})
+    assert unavailable.status_code == 503 and "private PG details" not in unavailable.text
+    assert values["t1"] == 60
+    harness.catalog.actors.pop("admin")
+    assert get(harness, path).status_code == 403

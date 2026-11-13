@@ -7,7 +7,7 @@ feature:
   name: 本地文件与自研管理员历史轨迹查看
   status: planned
   description: 现有MonitoringManager选择local_file/otlp及远端提供方导出；本地按租户/用户/首次根Agent/会话ID分组，每会话meta.json＋每执行正文完整内嵌的OTLP
-    JSONL，管理员按用户→最近Agent→会话使用自研查看器静态查看轨迹，默认保留30天，直接复用用户POST、扩展2个会话GET及新增4个轨迹GET和1个清理POST；支持配置定期清理及管理员主动清理N天以前。
+    JSONL，管理员按用户→最近Agent→会话使用自研查看器静态查看轨迹，默认保留30天，直接复用用户POST、扩展2个会话GET及新增4个轨迹读取GET、1个清理POST及租户周期设置GET/PUT；支持配置定期清理及管理员主动清理N天以前。
   business_rules:
   - rule_id: TRJ-RULE-001
     description: 复用OTel埋点，物理模型attempt、工具及Agent为实际Span，完整输入输出/失败片段/思考在属性和Events保留，聊天回滚兼容。
@@ -26,7 +26,7 @@ feature:
       引用状态在服务端有界缓存保存，随机ID逐次核验类型及身份/资源绑定，部署无需轨迹密钥，失效后重新查询。
   - rule_id: TRJ-RULE-006
     description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。
-      定期清理开关/天数/周期可配置，管理员可按天数主动清理当前可信租户；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
+      定期清理开关/天数由部署配置，ADMIN可在页面持久化本租户周期、SU可管理授权租户周期，后台30秒轮询并动态生效；管理员可按天数主动清理当前可信租户；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
       单个/批量删除会话确认成功后立即向受管文件线程提交定向清理；会话与执行摘要在同一PG事务软删除；只清理实际删除会话的全部轮次，失败/占用重试且独立于定期清理开关。
   - rule_id: TRJ-RULE-007
     description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file仅写本地且关闭远端导出，默认目录/mnt/nexent-data/trajectory，查询固定30秒，启动自动初始化且无需根UUID，SDK仅接参数，单节点/共享卷验证。

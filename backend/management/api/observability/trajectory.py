@@ -5,7 +5,7 @@ import logging
 from typing import Annotated
 
 from contracts.errors.exceptions import UnauthorizedError
-from contracts.trajectory import CleanupRequest, RecordsQuery
+from contracts.trajectory import CleanupRequest, CleanupScheduleRequest, RecordsQuery
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -13,6 +13,7 @@ from fastapi.routing import APIRoute
 from gateway.authentication.auth import get_current_user_context
 from management.services.trajectory.access import Actor
 from management.services.trajectory.cleanup import cleanup
+from management.services.trajectory.cleanup_schedule import read_schedule, save_schedule
 from management.services.trajectory.collection import facets, records
 from management.services.trajectory.primitives import CURRENT_CANCEL, QueryError
 from management.services.trajectory.runtime import get_service
@@ -49,7 +50,7 @@ class PrivateRoute(APIRoute):
 router = APIRouter(prefix="/trajectory", route_class=PrivateRoute)
 
 
-async def dispatch(request, authorization, operation, *, lane="trajectory-read"):
+async def dispatch(request, authorization, operation, *, lane="trajectory-read", needs_service=True):
     def work(cancel_event):
         user, tenant, role = get_current_user_context(authorization)
         if not user:
@@ -59,7 +60,7 @@ async def dispatch(request, authorization, operation, *, lane="trajectory-read")
             raise QueryError("administrator_required", 403)
         token = CURRENT_CANCEL.set(cancel_event)
         try:
-            return operation(get_service(), actor)
+            return operation(get_service() if needs_service else None, actor)
         finally:
             CURRENT_CANCEL.reset(token)
 
@@ -143,6 +144,26 @@ async def list_records(request: Request, authorization: str | None = Header(None
         )
 
     return await dispatch(request, authorization, operation)
+
+
+@router.get("/cleanup/schedule")
+async def get_cleanup_schedule(
+    request: Request, authorization: str | None = Header(None),
+    tenant_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+):
+    return await dispatch(
+        request, authorization, lambda service, actor: read_schedule(actor, tenant_id), needs_service=False,
+    )
+
+
+@router.put("/cleanup/schedule")
+async def put_cleanup_schedule(
+    request: Request, body: CleanupScheduleRequest, authorization: str | None = Header(None),
+):
+    return await dispatch(
+        request, authorization, lambda service, actor: save_schedule(actor, body.interval_seconds, body.tenant_id),
+        needs_service=False,
+    )
 
 
 @router.get("/conversations/{conversation_id}")

@@ -9,6 +9,7 @@ case:
   - CHAT-TRAJECTORY-REFERENCES-20261111
   - CHAT-TRAJECTORY-CONVERSATION-20261111
   - CHAT-TRAJECTORY-SUMMARY-20261113
+  - CHAT-TRAJECTORY-SCHEDULE-20261113
   business_rule_ids:
   - TRJ-RULE-002
   - TRJ-RULE-003
@@ -32,7 +33,7 @@ case:
   - 目录使用tenant/user/agent/conversation业务ID，agent_id固定为首次采集根Agent；首次PG行锁登记，后续会话目录.lock互斥。会话切换根Agent仍读写同一物理目录。
   - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
   - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间。
-  - 用户搜索直接复用POST /users/list；Agent/会话选择在既有两个GET增加view=trajectory、target_user_id及普通/工作台分类；新增仅4个轨迹GET及清理POST，原分支行为保持。
+  - 用户搜索直接复用POST /users/list；Agent/会话选择在既有两个GET增加view=trajectory、target_user_id及普通/工作台分类；轨迹读取4个GET、清理POST及设置GET/PUT，原分支行为保持。
   test_data:
     profile: mock
   steps:
@@ -50,10 +51,10 @@ case:
       大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。
   - order: 4
     action: 使用快照中的output正文引用，经统一contents反复冷读工具结果并分块取大结果；以合法管理员篡改为内部文件来源及跨会话引用；完成新运行后再次查询，检查缺usage/时间记录及新增路由集合。
-    expected: 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。新增轨迹GET恰为4条，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
+    expected: 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。轨迹读取GET保持4条，另增设置GET/PUT，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
   - order: 5
     action: 使用ADMIN/SU向POST /trajectory/cleanup提交before_days=7并沿next_cursor遍历；覆盖1/3650边界、0/负数/小数/3651、篡改/跨actor/跨租户游标、批次间撤权、409占用与503挂载失败；检查GET保持只读。
-    expected: 仅新增1个清理POST，新增轨迹GET保持4条、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
+    expected: 仅新增1个清理POST，轨迹读取GET保持4条，另增设置GET/PUT、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
   - order: 6
     action: 依次请求POST /users/list、两个现有会话GET的默认分支和view=trajectory分支；比较旧调用响应、普通身份自己的轨迹视图、跨用户/租户参数、工作台/NULL组、大量置顶项及篡改游标，核对路由数量。
     expected: 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
@@ -69,19 +70,23 @@ case:
   - order: 10
     action: 通过HTTP查询两页PG执行摘要、切换会话ID及模型筛选，打开详情；禁止列表和候选调用文件读取。新增执行后复用query_id，再清理、删除或撤权。
     expected: records与facet仅调用PG，摘要按会话聚合且NULL累计不冒充完整；搜索不匹配子Trace ID。同一执行同时命中模型/Agent/时间；最新状态先确定。query_id固定成员与顺序，更新仅新查询纳入；撤权/清理使旧快照失效。顶部统计不随列表筛选重算，读取完整统计行及computed_at；详情仍按需读取OTLP。
+  - order: 11
+    action: 打开定时清理设置，修改并保存周期，重读并覆盖非SU、非法参数及故障。
+    expected: ADMIN/SU通过GET/PUT /trajectory/cleanup/schedule读取和持久化租户扫描周期，重读保留新值；普通角色403、跨租户404，非法或未知字段422，数据库故障503；配置请求保持private,no-store且不访问轨迹文件。
   expected_results:
   - 授权目录默认20最多100，用户/最近agent_id/会话不匹配404，普通创建者403；actor与target_user区分，HTTP包装不变。分组只用现有agent_id，切换后仅在最近组，子Agent不入根组，未知不造ID；后台核验归属冲突后撤销可读摘要，候选只查PG且无跨权限标题/聊天泄漏，允许短页并按已检查候选返回游标，不扫描正文或无界追读凑页。
     物理目录按tenant/user/首次根Agent/conversation组织，meta各层一致；最近Agent筛选不要求其等于agent_id，切换和删除Agent后仍可读取全部保留执行。
   - 摘要默认50最多200且≤2MiB，节点DTO单段≤500条/8MiB，源UUID/seq保持字符串；原快照内旧成员无重复/跳过，新归档仅显式查询后出现；清理换代返回snapshot_reset，参数/游标篡改拒绝。最近Agent只筛会话，不裁剪会话内其他Agent执行，trace_id与conversation_id同值。
   - OTLP→节点DTO思考/工具内容和业务父子正确，物理attempt各自独立；fragment与最终Span按源ID/区间去重。普通正文完整，超大字段按至多1MiB分块读全；未知思考不补造，410/503/trajectory_corrupt明确。节点id复用record_id、parent_id关联业务父，source保留实际traceId/spanId及export_seq，排序位置独立；duration_ms=20表示20ms，OTLP业务trace属性与原生ID分别保留。
     大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。
-  - 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。新增轨迹GET恰为4条，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
-  - 仅新增1个清理POST，新增轨迹GET保持4条、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
+  - 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。轨迹读取GET保持4条，另增设置GET/PUT，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
+  - 仅新增1个清理POST，轨迹读取GET保持4条，另增设置GET/PUT、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
   - 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
   - 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话ID筛选；分页排序基于固定查询成员；四卡只读授权租户或全局的全量统计快照，新执行仅刷新纳入、撤权及过期立即排除。后台生成全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0），接口返回computed_at和统计范围；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
   - 引用为服务端随机ID，成功正文与原值一致；未知/错类型/跨身份及缓存失效引用422且不返回正文，重新查询的新引用可读取；普通角色仍403。
   - view=conversation每会话一行，最新执行状态优先于历史模型/ID条件；累计指标与命中执行汇总分开；四态可筛选且未知不填零。查询快照固定成员和最新状态，详情按顺序分页返回round_no、版本和匹配标记，清理与撤权仍即时失效；省略view保留逐执行合同。
   - records与facet仅调用PG，摘要按会话聚合且NULL累计不冒充完整；搜索不匹配子Trace ID。同一执行同时命中模型/Agent/时间；最新状态先确定。query_id固定成员与顺序，更新仅新查询纳入；撤权/清理使旧快照失效。顶部统计不随列表筛选重算，读取完整统计行及computed_at；详情仍按需读取OTLP。
+  - ADMIN/SU通过GET/PUT /trajectory/cleanup/schedule读取和持久化租户扫描周期，重读保留新值；普通角色403、跨租户404，非法或未知字段422，数据库故障503；配置请求保持private,no-store且不访问轨迹文件。
   forbidden_side_effects:
   - 不得因查询、重新查询或历史分段调用模型/工具或改变聊天。
   - 不得泄漏凭证、绝对路径、范围外用户数据，也不得将预览伪称全文。
@@ -107,7 +112,7 @@ case:
     expected_results:
     - 3
   - id: AC-04
-    description: 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。新增轨迹GET恰为4条，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
+    description: 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。轨迹读取GET保持4条，另增设置GET/PUT，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
     steps:
     - 4
     expected_results:
@@ -116,7 +121,7 @@ case:
     - 1
     - 2
   - id: AC-05
-    description: 仅新增1个清理POST，新增轨迹GET保持4条、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
+    description: 仅新增1个清理POST，轨迹读取GET保持4条，另增设置GET/PUT、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
     steps:
     - 5
     expected_results:
@@ -151,6 +156,12 @@ case:
     - 10
     expected_results:
     - 10
+  - id: AC-11
+    description: ADMIN/SU通过GET/PUT /trajectory/cleanup/schedule读取和持久化租户扫描周期，重读保留新值；普通角色403、跨租户404，非法或未知字段422，数据库故障503；配置请求保持private,no-store且不访问轨迹文件。
+    steps:
+    - 11
+    expected_results:
+    - 11
   source:
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     acceptance_criteria:
@@ -164,6 +175,7 @@ case:
     - AC-011
     - AC-012
     - AC-REF-01
+    - AC-SCHEDULE-01
   execution:
     profiles:
     - name: mock

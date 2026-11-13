@@ -49,6 +49,8 @@ vi.mock("@/services/trajectoryService", () => ({
     snapshot: vi.fn(),
     content: vi.fn(),
     cleanup: vi.fn(),
+    cleanupSchedule: vi.fn(),
+    saveCleanupSchedule: vi.fn(),
   },
 }));
 const api = vi.mocked(trajectoryService);
@@ -88,6 +90,40 @@ beforeEach(() => {
 });
 
 describe("observability role gate", () => {
+  it("allows the tenant admin to configure their own cleanup interval", async () => {
+    api.cleanupSchedule.mockResolvedValue({
+      tenant_id: "tenant",
+      interval_seconds: 3600,
+      enabled: true,
+      retention_days: 30,
+    });
+    render(
+      <ObservabilityCenter
+        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as never}
+      />,
+      { wrapper }
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
+    );
+    expect(await screen.findByRole("spinbutton")).toHaveValue("60");
+    expect(api.cleanupSchedule).toHaveBeenCalledWith(
+      "tenant",
+      expect.any(AbortSignal)
+    );
+  });
+  it("requires SU to select a tenant before opening schedule settings", () => {
+    render(
+      <ObservabilityCenter
+        user={{ id: "su", role: "SU", tenantId: "tenant" } as never}
+      />,
+      { wrapper }
+    );
+    expect(
+      screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
+    ).toBeDisabled();
+    expect(api.cleanupSchedule).not.toHaveBeenCalled();
+  });
   it.each(["USER", "DEV", "SPEED", "ASSET_OWNER"])(
     "denies %s without fetching protected content",
     (role) => {

@@ -11,6 +11,7 @@ case:
   - CHAT-TRAJECTORY-CONVERSATION-20261111
   - CHAT-TRAJECTORY-AUTO-CONTENT-20261112
   - CHAT-TRAJECTORY-SUMMARY-20261113
+  - CHAT-TRAJECTORY-SCHEDULE-20261113
   business_rule_ids:
   - TRJ-RULE-002
   - TRJ-RULE-003
@@ -55,6 +56,9 @@ case:
   - order: 7
     action: 准备同会话失败后成功及过期/未采集数据，筛选历史执行并翻页打开多轮详情，期间新增执行/清理并切换会话。
     expected: 列表以会话为行并展示轮数和四态；打开详情从首轮开始连续追加后续轮次/节点，各轮从0计时且跨轮节点ID互不覆盖。搜索和类型筛选作用于已加载轮次并保留父级；切换会话取消请求并释放缓存，正文失效清除查看器。
+  - order: 8
+    action: 打开定时清理设置，修改并保存周期，重读并覆盖非SU、非法参数及故障。
+    expected: ADMIN显示本租户定时清理入口，SU选择授权租户后显示；打开读取当前策略，按分钟保存、关闭重开保留周期；错误可重试、保存失败保留输入；修改周期不触发手动删除。
   expected_results:
   - 候选有界并显示名称；上级变化重置下级、最近项和请求；四卡读取租户/全局统计快照，显示范围和统计时间，筛选及翻页保持同范围结果，零与未知分开。分页排序沿用query_id，显式刷新才纳入新执行。
   - 右侧抽屉保留列表状态，52/48层级时间线与单页详情联动，起止时间明确；Agent显示完整子树次数/usage，模型才显示TTFT和吞吐。 列表根V3、树和详情子V2/草稿/未知各自正确，切换模型或工具隐藏智能体版本。
@@ -63,6 +67,7 @@ case:
   - 状态原因与重试入口明确，禁止伪造零和完整性；普通身份不发送轨迹请求或展示受限标题正文。
   - 清理不受列表用户/Agent筛选影响，POST不含tenant/path；未确认不发请求，取消后不续批，部分失败不显示全部完成，成功后刷新列表；释放独占浏览器和路由资源。
   - 列表以会话为行并展示轮数和四态；打开详情从首轮开始连续追加后续轮次/节点，各轮从0计时且跨轮节点ID互不覆盖。搜索和类型筛选作用于已加载轮次并保留父级；切换会话取消请求并释放缓存，正文失效清除查看器。
+  - ADMIN显示本租户定时清理入口，SU选择授权租户后显示；打开读取当前策略，按分钟保存、关闭重开保留周期；错误可重试、保存失败保留输入；修改周期不触发手动删除。
   forbidden_side_effects:
   - 不得以静态截图替代自研查看器的实际节点交互验收。
   - 不得因历史查看/再次查询启动模型或工具，也不得对普通用户开放轨迹。
@@ -113,6 +118,12 @@ case:
     - 7
     expected_results:
     - 7
+  - id: AC-08
+    description: ADMIN显示本租户定时清理入口，SU选择授权租户后显示；打开读取当前策略，按分钟保存、关闭重开保留周期；错误可重试、保存失败保留输入；修改周期不触发手动删除。
+    steps:
+    - 8
+    expected_results:
+    - 8
   source:
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     acceptance_criteria:
@@ -128,6 +139,7 @@ case:
     - AC-010
     - AC-011
     - AC-013
+    - AC-SCHEDULE-01
     blocked_reason: Production page/viewer implemented; a partial fixed browser script
       and owned HTTP fixture exist. Delayed-response/all availability/SU/locale/keyboard/resource-volume
       assertions remain pending. The partial journey has an execution binding; formal

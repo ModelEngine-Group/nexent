@@ -164,6 +164,13 @@ export interface ContentChunk {
   byte_count: number;
   char_count: number;
 }
+export interface CleanupSchedule {
+  tenant_id: string;
+  interval_seconds: number;
+  enabled: boolean;
+  retention_days: number;
+}
+
 export interface CleanupResult {
   cutoff_at: string;
   scanned_runs: number;

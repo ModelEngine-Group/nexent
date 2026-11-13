@@ -26,6 +26,7 @@ def create_local_processor(config, metadata_provider):
     if not capturing and not maintaining:
         return None
     from management.db.trajectory.repository import ExecutionRepository
+    from management.services.trajectory.cleanup_schedule import read_intervals
 
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
@@ -59,6 +60,7 @@ def create_local_processor(config, metadata_provider):
         maintenance_store=maintenance,
         cleanup_enabled=config.TRAJECTORY_CLEANUP_ENABLED,
         cleanup_interval_seconds=config.TRAJECTORY_CLEANUP_INTERVAL_SECONDS,
+        cleanup_interval_provider=read_intervals,
     )
 
 

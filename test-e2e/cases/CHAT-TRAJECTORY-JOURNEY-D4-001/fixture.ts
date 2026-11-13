@@ -16,6 +16,9 @@ export async function installTrajectoryFixture(
     failure: "",
     cleanupPaused: false,
     multiRound: false,
+    schedules: {} as Record<string, number>,
+    scheduleSaves: [] as Record<string, unknown>[],
+    scheduleFailure: false,
   };
   const body = (text: string, complete = true) => ({
     availability: "available",
@@ -147,7 +150,30 @@ export async function installTrajectoryFixture(
       });
       return;
     }
-    if (path.endsWith("/trajectory/records")) {
+    if (path.endsWith("/trajectory/cleanup/schedule")) {
+      if (request.method() === "PUT") {
+        const payload = request.postDataJSON();
+        state.scheduleSaves.push(payload);
+        if (state.scheduleFailure) {
+          await route.fulfill({
+            status: 503,
+            json: { detail: { code: "query_unavailable" } },
+          });
+          return;
+        }
+        state.schedules[payload.tenant_id] = payload.interval_seconds;
+      }
+      const tenant =
+        request.method() === "PUT"
+          ? request.postDataJSON().tenant_id
+          : url.searchParams.get("tenant_id");
+      data = {
+        tenant_id: tenant,
+        interval_seconds: state.schedules[tenant] ?? 3600,
+        enabled: true,
+        retention_days: 30,
+      };
+    } else if (path.endsWith("/trajectory/records")) {
       state.records.push(url);
       const facet = url.searchParams.get("facet");
       data = facet

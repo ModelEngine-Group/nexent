@@ -18,6 +18,29 @@ beforeEach(() => {
 });
 
 describe("trajectory HTTP adapter", () => {
+  it("uses tenant-scoped GET and PUT for the cleanup interval with cancellation", async () => {
+    const signal = new AbortController().signal;
+    await trajectoryService.cleanupSchedule("tenant + ?", signal);
+    const url = new URL(String(request.mock.calls[0][0]), "http://localhost");
+    expect(url.searchParams.get("tenant_id")).toBe("tenant + ?");
+    expect(request.mock.calls[0][1]).toMatchObject({
+      signal,
+      cache: "no-store",
+    });
+    request.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 0, data: {} }))
+    );
+    await trajectoryService.saveCleanupSchedule("tenant", 120, signal);
+    expect(request.mock.calls[1][1]).toMatchObject({
+      method: "PUT",
+      signal,
+      cache: "no-store",
+    });
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({
+      tenant_id: "tenant",
+      interval_seconds: 120,
+    });
+  });
   it("preserves decimal IDs and forwards cancellation, filters and signed membership", async () => {
     const signal = new AbortController().signal;
     await trajectoryService.records(

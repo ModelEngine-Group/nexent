@@ -6918,5 +6918,14 @@
   "trajectory.statisticsGlobal": "全局统计",
   "trajectory.statisticsTenant": "当前租户统计",
   "trajectory.statisticsComputedAt": "统计时间：{{time}}",
-  "trajectory.statisticsPreparing": "统计准备中"
+  "trajectory.statisticsPreparing": "统计准备中",
+  "trajectory.scheduledCleanup": "定时清理",
+  "trajectory.saveSchedule": "保存设置",
+  "trajectory.savingSchedule": "保存中",
+  "trajectory.scheduleSaved": "设置已保存，后台将在30秒内读取新周期",
+  "trajectory.cleanupIntervalMinutes": "清理周期（分钟）",
+  "trajectory.schedulePolicy": "当前租户清理{{days}}天以前的轨迹",
+  "trajectory.scheduleDisabled": "定时清理已在部署配置中关闭",
+  "trajectory.scheduleHelp": "周期为1～525600分钟，从本租户上次扫描结束开始计时。保存后30秒内生效，当前扫描继续完成。保留天数和清理开关由部署配置决定。",
+  "trajectory.scheduleSelectTenant": "请先选择要配置的租户"
 }

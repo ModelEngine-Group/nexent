@@ -298,13 +298,18 @@ class TrajectoryFileStore:
         with self._session(identity) as directory:
             return directory.read_json("meta.json")
 
-    def identities(self, *, owner_user_id=None, conversation_ids=None):
+    def identities(self, *, owner_user_id=None, conversation_ids=None, tenant_ids=None):
         """Enumerate fixed file identities for internal maintenance, never an HTTP listing."""
         with self._root() as root:
-            for tenant in os.listdir(root.fd):
+            tenants = os.listdir(root.fd) if tenant_ids is None else [component(t) for t in sorted(tenant_ids)]
+            for tenant in tenants:
                 if tenant.startswith("."):
                     continue
-                with root.child(tenant) as td:
+                try:
+                    tenant_directory = root.child(tenant)
+                except FileNotFoundError:
+                    continue
+                with tenant_directory as td:
                     users = [component(owner_user_id)] if owner_user_id is not None else os.listdir(td.fd)
                     for user in users:
                         try:

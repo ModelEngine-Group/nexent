@@ -283,6 +283,60 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     await close();
   });
+  await contract.step(steps[7], async () => {
+    const deleted = state.cleanups.length;
+    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const input = dialog.getByRole("spinbutton");
+    await expect(input).toHaveValue("60");
+    await input.fill("120");
+    state.scheduleFailure = true;
+    await dialog.getByRole("button", { name: "保存设置", exact: true }).click();
+    await expect(
+      dialog.getByText("查询暂不可用，请重试或缩小租户/时间范围", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect(input).toHaveValue("120");
+    state.scheduleFailure = false;
+    await dialog.getByRole("button", { name: "重试", exact: true }).click();
+    await expect(
+      dialog.getByText("设置已保存，后台将在30秒内读取新周期"),
+    ).toBeVisible();
+    expect(state.scheduleSaves.at(-1)).toEqual({
+      tenant_id: "tenant",
+      interval_seconds: 7200,
+    });
+    await dialog
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
+    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await expect(page.getByRole("spinbutton")).toHaveValue("120");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
+    state.role = "SU";
+    await page.goto(`${base}/zh/observability`);
+    await expect(
+      page.getByRole("button", { name: "定时清理", exact: true }),
+    ).toBeDisabled();
+    await page.getByRole("combobox", { name: "租户", exact: true }).click();
+    await page
+      .getByRole("option")
+      .filter({ hasText: "Fixture Tenant" })
+      .click();
+    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await expect(page.getByRole("spinbutton")).toHaveValue("120");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
+    expect(state.cleanups).toHaveLength(deleted);
+  });
   for (const id of contract.expectedIds("assertions")) {
     await contract.assertion(id, async () => {
       expect(

@@ -3,6 +3,7 @@
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
   CleanupResult,
+  CleanupSchedule,
   ConversationPage,
   ContentChunk,
   FacetPage,
@@ -32,6 +33,33 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
+  cleanupSchedule: (tenantId: string, signal?: AbortSignal) =>
+    read<CleanupSchedule>(
+      queryUrl(API_ENDPOINTS.trajectory.cleanupSchedule, {
+        tenant_id: tenantId,
+      }),
+      signal
+    ),
+  async saveCleanupSchedule(
+    tenantId: string,
+    intervalSeconds: number,
+    signal?: AbortSignal
+  ): Promise<CleanupSchedule> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.cleanupSchedule,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          interval_seconds: intervalSeconds,
+        }),
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as CleanupSchedule;
+  },
   records: (params: RecordsRequest, signal?: AbortSignal) =>
     read<RecordsPage>(
       queryUrl(API_ENDPOINTS.trajectory.records, params),

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DatePicker, Popover, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { ChevronRight, Filter, Search, Trash2 } from "lucide-react";
+import { ChevronRight, Clock3, Filter, Search, Trash2 } from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -33,6 +33,7 @@ import { TrajectorySummary } from "./TrajectorySummary";
 import { TrajectoryError } from "./TrajectoryFeedback";
 import { TrajectoryDrawer } from "./TrajectoryDrawer";
 import { CleanupDialog } from "./CleanupDialog";
+import { CleanupScheduleDialog } from "./CleanupScheduleDialog";
 import { TrajectoryStatus } from "./TrajectoryPresentation";
 
 dayjs.extend(utc);
@@ -53,6 +54,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   >({ sort_by: "started_at", sort_order: "desc" });
   const [selected, setSelected] = useState<TrajectoryRecord | null>(null);
   const [cleaning, setCleaning] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, user.role]);
   const records = useTrajectoryRecords(scope, {
     view: "conversation",
@@ -90,13 +92,17 @@ export function ObservabilityCenter({ user }: { user: User }) {
       next = { ...next, tenant_id: option.tenant_id };
     setSearch("");
     change(next);
-    if (field === "tenant_id") setCleaning(false);
+    if (field === "tenant_id") {
+      setCleaning(false);
+      setScheduling(false);
+    }
   };
   const clear = () => {
     setSearch("");
     setDirectoryLabels({});
     change(initial());
     setCleaning(false);
+    setScheduling(false);
   };
   const refresh = () => {
     setSelected(null);
@@ -350,6 +356,17 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
+          <Tooltip title={tenant ? "" : t("trajectory.scheduleSelectTenant")}>
+            <span>
+              <StandardButton
+                icon={<Clock3 size={14} />}
+                disabled={!tenant}
+                onClick={() => setScheduling(true)}
+              >
+                {t("trajectory.scheduledCleanup")}
+              </StandardButton>
+            </span>
+          </Tooltip>
           <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
             <span>
               <StandardButton
@@ -571,6 +588,14 @@ export function ObservabilityCenter({ user }: { user: User }) {
           key={tenant}
           onClose={() => setCleaning(false)}
           onComplete={refresh}
+        />
+      )}
+      {scheduling && tenant && (
+        <CleanupScheduleDialog
+          key={tenant}
+          scope={scope}
+          tenantId={tenant}
+          onClose={() => setScheduling(false)}
         />
       )}
     </main>

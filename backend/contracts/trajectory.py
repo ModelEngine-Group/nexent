@@ -90,6 +90,12 @@ class RecordsQuery(BaseModel):
         )
 
 
+class CleanupScheduleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tenant_id: str | None = Field(None, min_length=1, max_length=128)
+    interval_seconds: StrictInt = Field(ge=60, le=31536000)
+
+
 class CleanupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     before_days: StrictInt = Field(ge=1, le=3650)
