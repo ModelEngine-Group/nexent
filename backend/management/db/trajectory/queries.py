@@ -127,6 +127,8 @@ class ExecutionCatalog:
             key: row.get(prefix + key + "_tokens")
             for key in ("input", "output", "total")
         }
+        # PostgreSQL SUM(BIGINT) yields NUMERIC/Decimal; JSON token counts stay integers.
+        tokens = {key: int(value) if value is not None else None for key, value in tokens.items()}
         usage = {**tokens, "complete": all(v is not None for v in tokens.values())}
         result = {
             "tenant_id": row["tenant_id"],

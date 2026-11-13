@@ -70,6 +70,7 @@ case:
   - order: 10
     action: 通过HTTP查询两页PG执行摘要、切换会话ID及模型筛选，打开详情；禁止列表和候选调用文件读取。新增执行后复用query_id，再清理、删除或撤权。
     expected: records与facet仅调用PG，摘要按会话聚合且NULL累计不冒充完整；搜索不匹配子Trace ID。同一执行同时命中模型/Agent/时间；最新状态先确定。query_id固定成员与顺序，更新仅新查询纳入；撤权/清理使旧快照失效。顶部统计不随列表筛选重算，读取完整统计行及computed_at；详情仍按需读取OTLP。
+      PostgreSQL累计Token按NUMERIC/Decimal边界输入，HTTP返回JSON整数，null与零保持，查询快照可继续翻页。
   - order: 11
     action: 打开定时清理设置，修改并保存周期，重读并覆盖非SU、非法参数及故障。
     expected: ADMIN/SU通过GET/PUT /trajectory/cleanup/schedule读取和持久化租户扫描周期，重读保留新值；普通角色403、跨租户404，非法或未知字段422，数据库故障503；配置请求保持private,no-store且不访问轨迹文件。
@@ -86,6 +87,7 @@ case:
   - 引用为服务端随机ID，成功正文与原值一致；未知/错类型/跨身份及缓存失效引用422且不返回正文，重新查询的新引用可读取；普通角色仍403。
   - view=conversation每会话一行，最新执行状态优先于历史模型/ID条件；累计指标与命中执行汇总分开；四态可筛选且未知不填零。查询快照固定成员和最新状态，详情按顺序分页返回round_no、版本和匹配标记，清理与撤权仍即时失效；省略view保留逐执行合同。
   - records与facet仅调用PG，摘要按会话聚合且NULL累计不冒充完整；搜索不匹配子Trace ID。同一执行同时命中模型/Agent/时间；最新状态先确定。query_id固定成员与顺序，更新仅新查询纳入；撤权/清理使旧快照失效。顶部统计不随列表筛选重算，读取完整统计行及computed_at；详情仍按需读取OTLP。
+    PostgreSQL累计Token按NUMERIC/Decimal边界输入，HTTP返回JSON整数，null与零保持，查询快照可继续翻页。
   - ADMIN/SU通过GET/PUT /trajectory/cleanup/schedule读取和持久化租户扫描周期，重读保留新值；普通角色403、跨租户404，非法或未知字段422，数据库故障503；配置请求保持private,no-store且不访问轨迹文件。
   forbidden_side_effects:
   - 不得因查询、重新查询或历史分段调用模型/工具或改变聊天。
@@ -152,6 +154,7 @@ case:
     - 9
   - id: AC-10
     description: records与facet仅调用PG，摘要按会话聚合且NULL累计不冒充完整；搜索不匹配子Trace ID。同一执行同时命中模型/Agent/时间；最新状态先确定。query_id固定成员与顺序，更新仅新查询纳入；撤权/清理使旧快照失效。顶部统计不随列表筛选重算，读取完整统计行及computed_at；详情仍按需读取OTLP。
+      PostgreSQL累计Token按NUMERIC/Decimal边界输入，HTTP返回JSON整数，null与零保持，查询快照可继续翻页。
     steps:
     - 10
     expected_results:

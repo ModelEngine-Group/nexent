@@ -941,9 +941,11 @@ def test_trj_query_private_validation_under_api_root(harness):
     assert response.json() == {"detail": {"code": "invalid_parameters"}}
 
 
-def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch):
+@pytest.mark.parametrize("missing_input", [False, True])
+def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch, missing_input):
     """Controlled PG results cross the real HTTP boundary; detail still opens the actual archive."""
     from datetime import UTC, datetime
+    from decimal import Decimal
     from unittest.mock import Mock
 
     from management.db.trajectory.queries import ExecutionCatalog
@@ -974,9 +976,9 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
             "execution_count": 1,
             "matching_execution_count": 1,
             "cumulative_duration_ms": values["duration_ms"],
-            "cumulative_input_tokens": values["input_tokens"],
-            "cumulative_output_tokens": values["output_tokens"],
-            "cumulative_total_tokens": values["total_tokens"],
+            "cumulative_input_tokens": None if missing_input else Decimal(values["input_tokens"]),
+            "cumulative_output_tokens": Decimal(0),
+            "cumulative_total_tokens": None if missing_input else Decimal(values["input_tokens"]),
         },
         "conversation",
     )
@@ -1011,6 +1013,14 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
         )
     )
     assert first["items"][0]["conversation_id"] == "123" and first["summary"] == summary
+    usage = first["items"][0]["usage"]
+    assert usage == {
+        "input": None if missing_input else values["input_tokens"],
+        "output": 0,
+        "total": None if missing_input else values["input_tokens"],
+        "complete": not missing_input,
+    }
+    assert all(value is None or type(value) is int for key, value in usage.items() if key != "complete")
     catalog.list_records.assert_called_once()
     second = data(
         get(

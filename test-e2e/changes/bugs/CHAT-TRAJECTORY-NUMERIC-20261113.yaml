@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-NUMERIC-20261113
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-NUMERIC-20261113
+  title: 修复records累计Token的Decimal序列化失败
+  description: 在数据库DTO边界将累计Token转换为JSON整数，保持null、零与整数精度。
+  observed_behavior: 会话SUM(BIGINT)返回Decimal，查询快照json.dumps触发TypeError，records返回503。
+  expected_behavior: records正常返回JSON数值Token，查询快照分页与原执行视图保持兼容。
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: 现有摘要与HTTP测试替身使用整数，缺少PostgreSQL SUM(BIGINT)实际Decimal类型变体。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 会话Decimal累计值经过DTO、快照缓存和JSON响应保持整数；null、零、大整数不丢失。
+    - 原逐执行整数与固定成员分页保持兼容。
+    reason: 补齐驱动数值到JSON边界，已有测试未使用Decimal，不新增重复D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_pg_numeric_serialization.py
+  notes: SPEC design.md累计Token类型及task本轮修复；基线af9a8d34a。责任域runtime，D2沿用自包含资源与teardown；真实PG及完整正式验收按用户要求暂缓。
