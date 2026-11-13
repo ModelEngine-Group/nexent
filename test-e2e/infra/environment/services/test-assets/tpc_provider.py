@@ -22,7 +22,10 @@ async def configure(nonce: str, request: Request):
         raise HTTPException(400, 'Invalid sequence')
     if not all(isinstance(item, str) for item in responses):
         raise HTTPException(400, 'Responses must be strings')
-    scenarios[nonce] = {'responses': responses, 'request_count': 0,
+    marker = body.get('observation_marker')
+    if marker is not None and (not isinstance(marker, str) or not 1 <= len(marker) <= 256):
+        raise HTTPException(400, 'Invalid observation marker')
+    scenarios[nonce] = {'observation_marker': marker, 'observation_counts': [], 'responses': responses, 'request_count': 0,
                         'finish_reason': body.get('finish_reason', 'stop'),
                         'auxiliary_title': body.get('auxiliary_title', 'TPC verification')}
     return {'ready': True}
@@ -33,7 +36,9 @@ async def stats(nonce: str, request: Request):
     controlled(request)
     if nonce not in scenarios:
         raise HTTPException(404, 'Unknown sequence')
-    return {'request_count': scenarios[nonce]['request_count']}
+    state = scenarios[nonce]
+    observed = {'observation_counts': state['observation_counts']} if state['observation_marker'] else {}
+    return {'request_count': state['request_count'], **observed}
 
 
 @router.delete('/tpc/{nonce}')
@@ -52,6 +57,8 @@ async def complete(nonce: str, request: Request):
     if body.get('max_tokens') == 4096:
         index = state['request_count']
         state['request_count'] += 1
+        if state['observation_marker']:
+            state['observation_counts'].append(json.dumps(body.get('messages', []), ensure_ascii=False).count(state['observation_marker']))
         text = state['responses'][min(index, len(state['responses']) - 1)]
         finish = state['finish_reason']
     else:

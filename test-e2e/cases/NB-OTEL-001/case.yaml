@@ -29,8 +29,9 @@ case:
   - order: 2
     action: Read trace from authenticated Phoenix and inspect Northbound/Runtime HTTP,
       Agent, model and tool spans.
-    expected: Shared trace and valid ancestry; ended Northbound span encloses normal
-      Runtime/model/tool execution; actual model input and tokens visible.
+    expected: Shared trace and valid ancestry; ended Northbound and Runtime HTTP spans
+      each enclose normal Agent/model/tool work. Independent HTTP cleanup tails need
+      not end in parent-child order; actual model input and tokens are visible.
   - order: 3
     action: POST chat without Authorization with another W3C traceparent and inspect
       Phoenix.
@@ -42,8 +43,8 @@ case:
       one user/assistant pair with actual skill marker, without stop or resubmission.
   expected_results:
   - Actual final answer agrees with real tool/model execution.
-  - Normal Northbound HTTP duration encloses Runtime completion with shared trace
-    and ancestry.
+  - Normal Northbound and Runtime HTTP durations each enclose Agent/model/tool work
+    with shared trace and ancestry; independent HTTP cleanup end times are not ordered.
   - Unauthorized HTTP is traced without downstream execution.
   - Disconnected HTTP span ends while the existing persisted-run continuation policy
     remains unchanged.

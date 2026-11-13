@@ -26,22 +26,23 @@ change:
     retired: []
   affected_cases:
     existing:
-    - TPC-D3-001
     - TPC-D4-001
     - AGENT-HISTORY-D3-001
     added: []
-    modified: []
+    modified:
+    - TPC-D3-001
     retired: []
   traditional_ut:
     decision: strengthen
     behaviors:
     - Top-level case-insensitive actions with prose and HTML
     - Markdown examples never execute
-    - Mixed candidate executes once before actual-result confirmation
+    - Mixed model answer text streams normally; code executes once and real results reach ordinary continuation
     - Runtime-only history preserves masking, false values and recall
     test_selectors:
     - test/sdk/core/agents/test_output_protocol_patch.py
     - test/sdk/core/agents/test_output_protocol.py
+    - test/sdk/core/utils/test_observer_mixed_answer.py
     - test/sdk/core/agents/test_execution_history_compaction.py
     - test/sdk/core/agents/test_execution_history_review_regressions.py
     reason: Existing UT and deployed TPC/history cases cover adjacent behavior; new
@@ -51,3 +52,4 @@ change:
     UT and formal runtime evidence reported separately. Existing formal D3/D4 remain
     required and must execute against the patch; new input variants verified by patch
     acceptance script.
+    User clarified on 2026-11-13 that prompt confirmation guidance stays, but the new observer stream suppression is withdrawn. Restore baseline observer behavior without changing parsing, tool execution, canonical results or the ordinary CodeAgent loop. The structured-output configuration regression remains an explicitly accepted known limitation and is not repaired in this change. Strengthen existing TPC-D3-001 for mixed streaming and continuation; reuse existing UT and add no duplicate D1.

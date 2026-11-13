@@ -385,7 +385,6 @@ class MessageObserver:
         self.in_think_mode = False
         self.legacy_code_fence_pending = False
         self._stream_state.in_final_answer = False
-        self._stream_state.defer_action_answer = False
         self._step_output().pop("answer", None)
         self._step_output().pop("body", None)
         self._step_output().pop("accepted_answer", None)
@@ -444,17 +443,6 @@ class MessageObserver:
                     if self.token_buffer:
                         self._emit(self.current_mode, "".join(self.token_buffer))
                         self.token_buffer.clear()
-                    from ..agents.output_protocol import (
-                        ExecutableAction,
-                        ModelOutputProtocolError,
-                        classify_model_output,
-                    )
-
-                    try:
-                        preceding = classify_model_output("".join(self._step_output().get("body", [])), protocol="code_action")
-                    except ModelOutputProtocolError:
-                        preceding = None
-                    self._stream_state.defer_action_answer = isinstance(preceding, ExecutableAction)
                     self._stream_state.in_final_answer = True
                 elif marker != "</final_answer>":
                     self.in_think_mode = not self.in_think_mode
@@ -475,8 +463,6 @@ class MessageObserver:
 
     def _emit_answer_delta(self, content: str) -> None:
         """Publish answer fragments in the same invocation and model attempt."""
-        if getattr(self._stream_state, "defer_action_answer", False):
-            return
         state = self._step_output()
         state.setdefault("answer", []).append(content)
         self._emit(ProcessType.FINAL_ANSWER, content, metadata={"answer_phase": "delta"})

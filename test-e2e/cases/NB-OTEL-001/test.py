@@ -33,7 +33,7 @@ def config():
     return PrivateConfig(cfg)
 
 
-def read_trace(cfg, trace_id, expected_route):
+def read_trace(cfg, trace_id, expected_route, *, require_runtime=False):
     url = (cfg['phoenix_url'].rstrip('/') + '/v1/projects/'
            + quote(cfg['phoenix_project'], safe='') + '/spans')
     deadline = time.monotonic() + 45
@@ -45,7 +45,9 @@ def read_trace(cfg, trace_id, expected_route):
             continue
         assert response.status_code == 200, 'Authenticated Phoenix span query failed'
         spans = response.json()['data']
-        if any(expected_route in str(s['attributes'].get('http.route', '')) for s in spans):
+        root_ready = any(expected_route in str(s['attributes'].get('http.route', '')) for s in spans)
+        runtime_ready = any('/agent/internal/northbound/run' in str(s['attributes'].get('http.route', '')) for s in spans)
+        if root_ready and (not require_runtime or runtime_ready):
             break
         assert time.monotonic() < deadline, 'Completed HTTP trace was not exported'
         time.sleep(1)
@@ -87,21 +89,24 @@ def test_nb_otel_001_real_stream_and_trace_ancestry(config):
     assert not any(event.get('type') == 'error' for event in events)
     finals = ''.join(str(e.get('content', '')) for e in events if e.get('type') == 'final_answer')
     assert config['skill_marker'] in finals
-    spans = read_trace(config, trace_id, '/nb/v1/chat/run')
+    spans = read_trace(config, trace_id, '/nb/v1/chat/run', require_runtime=True)
     north = [s for s in spans if s['attributes'].get('http.route', '').endswith('/nb/v1/chat/run')]
     runtime = [s for s in spans if '/agent/internal/northbound/run' in s['attributes'].get('http.route', '')]
     assert len(north) == 1 and len(runtime) == 1
     root = north[0]
     assert root['parent_id'] == '1111111111111111'
     assert runtime[0]['parent_id'] == root['context']['span_id']
-    assert root['start_time'] <= runtime[0]['start_time'] <= runtime[0]['end_time'] <= root['end_time']
-    models = [s for s in spans if s['attributes'].get('llm.model_name')]
+    # The peer can consume the final body before upstream ASGI cleanup returns.
+    assert root['start_time'] <= runtime[0]['start_time'] <= root['end_time']
+    # Sandbox warmup also carries model metadata but is not an LLM request.
+    models = [s for s in spans if s['attributes'].get('llm.operation.name')]
     tools = [s for s in spans if s['name'] == 'agent.tool.read_skill_md']
     agents = [s for s in spans if s['name'] == 'agent.run']
     assert models and tools and agents
     by_id = {s['context']['span_id']: s for s in spans}
     for span in models + tools + agents:
         assert root['start_time'] <= span['start_time'] <= span['end_time'] <= root['end_time']
+        assert runtime[0]['start_time'] <= span['start_time'] <= span['end_time'] <= runtime[0]['end_time']
         cursor = span
         for _ in range(len(spans)):
             if cursor['context']['span_id'] == root['context']['span_id']:

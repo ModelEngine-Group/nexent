@@ -93,7 +93,7 @@ def test_ac005_only_actual_call_and_runtime_fields_enter_history():
 
 
 @pytest.mark.parametrize('strict', [False, True])
-def test_ac004_mixed_candidate_executes_once_and_confirms_actual_result(strict):
+def test_ac004_mixed_stream_executes_once_and_continues_with_actual_result(strict):
     calls = []
     requests = []
 
@@ -107,20 +107,29 @@ def test_ac004_mixed_candidate_executes_once_and_confirms_actual_result(strict):
             calls.append('actual')
             return 'REAL_FAILURE'
 
+    observer = MessageObserver(lang='en')
+
     class RuntimeModel(Model):
         def generate(self, messages, **kwargs):
             requests.append(json.dumps(messages, default=str))
             if len(requests) == 1:
-                return ChatMessage(role='assistant', content=(
-                    '<CODE>print(actual())</CODE><final_answer>FAKE_SUCCESS</final_answer>'
-                ))
+                content = '<CODE>print(actual())</CODE><final_answer>FAKE_SUCCESS</final_answer>'
+                observer.begin_model_attempt('mixed-action', 1)
+                for offset in range(0, len(content), 3):
+                    observer.add_model_new_token(content[offset:offset + 3])
+                observer.flush_remaining_tokens()
+                events = [json.loads(value) for value in observer.message_query]
+                assert ''.join(event.get('content', '') for event in events
+                               if event.get('type') == 'final_answer') == 'FAKE_SUCCESS'
+                assert calls == []
+                return ChatMessage(role='assistant', content=content)
             assert 'REAL_FAILURE' in requests[-1]
             assert 'FAKE_SUCCESS' not in requests[-1]
             return ChatMessage(role='assistant', content='<final_answer>Confirmed REAL_FAILURE</final_answer>')
 
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
     templates['system_prompt'] = 'Use runtime results.'
-    agent = CoreAgent(observer=MessageObserver(lang='en'), model=RuntimeModel(model_id='unit'),
+    agent = CoreAgent(observer=observer, model=RuntimeModel(model_id='unit'),
                       tools=[ActualTool()], prompt_templates=templates, max_steps=3, verbosity_level=0,
                       context_runtime=ManagedContextRuntime(ContextManager(), []), enable_protocol_repair_retry=strict)
     assert str(agent.run('Run actual once and report the result.')) == 'Confirmed REAL_FAILURE'

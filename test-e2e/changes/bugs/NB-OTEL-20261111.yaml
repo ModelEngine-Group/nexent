@@ -50,4 +50,5 @@ change:
     suites remain adjacent regression. CI found seven stale Northbound env-injection/precedence
     expectations in the existing Helm suite; align its monitored-service set, preserving
     all ordering/platform/credential precedence assertions. Entire owning suite 24
-    tests passed locally.'
+    tests passed locally.
+    Observer-withdrawal regression rerun exposed an evidence polling race: the Northbound root batch can be ingested before the Runtime batch. Normal-stream trace polling now waits for the Runtime HTTP span as well, preserving ancestry assertions and the unauthorized/disconnect readiness contract. Cross-process ASGI cleanup can finish just after the peer consumes the response. Assert that both HTTP spans enclose all actual Agent/model/tool work instead of requiring ordered cleanup tails. Sandbox warmup can carry llm.model_name without being an LLM request; select actual requests by llm.operation.name before checking input and token evidence. No OTel product code changed.'
