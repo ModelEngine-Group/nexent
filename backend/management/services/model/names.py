@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import Any, Dict, List
 
@@ -53,7 +55,7 @@ def split_display_name(full_name: str):
 
 def sort_models_by_id(model_list: List[dict]) -> List[dict]:
     """
-    Sort model list by the first letter of id
+    Sort model list by id (case-insensitive full string).
 
     Args:
         model_list: List of models
@@ -63,9 +65,7 @@ def sort_models_by_id(model_list: List[dict]) -> List[dict]:
     """
     if isinstance(model_list, list):
         model_list.sort(
-            key=lambda m: str((m.get("id") if isinstance(m, dict) else m) or "")[
-                :1
-            ].lower(),
+            key=lambda m: str((m.get("id") if isinstance(m, dict) else m) or "").lower(),
             reverse=False,
         )
     return model_list
