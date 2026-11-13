@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from .clarification import CLARIFICATION_SCHEMA_GUIDANCE, ClarificationForm
 
 
+
 OutputProtocol = Literal["code_action", "final_envelope"]
 
 
@@ -365,7 +366,6 @@ def classify_model_output(
     if protocol == "final_envelope":
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
     return _classify_code_action(text, protocol=protocol, logger=logger)
-
 
 
 def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm | None:

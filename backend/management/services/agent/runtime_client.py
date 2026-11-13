@@ -1,8 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP forwarding from northbound APIs to the runtime service."""
 
-from collections.abc import AsyncIterator
-from typing import Literal
+from typing import AsyncIterator, Literal
 
 import httpx
 from fastapi.responses import StreamingResponse
@@ -14,11 +13,10 @@ from consts.exceptions import (
     RuntimeUpstreamError,
 )
 from consts.model import AgentRequest
+from management.services.permission.identity.authentication_helpers import generate_internal_runtime_jwt
 from infrastructure.http.client import create_httpx_client
-from management.services.permission.identity.authentication_helpers import (
-    generate_internal_runtime_jwt,
-)
 from nexent.monitor.monitoring import get_monitoring_manager
+
 
 _HOP_BY_HOP_HEADERS = {
     "connection",

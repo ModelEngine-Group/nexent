@@ -76,7 +76,11 @@ def test_nb_ac004_northbound_enables_existing_monitoring_and_deployment_config()
     included = next(line.split('=', 1)[1] for line in env.splitlines() if line.startswith('MONITORING_FASTAPI_INCLUDED_URLS='))
     excluded = monitoring._build_fastapi_excluded_urls(included, '')
     import re
+    assert not re.search(excluded, 'http://northbound:5013/nb/v1/generate_title')
+    assert not re.search(excluded, 'http://northbound:5013/api/nb/v1/generate_title')
     assert not re.search(excluded, 'http://northbound:5013/api/nb/v1/chat/run')
     assert not re.search(excluded, 'http://runtime:5014/api/agent/internal/northbound/run')
-    explicit = monitoring._build_fastapi_excluded_urls(included, '/nb/v1/chat/run')
-    assert any(re.search(pattern, 'http://northbound:5013/api/nb/v1/chat/run') for pattern in explicit.split(','))
+    assert re.search(excluded, 'http://northbound:5013/api/health')
+    for route in ('/nb/v1/chat/run', '/nb/v1/generate_title'):
+        explicit = monitoring._build_fastapi_excluded_urls(included, route)
+        assert any(re.search(pattern, 'http://northbound:5013/api' + route) for pattern in explicit.split(','))
