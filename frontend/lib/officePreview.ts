@@ -13,6 +13,24 @@
 /** Office formats that are a zip archive of XML parts and can be parsed client-side. */
 export type OfficeFormat = "docx" | "xlsx" | "pptx";
 
+/** Supply readable paper geometry when a generated DOCX omits section settings. */
+export function applyDocxPageDefaults(container: HTMLElement): void {
+  for (const page of container.querySelectorAll<HTMLElement>(
+    ".docx-wrapper > section.docx"
+  )) {
+    if (!page.style.width) page.style.width = "min(210mm, 100%)";
+    if (!page.style.height && !page.style.minHeight) {
+      page.style.minHeight = "297mm";
+    }
+    for (const side of ["top", "right", "bottom", "left"]) {
+      const property = `padding-${side}`;
+      if (!page.style.getPropertyValue(property)) {
+        page.style.setProperty(property, "25.4mm");
+      }
+    }
+  }
+}
+
 /**
  * Renderer that handles the bytes a document stream returned.
  *

@@ -15,6 +15,7 @@ import {
   type PreviewAccessReason,
 } from "@/lib/filePreviewUtils";
 import {
+  applyDocxPageDefaults,
   neutralizeUnsafeLinks,
   officeHtmlToText,
   percentageOf,
@@ -367,6 +368,7 @@ export function RawStreamPreviewViewer(
         // with no scheme filter, so the anchors it produced are disarmed before
         // a reader can click them.
         neutralizeUnsafeLinks(body);
+        applyDocxPageDefaults(body);
       } else if (kind === "xlsx") {
         const excelModule = await import("exceljs");
         const ExcelJS = (excelModule.default ??
@@ -433,7 +435,7 @@ export function RawStreamPreviewViewer(
             : renderMessage(t("filePreview.previewFailed"))}
         </div>
       )}
-      <div className="h-full overflow-auto bg-gray-200 p-4">
+      <div className={`h-full overflow-auto p-4 ${styles.docxViewport}`}>
         <div ref={docxStyleRef} />
         <div
           ref={docxBodyRef}

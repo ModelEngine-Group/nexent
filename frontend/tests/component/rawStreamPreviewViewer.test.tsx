@@ -139,6 +139,27 @@ describe("RawStreamPreviewViewer", () => {
     ).not.toBeNull();
   });
 
+  it("applies paper defaults to a DOCX preview with no section layout", async () => {
+    vi.mocked(fetchPreviewBlobWithMeta).mockResolvedValue(
+      servedDocument("simple_document.docx") as never
+    );
+    vi.mocked(renderAsync).mockImplementationOnce(async (_data, body) => {
+      body.innerHTML =
+        '<div class="docx-wrapper"><section class="docx"><article><p>Short generated document</p></article></section></div>';
+      return {} as never;
+    });
+    render(
+      <RawStreamPreviewViewer
+        url="/api/preview"
+        fileName="simple_document.docx"
+      />
+    );
+    expect(await screen.findByText("Short generated document")).toBeVisible();
+    const page = document.querySelector<HTMLElement>("section.docx")!;
+    expect(page.style.minHeight).toBe("297mm");
+    expect(page.style.paddingTop).toBe("25.4mm");
+  });
+
   it("anchors a rotated pptx group around its own centre", () => {
     // Group centre: (100 + 400 / 2) / 960 and (50 + 200 / 2) / 540.
     expect(

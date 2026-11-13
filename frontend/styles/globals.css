@@ -51,6 +51,8 @@
 
 @layer base {
   :root {
+    --palette-gray-0: #ffffff;
+    --color-bg-3: var(--palette-gray-0);
     --navigation-surface: lab(97.0939% -0.108689 -0.749958);
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
