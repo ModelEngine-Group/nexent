@@ -4695,6 +4695,8 @@ class TestCreateAgentRunInfo:
                 conversation_id=None,
                 enable_planning=ANY,
                 runtime_file_context=ANY,
+                run_history_length=0,
+                run_has_attachments=False,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -5286,6 +5288,8 @@ class TestCreateAgentRunInfo:
                 enable_planning=False,
                 runtime_file_context=ANY,
                 tool_params=None,
+                run_history_length=0,
+                run_has_attachments=False,
             )
 
     @pytest.mark.asyncio
@@ -5336,6 +5340,8 @@ class TestCreateAgentRunInfo:
                 enable_planning=False,
                 runtime_file_context=ANY,
                 tool_params=None,
+                run_history_length=0,
+                run_has_attachments=False,
             )
 
     @pytest.mark.asyncio
@@ -5392,6 +5398,8 @@ class TestCreateAgentRunInfo:
                 enable_planning=False,
                 runtime_file_context=ANY,
                 tool_params=None,
+                run_history_length=0,
+                run_has_attachments=False,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
