@@ -20,6 +20,7 @@ from smolagents.models import (
 )
 from smolagents.monitoring import TokenUsage
 
+from nexent.core.context_runtime.usage import InputUsageObservation, context_model_key
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
@@ -134,6 +135,7 @@ class LegacyChatModel(Model):
         self.last_provider_cache_advice = None
         self.last_retry_count = 0
         self.last_context_evidence = None
+        self.last_context_observation = None
 
     @classmethod
     def from_profile(cls, profile, api_key, *, http_headers=None, observer=None, cancellation_scope=None):
@@ -284,11 +286,15 @@ class LegacyChatModel(Model):
             raise TypeError("Legacy context_rebuild must be a synchronous callback")
         request, profile = self._request(messages, options, tools)
 
+        observed_messages = messages
+
         def rebuild_request(_error):
+            nonlocal observed_messages
             rebuilt = context_rebuild()
             rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
             if not isinstance(rebuilt_messages, list):
                 raise TypeError("context_rebuild must return FinalContext or a message list")
+            observed_messages = rebuilt_messages
             self.last_context_evidence = getattr(rebuilt, "evidence", None)
             replacement, _ = self._request(rebuilt_messages, options, tools, profile=profile)
             return replacement.model_copy(update={"request_id": request.request_id})
@@ -297,6 +303,7 @@ class LegacyChatModel(Model):
         self.last_attempt_number = None
         self.last_retry_count = 0
         self.last_context_evidence = None
+        self.last_context_observation = None
         self._reset_response(profile)
         attempt_number = None
         completed = False
@@ -330,6 +337,10 @@ class LegacyChatModel(Model):
                         if not suppress_stream:
                             self.observer.flush_remaining_tokens()
                         message = event.message
+                        self.last_context_observation = InputUsageObservation.capture(
+                            usage=message.usage, messages=observed_messages, tools=tools,
+                            model_key=context_model_key(self), request_id=request.request_id, attempt=event.attempt,
+                        )
                         self.last_finish_reason = message.finish_reason
                         self.last_input_token_count = message.usage.input_tokens
                         self.last_output_token_count = message.usage.output_tokens

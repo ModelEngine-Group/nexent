@@ -1592,18 +1592,9 @@ Additional Args:
             memory_step.code_action = code_action
             history = getattr(self, "_execution_history", None)
             if history is not None:
-                limit = self.context_runtime.effective_input_limit_tokens
-                if limit:
-                    estimate = final_context.evidence.final_token_estimate or 0
-                    usage = getattr(memory_step.model_output_message, "token_usage", None)
-                    provider_input = getattr(usage, "input_tokens", 0)
-                    if isinstance(provider_input, int):
-                        estimate = max(estimate, provider_input)
-                    # Existing context plus the accepted new assistant body must fit
-                    # alongside the read result. Reserve wrapper/error overhead.
-                    remaining = max(0, limit - estimate - 256)
-                    chars = max(0, int(remaining * self.context_runtime.chars_per_token) - len(str(model_output)))
-                    history.reset_read_budget(self._execution_owner, max_rendered_chars=chars)
+                # Keep recall bounded by the existing I/O cap. Local token estimates
+                # are advisory and must not make authorized original output unreadable.
+                history.reset_read_budget(self._execution_owner, max_rendered_chars=16000)
             self._resolve_deferred_model_attempt(
                 memory_step.model_output_message,
                 accepted=True,
@@ -2412,8 +2403,13 @@ Additional Args:
 
         # 3. Current memory estimated length
         chars_per_token = self.context_runtime.chars_per_token
-        metric["memory_state"]["estimated_input_tokens"] = msg_token_count(
-            action_step.model_input_messages, chars_per_token
+        context_counts = self.context_runtime.token_counts()
+        compressed_estimate = context_counts.get("compressed") if isinstance(context_counts, dict) else None
+        # Compare the same assembled payload and estimation basis before/after
+        # maintenance, including request overlays and tool schemas.
+        metric["memory_state"]["estimated_input_tokens"] = (
+            compressed_estimate if type(compressed_estimate) is int and compressed_estimate >= 0
+            else msg_token_count(action_step.model_input_messages, chars_per_token)
         )
         metric["memory_state"]["estimated_output_tokens"] = msg_token_count(
             action_step.model_output_message, chars_per_token
