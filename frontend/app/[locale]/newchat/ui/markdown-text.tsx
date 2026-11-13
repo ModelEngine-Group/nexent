@@ -23,6 +23,7 @@ import { MermaidDiagram } from "./mermaid-diagram";
 
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
+import { copyToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
@@ -306,21 +307,22 @@ const useCopyToClipboard = ({
 } = {}) => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  const copyToClipboard = (value: string) => {
-    if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
+  const copyMarkdown = (value: string) => {
+    if (!value) {
       return;
     }
 
-    navigator.clipboard.writeText(value).then(
-      () => {
+    void copyToClipboard(value)
+      .then(() => {
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), copiedDuration);
-      },
-      () => {}
-    );
+      })
+      .catch(() => {
+        // Keep the idle icon when both Clipboard API and execCommand fail.
+      });
   };
 
-  return { isCopied, copyToClipboard };
+  return { isCopied, copyToClipboard: copyMarkdown };
 };
 
 const MarkdownSyntaxHighlighter: FC<Omit<SyntaxHighlighterProps, "node">> = (
