@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import aiohttp
 from exa_py import Exa
 from smolagents.tools import Tool
@@ -53,7 +52,8 @@ class ExaSearchTool(Tool):
     def __init__(self, exa_api_key:str=Field(description="EXA API key"),
                  observer: MessageObserver=Field(description="Message observer", default=None, exclude=True),
                  max_results:int=Field(description="Maximum number of search results", default=3, ge=1, le=100),
-                 image_filter: bool = Field(description="Whether to enable image filtering", default=True)
+                 image_filter: bool = Field(description="Whether to enable image filtering", default=True),
+                 data_process_service: str = Field(description="Data process service URL", default=None, exclude=True)
      ):
 
         super().__init__()
@@ -64,8 +64,7 @@ class ExaSearchTool(Tool):
         self.image_filter = image_filter
         self.record_ops = 1  # Used to record sequence number
 
-        # TODO add data_process_service
-        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.data_process_service = unwrap_field_info(data_process_service)
 
     def forward(self, query: str) -> str:
         # Perform exa search
