@@ -34,7 +34,7 @@ from management.services.evaluation.sets import (
     list_evaluation_sets_impl,
     update_evaluation_set_case_impl,
 )
-from infrastructure.concurrency import config_thread_manager
+from management.thread_management import config_thread_manager
 from management.services.permission.identity.session import get_current_user_id
 from management.services.evaluation.spreadsheet import (
     build_evaluation_set_excel_template_bytes,

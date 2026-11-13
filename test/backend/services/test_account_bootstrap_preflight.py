@@ -19,7 +19,7 @@ def test_existing_su_blocks_before_missing_or_password_branch(mocker, check_only
     def transaction():
         yield session
 
-    mocker.patch("management.db.client.get_db_session", transaction)
+    mocker.patch("infrastructure.rdb.client.get_db_session", transaction)
     mocker.patch("management.db.identity.account.lock_account_keys")
     mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account")
@@ -36,7 +36,7 @@ def test_empty_installation_check_still_reports_absent(mocker):
     def transaction():
         yield session
 
-    mocker.patch("management.db.client.get_db_session", transaction)
+    mocker.patch("infrastructure.rdb.client.get_db_session", transaction)
     mocker.patch("management.db.identity.account.lock_account_keys")
     mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     assert bootstrap_super_admin("suadmin@nexent.com", "", check_only=True) == {"exists": False}
@@ -50,7 +50,7 @@ def test_inactive_historical_association_does_not_block_su_check(mocker):
     def transaction():
         yield session
 
-    mocker.patch("management.db.client.get_db_session", transaction)
+    mocker.patch("infrastructure.rdb.client.get_db_session", transaction)
     mocker.patch("management.db.identity.account.lock_account_keys")
     mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account")

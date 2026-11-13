@@ -162,7 +162,7 @@ _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
-_thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
+_thread_lifecycle_module = types.ModuleType("runtime.thread_management")
 _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
@@ -173,7 +173,8 @@ _thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
 )
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
+sys.modules["runtime.thread_management"] = _thread_lifecycle_module
+sys.modules["management.thread_management"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
@@ -247,20 +248,22 @@ sys.modules["management.db.models"] = MagicMock()
 sys.modules["management.db.conversation.repository"] = MagicMock()
 sys.modules["management.db.models"] = MagicMock()
 
-# Stub management.db.client early so real DB modules are not loaded during import
+# Stub infrastructure.rdb.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
 _mock_db_client.as_dict = MagicMock()
 _mock_db_client.MinioClient = MagicMock()
 _mock_db_client.db_client = MagicMock()
-sys.modules["management.db.client"] = _mock_db_client
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = _mock_db_client
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -274,7 +277,7 @@ tag_management_service_module.TagManagementService = MagicMock()
 sys.modules["management.services.tag.library"] = tag_management_service_module
 setattr(services_module, "tag_management_service", tag_management_service_module)
 
-runtime_state_service_module = types.ModuleType("management.services.agent.run_state")
+runtime_state_service_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_service_mock = MagicMock()
 runtime_state_service_mock.enabled = False
 runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
@@ -284,7 +287,7 @@ runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value
 runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
 runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
 runtime_state_service_module.runtime_state_service = runtime_state_service_mock
-sys.modules["management.services.agent.run_state"] = runtime_state_service_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
@@ -297,7 +300,7 @@ sys.modules["management.services.configuration.user.memory"] = memory_config_ser
 sys.modules["management.services.agent.versions"] = agent_version_service_mock
 sys.modules["management.services.skill.service"] = skill_service_mock
 sys.modules["management.services.file.service"] = MagicMock()
-sys.modules["infrastructure.streaming.channels"] = MagicMock()
+sys.modules["management.services.agent.channels"] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
@@ -373,7 +376,7 @@ streaming_channel_manager_mock.complete_channel = AsyncMock(
     side_effect=_complete_test_streaming_channel
 )
 sys.modules[
-    "infrastructure.streaming.channels"
+    "management.services.agent.channels"
 ].streaming_channel_manager = streaming_channel_manager_mock
 setattr(
     services_module, "skill_service", sys.modules["management.services.skill.service"]
@@ -447,7 +450,7 @@ utils_module.__path__ = [
 sys.modules["utils"] = utils_module
 sys.modules["management.services.permission.identity.session"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
-sys.modules["infrastructure.observability.knowledge"] = MagicMock()
+sys.modules["infrastructure.trace.knowledge"] = MagicMock()
 
 
 # Mock str_utils with actual convert_list_to_string implementation
@@ -492,7 +495,7 @@ def mock_convert_list_to_string(items):
     from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
-    from management.db import client as db_client_module
+    from infrastructure.rdb import client as db_client_module
 
     db_client_module.db_client = mock_postgres_client
 
@@ -574,7 +577,7 @@ sys.modules["management.utils.serialization"].convert_string_to_list = lambda s:
 sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 sys.modules["management.services.agent.prompt"] = MagicMock()
 sys.modules["management.services.model.invocation"] = MagicMock()
-sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
+sys.modules["infrastructure.trace.bootstrap"] = MagicMock()
 
 # =============================================================================
 # STEP 2: Now import after all mocks are in place
@@ -603,8 +606,8 @@ monitoring_manager_mock.set_span_attributes = MagicMock()
 
 sys.modules["nexent.monitor"].get_monitoring_manager = lambda: monitoring_manager_mock
 sys.modules["nexent.monitor"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
+sys.modules["infrastructure.trace.bootstrap"].monitoring_manager = monitoring_manager_mock
+sys.modules["infrastructure.trace.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
 
 # Mock storage config validate
 sys.modules["nexent.storage.minio_config"].MinIOStorageConfig = type(
@@ -644,9 +647,10 @@ mock_backend_database_client.PostgresClient = MagicMock(
 mock_backend_database_client.get_db_session = mock_get_db_session
 mock_backend_database_client.MinioClient = MagicMock(return_value=minio_client_mock)
 mock_backend_database_client.db_client = mock_postgres_client
-sys.modules["management.db.client"] = mock_backend_database_client
+sys.modules["infrastructure.rdb.client"] = mock_backend_database_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock storage client factory
 sys.modules[

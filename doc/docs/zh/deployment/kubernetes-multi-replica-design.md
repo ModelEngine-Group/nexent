@@ -71,7 +71,7 @@
 
 相关代码：
 
-- `backend/mcp_service.py`
+- `backend/http/mcp_service.py`
 - `backend/services/tool_configuration_service.py`
 - `backend/apps/tool_config_app.py`
 
@@ -91,7 +91,7 @@
 
 相关代码：
 
-- `backend/data_process_service.py`
+- `backend/http/data_process_service.py`
 - `backend/data_process/app.py`
 - `backend/data_process/worker.py`
 - `backend/services/auto_summary_scheduler.py`
@@ -410,7 +410,7 @@ List 方案也可行：
 
 涉及代码：
 
-- `backend/mcp_service.py`
+- `backend/http/mcp_service.py`
 - `database/outer_api_tool_db.py`
 
 新增函数：
@@ -461,7 +461,7 @@ Redis channel：
 
 - `backend/services/tool_configuration_service.py`
 - `backend/apps/tool_config_app.py`
-- `backend/mcp_service.py`
+- `backend/http/mcp_service.py`
 
 降级：
 

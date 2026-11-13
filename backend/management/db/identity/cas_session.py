@@ -8,8 +8,8 @@ from contracts.constants.constants import CAS_SESSION_ACTIVE, CAS_SESSION_REVOKE
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import UserCasSession
 
 

@@ -21,11 +21,11 @@ from contracts.constants.environment import (
     TOKEN,
 )
 from contracts.tool import ToolParamsRequest
-from infrastructure.http.client import create_httpx_client
-from infrastructure.redis import get_redis_client
+from backend.http.client import create_httpx_client
+from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
-from management.db.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.agent.preparation.inputs import (

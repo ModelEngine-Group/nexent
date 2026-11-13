@@ -3909,39 +3909,6 @@
       ]
     },
     {
-      "method": "POST",
-      "path": "/api/prompt/optimize",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/management/api/prompt/prompt.py",
-      "route_id": "route-b6eccc4b0b44c6d3",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/prompt/optimize/badcase",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/management/api/prompt/prompt.py",
-      "route_id": "route-bdea569c04c1b033",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/prompt/optimize/from_debug",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/management/api/prompt/prompt.py",
-      "route_id": "route-07e42006733bcd1f",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "GET",
       "path": "/api/ragflow/datasets",
       "transport": "http",
@@ -6031,5 +5998,5 @@
       ]
     }
   ],
-  "revision": "2026-11-05.1"
+  "revision": "2026-11-09.1"
 }

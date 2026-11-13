@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Best-effort cleanup for assets created by the current test batch."""
 
 from __future__ import annotations
@@ -161,8 +163,9 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                 backend = (repo_root() / 'backend').resolve()
                 if not backend.is_dir():
                     raise RuntimeError('Nexent backend source is unavailable for AIDP cleanup')
-                if str(backend) not in sys.path:
-                    sys.path.insert(0, str(backend))
+                for source_root in (backend.parent, backend):
+                    if str(source_root) not in sys.path:
+                        sys.path.insert(0, str(source_root))
                 from shared.postgres import apply_product_postgres_env
                 apply_product_postgres_env()
                 from shared.factories.aidp_permission import delete_owned_permission
@@ -181,8 +184,9 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                 backend = (repo_root() / 'backend').resolve()
                 if not backend.is_dir():
                     raise RuntimeError('Nexent backend source is unavailable for lifecycle cleanup')
-                if str(backend) not in sys.path:
-                    sys.path.insert(0, str(backend))
+                for source_root in (backend.parent, backend):
+                    if str(source_root) not in sys.path:
+                        sys.path.insert(0, str(source_root))
                 from shared.postgres import apply_product_postgres_env
                 apply_product_postgres_env()
                 from shared.factories.owned_lifecycle import delete_knowledge, delete_file

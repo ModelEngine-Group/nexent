@@ -27,9 +27,11 @@ from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
-from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
-from infrastructure.service_identity.mcp import TenantMCPRouter
+from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
+from runtime.api.identity_routes import is_runtime_service_request
+from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.mcp.identity_router import TenantMCPRouter
 from gateway.security.identity import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
 from nexent.core.concurrency import LanePolicy, ThreadManager
@@ -104,7 +106,8 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
     management.include_router(lookup_routes.router)
     runtime = FastAPI(root_path="/api")
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True,
+                           internal_runtime_request=is_runtime_service_request)
     reached = []
     context_checks = []
 
@@ -184,9 +187,13 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 await send({"type": "http.response.start", "status": 200, "headers": []})
                 await send({"type": "http.response.body", "body": json.dumps(principal).encode()})
 
+            async def resolve_delegated_identity(scope, authorization):
+                return await resolve_mcp_identity(scope, authorization, gateway_url=gateway_url, key=secret)
+
             mcp_app = FastAPI()
             mcp_app.mount("/", TenantMCPRouter(get_app=lambda tenant: mcp_sink, refresh=lambda tenant: None,
-                                               internal_token="fixture-internal", gateway_required=True))
+                                               internal_token="fixture-internal", gateway_required=True,
+                                               resolve_identity=resolve_delegated_identity))
             mcp_app.add_middleware(ObserveContext)
             with serve(mcp_app) as mcp_url:
                 async with httpx.AsyncClient(trust_env=False, timeout=10) as mcp_client:
@@ -255,7 +262,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 key_record["delete_flag"] = "Y"
                 response = await client.get(gateway_url + "/nb/v1/agents", headers={"Authorization": "Bearer fixture-api-key"})
                 assert response.status_code == 401 and reached == baseline
-                from infrastructure.service_identity import internal_tokens
+                from gateway.downstream import internal_tokens
 
                 monkeypatch.setattr(internal_tokens, "JWT_SECRET", secret)
                 response = await client.post(runtime_url + "/api/agent/internal/northbound/run", headers={

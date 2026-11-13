@@ -19,14 +19,14 @@ from collections import defaultdict
 from datetime import datetime
 from statistics import mean
 
-from adapters.exception import JiuwenSDKUnavailableError
+from contracts.errors.capabilities import JiuwenSDKUnavailableError
 from contracts.constants.constants import MAX_TURNS_PER_SESSION
 from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
     agent_run_manager,

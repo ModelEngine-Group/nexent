@@ -14,23 +14,23 @@ from sqlalchemy.exc import IntegrityError
 from management.db.models import KnowledgeStorageObject
 
 
-client_module = types.ModuleType("management.db.client")
+client_module = types.ModuleType("infrastructure.rdb.client")
 client_module.as_dict = MagicMock(name="as_dict")
 client_module.get_db_session = MagicMock(name="get_db_session")
-previous_client_module = sys.modules.get("management.db.client")
-sys.modules["management.db.client"] = client_module
+previous_client_module = sys.modules.get("infrastructure.rdb.client")
+sys.modules["infrastructure.rdb.client"] = client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 from management.db.knowledge_base import storage_object as storage_db
 from contracts.constants import constants as storage_db_knowledge_base_storage_object
 
 if previous_client_module is None:
-    sys.modules.pop("management.db.client", None)
+    sys.modules.pop("infrastructure.rdb.client", None)
 else:
-    sys.modules["management.db.client"] = previous_client_module
+    sys.modules["infrastructure.rdb.client"] = previous_client_module
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 def _row(**overrides):

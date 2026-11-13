@@ -31,14 +31,14 @@ from contracts.errors.exceptions import (
 )
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from infrastructure.service_identity.internal_tokens import (
+from gateway.downstream.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE,
     INTERNAL_RUNTIME_JWT_TTL_SECONDS,
     generate_internal_runtime_jwt,
 )
-from gateway.security.signatures import (
+from management.services.permission.identity.signatures import (
     TIMESTAMP_VALIDITY_WINDOW,
     calculate_hmac_signature,
     validate_timestamp,
@@ -54,7 +54,7 @@ from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
 def _gateway_identity(kind="session"):
-    from infrastructure.service_identity.gateway import IdentityError, enabled, trusted_identity
+    from gateway.downstream.identity import IdentityError, enabled, trusted_identity
 
     try:
         identity = trusted_identity(kind)
@@ -436,7 +436,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
 def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     """Translate the shared bearer syntax failure into the backend domain error."""
-    from infrastructure.service_identity.gateway import IdentityError, bearer_token
+    from gateway.downstream.identity import IdentityError, bearer_token
 
     try:
         return bearer_token(authorization)
@@ -446,7 +446,7 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Compatibility export of the common service-token verifier."""
-    from infrastructure.service_identity.internal_tokens import verify_internal_runtime_jwt as verify
+    from gateway.downstream.internal_tokens import verify_internal_runtime_jwt as verify
 
     return verify(authorization, secret=JWT_SECRET)
 

@@ -4,7 +4,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.errors.exceptions import DuplicateError
 from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -17,8 +17,8 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.errors.exceptions import DuplicateError
 from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import KnowledgeRecord
 from management.utils.serialization import convert_list_to_string
 

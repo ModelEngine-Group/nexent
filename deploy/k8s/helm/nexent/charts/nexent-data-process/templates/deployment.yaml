@@ -48,7 +48,7 @@ spec:
             - /opt/nexent/scripts/start-backend.sh
             - /bin/sh
             - -c
-            - python /opt/backend/data_process_service.py
+            - python -m backend.http.data_process_service
           envFrom:
             - configMapRef:
                 name: nexent-config

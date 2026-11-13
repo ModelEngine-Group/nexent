@@ -4,8 +4,8 @@ import logging
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy import update
 
-from management.db.client import get_db_session
-from management.utils.orm import as_dict
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import as_dict
 from management.db.models import AgentInfo, ToolInstance, AgentRelation
 from management.db.agent.version import search_version_by_version_no, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, insert_skill_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, restore_agent_draft, get_next_version_no, delete_version
 from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED

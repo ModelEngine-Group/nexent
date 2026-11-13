@@ -14,7 +14,7 @@ from contracts.conversation import (
     encode_agent_conversation_cursor,
     encode_agent_group_cursor,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.conversation.models import ConversationRecord
 

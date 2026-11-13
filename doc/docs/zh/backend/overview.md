@@ -81,11 +81,12 @@ backend/
 │   └── ...
 ├── consts/                       # 常量定义（const.py 环境变量唯一来源 / model.py）
 ├── prompts/                      # 提示词模板
-├── config_service.py             # 编辑态服务入口
-├── runtime_service.py            # 运行态服务入口
-├── northbound_service.py         # 北向开放 API 服务入口（端口 5013）
-├── data_process_service.py       # 数据处理服务入口
-├── mcp_service.py                # MCP 服务入口
+├── http/
+│   ├── gateway_service.py
+│   ├── config_service.py
+│   ├── runtime_service.py
+│   ├── data_process_service.py
+│   └── mcp_service.py
 └── pyproject.toml                # Python 依赖（uv 管理，uv sync 安装）
 ```
 
@@ -226,12 +227,15 @@ uv pip install -e "../sdk[dev]"
 ```
 
 ### 服务启动
+
+在仓库根目录执行以下命令。
 ```bash
-cd backend
-python data_process_service.py   # 数据处理服务
-python config_service.py         # 编辑态服务
-python runtime_service.py        # 运行态服务
-python mcp_service.py            # MCP服务
+export PYTHONPATH="$PWD/backend"
+python -m backend.http.gateway_service
+python -m backend.http.data_process_service   # 数据处理服务
+python -m backend.http.config_service         # 编辑态服务
+python -m backend.http.runtime_service        # 运行态服务
+python -m backend.http.mcp_service            # MCP服务
 ```
 
 ## 性能和可扩展性

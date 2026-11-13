@@ -103,11 +103,12 @@ source backend/.venv/Scripts/activate
 随后在项目根目录启动需要调试的服务。服务会通过 `python-dotenv` 读取项目根目录的 `.env`；若终端中已经设置同名环境变量，则保留终端中的值。
 
 ```bash
-python backend/mcp_service.py
-python backend/data_process_service.py
-python backend/config_service.py
-python backend/runtime_service.py
-python backend/northbound_service.py
+export PYTHONPATH="$PWD/backend"
+python -m backend.http.mcp_service
+python -m backend.http.data_process_service
+python -m backend.http.config_service
+python -m backend.http.runtime_service
+python -m backend.http.gateway_service
 ```
 
 | 服务 | 主要职责 |
@@ -116,7 +117,7 @@ python backend/northbound_service.py
 | `data_process_service.py` | 文档解析、分片和向量化任务 |
 | `config_service.py` | 模型、智能体、知识库和资源配置接口 |
 | `runtime_service.py` | 智能体运行与流式问答 |
-| `northbound_service.py` | 面向外部系统的北向 API |
+| `gateway_service.py` | 面向外部系统的北向 API |
 
 只调试某一模块时，可以仅启动它依赖的服务；需要完整体验平台功能时，应启动全部核心服务。
 

@@ -4,7 +4,6 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
-from typing import Optional as Opt
 
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
@@ -12,7 +11,7 @@ from contracts.conversation import HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from contracts.agent_prompt import normalize_imported_agent_bundle
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
@@ -58,36 +57,6 @@ class WorkbenchReleaseManifest:
     system_revision: str
     persistent_tool_names: tuple[str, ...]
     official_skill_names: tuple[str, ...] = WORKBENCH_OFFICIAL_SKILL_NAMES
-
-
-@dataclass
-class OptimizeRequest:
-    """优化请求的统一数据结构"""
-
-    agent_id: int
-    model_id: int
-    task_description: str
-    section_type: str
-    section_title: str
-    current_content: str
-    feedback: str
-    mode: str = "general"
-    start_pos: Opt[int] = None
-    end_pos: Opt[int] = None
-    tool_ids: Opt[list[int]] = None
-    sub_agent_ids: Opt[list[int]] = None
-    knowledge_base_display_names: Opt[list[str]] = None
-
-
-@dataclass
-class OptimizeResult:
-    """优化结果的统一数据结构"""
-
-    optimized_content: str
-    source: str
-    section_type: str = ""
-    section_title: str = ""
-    original_content: str = ""
 
 
 def _validated_context_policy(
@@ -421,67 +390,6 @@ class NL2SkillRunRequest(NL2ModelControlsRequest):
     language: Optional[Literal["zh", "en"]] = None
 
 
-
-
-class OptimizePromptSectionRequest(BaseModel):
-    task_description: str
-    agent_id: int
-    model_id: int
-    section_type: str
-    section_title: str
-    current_content: str
-    feedback: str
-    mode: Literal["general", "insert", "select"] = "general"
-    start_pos: Optional[int] = Field(
-        None, description="Start position for insert/select mode"
-    )
-    end_pos: Optional[int] = Field(
-        None, description="End position for insert/select mode"
-    )
-    tool_ids: Optional[List[int]] = Field(
-        None,
-        description="Optional: tool IDs from frontend (takes precedence over database query)",
-    )
-    sub_agent_ids: Optional[List[int]] = Field(
-        None,
-        description="Optional: sub-agent IDs from frontend (takes precedence over database query)",
-    )
-    knowledge_base_display_names: Optional[List[str]] = Field(
-        None,
-        description="Optional: knowledge base display names from frontend (takes precedence over database query)",
-    )
-
-
-class BadCaseItem(BaseModel):
-    question: str
-    answer: str
-    label: Optional[str] = None
-    reason: Optional[str] = None
-
-
-class OptimizePromptBadCaseRequest(BaseModel):
-    agent_id: int
-    model_id: int
-    current_content: str
-    bad_cases: List[BadCaseItem]
-    section_type: str
-    section_title: str
-    tool_ids: Optional[List[int]] = Field(None)
-    sub_agent_ids: Optional[List[int]] = Field(None)
-    knowledge_base_display_names: Optional[List[str]] = Field(None)
-
-
-class OptimizeFromDebugSelected(BaseModel):
-    user_question: str
-    assistant_answer: str
-
-
-class OptimizePromptFromDebugRequest(BaseModel):
-    agent_id: int
-    model_id: int
-    feedback: str
-    selected: OptimizeFromDebugSelected
-    history: Optional[List[HistoryItem]] = None
 
 
 class AgentSkillInstanceRequest(BaseModel):

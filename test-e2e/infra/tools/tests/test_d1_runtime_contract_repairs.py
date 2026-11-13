@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled mutations prove the repaired formal D1 assertions reject regressions.
 
 Run as an infrastructure test with pytest --noconftest. These are not new
@@ -71,9 +73,9 @@ async def test_cancellation_lifecycle_rejects_controlled_regressions(runtime_cas
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('defect', ['missing_model_lane', 'wrong_capacity'])
-async def test_exact_northbound_policies_reject_controlled_regressions(monkeypatch, defect):
+async def test_exact_management_policies_reject_controlled_regressions(monkeypatch, defect):
     case = _load_case('UT-BE-AUTO-A5E5C8329C318684')
-    policies = case.northbound_thread_manager._policies
+    policies = case.config_thread_manager._policies
     if defect == 'missing_model_lane':
         monkeypatch.delitem(policies, 'model-tool-io')
     else:
@@ -85,7 +87,7 @@ async def test_exact_northbound_policies_reject_controlled_regressions(monkeypat
 @pytest.mark.asyncio
 async def test_model_lane_probe_rejects_swallowed_errors(monkeypatch):
     case = _load_case('UT-BE-AUTO-A5E5C8329C318684')
-    manager = case.ThreadManager('mutation-probe', case.northbound_thread_manager._policies)
+    manager = case.ThreadManager('mutation-probe', case.config_thread_manager._policies)
     original = manager.run
 
     async def swallowing_run(lane, spec, fn, *args, **kwargs):
@@ -96,6 +98,6 @@ async def test_model_lane_probe_rejects_swallowed_errors(monkeypatch):
 
     monkeypatch.setattr(manager, 'run', swallowing_run)
     with pytest.raises(pytest.fail.Exception, match='DID NOT RAISE'):
-        await case._check_northbound_model_lane_isolation(manager)
+        await case._check_management_model_lane_isolation(manager)
     assert manager.state is case.ManagerState.CLOSED
     assert manager.snapshot().active_count == 0

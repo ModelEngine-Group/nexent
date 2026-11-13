@@ -47,7 +47,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/runtime_service.py
+            - -m
+            - backend.http.runtime_service
           envFrom:
             - configMapRef:
                 name: nexent-config

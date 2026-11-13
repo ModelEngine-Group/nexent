@@ -9,8 +9,8 @@ import httpx
 from contracts.constants.environment import DATA_PROCESS_SERVICE
 from contracts.knowledge import ProcessParams
 from management.db.knowledge_base.repository import get_knowledge_record
-from infrastructure.ingestion.errors import classify_ingestion_exception
-from infrastructure.observability.knowledge import (
+from contracts.errors.ingestion import classify_ingestion_exception
+from infrastructure.trace.knowledge import (
     inject_trace_context,
     set_span_attributes,
     trace_knowledge_operation,

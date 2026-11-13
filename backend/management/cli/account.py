@@ -10,14 +10,14 @@ from contracts.errors.exceptions import AccountConflictError
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import (
         create_account,
         get_account_by_email,
         lock_account_keys,
     )
     from management.db.identity.user_tenant import insert_user_tenant
-    from gateway.security.passwords import hash_password
+    from management.utils.account_passwords import hash_password
     from sqlalchemy import select
     from management.db.models import UserTenant
 

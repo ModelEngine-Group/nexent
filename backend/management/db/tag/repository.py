@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ResourceTagAssignment, TagBucket, TagBucketResourceType, TagDefinition, TagValue
 from sqlalchemy import and_, func
 

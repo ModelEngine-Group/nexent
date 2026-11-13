@@ -9,8 +9,8 @@ from sqlalchemy import Float, select
 from contracts.errors.codes import ErrorCode
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
 
 

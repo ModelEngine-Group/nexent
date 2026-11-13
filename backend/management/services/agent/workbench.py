@@ -27,7 +27,7 @@ from management.services.model.resolver import is_model_available
 from management.services.skill.service import SkillService
 from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
 from management.db.identity.group import query_group_ids_by_user
-from infrastructure.serialization.containers import clone_runtime_config
+from management.services.agent.runtime_config import clone_runtime_config
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     get_agent_knowledge_capabilities,

@@ -351,7 +351,6 @@ def test_agent_services_do_not_restore_test_only_entry_points():
 def test_agent_shared_types_and_utilities_have_canonical_locations():
     shared_types = {
         "AgentModelProjection", "AgentRunContext", "SystemAgentRef", "WorkbenchReleaseManifest",
-        "OptimizeRequest", "OptimizeResult",
     }
     contract = ast.parse((BACKEND_ROOT / "contracts/agent.py").read_text(encoding="utf-8"))
     # The business file also owns the API request models after their migration.

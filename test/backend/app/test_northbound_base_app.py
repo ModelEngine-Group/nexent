@@ -173,7 +173,6 @@ install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 consts_const_module = types.ModuleType("contracts.constants.environment")
 consts_const_module.MINIO_ENDPOINT = "http://minio:9000"
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
-consts_const_module.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = 1
 
 class VectorDatabaseType:
     ELASTICSEARCH = "elasticsearch"
@@ -227,13 +226,13 @@ concurrency_module.set_default_thread_manager = MagicMock()
 concurrency_module.clear_default_thread_manager = MagicMock()
 sys.modules["nexent.core.concurrency"] = concurrency_module
 
-thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
+thread_lifecycle_module = types.ModuleType("management.thread_management")
 thread_lifecycle_module.config_thread_manager = _NorthboundThreadManager()
-sys.modules["infrastructure.concurrency"] = thread_lifecycle_module
+sys.modules["management.thread_management"] = thread_lifecycle_module
 
-runtime_state_module = types.ModuleType("management.services.agent.run_state")
+runtime_state_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_module.runtime_state_service = MagicMock()
-sys.modules["management.services.agent.run_state"] = runtime_state_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
@@ -270,12 +269,12 @@ file_management_app_module.build_content_disposition_header = MagicMock(
 )
 sys.modules["management.api.file.file_management"] = file_management_app_module
 
-# Mock management.utils.app_factory (imported by northbound_base_app)
-app_factory_module = types.ModuleType("management.utils.app_factory")
+# Mock backend.http.server.app_factory (imported by northbound_base_app)
+app_factory_module = types.ModuleType("backend.http.server.app_factory")
 
 # Import real register_exception_handlers to apply to the app
 try:
-    from management.utils.app_factory import register_exception_handlers as _real_register_exception_handlers
+    from backend.http.server.app_factory import register_exception_handlers as _real_register_exception_handlers
 except Exception:
     _real_register_exception_handlers = None
 
@@ -298,7 +297,7 @@ def register_exception_handlers(app):
 
 app_factory_module.register_exception_handlers = register_exception_handlers
 app_factory_module.create_app = None  # placeholder
-sys.modules['management.utils.app_factory'] = app_factory_module
+sys.modules['backend.http.server.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",

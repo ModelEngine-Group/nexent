@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from infrastructure.observability import knowledge as knowledge_telemetry
+from infrastructure.trace import knowledge as knowledge_telemetry
 
 
 def test_span_kind_distinguishes_storage_tools_from_chains():

@@ -83,6 +83,8 @@ COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 
 # Layer 2: copy backend code
 COPY backend /opt/backend
+COPY infrastructure /opt/infrastructure
+ENV PYTHONPATH=/opt:/opt/backend
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json

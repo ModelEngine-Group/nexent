@@ -113,17 +113,19 @@ consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
-db_client_mod = types.ModuleType("management.db.client")
+db_client_mod = types.ModuleType("infrastructure.rdb.client")
 db_client_mod.get_db_session = MagicMock()
 db_client_mod.as_dict = MagicMock()
-sys.modules["management.db.client"] = db_client_mod
+sys.modules["infrastructure.rdb.client"] = db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = db_client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 db_package = types.ModuleType("database")
 db_package.client = db_client_mod
@@ -182,13 +184,13 @@ services_package = types.ModuleType("services")
 services_package.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/services")]
 
 # Mock runtime_state_service
-runtime_state_service_mod = types.ModuleType("management.services.agent.run_state")
+runtime_state_service_mod = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_service_mod.runtime_state_service = MagicMock()
 runtime_state_service_mod.runtime_state_service.enabled = False
 runtime_state_service_mod.runtime_state_service.acquire_idempotency_async = AsyncMock(return_value=True)
 runtime_state_service_mod.runtime_state_service.release_idempotency_async = AsyncMock()
 runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = AsyncMock(return_value=1)
-sys.modules["management.services.agent.run_state"] = runtime_state_service_mod
+sys.modules["infrastructure.redis.run_state"] = runtime_state_service_mod
 
 # Mock agent_service
 agent_service_mod = types.ModuleType("management.services.agent.service")
@@ -201,7 +203,7 @@ runtime_proxy_mod.forward_agent_run = AsyncMock()
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 
-thread_lifecycle_mod = types.ModuleType("infrastructure.concurrency")
+thread_lifecycle_mod = types.ModuleType("management.thread_management")
 thread_lifecycle_mod.config_thread_manager = MagicMock()
 
 
@@ -212,7 +214,7 @@ async def _run_managed_test_task(_lane, _spec, func, *args, **kwargs):
 thread_lifecycle_mod.config_thread_manager.run = AsyncMock(
     side_effect=_run_managed_test_task
 )
-sys.modules["infrastructure.concurrency"] = thread_lifecycle_mod
+sys.modules["management.thread_management"] = thread_lifecycle_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("management.services.conversation.service")

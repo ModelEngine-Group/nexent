@@ -5,7 +5,7 @@ from management.api.identity.gateway_identity import router as gateway_identity_
 import logging
 from contextlib import asynccontextmanager
 
-from management.utils.app_factory import create_app
+from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.skill.skill_repository import skill_repository_router
@@ -21,7 +21,6 @@ from management.api.knowledge_base.knowledge_summary import router as summary_ro
 from management.api.identity.mock_user_management import router as mock_user_management_router
 from management.api.model.model_managment import router as model_manager_router
 from management.api.identity.oauth import router as oauth_router
-from management.api.prompt.prompt import router as prompt_router
 from management.api.mcp.mcp_management import router as mcp_management_router
 from management.api.mcp.remote_mcp import router as remote_mcp_router
 from management.api.skill.skill import router as skill_router
@@ -56,7 +55,7 @@ from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABL
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
-from infrastructure.concurrency import config_thread_manager
+from management.thread_management import config_thread_manager
 
 logger = logging.getLogger("base_app")
 
@@ -168,7 +167,6 @@ app.include_router(oauth_router)
 app.include_router(cas_router)
 
 app.include_router(summary_router)
-app.include_router(prompt_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)

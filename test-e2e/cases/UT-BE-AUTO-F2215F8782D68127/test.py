@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +81,8 @@ def _new_manager():
 @pytest.mark.stage('D1')
 def test_global_thread_pool_removal_and_run_async_migration(monkeypatch) -> None:
     # 1. deleted legacy module must be unresolvable
-    assert importlib.util.find_spec('backend.utils.thread_utils') is None
+    if importlib.util.find_spec('backend.utils') is not None:
+        assert importlib.util.find_spec('backend.utils.thread_utils') is None
 
     # 2. no residual GlobalThreadPool / thread_utils.submit reference
     for py_file in _backend_py_files():

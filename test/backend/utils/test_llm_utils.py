@@ -145,9 +145,9 @@ gateway_mod.registry = registry_mod
 # ``from nexent import MessageObserver`` at model_gateway_service import time.
 nexent_module.MessageObserver = observer_mod.MessageObserver
 
-# Ensure management.db.client modules exist before patching
-import management.db.client
-import management.db.client
+# Ensure infrastructure.rdb.client modules exist before patching
+import infrastructure.rdb.client
+import infrastructure.rdb.client
 
 from management.services.model.invocation import call_llm_for_system_prompt, _process_thinking_tokens
 

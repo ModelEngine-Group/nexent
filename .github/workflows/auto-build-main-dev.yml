@@ -10,6 +10,7 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
+      - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
       - 'deploy/common/**'
@@ -19,6 +20,7 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
+      - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
       - 'deploy/common/**'

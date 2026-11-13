@@ -9,7 +9,7 @@ case:
   title: badcase 优化与 debug history 优化｜外部依赖异常与超时
   type: AGENT-IT
   priority: P1
-  status: active
+  status: retired
   automation: automated
   objective: badcase 优化与 debug history 优化｜外部依赖异常与超时
   preconditions:

@@ -21,7 +21,7 @@ from contracts.errors.exceptions import (
 )
 from fastapi import HTTPException, Request
 from management.services.permission.identity.session import extract_bearer_token, require_active_account
-from gateway.security.signatures import (
+from management.services.permission.identity.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )

@@ -18,7 +18,7 @@ from gateway.configuration import GatewaySettings, load_settings
 from gateway.security.database_provider import DatabaseIdentityProvider
 from gateway.security.identity import IdentityError
 from gateway.security.management_client import IdentityUnavailable
-from infrastructure.database.identity import IdentityRejected, IdentityRepository, IdentityStoreUnavailable
+from infrastructure.rdb.identity import IdentityRejected, IdentityRepository, IdentityStoreUnavailable
 
 
 def snapshot(role="USER", tenant="t1", version=3, active=True):
@@ -169,7 +169,7 @@ async def test_api_only_account_preserves_null_email_contract():
 async def test_pool_open_and_shutdown_have_finite_timeouts(monkeypatch):
     pool = Pool(None)
     factory = AsyncMock(return_value=pool)
-    monkeypatch.setattr("infrastructure.database.identity.asyncpg.create_pool", factory)
+    monkeypatch.setattr("infrastructure.rdb.identity.asyncpg.create_pool", factory)
     repo = await IdentityRepository.open(host="host", port=5432, database="fixture", user="reader", password="secret")
     options = factory.await_args.kwargs
     assert options["server_settings"]["default_transaction_read_only"] == "on"
@@ -213,10 +213,10 @@ def test_database_credentials_are_required_and_redacted():
     assert "database-secret" not in repr(settings)
 
 
-def test_database_package_never_imports_business_configuration_or_orm():
-    directory = Path(__file__).resolve().parents[3] / "backend/infrastructure/database"
+def test_gateway_database_never_imports_business_configuration_or_orm():
+    directory = Path(__file__).resolve().parents[3] / "infrastructure/rdb"
     allowed = set(sys.stdlib_module_names) | {"asyncpg"}
-    for path in directory.glob("*.py"):
+    for path in (directory / "__init__.py", directory / "identity.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             modules = ([node.module] if isinstance(node, ast.ImportFrom) else
                        [item.name for item in node.names] if isinstance(node, ast.Import) else [])

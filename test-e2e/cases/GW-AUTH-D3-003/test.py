@@ -30,8 +30,9 @@ from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.configuration import load_settings
 from gateway.security.identity import sign_delegation, verify_identity
-from infrastructure.service_identity.gateway import identity_context
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from gateway.downstream.identity import identity_context
+from runtime.api.identity_routes import is_runtime_service_request
+from gateway.downstream.middleware import GatewayIdentityMiddleware
 
 
 @contextmanager
@@ -67,7 +68,8 @@ async def test_gateway_database_identity_protocol(monkeypatch):
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
     management, runtime = FastAPI(), FastAPI()
     management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True,
+                           internal_runtime_request=is_runtime_service_request)
     reached, lookup_calls, closed = [], [], []
 
     @management.post("/api/internal/identity/resolve")

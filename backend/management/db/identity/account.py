@@ -7,8 +7,8 @@ from uuid import uuid4
 from sqlalchemy import select, text, update
 
 from contracts.errors.exceptions import AccountConflictError
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import UserAccount
 
 
@@ -71,7 +71,7 @@ def create_account(email: str | None, password_hash=None, *, user_id=None, db_se
         lock_account_keys(session, user_id, email)
         if get_account(user_id, session) or (email is not None and get_account_by_email(email, session)):
             raise AccountConflictError("Email already exists")
-        from gateway.security.passwords import password_scheme
+        from management.utils.account_passwords import password_scheme
 
         account = UserAccount(
             user_id=user_id,
@@ -111,7 +111,7 @@ def delete_account(user_id: str, db_session=None):
 
 def change_password(user_id: str, expected_hash: str, password_hash: str):
     """Compare-and-swap prevents overwriting a concurrent password change."""
-    from gateway.security.passwords import password_scheme
+    from management.utils.account_passwords import password_scheme
 
     with get_db_session() as session:
         result = session.execute(

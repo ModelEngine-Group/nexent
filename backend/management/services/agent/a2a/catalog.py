@@ -13,7 +13,7 @@ import aiohttp
 
 from management.db.a2a import repository as a2a_agent_db
 from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from infrastructure.http.a2a import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from management.services.agent.a2a.http_client import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger(__name__)
@@ -242,7 +242,7 @@ class A2AClientService:
 
         # Import Nacos client (lazy import to avoid hard dependency)
         try:
-            from infrastructure.discovery.nacos import NacosClient
+            from management.services.agent.a2a.nacos import NacosClient
         except ImportError:
             logger.warning("Nacos client not available, using mock discovery")
             return None

@@ -16,7 +16,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from management.api.conversation import workbench_pins as routes
 from management.db.conversation import pins as workbench_pin_db
-from management.db.client import db_client
+from infrastructure.rdb.client import db_client
 from management.db.models import ConversationRecord
 
 

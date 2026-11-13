@@ -71,14 +71,14 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules[mod.__name__] = mod
 
-# Register non-prefixed ``database`` / ``management.db.client`` stubs so that
-# production modules (which import as ``from management.db.client import ...``)
+# Register non-prefixed ``database`` / ``infrastructure.rdb.client`` stubs so that
+# production modules (which import as ``from infrastructure.rdb.client import ...``)
 # resolve to these mocks rather than loading real Minio/Postgres clients.
 # Previous ``backend.*``-prefixed keys caused Python to create parallel
 # module objects that broke mock patching.
 _db_pkg = sys.modules.get("database") or _mod("database")
 _db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-_db_client = _mod("management.db.client")
+_db_client = _mod("infrastructure.rdb.client")
 _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
@@ -95,7 +95,7 @@ from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     UpdateKbRequest,
     aidp_mgmt_router,
 )
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"

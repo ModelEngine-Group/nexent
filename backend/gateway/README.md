@@ -1,16 +1,18 @@
 # Gateway service
 
-Gateway listens on 5013 and handles both ordinary backend forwarding to Management5010/Runtime5014 and Northbound APIs. Run `python backend/gateway_service.py` from the repository root. The Dockerfile declares no application ENTRYPOINT/CMD; Compose and Helm provide the Python command.
+Gateway listens on 5013 and handles both ordinary backend forwarding to Management5010/Runtime5014 and Northbound APIs. From the repository root, set `PYTHONPATH` to the absolute `backend/` directory and run `python -m backend.http.gateway_service`. The Dockerfile declares no application ENTRYPOINT/CMD; Compose and Helm provide the Python command.
 
 ## Authentication and source boundary
 
-External session JWTs and API keys are verified in Gateway. `security/credentials.py` parses credentials and enforces their purpose; `security/database_provider.py` applies identity policy to a snapshot read by `infrastructure/database/identity.py`. The default provider queries PostgreSQL directly and never falls back to Management HTTP lookup. The older signed Management identity endpoint remains for explicit compatibility callers and regression tests.
+External session JWTs and API keys are verified in Gateway. `security/credentials.py` parses credentials and enforces their purpose; `security/database_provider.py` applies identity policy to a snapshot read by `infrastructure/rdb/identity.py`. The default provider queries PostgreSQL directly and never falls back to Management HTTP lookup. The older signed Management identity endpoint remains for explicit compatibility callers and regression tests.
 
 The repository selects only user identity, canonical account role/email, token version, active membership, API-key ownership and CAS status/expiry/ownership. Existing SU and ASSET_OWNER session defaults are preserved. Membership selection preserves the established first-active-relation behavior, ordered by its primary key. Missing or ambiguous accounts and revoked credentials fail before business execution. Database faults return a sanitized503; invalid credentials return401. Logout keeps its idempotent anonymous failure behavior. MCP credential delegation uses the same database provider.
 
 Every lookup uses a read-only repeatable-read transaction with finite acquire/query/connect timeouts and no cross-request identity cache. Lifespan owns the connection pool and closes it on shutdown. A broken or cancelled connection is terminated rather than reused or retried. Ordinary request resource authorization remains in each downstream service.
 
-The image contains Gateway, its launcher, and only the side-effect-free infrastructure initializer/database subpackage. It contains no Management/Runtime implementation, SDK, ORM, MinIO factory or global backend environment. Seven direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT, bcrypt and asyncpg. Gateway configuration reads injected environment only and never loads .env.
+The image packages Gateway, its launcher, the shared security protocol, and the read-only RDB identity adapter. Its six direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT and asyncpg. Gateway configuration reads injected environment only and never loads .env.
+
+Gateway owns request signing, path normalization, the public-entry policy, and MCP credential delegation. The MCP process binds the Gateway-owned tenant router to its local app registry and supplies its own Gateway URL and signing key. Downstream apps use the adapters in `gateway/downstream/` to load backend configuration and verify signatures. The standalone Gateway image packages only the edge modules and pure protocol code.
 
 ## Database configuration
 

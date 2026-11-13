@@ -85,17 +85,15 @@ from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
-from management.services.agent.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     validate_runtime_metadata,
 )
 

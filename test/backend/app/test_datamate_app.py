@@ -45,15 +45,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig',
       return_value=minio_config_mock).start()
-patch('management.db.client.MinioClient',
+patch('infrastructure.object_storage.client.MinioClient',
       return_value=minio_client_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
-patch('management.db.client.minio_client', minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('management.db.client.MinioClient', return_value=minio_client_mock), \
+with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from management.api.knowledge_base.datamate import sync_datamate_knowledges, get_datamate_knowledge_base_files_endpoint, test_datamate_connection_endpoint as datamate_connection_endpoint
 

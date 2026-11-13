@@ -295,7 +295,7 @@ sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 # Set up database mocks
 database_mock = types.ModuleType('database')
 database_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/database"))]
-database_client_mock = types.ModuleType('management.db.client')
+database_client_mock = types.ModuleType('infrastructure.rdb.client')
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.as_dict = MagicMock()
 database_client_mock.filter_property = MagicMock()
@@ -397,11 +397,12 @@ database_mock.skill_db = database_skill_db_mock
 database_mock.db_models = database_db_models_mock
 
 sys.modules['database'] = database_mock
-sys.modules['management.db.client'] = database_client_mock
+sys.modules['infrastructure.rdb.client'] = database_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.skill.repository'] = database_skill_db_mock
 sys.modules['management.db.models'] = database_db_models_mock
 sys.modules['management.db.identity.group'] = database_group_db_mock

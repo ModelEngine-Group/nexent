@@ -2761,11 +2761,14 @@ class MonitoringRecordBuffer:
             import sys
             import os
 
-            backend_path = os.path.join(os.getcwd(), "backend")
-            if os.path.exists(backend_path) and backend_path not in sys.path:
-                sys.path.insert(0, backend_path)
+            repository_root = os.getcwd()
+            backend_path = os.path.join(repository_root, "backend")
+            if os.path.isdir(backend_path):
+                for source_root in (repository_root, backend_path):
+                    if source_root not in sys.path:
+                        sys.path.insert(0, source_root)
 
-            from management.db.client import get_monitoring_db_session
+            from infrastructure.rdb.client import get_monitoring_db_session
             from management.db.models import ModelMonitoringRecord
         except ImportError as e:
             logger.debug(

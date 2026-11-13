@@ -104,11 +104,12 @@ source backend/.venv/Scripts/activate
 Then start the services you need to debug from the repository root. The services use `python-dotenv` to read `.env` from the repository root. If an environment variable with the same name is already set in the terminal, the terminal value is preserved.
 
 ```bash
-python backend/mcp_service.py
-python backend/data_process_service.py
-python backend/config_service.py
-python backend/runtime_service.py
-python backend/northbound_service.py
+export PYTHONPATH="$PWD/backend"
+python -m backend.http.mcp_service
+python -m backend.http.data_process_service
+python -m backend.http.config_service
+python -m backend.http.runtime_service
+python -m backend.http.gateway_service
 ```
 
 | Service | Primary Responsibility |
@@ -117,7 +118,7 @@ python backend/northbound_service.py
 | `data_process_service.py` | Document parsing, chunking, and vectorization tasks |
 | `config_service.py` | Model, agent, knowledge-base, and resource configuration APIs |
 | `runtime_service.py` | Agent execution and streaming chat |
-| `northbound_service.py` | Northbound APIs for external systems |
+| `gateway_service.py` | Northbound APIs for external systems |
 
 When debugging one module, you can start only the services it depends on. Start all core services when you need to use the complete platform.
 

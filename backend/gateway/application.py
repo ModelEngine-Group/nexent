@@ -48,7 +48,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
         if authenticate:
             settings.signing_key()
         if authenticate and identity_lookup is None:
-            from infrastructure.database.identity import IdentityRepository
+            from infrastructure.rdb.identity import IdentityRepository
             from gateway.security.database_provider import DatabaseIdentityProvider
 
             repository = await IdentityRepository.open(**settings.database_options())

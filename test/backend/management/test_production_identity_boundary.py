@@ -5,7 +5,7 @@ import pytest
 
 from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
-from infrastructure.service_identity.context import identity_context
+from gateway.security.context import identity_context
 from management.services.permission.identity import northbound as api_key, session as session
 
 

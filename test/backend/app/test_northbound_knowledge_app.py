@@ -210,12 +210,12 @@ northbound_app_module._get_northbound_context = AsyncMock()
 sys.modules["management.services.permission.identity.northbound"] = northbound_app_module
 northbound_app_module.get_northbound_context = northbound_app_module._get_northbound_context
 
-file_management_app_module = types.ModuleType("management.utils.file_http")
+file_management_app_module = types.ModuleType("management.api.file.http")
 file_management_app_module.build_storage_proxy_url = MagicMock()
 file_management_app_module.build_content_disposition_header = MagicMock(
     return_value='attachment; filename="file.txt"'
 )
-sys.modules["management.utils.file_http"] = file_management_app_module
+sys.modules["management.api.file.http"] = file_management_app_module
 
 # Other business handlers share the router but are outside this test boundary.
 sys.modules["management.db.identity.user_tenant"] = MagicMock()

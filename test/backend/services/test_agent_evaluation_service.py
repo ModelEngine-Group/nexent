@@ -27,7 +27,7 @@ if str(_BACKEND_DIR) not in sys.path:
 # The service imports a large dependency graph. Keep its test doubles scoped
 # to this module's fixture so they cannot leak into sibling test modules.
 _MODULE_ROOTS = (
-    "adapters",
+    "adapters.jiuwen_sdk_adapter",
     "boto3",
     "botocore",
     "consts",
@@ -266,15 +266,16 @@ _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(return_value={"user_
 sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 _db_pkg.user_tenant_db = _user_tenant_db_mock
 
-# management.db.client / management.db.models are imported by both service modules.
+# infrastructure.rdb.client / management.db.models are imported by both service modules.
 _db_client_module = MagicMock()
 _db_client_module.get_db_session = MagicMock()
 _db_client_module.as_dict = MagicMock()
-sys.modules["management.db.client"] = _db_client_module
+sys.modules["infrastructure.rdb.client"] = _db_client_module
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()
@@ -386,18 +387,10 @@ _consts_exceptions_module.VoiceServiceException = Exception
 install_shared_contract_stub(_consts_exceptions_module, 'exceptions')
 _consts_pkg.exceptions = _consts_exceptions_module
 
-# adapters (Jiuwen SDK) stubs
-_adapters_pkg = _register_package("adapters")
-_adapters_exc_module = types.ModuleType("adapters.exception")
-_adapters_exc_module.JiuwenSDKError = Exception
-_adapters_exc_module.JiuwenSDKUnavailableError = Exception
-sys.modules["adapters.exception"] = _adapters_exc_module
-_adapters_pkg.exception = _adapters_exc_module
-
+# Disable the optional Jiuwen SDK in these evaluation unit tests.
 _jiuwen_module = MagicMock()
 _jiuwen_module.JiuwenSDKAdapter = None
 sys.modules["adapters.jiuwen_sdk_adapter"] = _jiuwen_module
-_adapters_pkg.jiuwen_sdk_adapter = _jiuwen_module
 
 # Make sure pre-existing real utils package is in sys.modules so
 # the app test (and any sibling tests) can resolve doted paths like
@@ -481,11 +474,12 @@ sys.modules["services.evaluation_prompt_service"] = _eval_prompt_service_module
 _services_pkg.evaluation_prompt_service = _eval_prompt_service_module
 
 _thread_lifecycle_service_module = types.ModuleType(
-    "infrastructure.concurrency"
+    "runtime.thread_management"
 )
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_service_module.config_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = _thread_lifecycle_service_module
+sys.modules["runtime.thread_management"] = _thread_lifecycle_service_module
+sys.modules["management.thread_management"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
 
 # ---- 补齐 management.services.evaluation.sets（agent_evaluation_service.py L64）----

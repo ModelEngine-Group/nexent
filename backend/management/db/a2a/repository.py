@@ -41,7 +41,7 @@ from management.db.models import (
 # Import session factory - kept at function level to avoid triggering module-level import
 # of db_models.client, which would cause circular dependency at import time.
 def _get_db_session():
-    from management.db.client import get_db_session as _gds
+    from infrastructure.rdb.client import get_db_session as _gds
 
     return _gds()
 

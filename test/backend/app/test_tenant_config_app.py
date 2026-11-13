@@ -17,11 +17,12 @@ database_client_mock = MagicMock()
 database_client_mock.MinioClient = MagicMock()
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.db_client = MagicMock()
-sys.modules['management.db.client'] = database_client_mock
+sys.modules['infrastructure.rdb.client'] = database_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 botocore_client_mock = MagicMock()
 sys.modules['botocore.client'] = botocore_client_mock

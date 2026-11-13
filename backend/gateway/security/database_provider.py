@@ -3,7 +3,7 @@
 
 from gateway.security.identity import IdentityError
 from gateway.security.management_client import IdentityUnavailable
-from infrastructure.database.identity import IdentityRejected, IdentityStoreUnavailable
+from infrastructure.rdb.identity import IdentityRejected, IdentityStoreUnavailable
 
 
 class DatabaseIdentityProvider:

@@ -5,8 +5,8 @@ import logging
 from typing import List, Optional, Tuple
 from sqlalchemy import or_, select, insert, update, delete, func
 
-from management.db.client import get_db_session
-from management.utils.orm import as_dict
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import as_dict
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion, SkillInstance
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 

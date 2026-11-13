@@ -30,11 +30,11 @@ def lifecycle(monkeypatch):
     state = MagicMock()
     recovery = SimpleNamespace(recover_northbound_tasks=MagicMock(),
                                schedule_interrupted_upload_cleanup=AsyncMock())
-    monkeypatch.setitem(sys.modules, "infrastructure.concurrency", SimpleNamespace(config_thread_manager=manager))
+    monkeypatch.setitem(sys.modules, "management.thread_management", SimpleNamespace(config_thread_manager=manager))
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
-    monkeypatch.setitem(sys.modules, "management.services.agent.run_state", SimpleNamespace(runtime_state_service=state))
+    monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(runtime_state_service=state))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))
-    monkeypatch.setitem(sys.modules, "management.utils.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
+    monkeypatch.setitem(sys.modules, "backend.http.server.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)
     path = Path(__file__).resolve().parents[3] / "backend/management/api/northbound_application.py"
     spec = importlib.util.spec_from_file_location("isolated_management_northbound", path)
