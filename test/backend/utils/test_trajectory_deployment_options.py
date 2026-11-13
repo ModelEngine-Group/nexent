@@ -39,8 +39,8 @@ def test_store_initializes_directory_without_root_id_and_preserves_manifest(tmp_
 
 
 def test_trajectory_budget_defaults_to_thirty_seconds():
-    from management.services.trajectory.primitives import Budget
-    from management.services.trajectory.service import TrajectoryService
+    from ops.services.trajectory.primitives import Budget
+    from ops.services.trajectory.service import TrajectoryService
 
     assert Budget().seconds == 30
     assert TrajectoryService(Mock(), Mock(), Mock()).budget().seconds == 30

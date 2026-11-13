@@ -8,10 +8,10 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from management.services.trajectory.access import Actor
-from management.services.trajectory.archive import Archive
-from management.services.trajectory.primitives import QueryError, ReferenceStore
-from management.services.trajectory.service import TrajectoryService
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.archive import Archive
+from ops.services.trajectory.primitives import QueryError, ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 
 @pytest.fixture

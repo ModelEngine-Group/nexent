@@ -20,6 +20,7 @@ from infrastructure.observability.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
+from ops.services.trajectory.lifecycle import create_maintenance_processor
 
 
 def configuration(root="", **overrides):
@@ -48,7 +49,7 @@ def test_default_configuration_has_no_filesystem_side_effects():
 def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     TrajectoryFileStore.provision(tmp_path)
-    processor = create_local_processor(configuration(tmp_path), lambda: None)
+    processor = create_maintenance_processor(configuration(tmp_path))
     maintenance = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     now = datetime(2026, 11, 1, tzinfo=UTC)
@@ -75,16 +76,16 @@ def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog
         active.close()
 
 
+
 def test_startup_recovery_seals_orphan_even_when_cleanup_disabled(tmp_path):
     TrajectoryFileStore.provision(tmp_path)
-    processor = create_local_processor(
+    processor = create_maintenance_processor(
         configuration(
             tmp_path,
             ENABLE_TELEMETRY=True,
             MONITORING_PROVIDER="local_file",
             TRAJECTORY_CLEANUP_ENABLED=False,
         ),
-        lambda: None,
     )
     maintenance = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", None)
@@ -95,6 +96,7 @@ def test_startup_recovery_seals_orphan_even_when_cleanup_disabled(tmp_path):
     assert run["business_status"] == "interrupted"
     assert run["capture_state"] == "incomplete"
     assert run["file_deleted_at"] is None
+
 
 
 @pytest.mark.parametrize(
@@ -158,7 +160,7 @@ def test_capture_authorization_requires_active_membership_and_actual_owner(monke
 
 def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, caplog):
     TrajectoryFileStore.provision(tmp_path)
-    processor = create_local_processor(configuration(tmp_path), lambda: None)
+    processor = create_maintenance_processor(configuration(tmp_path))
     maintenance = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     with maintenance.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
@@ -179,13 +181,14 @@ def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, cap
     assert run["cleanup_reason"] == "conversation_deleted" and run["file_deleted_at"] is not None
 
 
+
 @pytest.mark.parametrize("elapsed", [2.0, 2.1])
 def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     tmp_path, monkeypatch, caplog, elapsed,
 ):
     caplog.set_level(logging.INFO)
     TrajectoryFileStore.provision(tmp_path)
-    processor = create_local_processor(configuration(tmp_path), lambda: None)
+    processor = create_maintenance_processor(configuration(tmp_path))
     store = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     now = datetime(2026, 11, 1, tzinfo=UTC)
@@ -229,6 +232,7 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     assert all(event["failed_runs"] == 0 and event["counts_complete"] for event in events)
 
 
+
 def test_local_provider_keeps_deletion_worker_when_capture_reads_and_retention_are_disabled(tmp_path):
     config = configuration(
         tmp_path, MONITORING_PROVIDER="local_file", TRAJECTORY_READ_ENABLED=False,
@@ -257,6 +261,8 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
 def isolated_summary_database(mocker):
     from contextlib import nullcontext
     repository=mocker.patch("management.db.trajectory.repository.ExecutionRepository")
-    mocker.patch("management.db.trajectory.cleanup_schedule.CleanupScheduleRepository").return_value.read_all.return_value = {}
+    mocker.patch("ops.db.trajectory.cleanup_schedule.CleanupScheduleRepository").return_value.read_all.return_value = {}
+    mocker.patch("ops.services.trajectory.lifecycle.ExecutionRepository", repository)
+    mocker.patch("ops.services.trajectory.lifecycle.conversation_deleted", return_value=False)
     repository.return_value.initialize.side_effect=lambda identity:nullcontext()
     return repository

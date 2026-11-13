@@ -3,9 +3,9 @@
 
 import pytest
 from contracts.trajectory import CleanupScheduleRequest
-from management.services.trajectory import cleanup_schedule as schedule
-from management.services.trajectory.access import Actor
-from management.services.trajectory.primitives import QueryError
+from ops.services.trajectory import cleanup_schedule as schedule
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.primitives import QueryError
 from pydantic import ValidationError
 
 

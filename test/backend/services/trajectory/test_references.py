@@ -2,7 +2,7 @@
 """Opaque references retain trusted state on the server without a deployment key."""
 
 import pytest
-from management.services.trajectory import primitives
+from ops.services.trajectory import primitives
 
 
 def test_references_are_random_ids_and_keep_payload_server_side():
@@ -47,7 +47,7 @@ def test_reference_state_is_detached_from_both_input_and_output():
 
 def test_expired_and_restarted_references_require_a_new_query(monkeypatch):
     clock = [100.0]
-    monkeypatch.setattr("management.services.trajectory.cache.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("ops.services.trajectory.cache.time.monotonic", lambda: clock[0])
     store = primitives.ReferenceStore(ttl=30)
     token = store.issue("snapshot", {"actor": "admin"})
     clock[0] += 30

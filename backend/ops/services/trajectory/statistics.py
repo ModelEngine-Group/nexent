@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import UTC, datetime
 
-from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+from ops.db.trajectory.catalog import TrajectoryCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class StatisticsRefresher:
 
     def refresh(self, tenants, kind, identity, check=lambda: None):
         from infrastructure.observability.trajectory_reader import JSONReader
-        from management.db.trajectory import statistics as database
+        from ops.db.trajectory import statistics as database
 
         from .nodes import build_nodes
         from .primitives import Budget
@@ -219,7 +219,7 @@ class StatisticsWorker:
             cancel_event.wait(60)
 
     def tick(self):
-        from management.services.trajectory.access import Actor
+        from ops.services.trajectory.access import Actor
 
         tenants = TrajectoryCatalog().tenants(Actor("trajectory", "", "SU"))
         for kind, identity, scope in [("tenant", t, [t]) for t in tenants] + [

@@ -126,6 +126,9 @@ def test_failed_serialization_is_a_gap_and_does_not_break_execution(capture):
 
 
 def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture):
+    from uuid import uuid4
+
+    from nexent.core.model_service.contracts import ModelEvent
     from nexent.core.model_service.http_contracts import RawHttpResponse
     from nexent.core.model_service.sse import SSEEvent
 
@@ -134,6 +137,8 @@ def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture)
         session = ModelAttemptSession(manager, "model", logical, "request", 1)
         session.begin({"messages": []})
         session.frame(SSEEvent('{"choices":[{"delta":{"content":"partial"}}]}'))
+        session.event(ModelEvent(type="text_delta", request_id="request", message_id=uuid4(),
+                                 sequence=1, delta="partial"))
         session.raw_response(
             RawHttpResponse(
                 400, {}, b'{"error":{"message":"secret-value"}}', ("secret-value",)
@@ -142,7 +147,8 @@ def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture)
         session.fail({"category": "MODEL_PROTOCOL", "will_retry": False})
     attempt = local.get_finished_spans()[0]
     assert "secret-value" not in str(attempt.attributes)
-    assert "partial" in attempt.attributes["nexent.raw.value"]
+    assert "stream" not in json.loads(attempt.attributes["nexent.raw.value"])
+    assert json.loads(attempt.attributes["output.value"])["content_parts"] == [{"type": "text", "text": "partial"}]
     assert attempt.attributes["nexent.output_complete"] is False
 
 
@@ -277,3 +283,159 @@ async def test_consumer_close_saves_partial_output_and_closes_attempt(
     assert "保留思考" in attempt.attributes["nexent.reasoning.value"]
     assert "unread" not in attempt.attributes["nexent.raw.value"]
     assert sender.closed == 1
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_stream_capture_saves_only_merged_output(capture, terminal, legacy):
+    from uuid import uuid4
+
+    from nexent.core.model_service.contracts import ModelEvent, ToolCallDelta
+    from nexent.core.model_service.sse import SSEEvent
+
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        message_id, call_id = uuid4(), uuid4()
+        for index, (thought, text, argument) in enumerate(
+            [("分析", "完整", '{"城市":'), ("完成", "回答", '"北京"}')]
+        ):
+            session.frame(SSEEvent('{"private_frame":true}'))
+            if legacy:
+                session.legacy_chunk(Mock(model_dump=Mock(return_value={
+                    "choices": [{"index": 0, "delta": {
+                        "reasoning_content": thought, "content": text,
+                        "tool_calls": [{"index": 0, "id": "call-1", "function": {
+                            "name": "weather" if index == 0 else "", "arguments": argument,
+                        }}],
+                    }}],
+                })))
+            else:
+                for kind, payload in (
+                    ("reasoning_delta", {"delta": thought}),
+                    ("text_delta", {"delta": text}),
+                    ("tool_call_delta", {"tool_call_delta": ToolCallDelta(
+                        local_call_id=call_id, index=0, provider_call_id="call-1",
+                        name_delta="weather" if index == 0 else "", arguments_delta=argument,
+                    )}),
+                ):
+                    session.event(ModelEvent(type=kind, request_id="request", message_id=message_id,
+                                             sequence=index + 1, **payload))
+            assert "output.value" not in session.span.attributes
+            assert "nexent.reasoning.value" not in session.span.attributes
+        if terminal == "completed":
+            session.legacy_complete("完整回答", "stop")
+            session.end()
+        elif terminal == "failed":
+            session.fail({"category": "MODEL_PROTOCOL"})
+        else:
+            session.end(cancelled=True)
+    attempt = next(s for s in local.get_finished_spans() if s.name == "model.attempt")
+    raw = json.loads(attempt.attributes["nexent.raw.value"])
+    output = json.loads(attempt.attributes["output.value"])
+    assert "stream" not in raw and "private_frame" not in str(raw)
+    assert "deltas" not in output
+    assert output["content_parts"] == [{"type": "text", "text": "完整回答"}]
+    assert output["reasoning_parts"] == [{"type": "text", "text": "分析完成"}]
+    assert output["tool_calls"][0]["parsed_arguments"] == {"城市": "北京"}
+    assert output["tool_calls"][0]["name"] == "weather"
+    assert output["complete"] is (terminal == "completed")
+    assert attempt.attributes["nexent.business_status"] == terminal
+
+
+def test_stream_buffer_budget_is_reused_for_final_output(capture):
+    from uuid import uuid4
+
+    from nexent.core.model_service.contracts import ModelEvent
+
+    manager, local, _ = capture
+    manager._config.local_span_processor = SimpleNamespace(run_queue_max_bytes=2048)
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        for index in range(1000):
+            session.event(ModelEvent(type="text_delta", request_id="request", message_id=uuid4(),
+                                     sequence=index + 1, delta="a"))
+        session.complete({"content_parts": [{"type": "text", "text": "a" * 1000}]})
+        session.end()
+    attempt = next(s for s in local.get_finished_spans() if s.name == "model.attempt")
+    assert attempt.attributes["nexent.output_complete"] is True
+    assert "nexent.trajectory.gap" not in attempt.attributes
+    assert json.loads(attempt.attributes["output.value"])["content_parts"][0]["text"] == "a" * 1000
+
+
+def test_partial_output_scrubs_credentials_split_across_chunks(capture):
+    from uuid import uuid4
+
+    from nexent.core.model_service.contracts import ModelEvent
+    from nexent.core.model_service.sse import SSEEvent
+
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        session.frame(SSEEvent("ignored", sensitive_values=("private-credential",)))
+        for index, text in enumerate(["private-", "credential"]):
+            session.event(ModelEvent(type="text_delta", request_id="request", message_id=uuid4(),
+                                     sequence=index + 1, delta=text))
+        session.end(cancelled=True)
+    attempt = next(s for s in local.get_finished_spans() if s.name == "model.attempt")
+    assert "private-credential" not in str(attempt.attributes)
+    assert "[redacted]" in attempt.attributes["output.value"]
+
+
+
+def test_local_stream_keeps_metrics_without_per_chunk_events(capture):
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        tracker = session.begin({"messages": []})
+        for _ in range(200):
+            tracker.record_token("a")
+        session.complete({"content_parts": [{"type": "text", "text": "a" * 200}],
+                          "usage": {"input_tokens": 3, "output_tokens": 50},
+                          "provider_metadata": {"model": "model", "unmapped_delta_fields": [{"x": "delta"}]}})
+        session.end()
+    attempt = next(s for s in local.get_finished_spans() if s.name == "model.attempt")
+    assert not attempt.dropped_events
+    assert [event.name for event in attempt.events] == ["model.requested", "first_token_received", "model.finished"]
+    assert attempt.attributes["llm.token_count.completion"] == 50
+    assert attempt.attributes["llm.ttft_ms"] >= 0
+    output = json.loads(attempt.attributes["output.value"])
+    assert output["provider_metadata"] == {"model": "model"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_service_stream_preserves_deltas_but_archives_final_message(capture, setup, asynchronous):
+    from nexent.core.model_service.service import ModelService
+    from nexent.core.model_service.sse import SSEEvent
+
+    manager, local, _ = capture
+    profile, request, limiter, _ = setup
+    manager.trace_llm_request = lambda *a, **kw: manager.tracer.start_as_current_span("logical")
+    manager.add_span_event = Mock()
+    manager.set_span_attributes = Mock()
+    manager.set_openinference_output = Mock()
+    sender = Sender([[frame({"reasoning_content": "分析"}), frame({"reasoning_content": "完成"}),
+                      frame({"content": "完整"}), frame({"content": "回答"}),
+                      frame(finish="stop"), SSEEvent("[DONE]")]])
+    service = ModelService(lambda _: sender, limiter=limiter, monitoring=manager)
+    request = request.model_copy(update={"stream": True})
+    if asynchronous:
+        async with service.astream(request, profile) as events:
+            received = [event async for event in events]
+    else:
+        with service.stream(request, profile) as events:
+            received = list(events)
+    assert [event.delta for event in received if event.type == "text_delta"] == ["完整", "回答"]
+    assert [event.delta for event in received if event.type == "reasoning_delta"] == ["分析", "完成"]
+    assert len(sender.calls) == sender.closed == 1
+    attempt = next(s for s in local.get_finished_spans() if s.name == "model.attempt")
+    output = json.loads(attempt.attributes["output.value"])
+    assert output["complete"] is True and "deltas" not in output
+    assert output["content_parts"] == [{"type": "text", "text": "完整回答"}]
+    assert output["reasoning_parts"] == [{"type": "text", "text": "分析完成"}]
+    assert "stream" not in json.loads(attempt.attributes["nexent.raw.value"])
+    assert attempt.attributes["llm.ttft_ms"] >= 0

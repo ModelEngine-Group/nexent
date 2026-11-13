@@ -23,22 +23,6 @@ runtime_thread_manager = ThreadManager(
             cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
-        "trajectory-read": LanePolicy(
-            name="trajectory-read",
-            max_workers=4,
-            max_queue_size=8,
-            queue_timeout_seconds=2,
-            cancel_grace_seconds=2,
-            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
-        ),
-        "trajectory-cleanup": LanePolicy(
-            name="trajectory-cleanup",
-            max_workers=1,
-            max_queue_size=0,
-            queue_timeout_seconds=0,
-            cancel_grace_seconds=2,
-            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
-        ),
         "control-io": LanePolicy(
             name="control-io",
             max_workers=16,

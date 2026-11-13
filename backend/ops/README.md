@@ -1,9 +1,9 @@
 # Nexent operations backend
 
-The operations backend runs in its own process and container using the existing
-backend image. It currently exposes only process health and API documentation.
-It does not initialize databases, Redis, MinIO, Elasticsearch, telemetry, Agent
-executors or schedulers.
+The operations backend runs in its own process and container using the shared
+backend image. It owns historical trajectory queries, retrieval, administrator
+cleanup settings and background summary/statistics maintenance. Runtime retains
+Agent execution, capture identity, file writing and conversation-deletion hooks.
 
 ## Local startup
 
@@ -13,114 +13,91 @@ Use the existing Python 3.11 backend environment. From `backend/`:
 python ops_service.py
 ```
 
-The listener binds to `0.0.0.0`. Defaults: port `5016`, log level `info`. Configure
-`OPS_PORT` and `LOG_LEVEL` through the process environment or
-the existing `.env` workflow. Reads remain centralized in
-`contracts/constants/environment.py`. For a clean environment without loading
-a nearby `.env`, set `PYTHON_DOTENV_DISABLED=1` before starting Python.
+The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
+reads remain centralized in `contracts/constants/environment.py`. Set
+`PYTHON_DOTENV_DISABLED=1` to disable nearby dotenv loading.
+
+With trajectory reading disabled and a provider other than `local_file`, ops
+serves health and documentation without importing business clients or the SDK.
+Setting `TRAJECTORY_READ_ENABLED=true` or selecting `MONITORING_PROVIDER=local_file`
+enables trajectory routes and managed maintenance. Query reads still require
+`TRAJECTORY_READ_ENABLED=true`. Enabled operations uses the existing PostgreSQL
+configuration and JWT authentication. It does not initialize telemetry exporters
+or execute Agent calls or SQL migrations.
 
 | Endpoint | Contract |
 | --- | --- |
 | `/health/live` | HTTP 200 with `{"status":"alive"}` |
-| `/health/ready` | HTTP 200 with `{"status":"ready"}` after startup; otherwise HTTP 503 with `{"status":"not_ready"}` |
-| `/docs` | OpenAPI UI; health endpoints are omitted from the schema |
+| `/health/ready` | HTTP 200 after local startup; HTTP 503 before startup and during shutdown |
+| `/docs` | OpenAPI UI |
+| `/trajectory/records` | PG-only lists, filter candidates and saved statistics |
+| `/trajectory/conversations/{id}` | Conversation execution list |
+| `/trajectory/conversations/{id}/snapshot` | File-backed nodes and metrics |
+| `/trajectory/conversations/{id}/contents/{content_id}` | Bounded body chunks |
+| `/trajectory/cleanup` | Administrator cleanup batches |
+| `/trajectory/cleanup/schedule` | Read or update tenant cleanup intervals |
+| `/conversation/agent_groups` and its conversations subresource | Administrator directory with `view=trajectory` |
 
-Health checks describe only the operations process. Business monitoring APIs
-and their authentication will be added together in a later change.
+The existing Web origin accepts `/api/trajectory/` and forwards it to ops through
+`OPS_HTTP_BACKEND` (local default `http://localhost:5016`). Conversation directory
+requests go to ops only with `view=trajectory`; ordinary history and execution
+requests remain on Runtime. Roles, tenant ownership, private-cache headers,
+response envelopes and opaque references retain their existing contracts.
+References are process-local; multi-replica deployments need affinity or must
+restart a query when its reference is unavailable.
 
-## Container startup
+## Storage and process resources
 
-Build the normal backend image with this source, then set `NEXENT_IMAGE` to that
-image. Docker deployment starts ops whenever the `application` component is
-selected, including the default full deployment. Development and production
-Compose files extend the same operations service definition. Infrastructure-only
-deployment does not start ops. Kubernetes also includes ops in the application component.
+Both Runtime and ops must see the same `TRAJECTORY_ROOT_DIR`, default
+`/mnt/nexent-data/trajectory`. Runtime provisions and writes archives. Ops reads
+those files, updates PG projections and performs retention cleanup using the
+existing per-tenant intervals and cross-process file locks. Multi-node deployments
+require the existing `shared_directory` storage mode and a shared filesystem
+supporting the required lock/atomic-replace behavior.
 
-Run the normal deployment entry point from the repository root:
+Ops owns its ThreadManager query/cleanup lanes and three managed background
+services: maintenance, summary compensation and statistics refresh. Capture
+publication occurs in another process, so summary compensation discovers durable
+archives through its bounded scan, restarting a completed scan after 60 seconds.
+Readiness describes local resource startup; it does not poll PostgreSQL on each
+health request. Shutdown stops owned services and releases process-local query
+references.
+
+Historical summary backfill is now:
 
 ```shell
-bash deploy/deploy.sh --defaults docker
+python -m ops.scripts.backfill_trajectory_summaries
 ```
 
-To start only ops against an existing deployment, use the same Compose project:
+## Deployment
+
+Normal Docker and Kubernetes application selection includes ops. Docker ops
+loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
+logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Its Web
+container receives the corresponding `OPS_HTTP_BACKEND`.
 
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops
 ```
 
-The Compose file defines only `nexent-ops` and joins the existing shared
-`nexent_network`, matching the optional monitoring deployment. The main stack
-normally creates this network. If running ops before the main stack, create the
-network once with `docker network create nexent_network`.
+Standalone Compose joins the existing external `nexent_network`. The shared
+network and environment files must already exist. Kubernetes mounts the logs
+PVC and, when trajectories are enabled, the trajectory PVC plus existing shared
+configuration/secrets. Default health mode keeps its minimal configuration and
+logs-only mount. The normal deployment generator sets Web `config.opsHttpBackend`
+from `OPS_PORT`; direct Helm overrides must set that address consistently with
+the ops Service port. SQL startup stays disabled in ops.
 
-The default published port is `5016:5016`. Containers on the shared network can
-resolve `nexent-ops` and reach `http://nexent-ops:5016`; host access uses
-`http://localhost:5016`. If `OPS_PORT` is changed, both ports change together.
-
-The service has no business-service `depends_on` entries. Like the other backend
-services, it loads `deploy/env/.env` through `env_file`. Logging parameters come
-from that file rather than repeated Compose defaults. Merely passing component
-addresses does not initialize their clients.
-Only the existing logs directory is mounted; no business data volumes are required. Set
-`ROOT_DIR` in the deployment environment for this mount. SQL startup is explicitly disabled. The container listens on
-`0.0.0.0`. There is no operations destination URL configured in business services.
-The listener address is not an access policy: the published port remains reachable
-according to host networking and firewall rules. Preventing business services from
-accessing operations requires an explicit ingress or network policy.
-
-The shared backend image retains its existing installed dependencies. This
-change reduces runtime service dependencies, not image size. No image build or
-container rollout is performed by the bootstrap code.
+Application, Uvicorn and access logs use `infrastructure.logging`, console and
+rotating persistent files. The file path is `LOG_DIR/ops/nexent_ops.log`; Kubernetes
+uses a per-pod log directory to avoid concurrent rotation.
 
 ## Code boundaries
 
-- `ops_service.py`: process launcher.
-- `ops/api/`: HTTP parsing, responses and application composition.
-- `ops/services/`: future business rules and orchestration.
-- `ops/lifespan.py`: process resources and readiness lifecycle.
-
-Introduce database access and integration adapters only when a feature needs
-them. Simple process health does not require a forwarding service class.
-
-## Kubernetes
-
-The existing `bash deploy/deploy.sh --defaults k8s` entry point enables the
-`nexent-ops` subchart whenever `application` is selected and waits for its
-Deployment to become ready. It reuses the selected backend image and does not
-mount business configuration, credentials, SQL or business storage. Only explicit
-ops settings, selected logging keys from the existing `nexent-env` Secret and
-SQL-startup-off are passed to its container; the Kubernetes API
-service-account token is not mounted.
-
-The only storage mount is the logs PVC, using `global.sharedStorage.logs.existingClaim`
-or the subchart's `logs.existingClaim` (default `nexent-logs`). The parent chart
-creates the standard logs claim; a standalone ops chart needs an existing claim.
-
-The Service and container port default to `5016` (`OPS_PORT` overrides both).
-The default external address is `<node-ip>:30016`; in the same namespace,
-use `http://nexent-ops:5016`. For direct Helm use, configure
-`nexent-ops.service.type=ClusterIP` to keep it internal, or change
-`nexent-ops.service.nodePort` when the default NodePort conflicts. Log level
-uses the shared `LOG_LEVEL` from `.env`, default `INFO`.
-
-Health probes use `/health/live` and `/health/ready`. Image and ops configuration
-checksums participate in rollouts. Resource requests and limits are configurable
-chart defaults, not measured memory or CPU consumption. Helm rendering verifies
-manifest composition; it does not prove an actual cluster deployment.
-
-## Persistent logs
-
-Console output remains available. Application, Uvicorn server and HTTP access
-records also use `get_uvicorn_logging_config(categories=['ops'])`, the same
-logging factory used by the existing backend entrypoints:
-
-- Local: `LOG_DIR/ops/nexent_ops.log`, default `logs/ops/nexent_ops.log`.
-- Docker host: `${ROOT_DIR}/logs/ops/nexent_ops.log`.
-- Kubernetes logs PVC: `<pod-name>/ops/nexent_ops.log`.
-
-Kubernetes assigns `LOG_DIR` per pod so replicas and rolling updates do not rotate
-the same file concurrently. Replacing a pod keeps its previous directory on the
-PVC; old pod directories need cleanup under the deployment's retention policy.
-Shared `LOG_LEVEL`, `IS_DEBUG`, `LOG_MAX_BYTES`, `LOG_ROTATION_INTERVAL` and
-`LOG_BACKUP_COUNT` settings apply. Defaults rotate at 50 MiB or daily and retain
-30 backups per file. No Elasticsearch client or log collection service is required.
+- `ops_service.py`: launcher.
+- `ops/api/`: HTTP routes and application composition.
+- `ops/services/trajectory/`: query parsing, file retrieval and maintenance orchestration.
+- `ops/db/trajectory/`: authorized catalogs, list/statistics SQL and cleanup configuration.
+- `ops/concurrency.py`, `ops/lifespan.py`: process-owned resources.
+- `management/db/trajectory/`: shared ORM and transactional capture/projection writes.
+- `infrastructure/observability/`: shared file primitives and Runtime capture wiring.

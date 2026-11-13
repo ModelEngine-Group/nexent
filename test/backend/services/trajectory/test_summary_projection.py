@@ -7,7 +7,7 @@ import pytest
 
 
 def test_projection_keeps_zero_and_unknown_categories_separate():
-    from management.services.trajectory.projection import execution_values
+    from ops.services.trajectory.projection import execution_values
 
     run = {
         "trajectory_id": "00000000-0000-0000-0000-000000000001",
@@ -48,7 +48,7 @@ def test_projection_keeps_zero_and_unknown_categories_separate():
 
 
 def test_projection_rejects_model_overflow():
-    from management.services.trajectory.projection import model_names
+    from ops.services.trajectory.projection import model_names
 
     with pytest.raises(ValueError):
         model_names([{"kind": "model", "model": "x" * 101}])
@@ -57,10 +57,10 @@ def test_projection_rejects_model_overflow():
 
 
 def test_records_never_open_files_and_freeze_pages():
-    from management.services.trajectory.access import Actor
-    from management.services.trajectory.cache import ByteCache
-    from management.services.trajectory.pg_collection import records
-    from management.services.trajectory.primitives import ReferenceStore
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.cache import ByteCache
+    from ops.services.trajectory.pg_collection import records
+    from ops.services.trajectory.primitives import ReferenceStore
 
     service = Mock()
     service.references = ReferenceStore()
@@ -114,8 +114,8 @@ def test_records_never_open_files_and_freeze_pages():
 
 @pytest.mark.parametrize("values", [[], [0], [0, 10, 20], list(range(1000))])
 def test_disk_quantiles_match_exact_interpolation_and_release_files(values):
-    from management.services.trajectory.primitives import percentiles
-    from management.services.trajectory.quantiles import DiskQuantiles
+    from ops.services.trajectory.primitives import percentiles
+    from ops.services.trajectory.quantiles import DiskQuantiles
 
     with DiskQuantiles(chunk_size=3) as calculator:
         folder = calculator.root
@@ -126,7 +126,7 @@ def test_disk_quantiles_match_exact_interpolation_and_release_files(values):
 
 
 def test_disk_quantiles_cancel_removes_owned_files():
-    from management.services.trajectory.quantiles import DiskQuantiles
+    from ops.services.trajectory.quantiles import DiskQuantiles
 
     def cancelled():
         raise InterruptedError("controlled")
@@ -173,7 +173,7 @@ def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation
 ):
     from contextlib import contextmanager
 
-    from management.db.trajectory.queries import ExecutionCatalog
+    from ops.db.trajectory.queries import ExecutionCatalog
 
     session = Mock()
     session.execute.return_value.mappings.return_value.all.return_value = []
@@ -182,7 +182,7 @@ def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation
     def scoped():
         yield session
 
-    mocker.patch("management.db.trajectory.queries._session", scoped)
+    mocker.patch("ops.db.trajectory.queries._session", scoped)
     result = ExecutionCatalog().list_records(
         ["t"],
         {"id_query": " 12 ", "agent_id": "7", "model": "m", "status": "error"},
@@ -204,10 +204,10 @@ def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation
 def test_same_scope_statistics_survive_filters_and_reset_rejects_removed_members(
     mocker,
 ):
-    from management.services.trajectory.access import Actor
-    from management.services.trajectory.cache import ByteCache
-    from management.services.trajectory.pg_collection import records
-    from management.services.trajectory.primitives import QueryError, ReferenceStore
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.cache import ByteCache
+    from ops.services.trajectory.pg_collection import records
+    from ops.services.trajectory.primitives import QueryError, ReferenceStore
 
     service = Mock(max_candidates=100)
     service.references = ReferenceStore()
@@ -237,10 +237,10 @@ def test_same_scope_statistics_survive_filters_and_reset_rejects_removed_members
 
 
 def test_list_rechecks_administrator_permission_before_returning_statistics():
-    from management.services.trajectory.access import Actor
-    from management.services.trajectory.cache import ByteCache
-    from management.services.trajectory.pg_collection import records
-    from management.services.trajectory.primitives import QueryError, ReferenceStore
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.cache import ByteCache
+    from ops.services.trajectory.pg_collection import records
+    from ops.services.trajectory.primitives import QueryError, ReferenceStore
 
     service = Mock(max_candidates=100)
     service.references = ReferenceStore()

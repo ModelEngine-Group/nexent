@@ -8,6 +8,7 @@ case:
   - CHAT-LOCAL-TRAJECTORY-20261103
   - CHAT-TRAJECTORY-VERSION-20261111
   - CHAT-TRAJECTORY-SUMMARY-20261113
+  - CHAT-TRAJECTORY-FINAL-OUTPUT-20261113
   business_rule_ids:
   - TRJ-RULE-001
   - TRJ-RULE-002
@@ -35,7 +36,7 @@ case:
   steps:
   - order: 1
     action: 使用smolagents Core 启动隔离普通会话，经真实产品入口访问受控 Provider HTTP fixture；首次物理请求输出固定片段后断开，第二次成功。
-    expected: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+    expected: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。 流式思考、回答及工具参数合并后保存，失败部分同样合并；OTLP没有逐块SSE、deltas或活动输出快照，保留TTFT和Token指标。
   - order: 2
     action: 驱动两个并行子调用、一个嵌套工具、一次受控取消和一个大于监控预览上限的结果，记录实际工具次数。
     expected: 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。 根V3与并行子V2分别写入OTLP及冷读DTO，后续同会话草稿0/未知仍独立，列表保持各执行历史根版本，模型/工具为null。
@@ -55,7 +56,7 @@ case:
     action: 分别从配置页与工作台创建入口启动共享编排，执行新建、后续轮次与合法重试；经真实NL2Agent流、smolagents及HTTP Provider fixture落盘，再冷读会话。PG保存边界受控，断言服务端消息收据和实际执行者。
     expected: 配置页及工作台的智能体对话创建在保存会话后绑定可信身份，新建/续聊/重试均以系统创建助手为根执行者并按最终会话归档；重试关联原用户消息且不重复保存。实际模型调用次数和聊天结果不因采集改变，创建目标与执行者独立，关闭流恢复上下文并释放资源。
   expected_results:
-  - 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+  - 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。 流式思考、回答及工具参数合并后保存，失败部分同样合并；OTLP没有逐块SSE、deltas或活动输出快照，保留TTFT和Token指标。
   - 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。 根V3与并行子V2分别写入OTLP及冷读DTO，后续同会话草稿0/未知仍独立，列表保持各执行历史根版本，模型/工具为null。
   - 默认otlp沿用原上报；local_file仅保存本地且关闭远端Trace/Metrics，otlp仅远端导出，远端保持原预览/过滤/采样。本地在原DROP决策下提升RECORD_ONLY并保留sampled位，实际Span ID有效且正文完整；入队不等于成功，只有OTLP先刷盘，再持久化meta.json的confirmed_bytes/hash才确认。每行按标准OTLP解码，hex
     ID/纳秒字符串/数字枚举/AnyValue正确。PG结构/序列复用，新增业务UUID由宿主生成；模型请求/响应/思考共用一个record及物理Span，业务父与Span父分别保存，异步归档不串上下文。 大正文完整内嵌属性/Events，单个请求行可超过刷盘阈值，落盘值不因预览长度被截断；每执行的业务事实均在一份OTLP文件。
@@ -68,7 +69,7 @@ case:
   - 不修改共享 Provider、租户或其他会话数据。
   acceptance:
   - id: AC-01
-    description: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+    description: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。 流式思考、回答及工具参数合并后保存，失败部分同样合并；OTLP没有逐块SSE、deltas或活动输出快照，保留TTFT和Token指标。
     steps:
     - 1
     expected_results:

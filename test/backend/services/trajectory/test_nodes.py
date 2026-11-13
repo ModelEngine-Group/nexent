@@ -3,7 +3,7 @@
 
 import pytest
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from management.services.trajectory.nodes import build_nodes
+from ops.services.trajectory.nodes import build_nodes
 
 TRACE = "a" * 32
 

@@ -104,7 +104,7 @@ def test_environment_rejects_unsupported_modes(monkeypatch, raw):
 
 def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypatch):
     from contracts.constants import environment
-    from management.services.trajectory import runtime
+    from ops.services.trajectory import runtime
 
     TrajectoryFileStore.provision(tmp_path, storage_mode="shared_directory")
     values = {
@@ -123,11 +123,11 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
         "TRAJECTORY_CLEANUP_INTERVAL_SECONDS": 3600,
     }
     processor = create_local_processor(SimpleNamespace(**values), lambda: None)
-    assert (
-        processor.store.storage_mode
-        == processor._maintenance_store.storage_mode
-        == "shared_directory"
-    )
+    from ops.services.trajectory.lifecycle import create_maintenance_processor
+
+    maintenance = create_maintenance_processor(SimpleNamespace(**values))
+    assert processor.store.storage_mode == maintenance.store.storage_mode == "shared_directory"
+    assert processor._maintenance_store is None
     for key, value in {
         **values,
         "TRAJECTORY_READ_ENABLED": True,

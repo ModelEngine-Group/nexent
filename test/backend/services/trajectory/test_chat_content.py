@@ -5,9 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call
 
 import pytest
-from management.services.trajectory.access import Actor
-from management.services.trajectory.primitives import QueryError, ReferenceStore
-from management.services.trajectory.service import TrajectoryService
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.primitives import QueryError, ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 ACTOR = Actor("admin", "tenant", "ADMIN")
 

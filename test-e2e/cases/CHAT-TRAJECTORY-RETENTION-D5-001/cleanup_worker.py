@@ -21,7 +21,7 @@ from infrastructure.observability.trajectory_store import (
 
 
 def scheduled_cleanup(root, clock, fault):
-    from infrastructure.observability.trajectory_runtime import create_local_processor
+    from ops.services.trajectory.lifecycle import create_maintenance_processor
 
     # Local dotenv files are outside this isolated environment-configuration proof.
     with patch("dotenv.load_dotenv", return_value=False):
@@ -29,7 +29,7 @@ def scheduled_cleanup(root, clock, fault):
     assert (
         config.TRAJECTORY_ROOT_DIR == root
     )
-    processor = create_local_processor(config, lambda: None)
+    processor = create_maintenance_processor(config)
     assert processor is not None
     processor._maintenance_store.clock = lambda: clock
     unlink = os.unlink

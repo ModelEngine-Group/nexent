@@ -9,8 +9,8 @@ from infrastructure.observability.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
-from management.services.trajectory.archive import Archive, storage_error
-from management.services.trajectory.cache import ByteCache
+from ops.services.trajectory.archive import Archive, storage_error
+from ops.services.trajectory.cache import ByteCache
 from pydantic import ValidationError
 
 
@@ -56,7 +56,7 @@ def test_cleanup_days_boundaries(value):
 
 def test_cache_hard_byte_limit_lru_and_expiry(mocker):
     now = mocker.patch(
-        "management.services.trajectory.cache.time.monotonic", return_value=0
+        "ops.services.trajectory.cache.time.monotonic", return_value=0
     )
     cache = ByteCache(max_bytes=10, ttl=10)
     assert not cache.put("large", object(), 11)
@@ -132,8 +132,8 @@ def test_read_configuration_is_independent_and_shared_per_process(
 ):
     from contracts.constants import environment
     from infrastructure.observability.trajectory_store import TrajectoryFileStore
-    from management.services.trajectory import runtime
-    from management.services.trajectory.primitives import QueryError
+    from ops.services.trajectory import runtime
+    from ops.services.trajectory.primitives import QueryError
 
     monkeypatch.setattr(runtime, "_service", None)
     monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
@@ -160,8 +160,8 @@ def test_read_configuration_is_independent_and_shared_per_process(
     "availability", ["not_captured", "serialization_failed", "redacted"]
 )
 def test_missing_body_preserves_capture_availability(availability):
-    from management.services.trajectory.primitives import ReferenceStore
-    from management.services.trajectory.service import TrajectoryService
+    from ops.services.trajectory.primitives import ReferenceStore
+    from ops.services.trajectory.service import TrajectoryService
 
     service = TrajectoryService(Mock(), Mock(), ReferenceStore())
     body = service._body(

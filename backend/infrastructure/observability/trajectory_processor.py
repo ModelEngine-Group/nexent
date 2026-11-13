@@ -417,6 +417,13 @@ class LocalTrajectoryProcessor(SpanProcessor):
             if run_id not in self._writers:
                 continue
             request = span_request(span)
+            body = request["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+            # Generated bodies are persisted only by the ended span, never by active snapshots.
+            body["attributes"] = [
+                item for item in body["attributes"]
+                if item["key"] not in {"output.value", "nexent.reasoning.value", "nexent.raw.value"}
+            ]
+            body["events"] = []
             if sum(len(chunk) for chunk in json_chunks(request)) > self.run_queue_max_bytes:
                 self._gaps.add(run_id)
                 self._writers[run_id].mark_incomplete("capture_gap")
@@ -431,6 +438,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
             body["name"] = "nexent.trajectory.fragment"
             body["spanId"] = uuid4().hex[:16]
             body["startTimeUnixNano"] = body["endTimeUnixNano"] = str(now)
+            content = [a for a in body["attributes"] if a["key"] == "input.value"]
             body["attributes"] = [
                 a
                 for a in body["attributes"]
@@ -450,11 +458,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                         {"key": "nexent.owner_span_id", "value": {"stringValue": f"{span.context.span_id:016x}"}},
                         {"key": "nexent.snapshot_mode", "value": {"stringValue": "replace"}},
                     ]
-                    + [
-                        a
-                        for a in span_request(span)["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
-                        if a["key"] in {"input.value", "output.value", "nexent.reasoning.value", "nexent.raw.value"}
-                    ],
+                    + content,
                 }
             ]
             try:

@@ -33,12 +33,16 @@ def snapshot(runtime, client):
 
 def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime):
     def reply(request, number, emit):
-        emit(reasoning='Reasoning for the physical attempt')
+        emit(reasoning='Reasoning for ')
+        emit(reasoning='the physical attempt')
         if number == 1:
-            emit('failed-partial')
+            emit('failed-')
+            emit('partial')
             emit(error=True)
         else:
-            emit('<final_answer>completed-answer</final_answer>')
+            emit('<final_answer>completed-')
+            emit('answer</final_answer>')
+            emit(usage={'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13})
             emit(done=True)
 
     with runtime.http(reply) as (base, requests):
@@ -54,7 +58,25 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
     assert second['nexent.business_status'] == 'completed'
     assert first['nexent.attempt_id'] == second['nexent.previous_attempt_id']
     assert first['nexent.record_id'] != second['nexent.record_id']
+    assert int(second['llm.token_count.prompt']) == 9
+    assert int(second['llm.token_count.completion']) == 4
+    assert int(second['llm.token_count.total']) == 13
     assert 'failed-partial' in first['output.value']
+    for span, expected, completed in zip(models, ('failed-partial', '<final_answer>completed-answer</final_answer>'),
+                                         (False, True)):
+        values = attrs(span)
+        output = json.loads(values['output.value'])
+        assert output['content_parts'] == [{'type': 'text', 'text': expected}]
+        assert output['reasoning_parts'] == [{'type': 'text', 'text': 'Reasoning for the physical attempt'}]
+        assert output['complete'] is completed
+        assert 'deltas' not in output and 'stream' not in json.loads(values['nexent.raw.value'])
+        assert 'unmapped_delta_fields' not in output.get('provider_metadata', {})
+        assert all(event['name'] != 'token_generated' for event in span.get('events', []))
+        assert float(values['llm.ttft_ms']) >= 0
+    for span in saved:
+        if span['name'] == 'nexent.trajectory.fragment':
+            for event in span.get('events', []):
+                assert not {'output.value', 'nexent.reasoning.value', 'nexent.raw.value'} & attrs(event).keys()
     assert all(json.loads(attrs(span)['nexent.raw.value'])['request'] == request
                for span, request in zip(models, requests))
     with runtime.client() as client:

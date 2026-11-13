@@ -7,7 +7,7 @@ import os
 import pytest
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
 from infrastructure.observability.trajectory_reader import JSONReader, read_text
-from management.services.trajectory.primitives import (
+from ops.services.trajectory.primitives import (
     percentiles,
 )
 

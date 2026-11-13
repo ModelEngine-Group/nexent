@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
 from .agent_version import agent_version_attributes
 from .first_token import stream_token_basis, valid_ttft
+from .local_content import local_capture_enabled
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
@@ -2002,7 +2003,7 @@ class LLMTokenTracker:
         if self.first_token_time is None:
             self.record_first_token()
         self.token_count += 1
-        if self.span:
+        if self.span and not local_capture_enabled(self.manager):
             self.span.add_event("token_generated", {
                 "token_count": self.token_count,
                 "token_length": len(token)

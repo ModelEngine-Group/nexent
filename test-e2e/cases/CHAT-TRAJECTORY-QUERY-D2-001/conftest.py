@@ -14,10 +14,10 @@ from infrastructure.observability.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
-from management.api.observability import trajectory as api
-from management.services.trajectory.primitives import QueryError, ReferenceStore
-from management.services.trajectory.service import TrajectoryService
 from nexent.core.concurrency import LanePolicy, ThreadManager
+from ops.api import trajectory as api
+from ops.services.trajectory.primitives import QueryError, ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 
 class Catalog:
@@ -169,8 +169,8 @@ def harness(tmp_path, monkeypatch):
     app = FastAPI()
     app.state.thread_manager = manager
     app.include_router(api.router)
-    from management.api.conversation import conversation_management as conversations
     from management.api.identity import user as users_api
+    from ops.api import trajectory_directory as conversations
 
     app.include_router(conversations.router)
     app.include_router(users_api.router)

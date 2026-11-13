@@ -9,8 +9,10 @@ services:
       - nexent
     volumes:
       - ${ROOT_DIR:?Set ROOT_DIR for persistent ops logs}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}
     env_file:
       - ../../env/.env
+      - ../../env/monitoring.env
     environment:
       OPS_PORT: "${OPS_PORT:-5016}"
       LOG_DIR: "/mnt/nexent-data/logs"

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backfill and verify PG projections before enabling the new list implementation.
 
-Run ``python -m scripts.backfill_trajectory_summaries`` from backend with its
+Run ``python -m ops.scripts.backfill_trajectory_summaries`` from backend with its
 configured environment after applying the migration and stopping old processes.
 """
 
@@ -13,7 +13,7 @@ from infrastructure.observability.trajectory_store import TrajectoryFileStore
 from management.db.client import get_db_session
 from management.db.trajectory.models import TrajectoryExecution
 from management.db.trajectory.repository import ExecutionRepository
-from management.services.trajectory.projection import Projector, manifest_runs
+from ops.services.trajectory.projection import Projector, manifest_runs
 
 logger = logging.getLogger(__name__)
 

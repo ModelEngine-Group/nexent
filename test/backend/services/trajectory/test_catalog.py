@@ -4,7 +4,7 @@
 from contextlib import contextmanager
 
 import pytest
-from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+from ops.db.trajectory.catalog import TrajectoryCatalog
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
@@ -28,7 +28,7 @@ def catalog(mocker):
         )
         return []
 
-    mocker.patch("management.db.conversation.trajectory_catalog._session", scoped)
+    mocker.patch("ops.db.trajectory.catalog._session", scoped)
     mocker.patch("sqlalchemy.orm.Query.all", empty)
     yield TrajectoryCatalog(), sql
     session.close()
@@ -122,7 +122,7 @@ def test_source_message_query_is_scalar_owned_bounded_and_keeps_deleted_history(
 
 
 def test_source_message_budget_returns_retryable_error(catalog, mocker):
-    from management.services.trajectory.primitives import QueryError
+    from ops.services.trajectory.primitives import QueryError
 
     service, _ = catalog
     mocker.patch("sqlalchemy.orm.Query.all", return_value=[(1,), (2,)])

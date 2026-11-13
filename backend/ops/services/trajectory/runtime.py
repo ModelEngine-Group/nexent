@@ -25,9 +25,9 @@ def get_service():
             from infrastructure.observability.trajectory_store import (
                 TrajectoryFileStore,
             )
-            from management.db.conversation.trajectory_catalog import TrajectoryCatalog
-            from management.db.trajectory.queries import ExecutionCatalog
             from management.db.trajectory.repository import ExecutionRepository
+            from ops.db.trajectory.catalog import TrajectoryCatalog
+            from ops.db.trajectory.queries import ExecutionCatalog
 
             from .archive import storage_error
             from .service import TrajectoryService
@@ -62,3 +62,10 @@ def get_service():
                 execution_catalog=ExecutionCatalog(),
             )
     return _service
+
+
+def reset_service():
+    """Release process-local query references after workers have stopped."""
+    global _service
+    with _lock:
+        _service = None

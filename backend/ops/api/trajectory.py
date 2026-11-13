@@ -11,13 +11,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from gateway.authentication.auth import get_current_user_context
-from management.services.trajectory.access import Actor
-from management.services.trajectory.cleanup import cleanup
-from management.services.trajectory.cleanup_schedule import read_schedule, save_schedule
-from management.services.trajectory.collection import facets, records
-from management.services.trajectory.primitives import CURRENT_CANCEL, QueryError
-from management.services.trajectory.runtime import get_service
 from nexent.core.concurrency import ManagedTaskSpec
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.cleanup import cleanup
+from ops.services.trajectory.cleanup_schedule import read_schedule, save_schedule
+from ops.services.trajectory.collection import facets, records
+from ops.services.trajectory.primitives import CURRENT_CANCEL, QueryError
+from ops.services.trajectory.runtime import get_service
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class PrivateRoute(APIRoute):
         handler = super().get_route_handler()
 
         async def private_handler(request):
-            if not request.url.path.startswith("/trajectory/") and request.query_params.get("view") != "trajectory":
+            if not self.path.startswith(("/trajectory/", "/conversation/agent_groups")):
                 return await handler(request)
             try:
                 response = await handler(request)

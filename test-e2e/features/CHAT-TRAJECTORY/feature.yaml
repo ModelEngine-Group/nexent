@@ -11,7 +11,7 @@ feature:
   business_rules:
   - rule_id: TRJ-RULE-001
     description: 复用OTel埋点，物理模型attempt、工具及Agent为实际Span，完整输入输出/失败片段/思考在属性和Events保留，聊天回滚兼容。
-      根和子Agent分别保存实际version_no及可用版本名称，0为草稿、缺失为未知，历史查询不查当前版本。
+      根和子Agent分别保存实际version_no及可用版本名称，0为草稿、缺失为未知，历史查询不查当前版本。 流式思考、回答和工具参数在内存合并，结束时保存最终内容；失败或取消保存合并后的已接收部分，活动快照仅保留输入和结构信息，最终文件不保存逐块SSE或deltas。
   - rule_id: TRJ-RULE-002
     description: PG新增执行摘要及统计快照两张表，复用现有授权目录，列表和候选只读PG；节点详情按需读取文件。本地按tenant/user/agent/conversation组织；meta保存固定归属/执行清单，每执行一份OTLP，全部正文内嵌属性/Events并按字段分块读取。256KiB为刷盘阈值，单行可更大，增量编码/解码须实际验证。
   - rule_id: TRJ-RULE-003
@@ -51,6 +51,7 @@ feature:
     - CHAT-TRAJECTORY-AUTO-CONTENT-20261112
     - CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
     - CHAT-TRAJECTORY-SUMMARY-20261113
+    - CHAT-TRAJECTORY-FINAL-OUTPUT-20261113
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
       historical provenance for retired Cases. Unit contracts stay in UT; preserve

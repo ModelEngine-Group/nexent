@@ -10,10 +10,10 @@ import uvicorn
 from conftest import Catalog
 from fastapi import FastAPI
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
-from management.api.observability import trajectory as api
-from management.services.trajectory.primitives import ReferenceStore
-from management.services.trajectory.service import TrajectoryService
 from nexent.core.concurrency import LanePolicy, ThreadManager
+from ops.api import trajectory as api
+from ops.services.trajectory.primitives import ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 
 def main():

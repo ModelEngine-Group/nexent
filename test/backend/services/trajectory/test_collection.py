@@ -7,11 +7,11 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from management.services.trajectory.access import Actor, authorize
-from management.services.trajectory.archive import Archive
-from management.services.trajectory.collection import records
-from management.services.trajectory.primitives import QueryError, ReferenceStore
-from management.services.trajectory.service import TrajectoryService
+from ops.services.trajectory.access import Actor, authorize
+from ops.services.trajectory.archive import Archive
+from ops.services.trajectory.collection import records
+from ops.services.trajectory.primitives import QueryError, ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 
 @pytest.fixture
@@ -209,7 +209,7 @@ def test_manifest_filters_avoid_body_io_without_changing_empty_totals(service, f
 
 
 def test_facet_rechecks_owner_after_reading_candidate_names(service):
-    from management.services.trajectory.collection import facets
+    from ops.services.trajectory.collection import facets
 
     service.catalog.agent_names.return_value = {("t", "7"): "Agent"}
     service.catalog.resolve.side_effect = QueryError("trajectory_not_found", 404)

@@ -10,7 +10,7 @@ from infrastructure.observability.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
-from management.services.trajectory.primitives import QueryError
+from ops.services.trajectory.primitives import QueryError
 
 
 def audit_context(**kwargs):

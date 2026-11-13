@@ -11,8 +11,8 @@ from infrastructure.observability.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
-from management.services.trajectory.archive import Archive
-from management.services.trajectory.service import TrajectoryService
+from ops.services.trajectory.archive import Archive
+from ops.services.trajectory.service import TrajectoryService
 
 
 @pytest.fixture

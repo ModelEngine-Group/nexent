@@ -123,14 +123,14 @@ def test_idempotent_registration_and_expired_compensation_do_not_revive(
 
 
 def test_summary_worker_failure_retries_without_publishing_partial(mocker):
-    from management.services.trajectory.statistics import StatisticsWorker
+    from ops.services.trajectory.statistics import StatisticsWorker
 
     store = Mock()
     store.identities.return_value = iter([])
     repository = Mock()
     worker = StatisticsWorker(store, repository)
     mocker.patch(
-        "management.services.trajectory.statistics.TrajectoryCatalog"
+        "ops.services.trajectory.statistics.TrajectoryCatalog"
     ).return_value.tenants.return_value = ["t"]
     worker.refresher = Mock()
     worker.refresher.refresh.side_effect = ValueError("controlled")
@@ -189,7 +189,7 @@ def test_out_of_order_file_registration_keeps_highest_turn_latest(tmp_path, iden
 def test_pending_notifications_are_coalesced_and_repaired_by_the_projection_worker(
     mocker, identity
 ):
-    from management.services.trajectory.statistics import SummaryWorker
+    from ops.services.trajectory.statistics import SummaryWorker
 
     store = Mock()
     store.identities.return_value = iter([])
@@ -206,9 +206,9 @@ def test_pending_notifications_are_coalesced_and_repaired_by_the_projection_work
 
 
 def test_statistics_scope_lock_is_released_even_after_failure(mocker):
-    from management.db.trajectory.statistics import scope_lock
+    from ops.db.trajectory.statistics import scope_lock
 
-    engine = mocker.patch("management.db.trajectory.statistics.db_client").engine
+    engine = mocker.patch("ops.db.trajectory.statistics.db_client").engine
     connection = engine.connect.return_value.execution_options.return_value.__enter__.return_value
     connection.execute.return_value.scalar.return_value = True
     with (
@@ -227,7 +227,7 @@ def test_statistics_scope_lock_is_released_even_after_failure(mocker):
 def test_statistics_publication_is_atomic_and_preserves_newer_source_revision(mocker):
     from datetime import UTC, datetime
 
-    from management.db.trajectory.statistics import publish
+    from ops.db.trajectory.statistics import publish
 
     session = Mock()
     session.execute.return_value.scalar.return_value = False
@@ -236,7 +236,7 @@ def test_statistics_publication_is_atomic_and_preserves_newer_source_revision(mo
     def scoped():
         yield session
 
-    mocker.patch("management.db.trajectory.statistics.get_db_session", scoped)
+    mocker.patch("ops.db.trajectory.statistics.get_db_session", scoped)
     assert publish(
         "tenant",
         "t",
@@ -260,7 +260,7 @@ def test_statistics_publication_is_atomic_and_preserves_newer_source_revision(mo
 
 
 def test_delayed_parser_cannot_republish_after_file_cleanup(tmp_path, identity, mocker):
-    from management.services.trajectory.projection import Projector
+    from ops.services.trajectory.projection import Projector
 
     store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     run = str(uuid4())
@@ -276,7 +276,7 @@ def test_delayed_parser_cannot_republish_after_file_cleanup(tmp_path, identity, 
         )
 
     mocker.patch(
-        "management.services.trajectory.projection.build_nodes", side_effect=parsed
+        "ops.services.trajectory.projection.build_nodes", side_effect=parsed
     )
     repository = Mock()
     Projector(store, repository).sync(identity)
@@ -286,7 +286,7 @@ def test_delayed_parser_cannot_republish_after_file_cleanup(tmp_path, identity, 
 def test_corrupt_archives_are_projected_explicitly_without_stalling_other_runs(
     tmp_path, identity
 ):
-    from management.services.trajectory.projection import Projector
+    from ops.services.trajectory.projection import Projector
 
     store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     run = str(uuid4())
@@ -299,9 +299,9 @@ def test_corrupt_archives_are_projected_explicitly_without_stalling_other_runs(
 
 
 def test_directory_candidates_use_pg_without_file_checks(mocker):
-    from management.services.trajectory.access import Actor
-    from management.services.trajectory.directory import directory
-    from management.services.trajectory.primitives import ReferenceStore
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.directory import directory
+    from ops.services.trajectory.primitives import ReferenceStore
 
     service = Mock()
     service.execution_catalog = Mock()
@@ -319,7 +319,7 @@ def test_directory_candidates_use_pg_without_file_checks(mocker):
 def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(mocker):
     from datetime import UTC, datetime
 
-    from management.db.trajectory.statistics import duration_statistics
+    from ops.db.trajectory.statistics import duration_statistics
 
     session = Mock()
     session.execute.return_value.mappings.return_value.one.return_value = {}
@@ -329,7 +329,7 @@ def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(moc
     def scoped():
         yield session
 
-    mocker.patch("management.db.trajectory.statistics.get_db_session", scoped)
+    mocker.patch("ops.db.trajectory.statistics.get_db_session", scoped)
     assert duration_statistics(["t"], datetime.now(UTC))["conversation_count"] == 3
     sql = str(session.execute.call_args_list[1].args[0])
     assert "percentile_cont(0.99)" in sql
@@ -341,7 +341,7 @@ def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(moc
 def test_pruned_latest_expired_fact_is_backfilled_without_fabricated_metrics(
     tmp_path, identity
 ):
-    from management.services.trajectory.projection import Projector
+    from ops.services.trajectory.projection import Projector
 
     store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     run = str(uuid4())
@@ -393,7 +393,7 @@ def test_lifecycle_still_registers_latest_request_when_archive_is_unreadable(moc
 
 def test_pg_reader_construction_never_opens_or_provisions_the_file_root(mocker):
     from contracts.constants import environment
-    from management.services.trajectory import runtime
+    from ops.services.trajectory import runtime
 
     mocker.patch.object(runtime, "_service", None)
     mocker.patch.object(environment, "TRAJECTORY_READ_ENABLED", True)

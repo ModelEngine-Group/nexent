@@ -274,13 +274,15 @@ def test_revoked_capture_releases_writer_and_seals_only_confirmed_content(captur
             raise PermissionError("Controlled membership revocation")
 
         capture.store.authorize = deny
-        root.set_attribute("nexent.local.output.value", "revoked-output")
+        root.set_attributes({"nexent.local.input.value": "revoked-input",
+                             "nexent.local.output.value": "revoked-output"})
         assert capture.processor.force_flush(2000)
         run = maintenance.manifest(capture.identity)["runs"][0]
         assert run["confirmed_bytes"] == before["confirmed_bytes"]
         assert run["capture_state"] == "incomplete" and run["business_status"] == "interrupted"
         assert not capture.processor._writers
         assert "revoked-output" not in json.dumps(requests(capture))
+        assert "revoked-input" not in json.dumps(requests(capture))
         maintenance.recover(capture.identity, run["trajectory_id"])
     assert capture.processor.force_flush(2000)
     assert not capture.processor._terminal
@@ -400,3 +402,24 @@ def test_remote_private_filter_preserves_otel_dropped_counts():
         == {"count": 7}
     )
     provider.shutdown()
+
+
+
+def test_active_snapshots_exclude_generated_content_until_span_end(capture):
+    with capture.tracer.start_as_current_span("agent.run") as root:
+        root.set_attribute("nexent.local.input.value", "stable-input")
+        assert capture.processor.force_flush(2000)
+        for text in ("partial-", "partial-answer"):
+            root.set_attributes({"nexent.local.output.value": text,
+                                 "nexent.local.nexent.reasoning.value": "growing-thought",
+                                 "nexent.local.nexent.raw.value": '{"stream":["raw-chunk"]}'})
+            assert capture.processor.force_flush(2000)
+        active = bodies(capture)
+        assert "partial-" not in json.dumps(active)
+        assert "growing-thought" not in json.dumps(active)
+        assert "raw-chunk" not in json.dumps(active)
+        assert len([s for s in active if s["name"] == "nexent.trajectory.fragment"]) == 1
+        root.set_attribute("nexent.local.output.value", "final-answer")
+    assert capture.processor.force_flush(2000)
+    final = next(s for s in bodies(capture) if s["name"] == "agent.run")
+    assert attrs(final)["output.value"] == "final-answer"

@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from infrastructure.observability.trajectory_store import parse_time
-from management.services.trajectory.primitives import QueryError
+from ops.services.trajectory.primitives import QueryError
 
 pytestmark = [
     pytest.mark.case_id("CHAT-TRAJECTORY-QUERY-D2-001"),
@@ -234,7 +234,7 @@ def test_trj_query_whole_result_metrics_filters_and_stable_membership(harness):
 
 
 def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness):
-    from management.services.trajectory.primitives import ReferenceStore
+    from ops.services.trajectory.primitives import ReferenceStore
 
     view = snapshot(harness)
     tool = next(node for node in view["nodes"] if node["kind"] == "tool")
@@ -713,7 +713,7 @@ def test_trj_query_content_chunk_rechecks_state_after_physical_read(
     monkeypatch,
     transition,
 ):
-    from management.services.trajectory import service as service_module
+    from ops.services.trajectory import service as service_module
 
     secret = "私有正文😀" * 4096
     harness.run = harness.add_run(body=secret, age_days=10)
@@ -918,7 +918,7 @@ def test_trj_query_managed_lane_capacity_rejection(harness):
 
 def test_trj_query_unauthorized_identity_is_401_and_private(harness, monkeypatch):
     from contracts.errors.exceptions import UnauthorizedError
-    from management.api.observability import trajectory as api
+    from ops.api import trajectory as api
 
     def denied(_):
         raise UnauthorizedError("Internal credential reason must remain private")
@@ -948,14 +948,14 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     from decimal import Decimal
     from unittest.mock import Mock
 
-    from management.db.trajectory.queries import ExecutionCatalog
-    from management.services.trajectory.cache import ByteCache
-    from management.services.trajectory.projection import execution_values
+    from ops.db.trajectory.queries import ExecutionCatalog
+    from ops.services.trajectory.cache import ByteCache
+    from ops.services.trajectory.projection import execution_values
 
     original_manifest = harness.service.archive.manifest
     row = harness.catalog.resolve(["t1"], "123")
     meta = original_manifest(row)
-    from management.services.trajectory.access import Actor
+    from ops.services.trajectory.access import Actor
 
     nodes, root, _ = harness.service.load(
         Actor("admin", "t1", "ADMIN"), row, harness.run.id, harness.service.budget()
@@ -1059,7 +1059,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     catalog.validate.side_effect = None
     monkeypatch.setattr(harness.service.archive, "manifest", original_manifest)
     # The real snapshot reader has independent permissions and file confirmation.
-    from management.services.trajectory.service import TrajectoryService
+    from ops.services.trajectory.service import TrajectoryService
 
     monkeypatch.setattr(
         harness.service, "load", TrajectoryService.load.__get__(harness.service)
@@ -1074,7 +1074,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
 def test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes(harness, monkeypatch):
     from types import SimpleNamespace
 
-    from management.services.trajectory import cleanup_schedule as settings
+    from ops.services.trajectory import cleanup_schedule as settings
 
     values = {}
     repository = SimpleNamespace(
@@ -1087,7 +1087,7 @@ def test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes(har
     monkeypatch.setattr(settings.config, "TRAJECTORY_CLEANUP_ENABLED", True)
     monkeypatch.setattr(settings.config, "TRAJECTORY_RETENTION_DAYS", 30)
     # Settings must remain available even when the trajectory file mount is unavailable.
-    from management.api.observability import trajectory as api
+    from ops.api import trajectory as api
     monkeypatch.setattr(api, "get_service", lambda: (_ for _ in ()).throw(OSError("unmounted")))
     path = "/trajectory/cleanup/schedule"
     assert data(get(harness, path))["interval_seconds"] == 3600

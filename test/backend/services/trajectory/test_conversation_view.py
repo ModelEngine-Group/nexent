@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 import test_collection as collection_fixtures
 from contracts.trajectory import RecordsQuery
-from management.services.trajectory.access import Actor
-from management.services.trajectory.collection import records
-from management.services.trajectory.primitives import QueryError
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.collection import records
+from ops.services.trajectory.primitives import QueryError
 
 service = collection_fixtures.service
 

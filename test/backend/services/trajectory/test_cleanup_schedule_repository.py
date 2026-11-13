@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from management.db.trajectory import cleanup_schedule as database
+from ops.db.trajectory import cleanup_schedule as database
 
 
 @pytest.fixture

@@ -2472,6 +2472,7 @@ deployment_render_helm_chart_values() {
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "${NEXENT_WEB_PORT:-30000}"
+  printf '  config:\n    opsHttpBackend: "http://nexent-ops:%s"\n' "${OPS_PORT:-5016}"
   printf 'nexent-data-process:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled data-process)"
   printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"

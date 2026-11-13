@@ -23,9 +23,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
-from management.api.observability import trajectory as api
-from management.services.trajectory.primitives import ReferenceStore
-from management.services.trajectory.service import TrajectoryService
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
 from nexent.core.agents.run_agent import agent_run_thread
 from nexent.core.agents.sandbox import SandboxConfig, SandboxPoolManager
@@ -50,6 +47,9 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON
+from ops.api import trajectory as api
+from ops.services.trajectory.primitives import ReferenceStore
+from ops.services.trajectory.service import TrajectoryService
 
 
 @contextmanager
@@ -68,9 +68,12 @@ def scripted_provider(reply):
             self.send_header('Content-Type', 'text/event-stream')
             self.end_headers()
 
-            def emit(content=None, *, reasoning=None, error=False, done=False):
+            def emit(content=None, *, reasoning=None, error=False, done=False, usage=None):
                 if done:
                     body = '[DONE]'
+                elif usage is not None:
+                    body = json.dumps({'id': 'fixture', 'object': 'chat.completion.chunk', 'created': 1,
+                                       'model': 'model', 'choices': [], 'usage': usage})
                 elif error:
                     body = json.dumps({'error': {'message': '500 server error in controlled fixture',
                                                  'type': 'server_error'}})

@@ -26,7 +26,6 @@ def create_local_processor(config, metadata_provider):
     if not capturing and not maintaining:
         return None
     from management.db.trajectory.repository import ExecutionRepository
-    from management.services.trajectory.cleanup_schedule import read_intervals
 
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
@@ -41,15 +40,6 @@ def create_local_processor(config, metadata_provider):
         source_query=capture_sources,
         storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
     )
-    # Maintenance identities come only from manifests under the verified storage root.
-    maintenance = TrajectoryFileStore(
-        config.TRAJECTORY_ROOT_DIR,
-        authorize=lambda identity: None,
-        initialization_guard=repository.initialize,
-        expire_callback=repository.expire,
-        retention_days=config.TRAJECTORY_RETENTION_DAYS,
-        storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
-    )
     return LocalTrajectoryProcessor(
         store,
         metadata_provider,
@@ -57,27 +47,24 @@ def create_local_processor(config, metadata_provider):
         flush_bytes=config.TRAJECTORY_FLUSH_BYTES,
         queue_max_bytes=config.TRAJECTORY_QUEUE_MAX_BYTES,
         run_queue_max_bytes=config.TRAJECTORY_RUN_QUEUE_MAX_BYTES,
-        maintenance_store=maintenance,
-        cleanup_enabled=config.TRAJECTORY_CLEANUP_ENABLED,
         cleanup_interval_seconds=config.TRAJECTORY_CLEANUP_INTERVAL_SECONDS,
-        cleanup_interval_provider=read_intervals,
     )
 
 
 def capture_sources(identity, upper=None):
     """Read only scalar IDs from the same currently authorized conversation."""
-    from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+    from management.db.conversation.trajectory_capture import CaptureCatalog
 
-    return TrajectoryCatalog().source_messages(
+    return CaptureCatalog().source_messages(
         identity.tenant_id, identity.owner_user_id, identity.conversation_id, upper=upper,
     )
 
 
 def conversation_deleted(identity):
     """Only a confirmed PG absence permits maintenance to reclaim an orphan."""
-    from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+    from management.db.conversation.trajectory_capture import CaptureCatalog
 
-    return TrajectoryCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)
+    return CaptureCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)
 
 
 def request_conversation_cleanup(conversation_ids, owner_user_id):

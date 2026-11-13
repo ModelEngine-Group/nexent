@@ -5,8 +5,8 @@ import logging
 
 from contracts.constants import environment as config
 from contracts.trajectory import CleanupScheduleRequest
-from management.db.conversation.trajectory_catalog import TrajectoryCatalog
-from management.db.trajectory.cleanup_schedule import CleanupScheduleRepository
+from ops.db.trajectory.catalog import TrajectoryCatalog
+from ops.db.trajectory.cleanup_schedule import CleanupScheduleRepository
 
 from .access import authorize
 from .primitives import QueryError

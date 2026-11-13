@@ -11,8 +11,7 @@ import pytest
 @pytest.mark.parametrize("fault", [None, "missing", "owner", "turn", "expiry"])
 def test_backfill_verifies_identity_turn_and_expired_status(mocker, fault):
     from infrastructure.observability.trajectory_store import CaptureIdentity
-
-    from scripts import backfill_trajectory_summaries as script
+    from ops.scripts import backfill_trajectory_summaries as script
 
     identity = CaptureIdentity("t", "u", "123", "7")
     store, repository, session = Mock(), Mock(), Mock()
@@ -47,7 +46,7 @@ def test_backfill_verifies_identity_turn_and_expired_status(mocker, fault):
 
 
 def test_backfill_does_not_republish_a_former_tenant_archive(mocker):
-    from scripts import backfill_trajectory_summaries as script
+    from ops.scripts import backfill_trajectory_summaries as script
 
     store, repository = Mock(), Mock()
     repository.placeholders.return_value = 0

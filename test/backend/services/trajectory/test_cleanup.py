@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 from infrastructure.observability.trajectory_io import TrajectoryConflict
-from management.services.trajectory.access import Actor
-from management.services.trajectory.cleanup import cleanup
-from management.services.trajectory.primitives import QueryError, ReferenceStore
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.cleanup import cleanup
+from ops.services.trajectory.primitives import QueryError, ReferenceStore
 
 ACTOR = Actor("admin", "tenant", "ADMIN")
 

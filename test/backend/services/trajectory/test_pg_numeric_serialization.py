@@ -9,11 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from management.db.trajectory.queries import ExecutionCatalog
-from management.services.trajectory.access import Actor
-from management.services.trajectory.cache import ByteCache
-from management.services.trajectory.pg_collection import records
-from management.services.trajectory.primitives import ReferenceStore
+from ops.db.trajectory.queries import ExecutionCatalog
+from ops.services.trajectory.access import Actor
+from ops.services.trajectory.cache import ByteCache
+from ops.services.trajectory.pg_collection import records
+from ops.services.trajectory.primitives import ReferenceStore
 
 
 @pytest.mark.parametrize("view", ["conversation", "execution"])
@@ -52,7 +52,7 @@ def test_pg_token_numbers_survive_json_cache_response_and_frozen_paging(
     session = Mock()
     session.execute.return_value.mappings.return_value.all.return_value = [row]
     mocker.patch(
-        "management.db.trajectory.queries._session",
+        "ops.db.trajectory.queries._session",
         side_effect=lambda: nullcontext(session),
     )
     catalog = ExecutionCatalog()
