@@ -11,6 +11,7 @@ from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.constants.environment import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
+from infrastructure.rdb import account_access
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
@@ -102,28 +103,7 @@ def _validate_user_tenant_limit(
 
 
 def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:
-    """Return the user's role within the given tenant.
-
-    Joins ``user_tenant_t`` by ``(user_id, tenant_id)`` so the result is
-    strictly tenant-scoped. Returns the empty string when no active row
-    exists; callers should treat that as "no role".
-    """
-    if not user_id or not tenant_id:
-        return ""
-    with get_db_session() as session:
-        result = (
-            session.query(UserTenant)
-            .filter(
-                UserTenant.user_id == user_id,
-                UserTenant.tenant_id == tenant_id,
-                UserTenant.delete_flag == "N",
-            )
-            .first()
-        )
-        # Access ORM attributes INSIDE the session context — the session
-        # closes on context-manager exit and lazy-loaded attributes are not
-        # reachable after that (would raise DetachedInstanceError).
-        return (result.user_role or "") if result is not None else ""
+    return account_access.get_user_role_by_tenant(user_id, tenant_id, session_factory=get_db_session)
 
 
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:

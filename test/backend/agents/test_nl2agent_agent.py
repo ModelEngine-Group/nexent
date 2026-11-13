@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,12 +14,8 @@ from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
 
-from management.services.agent.creation import (
-    build_nl2agent_system_prompt,
-    create_nl2agent_agent_config,
-)
-from tool_collection.mcp.local_mcp_service import local_mcp_service
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from infrastructure.agentos_identity import ServicePrincipal
+from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
     NL2A_WRAPPER_NAME,
     RECOMMEND_RESOURCES_NAME,
@@ -32,6 +29,12 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
 )
+from runtime.agentos.agent_creator_config import (
+    build_nl2agent_system_prompt,
+    create_nl2agent_agent_config,
+)
+from runtime.agentos.prepared_agent_creator import _callback_tools
+from tool_collection.mcp.local_mcp_service import local_mcp_service
 
 
 @pytest.mark.parametrize(
@@ -465,7 +468,10 @@ def test_requirement_clarification_accepts_at_most_five_questions():
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
     """UT-BE-DPR-011: ephemeral agents retain parallel tool localization."""
-    config = create_nl2agent_agent_config(language)
+    actor = ServicePrincipal("user", "tenant")
+    tools = list(_callback_tools(SimpleNamespace(run_id="a" * 32, agent_id=42), actor))
+    config = create_nl2agent_agent_config(language, tools)
+    assert all(tool.source == "langchain" for tool in config.tools[:-1])
     registered_tools = await local_mcp_service.get_tools()
 
     assert [tool.name for tool in config.tools] == [
@@ -519,7 +525,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
 
 
 def test_nl2agent_explicit_system_context_reaches_final_model_messages():
-    config = create_nl2agent_agent_config("zh")
+    config = create_nl2agent_agent_config("zh", [])
     runtime_agent = CodeAgent(
         tools=[],
         model=MagicMock(),

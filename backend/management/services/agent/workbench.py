@@ -8,14 +8,15 @@ import shutil
 import tempfile
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
 
-from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.errors.exceptions import RuntimeMetadataVersionConflict, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.agent import WorkbenchSessionConfig
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
+from infrastructure.workbench_skill_execution import resolve_skill_config
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -87,6 +88,16 @@ class ResolvedAgentPlan:
     root_skills: Tuple[ResolvedSkillMount, ...]
     child_mounts: Tuple[RuntimeAgentIdentity, ...] = ()
     knowledge_tree: Tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedWorkbench:
+    config: WorkbenchSessionConfig
+    plan: ResolvedAgentPlan
+    previous_version: int
+    version: int
+    knowledge: ResolvedKnowledgeScope | None = None
+    knowledge_tools: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -247,43 +258,6 @@ def build_workbench_main_profile(tenant_id: str) -> Dict[str, Any]:
             for skill in skills
         ],
     }
-
-
-def resolve_skill_config(schemas, defaults, published, runtime):
-    """Validate declared configuration after applying the three precedence layers."""
-    fields = {item["name"]: item for item in schemas if isinstance(item, dict) and item.get("name")}
-    values = deepcopy(defaults)
-    values.update(deepcopy(published))
-    values.update(deepcopy(runtime))
-    if any(name not in fields for name in runtime):
-        raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    types = {
-        "string": str, "boolean": bool, "integer": int,
-        "number": (int, float), "object": dict, "array": list,
-    }
-    for name, schema in fields.items():
-        value = values.get(name)
-        if value is None and "default" in schema:
-            value = values[name] = deepcopy(schema["default"])
-        if value is None or value == "":
-            if schema.get("required"):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            continue
-        expected = types.get(schema.get("type"))
-        if expected and (not isinstance(value, expected) or (
-            schema.get("type") in {"integer", "number"} and isinstance(value, bool)
-        )):
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if isinstance(schema.get("enum"), list) and value not in schema["enum"]:
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if schema.get("type") in {"integer", "number"}:
-            if not isfinite(value):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("minimum") is not None and value < schema["minimum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("maximum") is not None and value > schema["maximum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    return values
 
 
 class RuntimeMountService:
@@ -570,6 +544,55 @@ def assert_workbench_version(
             current_version,
             deepcopy(conversation.get("workbench_config")),
         )
+
+
+def prepare_portable_workbench(
+    request: AgentRequest, conversation: Mapping[str, Any] | None, user_id: str, tenant_id: str,
+) -> PreparedWorkbench | None:
+    from management.services.model.run_controls import validate_agent_model_selection
+
+    if not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+    validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
+    stored = conversation.get("workbench_config") if conversation is not None else None
+    previous_version = 0
+    if conversation is not None:
+        assert_workbench_version(conversation, request.expected_workbench_config_version)
+        previous_version = int(conversation.get("workbench_config_version") or 0)
+        metadata_version = int(conversation.get("runtime_metadata_version") or 0)
+        if request.metadata is not None and request.expected_metadata_version not in (None, metadata_version):
+            raise RuntimeMetadataVersionConflict(metadata_version)
+    requested = request.workbench
+    if requested is None and stored is not None:
+        requested = WorkbenchSessionConfig.model_validate(stored)
+    if requested is None:
+        raise ValidationError("Workbench configuration is required")
+    canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
+    version = previous_version + int(canonical.model_dump(mode="json") != stored)
+    if canonical.knowledge_scope is None:
+        return PreparedWorkbench(canonical, plan, previous_version, version)
+
+    knowledge, tools = resolve_workbench_knowledge(canonical, plan, request, user_id, tenant_id)
+    return PreparedWorkbench(canonical, plan, previous_version, version, knowledge, tools)
+
+
+def resolve_workbench_knowledge(
+    canonical: WorkbenchSessionConfig, plan: ResolvedAgentPlan, request: AgentRequest, user_id: str, tenant_id: str,
+) -> tuple[ResolvedKnowledgeScope, list[dict[str, Any]]]:
+    from management.services.knowledge_base.mount import mount_knowledge_records
+    from management.services.knowledge_base.scope import resolve_knowledge_scope, snapshot_runtime_knowledge_tree
+
+    root = plan.root.identity
+    # Workbench scopes apply only to the root, even when the run has mounted Agents.
+    tree = snapshot_runtime_knowledge_tree(int(root.agent_id), tenant_id, int(root.version_no))[:1]
+    tools = mount_knowledge_records(tree[0]["tools"], canonical.knowledge_scope, tenant_id)
+    tree[0]["tools"] = tools
+    knowledge = resolve_knowledge_scope(
+        scope=canonical.knowledge_scope, agent_id=int(root.agent_id), tenant_id=tenant_id, user_id=user_id,
+        version_no=root.version_no, is_debug=bool(request.is_debug),
+        request_tool_params=request.tool_params, runtime_agent_tree=tree,
+    )
+    return knowledge, tools
 
 
 def runtime_skill_snapshot(tree: ResolvedAgentPlan | ResolvedAgentTree) -> list[Dict[str, Any]]:

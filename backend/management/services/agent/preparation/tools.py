@@ -7,25 +7,31 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.agentos import EvaluationAnalysisTool
+from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.constants.environment import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
 )
-from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
-from management.db.agent.repository import search_agent_info_by_agent_id
+from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
+from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
+from infrastructure.local_tool_execution import (
+    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_CLASS_NAMES,
+    LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA,
+)
+from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
 from infrastructure.object_storage.client import minio_client
+from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, restrict_aidp_access, shared_aidp_parameters
+from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
 )
 from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from management.services.file.service import validate_urls_access
-from management.services.knowledge_base.providers.aidp import (
-    create_ind_aidp_image_url_builder,
-)
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_embedding_model_by_index_name,
@@ -36,26 +42,9 @@ from management.services.model.resolver import get_rerank_model
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.concurrency import run_blocking
-from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
-
-
-def _build_parallel_executor_tool_config(default_timeout_seconds: int) -> ToolConfig:
-    return ToolConfig(
-        class_name=ParallelExecutorTool.__name__,
-        name=ParallelExecutorTool.name,
-        description=ParallelExecutorTool.description,
-        description_zh=ParallelExecutorTool.description_zh,
-        inputs=json.dumps(
-            ParallelExecutorTool.inputs_for_timeout(default_timeout_seconds),
-            ensure_ascii=False,
-        ),
-        output_type=ParallelExecutorTool.output_type,
-        params={"default_timeout_seconds": default_timeout_seconds},
-        source="local",
-    )
 
 
 def _normalize_tool_params_request(
@@ -320,40 +309,8 @@ def _get_skill_script_tools(
 
 def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
     """Inject plan tool configs into the given tools list if enable_planning is True."""
-    if not enable_planning:
-        return
-
-    plan_names = {"create_plan", "update_plan_step"}
-    if any(t.name in plan_names for t in tools):
-        return
-
-    # Protocol fields stay fixed while prose follows the run language at render time.
-    tool_prose_en = get_builtin_tool_descriptions("en")
-    tool_prose_zh = get_builtin_tool_descriptions("zh")
-    tools.extend(
-        [
-            ToolConfig(
-                class_name="CreatePlanTool",
-                name="create_plan",
-                description=tool_prose_en["create_plan"],
-                description_zh=tool_prose_zh["create_plan"],
-                inputs='{"title": "string", "steps": "array"}',
-                output_type="object",
-                params={},
-                source="builtin",
-            ),
-            ToolConfig(
-                class_name="UpdatePlanStepTool",
-                name="update_plan_step",
-                description=tool_prose_en["update_plan_step"],
-                description_zh=tool_prose_zh["update_plan_step"],
-                inputs='{"step_id": "string", "status": "string"}',
-                output_type="object",
-                params={},
-                source="builtin",
-            ),
-        ]
-    )
+    if enable_planning and not any(tool.name in PLAN_TOOL_NAMES for tool in tools):
+        tools.extend(build_plan_tool_configs())
 
 
 async def create_tool_config_list(
@@ -365,9 +322,12 @@ async def create_tool_config_list(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     language: str = "zh",
+    *,
+    portable_evaluation: bool = False,
+    authorized_knowledge_tools: dict | None = None,
 ):
     tool_config_list = []
-    langchain_tools = await discover_langchain_tools()
+    langchain_tools = [] if portable_evaluation else await discover_langchain_tools()
     normalized_tool_params = _normalize_tool_params_request(tool_params)
 
     tools_list = _resolve_runtime_tool_records(
@@ -421,6 +381,15 @@ async def create_tool_config_list(
         elif tool.get("class_name") in agent_tool_overrides:
             override_params = agent_tool_overrides[tool.get("class_name")]
 
+        scoped_knowledge_tool = authorized_knowledge_tools is not None and tool.get("class_name") in {
+            "AidpSearchTool", "KnowledgeBaseSearchTool",
+        }
+        if scoped_knowledge_tool:
+            authorized = authorized_knowledge_tools.get((agent_id, version_no), {}).get(tool_identifier)
+            if authorized is None:
+                raise ValidationError("Agent knowledge configuration changed while preparing the run")
+            override_params = {**(override_params or {}), **authorized}
+
         # Independent AIDP endpoint, credential, and default KDS scope are
         # instance configuration. Request-level config overrides must not
         # rewrite them; forward() may still receive a per-call kds_list.
@@ -429,26 +398,20 @@ async def create_tool_config_list(
             if tool.get("class_name") == "IndependentAidpSearchTool"
             else override_params
         )
+        if portable_evaluation and tool.get("source") == "langchain" and tool.get("class_name") != "AidpSearchTool":
+            # The SDK invokes the plugin directly and does not use ToolConfig.params.
+            effective_override_params = None
         param_dict = _merge_tool_params(tool, effective_override_params)
         if tool.get("class_name") == "DeepSeekSearchTool":
             param_dict.pop("localization", None)
             param_dict.pop("max_content_chars", None)
             # Run language is authoritative over persisted or request-level tool parameters.
             param_dict["language"] = language
-        if tool.get("class_name") == "AidpSearchTool":
-            # Credentials are backend-owned since the v7.1 permission
-            # redesign; populate them from the central constants (the
-            # database row may carry a stale value).
-            param_dict.pop("server_url", None)
-            param_dict.pop("api_key", None)
-            param_dict.pop("tenant_id", None)
-            param_dict.update(
-                {
-                    "server_url": AIDP_SERVER_URL,
-                    "api_key": AIDP_API_KEY,
-                    "tenant_id": AIDP_TENANT_ID,
-                }
-            )
+        is_shared_aidp = tool.get("class_name") == "AidpSearchTool"
+        if is_shared_aidp:
+            param_dict = shared_aidp_parameters(param_dict)
+            if not portable_evaluation:
+                param_dict.update(server_url=AIDP_SERVER_URL, api_key=AIDP_API_KEY, tenant_id=AIDP_TENANT_ID)
 
         if tool.get("class_name") == "IndependentAidpSearchTool":
             if not param_dict.get("server_url") or not param_dict.get("api_key"):
@@ -456,19 +419,14 @@ async def create_tool_config_list(
                     "Independent AIDP search requires server_url and api_key in its tool configuration."
                 )
 
-        # Inject the runtime whitelist for AidpSearchTool. ``param_dict``
-        # already contains the resolved per-run range (inherit/override/
-        # disabled). Intersect it with the current remote catalog and local
-        # permissions, but never intersect it with the agent defaults again.
-        _allowed_kds_set: set[str] = set()
-        _kds_name_to_id_map: dict[str, str] = {}
-        if tool.get("class_name") == "AidpSearchTool":
+        aidp_snapshot = None
+        if is_shared_aidp and not portable_evaluation:
             try:
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
 
-                snapshot = await run_blocking(
+                aidp_snapshot = await run_blocking(
                     "resolve-runtime-aidp-access",
                     resolve_current_aidp_access,
                     server_url=AIDP_SERVER_URL,
@@ -479,39 +437,11 @@ async def create_tool_config_list(
                     lane="control-io",
                     owner="agents.create_agent_info",
                 )
-                _allowed_kds_set = set(snapshot.accessible_id_set)
-                _kds_name_to_id_map = {
-                    **snapshot.name_to_id,
-                    **snapshot.tenant_name_to_id,
-                }
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "AIDP access snapshot lookup failed: %s",
                     exc,
                 )
-
-            configured_kds = param_dict.get("kds_list") or []
-            if isinstance(configured_kds, str):
-                try:
-                    configured_kds = json.loads(configured_kds)
-                except json.JSONDecodeError:
-                    configured_kds = []
-            if not isinstance(configured_kds, list):
-                configured_kds = []
-            configured_kds = [str(kds_id) for kds_id in configured_kds]
-            configured_kds_set = set(configured_kds)
-            # The execution whitelist is the effective tool range, not every
-            # KDS the user could access. This prevents model-supplied arguments
-            # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds_set)
-            # Keep the full per-run scope in params so the SDK can distinguish
-            # configured-but-denied knowledge bases from unavailable ones.
-            param_dict["kds_list"] = configured_kds
-            _kds_name_to_id_map = {
-                name: kds_id
-                for name, kds_id in _kds_name_to_id_map.items()
-                if kds_id in configured_kds_set
-            }
 
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
@@ -524,35 +454,27 @@ async def create_tool_config_list(
             source=tool.get("source"),
             usage=tool.get("usage"),
         )
-
-        if tool.get("class_name") == "AidpSearchTool":
-            # Carry over the runtime whitelist; merge into any existing
-            # metadata so langchain_tool references that may already be
-            # attached are preserved. ``tool_config.metadata`` defaults to
-            # None on ToolConfig, so guard the spread accordingly.
-            existing = (
-                tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
+        if portable_evaluation and tool_config.source == "mcp" and effective_override_params:
+            tool_config.metadata = {MCP_ARGUMENT_OVERRIDES: effective_override_params}
+        if portable_evaluation and tool_config.source == "local" and effective_override_params:
+            key = (
+                LOCAL_SEARCH_TUNING_METADATA
+                if effective_override_params.keys() <= LOCAL_SEARCH_TUNING_FIELDS.get(
+                    LOCAL_SDK_CLASS_NAMES.get(tool_config.class_name, tool_config.name), set(),
+                )
+                else LOCAL_PARAMETER_OVERRIDES_METADATA
             )
-            tool_config.metadata = {
-                **existing,
-                "allowed_kds_set": sorted(_allowed_kds_set),
-                "kds_name_to_id_map": _kds_name_to_id_map,
-            }
-            tool_class_name = tool.get("class_name")
-            for langchain_tool in langchain_tools:
-                if langchain_tool.name == tool_class_name:
-                    existing2 = (
-                        tool_config.metadata
-                        if isinstance(tool_config.metadata, dict)
-                        else {}
-                    )
-                    tool_config.metadata = {
-                        **existing2,
-                        "langchain_tool": langchain_tool,
-                    }
-                    break
+            tool_config.metadata = {key: effective_override_params}
 
-        if tool.get("class_name") == "IndependentAidpSearchTool":
+        if is_shared_aidp and portable_evaluation and (runtime_knowledge_tools is not None or scoped_knowledge_tool):
+            tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}
+        elif is_shared_aidp and not portable_evaluation:
+            tool_config.metadata = restrict_aidp_access(param_dict["kds_list"], aidp_snapshot)
+            langchain_tool = next((item for item in langchain_tools if item.name == tool_config.class_name), None)
+            if langchain_tool is not None:
+                tool_config.metadata["langchain_tool"] = langchain_tool
+
+        if tool.get("class_name") == "IndependentAidpSearchTool" and not portable_evaluation:
             existing = (
                 tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
             )
@@ -587,8 +509,21 @@ async def create_tool_config_list(
             if kb_overrides and "document_paths" in kb_overrides:
                 document_paths = kb_overrides.get("document_paths")
 
+        if portable_evaluation and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
+            from management.services.agent.preparation.analysis import prepare_analysis_tool
+
+            if prepare_analysis_tool(tool_config, tenant_id):
+                tool_config_list.append(tool_config)
+                continue
+
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
+            if portable_evaluation:
+                from management.services.agent.preparation.knowledge_search import prepare_knowledge_search
+
+                if prepare_knowledge_search(tool_config, user_id, tenant_id, document_paths):
+                    tool_config_list.append(tool_config)
+                    continue
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
@@ -663,11 +598,7 @@ async def create_tool_config_list(
                     f"Please configure an embedding model for this knowledge base."
                 )
             tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in [
-            "DifySearchTool",
-            "DataMateSearchTool",
-            "RAGFlowSearchTool",
-        ]:
+        elif tool_config.class_name in LOCAL_RERANK_TOOL_CLASSES and not portable_evaluation:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
@@ -710,7 +641,7 @@ async def create_tool_config_list(
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
-        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"]:
+        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"] and not portable_evaluation:
             tool_config.metadata = {
                 "minio_client": minio_client,
                 "user_id": user_id,

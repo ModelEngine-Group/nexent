@@ -430,12 +430,14 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except RuntimeUpstreamError as e:
+        return Response(content=e.content, status_code=e.status_code, headers=e.headers)
     except RuntimeServiceTimeoutError as e:
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
-    except HTTPException as e:
-        raise e
+    except (AppException, HTTPException):
+        raise
     except Exception as e:
         logging.error(f"Failed to run chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")

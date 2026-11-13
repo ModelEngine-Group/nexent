@@ -243,7 +243,7 @@ file_management_app = __import__(
 )
 
 
-from runtime.api.file import upload as runtime_file
+from management.api.file import storage as file_storage
 from management.api.file import http as file_http
 
 # --- Helpers ---
@@ -786,7 +786,7 @@ async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
     """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
     with pytest.raises(HTTPException) as exc_info:
-        await runtime_file.storage_upload_files(http_request=None,
+        await file_storage.storage_upload_files(http_request=None,
             files=[f1],
             folder="knowledge_base",
             authorization=MOCK_AUTH
@@ -804,10 +804,10 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
         captured_params["user_id"] = user_id
         return [{"success": True, "file_name": "private.txt"}]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("private.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -827,10 +827,10 @@ async def test_storage_upload_files_attachments_no_auth_uses_raw_folder(monkeypa
         captured_params["user_id"] = user_id
         return [{"success": True, "file_name": "test.txt"}]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("test.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH_NONE
@@ -849,10 +849,10 @@ async def test_storage_upload_files_counts(monkeypatch):
             {"success": False, "file_name": "b.txt", "error": "x"},
         ]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
     f2 = make_upload_file("b.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1, f2],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -869,11 +869,11 @@ async def test_storage_upload_files_internal_error(monkeypatch):
     async def fake_upload(files, folder, user_id=None):
         raise RuntimeError("MinIO connection failed")
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
 
     with pytest.raises(Exception) as ei:
-        await runtime_file.storage_upload_files(http_request=None,
+        await file_storage.storage_upload_files(http_request=None,
             files=[f1],
             folder="attachments",
             authorization=MOCK_AUTH
@@ -2524,7 +2524,7 @@ class TestFileAuditEntries:
         from fastapi.testclient import TestClient
 
         app = FastAPI()
-        app.include_router(runtime_file.file_management_runtime_router)
+        app.include_router(file_storage.router)
         client = TestClient(app)
 
         with caplog.at_level(logging.INFO, logger="audit.security"):

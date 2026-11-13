@@ -59,7 +59,7 @@ class BatchLock:
 def terminate_tree(process, group=True):
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=10)
     elif group:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -80,7 +80,11 @@ def terminate_tree(process, group=True):
     process.wait(timeout=15)
 
 
-def logged(command, cwd, env, log, timeout, *, new_session=True):
+class CommandTimeoutCleanupError(RuntimeError):
+    """A timed-out owned command could not be confirmed reclaimed."""
+
+
+def logged(command, cwd, env, log, timeout, *, new_session=True, raise_on_timeout=False):
     """Bound each command and its children; never print env or argv secrets."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w", encoding="utf-8") as output:
@@ -90,7 +94,12 @@ def logged(command, cwd, env, log, timeout, *, new_session=True):
         try:
             return process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            terminate_tree(process, group=new_session)
+            try:
+                terminate_tree(process, group=new_session)
+            except Exception as exc:
+                raise CommandTimeoutCleanupError("Timed-out command cleanup failed") from exc
+            if raise_on_timeout:
+                raise
             return 124
         except BaseException:
             terminate_tree(process, group=new_session)

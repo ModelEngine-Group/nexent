@@ -18,9 +18,14 @@ from . import test_agent_service as service_tests
 def stream_capture(monkeypatch):
     service = service_tests.agent_execution
     batches = []
+
+    async def run_managed(_lane, _task, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "run", run_managed)
     monkeypatch.setattr(service, "save_message", MagicMock(return_value=42))
     monkeypatch.setattr(service, "persist_assistant_run_batch", lambda **kwargs: batches.append(kwargs))
-    monkeypatch.setattr(service, "_unregister_agent_run_after_execution", MagicMock())
+    monkeypatch.setattr(service_tests.legacy_execution_host, "unregister", MagicMock())
     monkeypatch.setattr(service.streaming_channel_manager, "complete_channel", AsyncMock())
     monkeypatch.setattr(service, "_cleanup_channel_later", AsyncMock())
 
@@ -39,7 +44,7 @@ def stream_capture(monkeypatch):
         request = service_tests.AgentRequest(
             agent_id=1, conversation_id=999, query="test", history=[], minio_files=[], is_debug=False)
         raw = [chunk async for chunk in service._stream_agent_chunks(
-            request, "user", "tenant", info, MagicMock(), channel=channel)]
+            request, "user", "tenant", info, None, channel=channel)]
         published = [json.loads(chunk.removeprefix("data: ").strip())
                      for chunk in raw if chunk.startswith("data: {" )]
         assert channel.publish.await_count == len(raw)

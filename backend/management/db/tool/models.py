@@ -1,11 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     Column,
-    Integer,
     Sequence,
     String,
     Text,
@@ -15,58 +13,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 
 
+from infrastructure.rdb.mcp_execution_records import ToolInfo as ToolInfo, ToolInstance as ToolInstance
 from management.db.base import SCHEMA, TableBase
-
-
-class ToolInfo(TableBase):
-    """
-    Information table for prompt tools
-    """
-    __tablename__ = "ag_tool_info_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    tool_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
-    name = Column(String(100), doc="Unique key name")
-    origin_name = Column(String(100), doc="Original name")
-    class_name = Column(
-        String(100), doc="Tool class name, used when the tool is instantiated")
-    description = Column(String(2048), doc="Prompt tool description")
-    source = Column(String(100), doc="Source")
-    author = Column(String(100), doc="Tool author")
-    usage = Column(String(100), doc="Usage")
-    params = Column(JSON, doc="Tool parameter information (json)")
-    inputs = Column(String(2048), doc="Prompt tool inputs description")
-    output_type = Column(String(100), doc="Prompt tool output description")
-    category = Column(String(100), doc="Tool category description")
-    labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
-    is_user_selectable = Column(
-        Boolean, default=True, nullable=False, doc="Whether users can actively select the tool in agent configuration")
-    is_available = Column(
-        Boolean, doc="Whether the tool can be used under the current main service")
-
-
-class ToolInstance(TableBase):
-    """
-    Information table for tenant tool configuration.
-    """
-    __tablename__ = "ag_tool_instance_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    tool_instance_id = Column(
-        Integer,
-        Sequence("ag_tool_instance_t_tool_instance_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-        doc="ID"
-    )
-    tool_id = Column(Integer, doc="Tenant tool ID")
-    agent_id = Column(Integer, doc="Agent ID")
-    params = Column(JSON, doc="Parameter configuration")
-    user_id = Column(String(100), doc="User ID")
-    tenant_id = Column(String(100), doc="Tenant ID")
-    enabled = Column(Boolean, doc="Enabled")
-    version_no = Column(Integer, default=0, primary_key=True, nullable=False,
-                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class OuterApiService(TableBase):

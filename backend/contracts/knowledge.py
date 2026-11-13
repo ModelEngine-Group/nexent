@@ -28,6 +28,7 @@ class ResolvedKnowledgeScope:
     local_capable: bool = True
     aidp_capable: bool = True
     warnings: List[Dict[str, Any]] = field(default_factory=list)
+    managed_tool_overrides: Dict[str, Dict[str, Dict[str, Any]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

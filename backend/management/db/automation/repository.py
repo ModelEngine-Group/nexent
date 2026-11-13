@@ -370,6 +370,9 @@ def update_run(
     values: Dict[str, Any],
     user_id: Optional[str] = None,
     expected_statuses: Optional[List[str]] = None,
+    *,
+    tenant_id: str | None = None,
+    expected_source: dict[str, Any] | None = None,
 ) -> Optional[Dict[str, Any]]:
     data = {
         **values,
@@ -384,6 +387,13 @@ def update_run(
         ]
         if expected_statuses:
             conditions.append(AgentAutomationRun.status.in_(expected_statuses))
+        if tenant_id is not None:
+            conditions.extend((AgentAutomationRun.tenant_id == tenant_id, AgentAutomationRun.user_id == user_id))
+        if expected_source is not None:
+            conditions.extend((
+                AgentAutomationRun.generated_prompt == expected_source["generated_prompt"],
+                AgentAutomationRun.user_message_id == expected_source["user_message_id"],
+            ))
         run = session.execute(
             update(AgentAutomationRun).where(*conditions).values(**data).returning(AgentAutomationRun)
         ).scalar_one_or_none()
@@ -400,6 +410,18 @@ def get_run(run_id: int, tenant_id: str, user_id: str) -> Optional[Dict[str, Any
                 AgentAutomationRun.delete_flag == "N",
             )
         ).scalar_one_or_none()
+        return as_dict(run) if run else None
+
+
+def get_run_by_runtime_id(
+    runtime_run_id: str, tenant_id: str, user_id: str, *, conversation_id: int,
+) -> Optional[Dict[str, Any]]:
+    with get_db_session() as session:
+        run = session.execute(select(AgentAutomationRun).where(
+            AgentAutomationRun.runtime_run_id == runtime_run_id, AgentAutomationRun.tenant_id == tenant_id,
+            AgentAutomationRun.user_id == user_id, AgentAutomationRun.conversation_id == conversation_id,
+            AgentAutomationRun.delete_flag == "N",
+        )).scalar_one_or_none()
         return as_dict(run) if run else None
 
 
@@ -453,13 +475,14 @@ def soft_delete_run(
         return as_dict(run) if run else None
 
 
-def cancel_runs_by_conversation(conversation_id: int, user_id: str, reason: str) -> int:
+def cancel_runs_by_conversation(conversation_id: int, user_id: str, tenant_id: str, reason: str) -> int:
     with get_db_session() as session:
         result = session.execute(
             update(AgentAutomationRun)
             .where(
                 AgentAutomationRun.conversation_id == conversation_id,
                 AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.tenant_id == tenant_id,
                 AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
                 AgentAutomationRun.delete_flag == "N",
             )
@@ -552,12 +575,26 @@ def get_active_run_task_ids(task_ids: List[int], tenant_id: str, user_id: str) -
         return {int(task_id) for task_id in rows}
 
 
-def has_active_run_for_conversation(conversation_id: int) -> bool:
+def list_active_runtime_run_ids(conversation_id: int, user_id: str, tenant_id: str) -> list[str]:
+    with get_db_session() as session:
+        return list(session.scalars(select(AgentAutomationRun.runtime_run_id).where(
+            AgentAutomationRun.conversation_id == conversation_id,
+            AgentAutomationRun.tenant_id == tenant_id,
+            AgentAutomationRun.user_id == user_id,
+            AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
+            AgentAutomationRun.delete_flag == "N",
+            AgentAutomationRun.runtime_run_id.is_not(None),
+        )))
+
+
+def has_active_run_for_conversation(conversation_id: int, user_id: str, tenant_id: str) -> bool:
     with get_db_session() as session:
         run = session.execute(
             select(AgentAutomationRun.run_id)
             .where(
                 AgentAutomationRun.conversation_id == conversation_id,
+                AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.tenant_id == tenant_id,
                 AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
                 AgentAutomationRun.delete_flag == "N",
             )
@@ -566,16 +603,77 @@ def has_active_run_for_conversation(conversation_id: int) -> bool:
         return run is not None
 
 
+def list_pending_projections(after_run_id: int, limit: int) -> list[dict]:
+    run, task = AgentAutomationRun, AgentAutomationTask
+    with get_db_session() as session:
+        rows = session.scalars(
+            select(run).join(task, task.task_id == run.task_id).where(
+                run.run_id > after_run_id,
+                run.projection_message_index.is_not(None),
+                run.delete_flag == "N",
+                task.delete_flag == "N",
+                task.tenant_id == run.tenant_id,
+                task.user_id == run.user_id,
+                task.conversation_id == run.conversation_id,
+                (run.trigger_type != "SCHEDULED") | task.lock_until.is_(None) | (task.lock_until <= func.now()),
+            ).order_by(run.run_id).limit(limit)
+        )
+        return [as_dict(row) for row in rows]
+
+
+def finish_prepared_run(run: dict, run_values: dict, task_values: dict) -> dict | None:
+    """Advance the task and finish its projected run atomically."""
+    task_model, run_model = AgentAutomationTask, AgentAutomationRun
+    user_id, tenant_id = run["user_id"], run["tenant_id"]
+    scheduled = run["trigger_type"] == "SCHEDULED"
+    with get_db_session() as session:
+        task = session.scalar(select(task_model).where(
+            task_model.task_id == run["task_id"], task_model.delete_flag == "N",
+            task_model.user_id == user_id, task_model.tenant_id == tenant_id,
+            task_model.conversation_id == run["conversation_id"],
+        ).with_for_update())
+        if task is None:
+            return None
+        if scheduled and task.lock_until and task.lock_until > _utcnow():
+            if task.lock_owner != run.get("_lease_owner"):
+                return None
+        now = _utcnow()
+        updated = session.scalar(update(run_model).where(
+            run_model.run_id == run["run_id"], run_model.task_id == task.task_id,
+            run_model.user_id == user_id, run_model.tenant_id == tenant_id,
+            run_model.conversation_id == run["conversation_id"],
+            run_model.delete_flag == "N", run_model.status == run["status"],
+            run_model.projection_message_index.is_not(None),
+        ).values(**run_values, update_time=now, updated_by=user_id).returning(run_model))
+        if updated is None:
+            return None
+        task_values = task_values.copy()
+        if task.status in ("PAUSED", "PAUSED_BY_SYSTEM"):
+            task_values["status"] = task.status
+        if not scheduled:
+            task_values = {key: task_values[key] for key in ("last_fire_at", "last_run_status", "last_error")}
+        for key, value in task_values.items():
+            setattr(task, key, value)
+        task.update_time = now
+        task.updated_by = user_id
+        return as_dict(updated)
+
+
 def claim_due_tasks(instance_id: str, batch_size: int, lease_seconds: float) -> List[Dict[str, Any]]:
     sql = text("""
         WITH due AS (
             SELECT task_id
-            FROM nexent.agent_automation_task_t
-            WHERE delete_flag = 'N'
-              AND status = 'ACTIVE'
-              AND next_fire_at <= now()
-              AND (lock_until IS NULL OR lock_until < now())
-            ORDER BY next_fire_at ASC
+            FROM nexent.agent_automation_task_t AS task
+            WHERE task.delete_flag = 'N'
+              AND task.status = 'ACTIVE'
+              AND task.next_fire_at <= now()
+              AND (task.lock_until IS NULL OR task.lock_until < now())
+              AND NOT EXISTS (
+                  SELECT 1 FROM nexent.agent_automation_run_t AS pending
+                  WHERE pending.task_id = task.task_id AND pending.delete_flag = 'N'
+                    AND pending.projection_message_index IS NOT NULL
+              )
+            ORDER BY task.next_fire_at ASC
             LIMIT :batch_size
             FOR UPDATE SKIP LOCKED
         ), claimed AS (
@@ -597,6 +695,7 @@ def claim_due_tasks(instance_id: str, batch_size: int, lease_seconds: float) -> 
               AND run.trigger_type = 'SCHEDULED'
               AND run.status IN ('QUEUED', 'RUNNING')
               AND run.delete_flag = 'N'
+              AND run.projection_message_index IS NULL
             RETURNING run.run_id
         )
         SELECT claimed.*
@@ -653,12 +752,10 @@ def renew_task_lock(task_id: int, lock_owner: str, lease_seconds: float) -> bool
 
 
 def recover_orphaned_runs() -> int:
-    """Finish runs that were executing when the single runtime stopped.
+    """Finish runs that were executing when the single scheduler stopped.
 
-    Queued runs are intentionally preserved so the existing scheduler can
-    consume work that never began. The deployment currently supports a single
-    runtime replica, therefore every persisted RUNNING row belongs to the
-    previous process even when its lease has not expired yet.
+    Preserve queued work and prepared runs that still need AgentOS reconciliation.
+    This startup cleanup runs before the deployment's single scheduler starts.
     """
     sql = text("""
         UPDATE nexent.agent_automation_run_t
@@ -669,6 +766,7 @@ def recover_orphaned_runs() -> int:
             update_time = now()
         WHERE delete_flag = 'N'
           AND status = 'RUNNING'
+          AND projection_message_index IS NULL
     """)
     with get_db_session() as session:
         result = session.execute(sql)
@@ -676,7 +774,7 @@ def recover_orphaned_runs() -> int:
 
 
 def release_all_task_locks() -> int:
-    """Release scheduler leases owned by the previous single runtime."""
+    """Release scheduler leases owned by the previous scheduler."""
     with get_db_session() as session:
         result = session.execute(
             update(AgentAutomationTask)

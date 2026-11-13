@@ -6,6 +6,3 @@ secrets:
     rootPassword: "nexent@4321"
     accessKey: ""
     secretKey: ""
-
-sqlFiles:
-  init: ""

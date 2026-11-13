@@ -193,13 +193,20 @@ runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = Async
 sys.modules["infrastructure.redis.run_state"] = runtime_state_service_mod
 
 # Mock agent_service
-agent_service_mod = types.ModuleType("management.services.agent.service")
+agent_service_mod = types.ModuleType("management.services.agent.management")
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
-sys.modules["management.services.agent.service"] = agent_service_mod
+sys.modules["management.services.agent.management"] = agent_service_mod
 
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("management.services.agent.runtime_client")
 runtime_proxy_mod.forward_agent_run = AsyncMock()
+
+
+async def _forward_via_northbound_fallback(_agent_request, _user_id, _tenant_id, *, fallback):
+    return await fallback()
+
+
+runtime_proxy_mod.forward_northbound_run = _forward_via_northbound_fallback
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 

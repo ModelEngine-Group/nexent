@@ -437,7 +437,7 @@ async def test_delete_conversation_success(conversation_mocks):
 
     assert result.code == 0 and result.data is True
     conversation_mocks['delete_conversation'].assert_called_once_with(
-        conversation_id, "user_id")
+        conversation_id, "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -480,7 +480,7 @@ async def test_delete_conversations_batch_success(conversation_mocks):
     assert result.code == 0
     assert result.data["deleted_count"] == 2
     conversation_mocks['delete_conversations_batch'].assert_called_once_with(
-        [1, 2, 3], "user_id")
+        [1, 2, 3], "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio

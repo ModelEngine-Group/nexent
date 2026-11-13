@@ -36,8 +36,6 @@ from management.db.evaluation.sets import get_evaluation_set_cases_all, material
 from management.db.evaluation.evaluator import get_evaluator
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.thread_management import config_thread_manager
-from runtime.thread_management import runtime_thread_manager
-from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,
     _EVENT_LABELS,
@@ -49,7 +47,6 @@ from management.services.evaluation.common import (
     logger,
 )
 from management.services.evaluation.sets import resolve_latest_published_version_no
-from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_analysis_report,
@@ -58,7 +55,6 @@ from nexent.core.agents.prompt.evaluation import (
     render_analysis_stats,
     render_evaluation_section,
 )
-from runtime.adapters.nexent.runner import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 
@@ -306,6 +302,12 @@ async def trial_run_evaluator_impl(
         language=language,
     )
     return {"query": query, "answer": answer_text, "scores": score, "reasons": reason}
+
+
+
+def run_evaluation_trial_in_worker(**kwargs):
+    """Run trial preparation, remote execution and scoring off the API event loop."""
+    return asyncio.run(trial_run_evaluator_impl(**kwargs))
 
 
 from management.services.evaluation.analysis import (

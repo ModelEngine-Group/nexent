@@ -1,0 +1,657 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: AOS-TRANSPORT-D3-001
+  feature_id: AOS-TRANSPORT
+  requirement_ids:
+  - AOS-REQ-001
+  - AOS-REQ-002
+  business_rule_ids:
+  - AOS-TRANSPORT-RULE-01
+  title: "Standard AgentOS transport and retired ingress isolation over local HTTP"
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove signed AgentOS run and stop transport across actual Management
+    and Runtime HTTP boundaries.
+  preconditions:
+  - Local loopback sockets and Python backend dependencies are available.
+  test_data:
+    profile: mock
+    service_key: Synthetic local fixture
+    execution: Recording Agent execution sink
+  steps:
+  - order: 1
+    action: Invoke run and stop through the Management AgentOS client over loopback
+      HTTP.
+    expected: The Runtime dispatcher observes the signed user, tenant and exact resource;
+      SSE event IDs and JSON stop results reach the caller.
+  - order: 2
+    action: Submit an unsigned request, a modified body, a reused token on another
+      operation, an expired credential and an unknown version.
+    expected: Authentication failures are 401; the unsupported path is 404; no rejected
+      call enters the execution sink.
+  - order: 3
+    action: Run a prepared synthetic evaluation and probe the retired compatibility route.
+    expected: Prepared evaluation preserves events and rejects a positive ID. The retired compatibility route is absent from routes and operations and returns 404 for every credential and payload.
+  - order: 4
+    action: Submit a signed background call with a run ID and disconnect another background client.
+    expected: Runtime receives the signed actor and run ID, returns the assistant message, and cancels execution after disconnect.
+  - order: 5
+    action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
+    expected: Runtime rebuilds scoped file, attachment, skill, external A2A and direct or skill-derived MCP bindings and a child Agent with the expected model parameters. The system parallel executor retains its timeout and tool order; an invalid timeout is rejected before execution. Events stay ordered. Out-of-scope attachments and changed execution bindings are refused. The runner reads the verified skill guide and effective configuration from its isolated workspace. A changed MCP skill contributor cannot start the runner. Knowledge search respects the index and document scope; group revocation denies the run before search. The runner uses the Runtime Docker policy and regenerated sandbox context even when Management compiled local Python guidance. Image analysis binds the signed tenant model, rejects unauthorized storage aliases and refuses a stale model before execution. A configured Dify tool uses its Runtime credentials and configured dataset without exposing them over AgentOS. A skill-derived local tool keeps its order and refuses a changed contributor. Independent AIDP retrieval uses the pinned tenant binding, and the Management proxy accepts the image reference signed by Runtime. Shared AIDP retrieves only from the current authorized scope, and revocation prevents another upstream search. A deployed LangChain plugin runs in tool order, and changed plugin bytes are rejected before execution. A pinned workspace tool writes in its configured Runtime path and the model body is restored from the bound Agent version; either revision changing prevents execution. An independent AIDP image generated from a skill-derived binding resolves through Management and rejects a changed contributor.
+  - order: 6
+    action: Resume after a scoped event cursor and attempt the same request under a different tenant.
+    expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
+  - order: 7
+    action: "Submit public Management conversations and cursorless resume, then probe retired Runtime starts."
+    expected: "Management claims one standard run with original context. Removed starts return 404 without dispatch or fallback; historical resume remains read-only."
+  - order: 8
+    action: Submit a signed conversation twice with one idempotency key and then change the request under that key.
+    expected: "Retries retain the original claimed run ID and conflicting input returns 409. Only the standard run is started, with no reverse start handoff."
+  - order: 9
+    action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
+    expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
+  - order: 10
+    action: Stop a registered run through the public Management and Northbound paths, and start and cancel an automation run using its persisted execution ID.
+    expected: "Management signs the exact run ID. Cancellation fences admission and rejects foreign user or tenant scope. Only standard lifecycle routes remain in Runtime."
+  - order: 11
+    action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
+    expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
+  - order: 12
+    action: Compile a conversation with a saved disabled knowledge scope, drop the prepared automation acknowledgement after Runtime accepts the run, and recover from the persisted Automation record.
+    expected: The signed snapshot excludes the disabled index. Management records the source message before compilation and the pending projection before dispatch, retains the exact execution ID, replays the signed journal, and finalizes one assistant message without starting the run again.
+  - order: 13
+    action: Reconnect to a prepared journal through Management's public conversation route and repeat with a foreign tenant.
+    expected: The response keeps the original event IDs and terminal state, presents observer events in the public format, signs only scoped output references, and rejects the foreign tenant.
+  - order: 14
+    action: Deliver a prepared planning snapshot through the signed Agent.run operation.
+    expected: Runtime rebuilds the built-in plan tools and injects its own Redis client. Creating a plan and completing a step emit the original SDK events and update the conversation-scoped plan.
+  - order: 15
+    action: Start an eligible public conversation with an idempotency key and repeat the submission.
+    expected: Management stages the user input, dispatches one signed Agent.run, confirms the turn, and projects the signed journal into the reserved assistant message. Retry returns the original run ID and the other tenant receives 404.
+  - order: 16
+    action: Invoke the prepared SDK proposal tool through the Runtime-to-Management AgentOS callback.
+    expected: Management uses the stored source message and Agent version, returns the original proposal response, and rejects unsigned, forward-signed, modified, and foreign-tenant calls.
+  - order: 17
+    action: Submit a first public turn without a conversation ID and repeat it with the same submission key.
+    expected: Management creates one conversation with the localized default title, announces its ID without consuming a Runtime cursor, and the retry returns the same conversation and run.
+  - order: 18
+    action: Submit an owned Northbound turn, reject another user and tenant, and stop a staged run through signed AgentOS.
+    expected: One turn stages and projects. Northbound preserves response headers and SSE data frames. Stop fences the exact staged run and keeps its public response.
+  - order: 19
+    action: Submit explicit runtime metadata to Northbound on an owned conversation through signed AgentOS.
+    expected: Runtime receives the replacement and next version. Management stages that version and preserves it in the public response.
+  - order: 20
+    action: Submit an owned Workbench turn with a resolved Workbench configuration and stream signed AgentOS output.
+    expected: The typed Workbench version and root generation reach Runtime and Management presents the public configuration event and version header.
+  - order: 21
+    action: Submit a Workbench turn with a local knowledge scope and consume the signed prepared journal.
+    expected: Runtime receives the scoped knowledge binding. The response emits the resolved configuration and authorized scope before journal events.
+  - order: 22
+    action: Send a prepared ephemeral run through signed AgentOS and close a live response.
+    expected: Runtime receives the exact authorized snapshot without a conversation. Observer events reach Management and closing the caller releases the worker and workspace.
+  - order: 23
+    action: Submit a Workbench turn with an authorized metadata replacement.
+    expected: Signed execution receives the metadata and both revisions. The public response exposes both versions and one projected turn.
+  - order: 24
+    action: Send a Workbench turn with a mounted shared AIDP tool and revoke one selected KDS before Runtime materializes it.
+    expected: The signed binding keeps typed retrieval options, and Runtime permits only the KDS still authorized.
+  - order: 25
+    action: Submit a clarification response for an owned conversation and retry with the same key.
+    expected: Management stages the structured response locally and sends only the prepared execution input to Runtime. The retry keeps the original run ID and another tenant receives 404.
+  - order: 26
+    action: Start a public debug run, try stopping it from a second tenant, then stop it from its owner.
+    expected: Management sends a signed debug snapshot and the public response retains the debug run ID. Only the owned scope emits a cancellation signal and the worker releases its resources.
+  - order: 27
+    action: Run an owned native conversation whose stored knowledge scope includes a revoked index.
+    expected: Management stages the unchanged desired scope and signs only the authorized index. The public event preserves the warning and the journal streams once.
+  - order: 28
+    action: Store Agent Memory through the Management SDK bridge, retry, and try an unauthorized conversation and unsigned request.
+    expected: Runtime uses the signed scope for one Model invocation and one write. Replay keeps the original ID and rejected calls do not write.
+  - order: 29
+    action: Submit a signed prepared conversation containing authorized Memory and execute its bound SDK store tool.
+    expected: Runtime reconstructs the tool for the signed owner and journals search events before model events.
+  - order: 30
+    action: Execute a prepared Memory write and observe the signed Management notification. Retry with missing or modified credentials and foreign ownership.
+    expected: Management ingests only the committed record for the signed owner and refuses untrusted notifications.
+  - order: 31
+    action: Submit an owned Memory-enabled public conversation through Management and replay its Runtime output.
+    expected: Management selects the prepared route and forwards the pinned Agent to the durable projection once.
+  - order: 32
+    action: Start a Memory-enabled automation run, lose its admission acknowledgement, and recover after the task Agent changes.
+    expected: Management projects the original signed run under the persisted Agent and prompt message without another dispatch.
+  - order: 33
+    action: Run a signed Workbench snapshot whose authorized root Skill overrides are obtained through the signed Management callback.
+    expected: Runtime rebuilds the root SDK Skill tools and refuses a modified bundle or revoked binding.
+  - order: 34
+    action: Run a signed Workbench snapshot whose mounted Skill contributes Local, MCP, and LangChain tools.
+    expected: Runtime reconstructs the tools from scoped catalog records and rejects a changed effective binding.
+  - order: 35
+    action: Run NL2Skill through its Management route, reject another conversation, and disconnect a second run.
+    expected: The authorized stream retains the Skill events and closes its Runtime worker when disconnected.
+  - order: 36
+    action: Run NL2Agent through Management, call the scoped draft tool, and close a second Runtime stream.
+    expected: Only the bound draft is written, the first interactive card ends its run, and a closed grant cannot be reused.
+  - order: 37
+    action: Fetch a mounted independent AIDP image after its signed Workbench run, then try a foreign user, tenant or revoked mount.
+    expected: Only the authorized image reaches its provider and the image response is not cached.
+  - order: 38
+    action: Start a public planning debug run through the signed ephemeral Runtime endpoint and stop it using the debug run ID.
+    expected: The two planning events preserve their order, the worker is released, and no conversation or shared plan key is written.
+  - order: 39
+    action: Run a scoped public debug request through AgentOS and wait for the scope event before allowing SDK output.
+    expected: The resolved scope and warning arrive before the planning events without persisting a conversation.
+  - order: 40
+    action: Submit a first native conversation turn with metadata, then an existing native turn with an empty object.
+    expected: The signed snapshots carry the initial or cleared value and response revision, and retries do not admit another turn.
+  - order: 41
+    action: Reconnect to a closed prepared conversation without a run ID, then try the same conversation from another tenant.
+    expected: Management returns the legacy terminal JSON for the owner and refuses the foreign request without a Runtime call.
+  - order: 42
+    action: Reconnect to a registered legacy execution without a run ID and follow replay and live events over AgentOS.
+    expected: Management uses the registered execution and returns legacy status frames, replay count, and the final status.
+  - order: 43
+    action: Send unsigned, malformed and unrelated signed requests to removed evaluation, background and inspection paths.
+    expected: Runtime has no route or operation registration for these paths, returns 404 and does not dispatch any work.
+  - order: 44
+    action: Reconnect without a cursor after the legacy projection is committed and the journal is unavailable, then repeat with a foreign tenant and an owned conversation without an assistant.
+    expected: Management confirms the receipt through the signed run inspection operation. Foreign scope is refused before inspection, and the empty conversation does not contact Runtime.
+  - order: 45
+    action: Compile explicit invocation parameters for direct and Skill-derived MCP tools and send the prepared run over signed HTTP.
+    expected: Runtime applies the declared overrides to SDK tool calls and continues to reject changed connection credentials or Skill bindings.
+  - order: 46
+    action: Compile a local search override and an ignored LangChain request parameter, then send the prepared run over signed HTTP.
+    expected: The search provider receives the requested result count with the stored credential. The plugin keeps its invocation behavior, and a signed attempt to override a credential is refused.
+  - order: 47
+    action: Submit a public debug request with a client conversation correlation ID and cancel the debug run through the standard AgentOS lifecycle endpoint.
+    expected: Management echoes the client ID and Runtime receives only the temporary run ID. The original planning and scoped cancellation behavior is preserved.
+  - order: 48
+    action: "Probe the retired saved-user start operation in the actual Runtime app with absent and invalid credentials."
+    expected: "The route and registered operation are absent and all probes return 404 without execution. Standard Northbound message ownership remains covered by prepared-turn probes."
+  - order: 49
+    action: "Invoke Management background orchestration locally and cross standard Runtime AgentOS for execution and cancellation."
+    expected: "Management preserves run ID, model, tools, source and projection without finalizing the schedule. Retry never starts twice; disconnect cancels the exact run. Uncompiled fixtures cannot fall back to legacy execution."
+  - order: 50
+    action: "Probe the removed raw debug start ingress with the actual Runtime application."
+    expected: "Retired raw starts return 404 without dispatch. Public debug continues through standard ephemeral AgentOS."
+  - order: 51
+    action: "Probe removed raw Workbench and native starts, retaining the public debug knowledge probes."
+    expected: "Retired private starts return 404. Public debug retains authorized resources, preparation events and warnings through standard AgentOS."
+  - order: 52
+    action: Dispatch raw debug requests with and without generation settings through both services and compare real SDK provider requests for the root and a child sharing its catalog model.
+    expected: The actual Management compiler and Runtime materializer retain the original effective model configurations. Nonempty generation settings export a root-only binding; legacy reasoning-only requests preserve the shared alias. A loopback provider receives identical JSON requests from the old effective profile and the restored profile, and credentials never enter the AgentOS payload.
+  - order: 53
+    action: Send a fixed-ID background request whose old RUNNING automation record lacks source metadata, retry it and race the source write with another pin.
+    expected: Management confirms an owned existing automation message and matching submitted history and conditionally pins its prompt and ID before compilation, then starts the original run once and resumes its projection on retry. Losing the source comparison returns 409 without compilation, projection or execution and preserves the competing values. Unprovable sources never pin a different turn; only snapshots unavailable to the compatibility preparer retain one explicit legacy fallback.
+  - order: 54
+    action: "Probe removed raw new-conversation starts with the actual Runtime application."
+    expected: "No private route or registered operation remains. New public conversations continue through Management prepared-turn admission."
+  - order: 55
+    action: Export knowledge search with null and string top_k values, cross signed AgentOS and execute the actual SDK tool alongside the legacy effective SDK configuration.
+    expected: Both SDK tools issue the same authorized vector query and return the same document-filtered result. The portable compiler retains the original valid-value conversion, keeps credentials local and cannot expand knowledge permissions.
+  - order: 56
+    action: Send an owned fixed-ID background request with no automation record or no provable source through both signed services, retry it, change its payload and disconnect another admitted request during projection.
+    expected: Management stages an assistant-only AUTOMATION marker at the original history index before standard Agent.run, projects once without finishing a schedule and retries from the same receipt. A changed request conflicts without another start, foreign tenants are refused and disconnect stops the same run while retaining recovery metadata. The old SDK execution handler cannot run.
+  - order: 57
+    action: Export SDK-local catalog aliases including reserved transport names and invoke them over signed AgentOS HTTP.
+    expected: The actual SDK retains its canonical execution name and provider request; changed revisions and cross-tenant access are rejected.
+  - order: 58
+    action: Compile a nested Agent carrying a sandbox policy and run it over signed AgentOS with the original model controls.
+    expected: The nested policy survives serialization and SDK reconstruction while effective execution retains the root sandbox and provider requests.
+  - order: 59
+    action: Compile an analysis tool using a catalog alias and materialize it across signed AgentOS together with MCP and knowledge tools.
+    expected: The SDK preserves canonical tool behavior, selected tenant model and object ACL without loading a Management inference adapter or colliding with MCP dispatch.
+  - order: 60
+    action: Compile a knowledge search catalog alias and execute its SDK search across signed AgentOS with allowed and denied indexes.
+    expected: Alias dispatch retains the exact original SDK search query and output, document filtering, model revision and denied-index behavior without colliding with MCP.
+  - order: 61
+    action: Export catalog-bound file transfer, parallel and unconfigured Memory SDK classes and reconstruct them through signed AgentOS.
+    expected: Runtime retains the original owner, tenant, workspace restrictions, timeout and unconfigured Memory behavior while Management sends no storage client or callback.
+  - order: 62
+    action: Hold controlled HTTP responses before headers and after the first stream chunk, testing both verification read deadlines and the production header deadline.
+    expected: AgentOS maps read and total pre-header timeouts, propagates the verification stream timeout and closes each client; admitted streams outlive the header deadline normally.
+  expected_results:
+  - Authorized operations preserve principal, body, stream events and stop JSON.
+  - Invalid credentials, modified requests and unknown versions do not dispatch.
+  - Evaluation returns exact ordered events without using a real conversation.
+  - Background execution returns the exact run ID and assistant message ID, and stops after the caller disconnects.
+  - Prepared evaluation returns ordered events and releases the run registration and staged skill files. Unauthorized requests cannot start the runner.
+  - Resume returns only events after the supplied cursor and never opens a journal for an unauthorized actor.
+  - Management relays the Runtime response and run ID while preserving the signed scope and request context.
+  - The admission claim returns the original run identity on retry without starting a second execution.
+  - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
+  - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
+  - Prepared conversation execution starts once and is resumable independently of the submit connection.
+  - The prepared automation runner preserves the saved knowledge restriction, recovers the same scoped run and commits its assistant message after the lost acknowledgement.
+  - The public route retains the signed cursor and presents the prepared output without exposing internal artifact paths.
+  - Planning runs use built-in tool bindings and Runtime-managed plan storage.
+  - One prepared public submission creates one Runtime execution and one assistant projection.
+  - The SDK tool emits the original proposal event while only the signed owned turn may create it.
+  - First-turn submission keeps one conversation, run, and original creation event.
+  - Northbound uses signed prepared admission and projection without a duplicate user write or exposing journal control frames.
+  - Northbound passes explicit metadata only as a signed prepared snapshot and retains the response version header.
+  - A prepared Workbench turn preserves its resolved configuration event, version and single projection.
+  - Workbench preserves the authorized local knowledge scope event and dispatches its scoped search binding once.
+  - The signed ephemeral stream retains observer events and releases request-owned execution on disconnect.
+  - Workbench preserves both configuration and metadata revisions across signed admission and one projection.
+  - Workbench carries a scoped shared AIDP catalog binding and Runtime enforces the narrowed KDS scope.
+  - A clarification response produces one signed prepared run and stays in Management history.
+  - Runtime applies the explicit temperature from the signed root model while reading provider credentials locally.
+  - A debug run has no persistent conversation and releases its worker and temporary resources after scoped cancellation.
+  - Native knowledge scope preserves the public warning without leaking the revoked index into Runtime.
+  - Agent Memory store preserves the receipt on replay and does not dispatch untrusted or out-of-scope writes.
+  - Prepared Memory preserves retrieved context, search event order and the signed scope of a local store.
+  - Prepared Memory notifies Management after local persistence. A notification cannot supply stored content or cross owner boundaries.
+  - Memory-enabled public turns use signed prepared admission and record completion work with the owned assistant projection.
+  - Automation recovery uses the original Memory Agent and prompt message under the owned automation projection.
+  - Workbench root Skill execution pins visible Skill files and effective settings without transporting Skill configuration values.
+  - Mounted Skills contribute only their authorized Local, MCP, and LangChain tools without transporting credentials or plugin code.
+  - Management retains Skill SSE and history. Signed Runtime runs the selected model, reports one safe failure, and stops on disconnect.
+  - NL2Agent uses signed bidirectional transport for execution and tools. Closing the stream revokes draft access.
+  - Workbench image retrieval is bound to the admitted conversation and current mounted tool and does not transport credentials in the signed URL.
+  - The request-owned debug plan stays local and retains the original plan and plan step events.
+  - Management emits the resolved debug scope before Runtime observer output and retains unavailable warnings locally.
+  - Native metadata follows the prepared admission path, remains scoped to its conversation, and keeps the public version header.
+  - A cursorless request for a terminal prepared turn is settled by Management using the owned projection.
+  - Registered legacy journals resume without invoking the compatibility execution router.
+  - Retired evaluation, background start and inspection routes are removed and return operation-not-found without executing.
+  - Management preserves the terminal and empty conversation JSON without using the compatibility execution route.
+  - MCP snapshots carry explicit invocation overrides and keep persisted defaults and connection configuration in Runtime.
+  - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
+  - Debug correlation is kept at the public boundary and debug cancellation uses signed Agent.stop.
+  - "Retired saved-user start operations have no route or registered protocol and cannot dispatch; standard Northbound preparation preserves message ownership."
+  - "Management owns background preparation locally and uses standard signed Runtime execution, retaining run ID, configuration, projection and disconnect cancellation without a legacy fallback."
+  - "Retired raw debug starts return 404 without dispatch while public debug uses standard ephemeral AgentOS."
+  - "Retired raw native and Workbench starts return 404; public debug preserves scoped knowledge, preparation events and warnings through standard AgentOS."
+  - Raw generation settings export without legacy execution and retain original root/child provider request bodies, including the shared model behavior of legacy reasoning-only requests.
+  - Old automation records recover the existing source before standard AgentOS execution without appending a user, overwriting a competing source or finalizing the caller's schedule.
+  - "Retired raw new-conversation starts have no route or registered operation; current new public conversations retain standard Management admission and projection."
+  - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
+  - Background execution needs no automation record or inferred user source when Management owns its fixed-ID admission and assistant-only projection.
+  - Noncanonical local catalog names retain actual SDK execution and scoped credentials without protocol dispatch collisions.
+  - Nested Agent sandbox configuration crosses signed AgentOS without legacy execution or changing the effective root sandbox.
+  - Analysis catalog aliases retain their SDK class, selected model, object ACL and original namespace separation across signed AgentOS.
+  - Knowledge search aliases preserve index authorization, document filtering and actual SDK query/output across signed AgentOS.
+  - Catalog transfer and parallel classes retain SDK execution settings and resource boundaries through signed AgentOS without transporting clients.
+  - Controlled response-header and stream stalls fail within the local verification deadline and close their HTTP clients.
+  forbidden_side_effects:
+  - Rejected calls must not invoke any execution handler.
+  - Verification must release temporary loopback servers.
+  integration_boundary:
+  - Actual Management AgentOS HTTP client and Runtime router behind the downstream
+    signature middleware; controlled execution sink.
+  observations:
+  - HTTP status, stream bytes, stop response and recorded invocations.
+  cleanup:
+  - Close HTTP streams and stop temporary servers.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  acceptance:
+  - id: AC-01
+    description: Signed run and stop traverse real service HTTP boundaries.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 2
+  - id: AC-02
+    description: Authentication, request binding and version reject before dispatch.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: Signed prepared evaluation preserves events and rejects real conversation keys. The retired route never runs an evaluation.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [2]
+  - id: AC-04
+    description: Signed background execution preserves the actor and run ID, and disconnect cancels the execution.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [2]
+  - id: AC-05
+    description: Prepared evaluation hydrates its own tenant model under signed AgentOS and cleans up execution.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-11
+    description: Prepared analysis rebuilds a revisioned tenant model and denies another user’s object before download.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-12
+    description: A prepared local SDK tool uses only its enabled tenant and Agent version binding. Changes and revocation deny execution before contacting the provider.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-13
+    description: A skill-derived SDK tool rebuilds only from the signed Agent skill scope, and a changed contributor prevents execution.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-14
+    description: Independent AIDP retrieval and image proxy retain provider scope and credentials without transporting them over AgentOS.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-15
+    description: Shared AIDP intersects the signed actor permissions with the bound scope in Runtime before retrieving.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-16
+    description: A prepared LangChain plugin runs with its pinned catalog instance and module revision; changed code cannot execute.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-17
+    description: Configured workspace tools and the model provider body run from the pinned bindings and cannot execute after either binding changes.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-18
+    description: An independent AIDP image from a skill-derived binding resolves through the proxy only while the contributing skill configuration is current.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-06
+    description: Signed resume preserves the run cursor across retained and live events.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [2]
+  - id: AC-07
+    description: The public Management conversation entry forwards over signed AgentOS and preserves SSE.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [2]
+  - id: AC-08
+    description: Ordinary signed submission retries reuse the original run identity and reject conflicting input.
+    steps: [8]
+    expected_results: [8]
+    forbidden_side_effects: [2]
+  - id: AC-09
+    description: Signed inspect and stop target one retained run and enforce user and tenant ownership.
+    steps: [9]
+    expected_results: [9]
+    forbidden_side_effects: [2]
+  - id: AC-10
+    description: "Public and Northbound stop preserve exact run identity and reject foreign scope through standard AgentOS; Runtime exposes no public or compatibility start handlers."
+    steps: [10]
+    expected_results: [10]
+    forbidden_side_effects: [2]
+  - id: AC-19
+    description: Prepared Agent.run and resume use the same scoped identity and retain raw observer events across HTTP requests.
+    steps: [11]
+    expected_results: [11]
+    forbidden_side_effects: [2]
+  - id: AC-20
+    description: Prepared automation carries the saved knowledge restriction and recovers a dropped start acknowledgement through inspect and replay of the original execution.
+    steps: [12]
+    expected_results: [12]
+    forbidden_side_effects: [2]
+  - id: AC-21
+    description: The public cursor route adapts prepared observer events and scoped attachments while preserving exact cursor and tenant authorization.
+    steps: [13]
+    expected_results: [13]
+    forbidden_side_effects: [1, 2]
+  - id: AC-22
+    description: Signed prepared planning reconstructs the SDK tools, retains observer events, and persists under the conversation and user scope.
+    steps: [14]
+    expected_results: [14]
+    forbidden_side_effects: [2]
+  - id: AC-23
+    description: The public prepared conversation path preserves ownership and idempotency through signed admission and journal projection.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1, 2]
+  - id: AC-24
+    description: The Runtime proposal tool uses a direction-bound callback and Management derives its trusted inputs from the owned turn.
+    steps: [16]
+    expected_results: [16]
+    forbidden_side_effects: [1, 2]
+  - id: AC-25
+    description: Management owns first-turn creation and preserves the public conversation ID and event without duplicate signed execution.
+    steps: [17]
+    expected_results: [17]
+    forbidden_side_effects: [1, 2]
+  - id: AC-26
+    description: Northbound preserves public frames and conversation ownership during signed prepared execution and run-scoped cancellation.
+    steps: [18]
+    expected_results: [18]
+    forbidden_side_effects: [1, 2]
+  - id: AC-27
+    description: Northbound preserves explicit metadata and the version across signed prepared admission without legacy execution.
+    steps: [19]
+    expected_results: [19]
+    forbidden_side_effects: [1, 2]
+  - id: AC-28
+    description: Signed prepared Workbench execution preserves the resolved configuration, root generation binding and public event.
+    steps: [20]
+    expected_results: [20]
+    forbidden_side_effects: [1, 2]
+  - id: AC-29
+    description: Signed Workbench execution carries the authorized local search binding and preserves the public knowledge scope event.
+    steps: [21]
+    expected_results: [21]
+    forbidden_side_effects: [1, 2]
+  - id: AC-30
+    description: A2A's prepared ephemeral operation preserves the signed snapshot and releases Runtime resources on disconnect.
+    steps: [22]
+    expected_results: [22]
+    forbidden_side_effects: [1, 2]
+  - id: AC-31
+    description: Workbench dispatches authorized metadata and configuration revisions together through signed AgentOS.
+    steps: [23]
+    expected_results: [23]
+    forbidden_side_effects: [1, 2]
+  - id: AC-32
+    description: A signed Workbench turn mounts a shared AIDP catalog tool with Runtime ACL rechecks.
+    steps: [24]
+    expected_results: [24]
+    forbidden_side_effects: [1, 2]
+  - id: AC-33
+    description: Management retains structured clarification answers and starts one signed prepared run for the owned conversation.
+    steps: [25]
+    expected_results: [25]
+    forbidden_side_effects: [1, 2]
+  - id: AC-34
+    description: Signed native conversation execution reconstructs the explicit root sampling settings.
+    steps: [11]
+    expected_results: [26]
+    forbidden_side_effects: [1, 2]
+  - id: AC-35
+    description: Public debug uses signed ephemeral execution and only its owner can signal cancellation.
+    steps: [26]
+    expected_results: [27]
+    forbidden_side_effects: [1, 2]
+  - id: AC-36
+    description: Native conversation scope is staged under its owner and only authorized index bindings are signed.
+    steps: [27]
+    expected_results: [28]
+    forbidden_side_effects: [1, 2]
+  - id: AC-37
+    description: The Management SDK bridge stores Agent Memory through the signed Runtime endpoint with scoped idempotency.
+    steps: [28]
+    expected_results: [29]
+    forbidden_side_effects: [1, 2]
+  - id: AC-38
+    description: Signed prepared runs carry authorized Memory context and locally bind the store tool to the conversation actor.
+    steps: [29]
+    expected_results: [30]
+    forbidden_side_effects: [1, 2]
+  - id: AC-39
+    description: Runtime's Memory store tool uses a signed reverse callback for scoped external ingestion.
+    steps: [30]
+    expected_results: [31]
+    forbidden_side_effects: [1, 2]
+  - id: AC-40
+    description: A Memory-enabled public turn persists the completion work scope through its signed Runtime run and Management projection.
+    steps: [31]
+    expected_results: [32]
+    forbidden_side_effects: [1, 2]
+  - id: AC-41
+    description: An automation run retains its Memory scope when Runtime accepts the run and its acknowledgement is lost.
+    steps: [32]
+    expected_results: [33]
+    forbidden_side_effects: [1, 2]
+  - id: AC-42
+    description: A prepared Workbench run obtains root Skill mounts from the signed Management operation and rechecks the Skill bundle.
+    steps: [33]
+    expected_results: [34]
+    forbidden_side_effects: [1, 2]
+  - id: AC-43
+    description: A signed Workbench run reconstructs tools contributed by its mounted root Skill.
+    steps: [34]
+    expected_results: [35]
+    forbidden_side_effects: [1, 2]
+  - id: AC-44
+    description: NL2Skill creation uses the signed Runtime temporary run and preserves scoped history and Skill SSE.
+    steps: [35]
+    expected_results: [36]
+    forbidden_side_effects: [1, 2]
+  - id: AC-45
+    description: A request-owned NL2Agent run uses signed, revocable callbacks scoped to its draft.
+    steps: [36]
+    expected_results: [37]
+    forbidden_side_effects: [1, 2]
+  - id: AC-46
+    description: An independent AIDP tool mounted by a Workbench Skill returns a scoped proxy image after the signed run.
+    steps: [37]
+    expected_results: [38]
+    forbidden_side_effects: [1, 2]
+  - id: AC-47
+    description: A signed debug run executes its built-in planning tools locally and forwards the planning SSE events.
+    steps: [38]
+    expected_results: [39]
+    forbidden_side_effects: [1, 2]
+  - id: AC-48
+    description: A signed debug request preserves scoped knowledge warnings before model or tool events.
+    steps: [39]
+    expected_results: [40]
+    forbidden_side_effects: [1, 2]
+  - id: AC-49
+    description: First and existing native turns apply explicit metadata through AgentOS while preserving ownership and idempotency.
+    steps: [40]
+    expected_results: [41]
+    forbidden_side_effects: [1, 2]
+  - id: AC-50
+    description: Cursorless resume of the latest closed prepared turn preserves the public terminal result without Runtime.
+    steps: [41]
+    expected_results: [42]
+    forbidden_side_effects: [1, 2]
+  - id: AC-51
+    description: A cursorless legacy client receives a scoped AgentOS journal in the original public SSE format.
+    steps: [42]
+    expected_results: [43]
+    forbidden_side_effects: [1, 2]
+  - id: AC-52
+    description: Retired evaluation, conversation-scoped background start and inspection are absent from routes and protocol operations, return 404 and never dispatch execution.
+    steps: [43]
+    expected_results: [44]
+    forbidden_side_effects: [1, 2]
+  - id: AC-53
+    description: Cursorless recovery confirms a legacy terminal receipt using the exact signed run ID and answers an empty conversation locally.
+    steps: [44]
+    expected_results: [45]
+    forbidden_side_effects: [1, 2]
+  - id: AC-54
+    description: Direct and Skill-derived MCP tools apply signed invocation overrides without transporting their stored defaults or credentials.
+    steps: [45]
+    expected_results: [46]
+    forbidden_side_effects: [1, 2]
+  - id: AC-55
+    description: Local search tuning and ignored LangChain request configuration are supported through signed AgentOS.
+    steps: [46]
+    expected_results: [47]
+    forbidden_side_effects: [1, 2]
+  - id: AC-56
+    description: Debug correlation and cancellation use the standard signed AgentOS lifecycle without accessing the correlated conversation.
+    steps: [47]
+    expected_results: [48]
+    forbidden_side_effects: [1, 2]
+  - id: AC-57
+    description: "Retired saved-user start operations have no route or registered protocol and cannot dispatch; standard Northbound preparation preserves message ownership."
+    steps: [48]
+    expected_results: [49]
+    forbidden_side_effects: [1, 2]
+  - id: AC-58
+    description: "Management owns background preparation locally and uses standard signed Runtime execution, retaining run ID, configuration, projection and disconnect cancellation without a legacy fallback."
+    steps: [49]
+    expected_results: [50]
+    forbidden_side_effects: [1, 2]
+  - id: AC-59
+    description: "Retired raw debug starts return 404 without dispatch while public debug uses standard ephemeral AgentOS."
+    steps: [50]
+    expected_results: [51]
+    forbidden_side_effects: [1, 2]
+  - id: AC-60
+    description: "Retired raw native and Workbench starts return 404; public debug preserves scoped knowledge, preparation events and warnings through standard AgentOS."
+    steps: [51]
+    expected_results: [52]
+    forbidden_side_effects: [1, 2]
+  - id: AC-61
+    description: Raw generation settings cross signed AgentOS and the actual SDK model boundary with unchanged provider requests for root and shared child, without transporting credentials or entering legacy execution.
+    steps: [52]
+    expected_results: [53]
+    forbidden_side_effects: [1, 2]
+  - id: AC-62
+    description: An old running automation source is verified against its history and conditionally pinned before AgentOS compilation and execution, preserves the fixed run and task owner, and cannot overwrite a competing source, adopt a different turn or launch twice.
+    steps: [53]
+    expected_results: [54]
+    forbidden_side_effects: [1, 2]
+  - id: AC-63
+    description: "Retired raw new-conversation starts have no route or registered operation; current new public conversations retain standard Management admission and projection."
+    steps: [54]
+    expected_results: [55]
+    forbidden_side_effects: [1, 2]
+  - id: AC-64
+    description: SDK-valid legacy knowledge top_k values export through AgentOS and retain the actual query and result while preserving knowledge authorization.
+    steps: [55]
+    expected_results: [56]
+    forbidden_side_effects: [1, 2]
+  - id: AC-65
+    description: A signed background request without an automation record or provable source uses one standard AgentOS run and an owned AUTOMATION assistant projection, retaining fixed-ID recovery, cancellation and task ownership.
+    steps: [56]
+    expected_results: [57]
+    forbidden_side_effects: [1, 2]
+  - id: AC-66
+    description: SDK-local catalog aliases preserve SDK execution and provider requests across signed AgentOS, including reserved namespace names, with unchanged revision and tenant enforcement.
+    steps: [57]
+    expected_results: [58]
+    forbidden_side_effects: [1, 2]
+  - id: AC-67
+    description: Legacy-valid nested sandbox configuration survives Management compilation and signed Runtime reconstruction while actual model calls retain their provider request and effective root sandbox.
+    steps: [58]
+    expected_results: [59]
+    forbidden_side_effects: [1, 2]
+  - id: AC-68
+    description: Analysis catalog aliases use pure Management descriptors and signed Runtime materialization while preserving selected model identity, SDK behavior and object ACL without namespace collisions.
+    steps: [59]
+    expected_results: [60]
+    forbidden_side_effects: [1, 2]
+  - id: AC-69
+    description: Knowledge search catalog aliases preserve actual SDK query/output, allowed and denied scopes and document filtering across signed AgentOS without namespace collisions.
+    steps: [60]
+    expected_results: [61]
+    forbidden_side_effects: [1, 2]
+  - id: AC-70
+    description: Catalog-bound transfer, parallel and unconfigured Memory tools materialize in Runtime from revisioned references with original actor scope, workspace boundaries, timeout and Memory behavior and no transported clients.
+    steps: [61]
+    expected_results: [62]
+    forbidden_side_effects: [1, 2]
+  - id: AC-71
+    description: Controlled verification stalls and production header stalls have finite deadlines and closed clients; admitted SSE streams outlive the header deadline, and timeout error mapping remains correct.
+    steps: [62]
+    expected_results: [63]
+    forbidden_side_effects: [1, 2]

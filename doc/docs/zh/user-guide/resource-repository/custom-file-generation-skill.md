@@ -87,7 +87,7 @@ script_outputs:
   "artifacts": [
     {
       "kind": "file",
-      "absolute_path": "/mnt/nexent/output/monthly-report.docx",
+      "absolute_path": "/mnt/nexent/workdir/user/run/outputs/monthly-report.docx",
       "file_name": "monthly-report.docx",
       "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "file_size_bytes": 12800
@@ -119,19 +119,22 @@ script_outputs:
 
 ## Python 脚本示例
 
-以下示例创建文本报告，并打印符合契约的 JSON。生成其他格式时，使用相应的文件生成库和 MIME 类型。
+以下示例在当前运行的工作区创建文本报告，并打印符合契约的 JSON。生成其他格式时，使用相应的文件生成库和 MIME 类型。
 
 ```python
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 MIME_TYPE = "text/plain"
 
 
 def main() -> None:
-    output_path = Path("/mnt/nexent/output/summary.txt")
+    workspace = Path(os.environ.get("NEXENT_WORKSPACE") or Path.cwd())
+    output_dir = Path(os.environ.get("NEXENT_OUTPUT_DIR") or workspace / "outputs")
+    output_path = output_dir / "summary.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("Generated report\n", encoding="utf-8")
 

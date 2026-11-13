@@ -8,12 +8,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from contracts.constants.constants import LANGUAGE
-from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.clustering import (
     analyze_cluster_coherence,
     calculate_document_embedding,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.clients.model import invoke_chat_prompt_in_worker
+from contracts.errors.exceptions import RuntimeUpstreamError
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.document import compose_document_cluster_summary
 from nexent.vector_database.base import VectorDatabaseCore
@@ -165,6 +165,8 @@ def summarize_document(
     max_words: int = 100,
     model_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> str:
     """
     Summarize a single document using LLM (Map stage)
@@ -176,6 +178,7 @@ def summarize_document(
         max_words: Maximum words in the summary
         model_id: Model ID for LLM call
         tenant_id: Tenant ID for model configuration
+        user_id: Authenticated caller or scheduled job actor
 
     Returns:
         Document summary text
@@ -196,33 +199,22 @@ def summarize_document(
             f"Document summary prompt generated for {filename} (max_words: {max_words})"
         )
 
-        # Call LLM if model_id and tenant_id are provided
-        if model_id and tenant_id:
-            # Get model configuration
-            llm_model_config = get_model_by_model_id(
-                model_id=model_id, tenant_id=tenant_id
-            )
-            if not llm_model_config:
-                logger.warning(
-                    f"No model configuration found for model_id: {model_id}, tenant_id: {tenant_id}"
-                )
-                return f"[Document Summary: {filename}] (max {max_words} words) - Content: {document_content[:200]}..."
-
-            document_summary = call_llm_for_system_prompt(
+        fallback = f"[Document Summary: {filename}] (max {max_words} words) - Content: {document_content[:200]}..."
+        if not (model_id and tenant_id and user_id):
+            return fallback
+        try:
+            content = invoke_chat_prompt_in_worker(
                 model_id=model_id,
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
-                callback=None,
+                user_id=user_id,
                 tenant_id=tenant_id,
             )
-
-            return (document_summary or "").strip()
-        else:
-            # Fallback to placeholder if no model configuration
-            logger.warning(
-                "No model_id or tenant_id provided, using placeholder summary"
-            )
-            return f"[Document Summary: {filename}] (max {max_words} words) - Content: {document_content[:200]}..."
+            return (content or "").strip()
+        except RuntimeUpstreamError as exc:
+            if exc.status_code == 404:
+                return fallback
+            raise
 
     except Exception as e:
         logger.error(f"Error generating document summary: {str(e)}", exc_info=True)
@@ -235,6 +227,8 @@ def summarize_cluster(
     max_words: int = 150,
     model_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> str:
     """
     Summarize a cluster of documents using LLM (Reduce stage)
@@ -245,6 +239,7 @@ def summarize_cluster(
         max_words: Maximum words in the summary
         model_id: Model ID for LLM call
         tenant_id: Tenant ID for model configuration
+        user_id: Authenticated caller or scheduled job actor
 
     Returns:
         Cluster summary text
@@ -259,34 +254,22 @@ def summarize_cluster(
             f"Cluster summary prompt generated (language: {language}, max_words: {max_words})"
         )
 
-        # Call LLM if model_id and tenant_id are provided
-        if model_id and tenant_id:
-            # Get model configuration
-            llm_model_config = get_model_by_model_id(
-                model_id=model_id, tenant_id=tenant_id
-            )
-            if not llm_model_config:
-                logger.warning(
-                    f"No model configuration found for model_id: {model_id}, tenant_id: {tenant_id}"
-                )
-                return f"[Cluster Summary] (max {max_words} words) - Based on {len(document_summaries)} documents"
-
-            # Create LLM instance
-            cluster_summary = call_llm_for_system_prompt(
+        fallback = f"[Cluster Summary] (max {max_words} words) - Based on {len(document_summaries)} documents"
+        if not (model_id and tenant_id and user_id):
+            return fallback
+        try:
+            content = invoke_chat_prompt_in_worker(
                 model_id=model_id,
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
-                callback=None,
+                user_id=user_id,
                 tenant_id=tenant_id,
             )
-
-            return (cluster_summary or "").strip()
-        else:
-            # Fallback to placeholder if no model configuration
-            logger.warning(
-                "No model_id or tenant_id provided, using placeholder summary"
-            )
-            return f"[Cluster Summary] (max {max_words} words) - Based on {len(document_summaries)} documents"
+            return (content or "").strip()
+        except RuntimeUpstreamError as exc:
+            if exc.status_code == 404:
+                return fallback
+            raise
 
     except Exception as e:
         logger.error(f"Error generating cluster summary: {str(e)}", exc_info=True)
@@ -399,6 +382,8 @@ def summarize_clusters_map_reduce(
     enhance_with_metadata: bool = True,
     model_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> Dict[int, str]:
     """
     Summarize all clusters using Map-Reduce approach
@@ -469,7 +454,7 @@ def summarize_clusters_map_reduce(
                 f"Summarizing document {filename} with {len(representative_chunks)} representative chunks"
             )
             doc_summary = summarize_document(
-                doc_content, filename, language, doc_max_words, model_id, tenant_id
+                doc_content, filename, language, doc_max_words, model_id, tenant_id, user_id=user_id
             )
             document_summaries.append(doc_summary)
 
@@ -483,7 +468,7 @@ def summarize_clusters_map_reduce(
                 )
 
             cluster_summary = summarize_cluster(
-                document_summaries, language, cluster_max_words, model_id, tenant_id
+                document_summaries, language, cluster_max_words, model_id, tenant_id, user_id=user_id
             )
             cluster_summaries[cluster_id] = cluster_summary
         else:

@@ -130,6 +130,8 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
+            "management.api.agent.conversation_run": {"router": APIRouter()},
+            "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
             "management.api.configuration.config_sync": {"router": APIRouter()},
@@ -140,6 +142,10 @@ class TestConfigAppRouterConfiguration:
             "management.api.knowledge_base.ragflow": {"router": APIRouter()},
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
+            "management.api.file.storage": {"router": APIRouter()},
+            "management.api.conversation.conversation_management": {"router": APIRouter()},
+            "management.api.conversation.conversation_share": {"router": APIRouter()},
+            "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
             "management.api.identity.mock_user_management": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
@@ -150,7 +156,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.configuration.tenant_config": {"router": APIRouter()},
             "management.api.tool.tool_config": {"router": APIRouter()},
             "management.api.identity.user_management": {"router": APIRouter()},
-            "management.api.voice.voice": {"voice_config_router": APIRouter()},
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
@@ -262,6 +267,7 @@ class TestConfigAppRouterConfiguration:
             for retired in retired_routers.values()
         )
         assert api_key_router in config_app.app.included_routers
+        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
         for router in router_modules["management.api.northbound"].values():
             assert router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
@@ -326,6 +332,12 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
+        automation_scheduler = types.SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+        automation_recover = MagicMock()
+        monkeypatch.setitem(sys.modules, "management.services.automation.scheduler", types.SimpleNamespace(
+            agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
+        ))
+
         validate_external = AsyncMock()
 
         async def exercise_lifespan():
@@ -350,6 +362,11 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
+        automation_recover.assert_called_once_with()
+        automation_scheduler.start.assert_awaited_once_with()
+        automation_scheduler.stop.assert_awaited_once_with()
+        for router in router_modules["management.api.automation.agent_automation"].values():
+            assert router in config_app.app.included_routers
 
         # A failure after Northbound recovery must still release Management ownership.
         for target in ("recover_config_tasks_on_startup", "validate_external_service_configuration", "start_dreaming_scheduler"):

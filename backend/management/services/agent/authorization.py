@@ -2,16 +2,13 @@
 
 from typing import Any
 
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
-from management.db.agent.repository import query_agent_records_for_nl2agent
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE
+from contracts.errors.exceptions import AgentDraftEditError, AgentNotFoundError, ForbiddenError
+from management.db.agent.repository import is_system_agent, query_agent_records_for_nl2agent, search_agent_info_by_agent_id
+from management.db.identity.group import query_group_ids_by_user_in_tenant
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.asset_owner import resolve_agent_list_permission
-
-
-from contracts.errors.exceptions import AgentDraftEditError
-
-
-from contracts.errors.exceptions import ResourceBindingError
+from management.services.skill.permission import _to_group_id_set
 
 
 def require_agent_draft_edit(
@@ -47,9 +44,23 @@ def require_agent_draft_edit(
     return draft
 
 
-from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
-from management.db.agent.repository import is_system_agent
-from contracts.errors.exceptions import AgentDraftEditError
+def authorize_debug_version(agent_id: int, version_no: int, user_id: str, tenant_id: str) -> dict:
+    """Authorize a tenant draft or published version before exporting any debug resources."""
+    agent = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+    if agent.get("tenant_id") != tenant_id:
+        raise AgentNotFoundError("agent not found")
+
+    role = get_user_role_by_tenant(user_id=user_id, tenant_id=tenant_id)
+    can_edit_all = (role or "").upper() in CAN_EDIT_ALL_USER_ROLES
+    if not can_edit_all and str(agent.get("created_by")) != user_id:
+        groups = query_group_ids_by_user_in_tenant(user_id, tenant_id)
+        if agent.get("ingroup_permission") == PERMISSION_PRIVATE or not _to_group_id_set(
+            agent.get("group_ids")
+        ).intersection(groups):
+            raise ForbiddenError("Agent is not accessible to the current identity")
+    if version_no == 0 and resolve_agent_list_permission(role, agent, user_id, can_edit_all) != PERMISSION_EDIT:
+        raise ForbiddenError("You do not have permission to debug this draft")
+    return agent
 
 
 def require_external_relation_edit(local_agent_id: int, tenant_id: str, user_id: str) -> None:

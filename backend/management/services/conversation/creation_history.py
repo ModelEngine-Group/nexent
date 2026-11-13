@@ -4,6 +4,7 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 from contracts.conversation import MessageRequest, MessageUnit
@@ -150,32 +151,33 @@ async def persist_creation_stream(
     units: list[tuple[str, str]] = []
     status = "completed"
     try:
-        async for event in stream:
-            for line in event.splitlines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    chunk = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
-                    continue
-                kind = chunk["type"]
-                raw_content = chunk.get("content")
-                content = (
-                    raw_content
-                    if isinstance(raw_content, str)
-                    else json.dumps(raw_content, ensure_ascii=False)
-                )
-                if kind in {
-                    "skill_body", "file_content", "agent_new_run",
-                    "target_files", "model_attempt_control", "done",
-                }:
-                    content = json.dumps(chunk, ensure_ascii=False)
-                units.append((kind, content))
-                if kind == "error":
-                    status = "failed"
-            yield event
+        async with aclosing(stream):
+            async for event in stream:
+                for line in event.splitlines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
+                        continue
+                    kind = chunk["type"]
+                    raw_content = chunk.get("content")
+                    content = (
+                        raw_content
+                        if isinstance(raw_content, str)
+                        else json.dumps(raw_content, ensure_ascii=False)
+                    )
+                    if kind in {
+                        "skill_body", "file_content", "agent_new_run",
+                        "target_files", "model_attempt_control", "done",
+                    }:
+                        content = json.dumps(chunk, ensure_ascii=False)
+                    units.append((kind, content))
+                    if kind == "error":
+                        status = "failed"
+                yield event
     except BaseException:
         status = "stopped"
         raise

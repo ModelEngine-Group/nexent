@@ -1,213 +1,211 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""HTTP forwarding from northbound APIs to the runtime service."""
+"""Management AgentOS calls for Agent execution."""
 
-from typing import AsyncIterator
+import logging
 
-import httpx
+from anyio import CancelScope
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.constants.environment import RUNTIME_SERVICE_URL
-from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
-from contracts.agent import AgentRequest
-from gateway.downstream.internal_tokens import generate_internal_runtime_jwt
 from backend.http.client import create_httpx_client
+from contracts.agent import AgentRequest
+from contracts.agentos import (
+    AgentLegacyResume, AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
+    EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
+    WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
+)
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
+from contracts.conversation import MessageSource
+from contracts.errors.exceptions import (
+    RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
+    ValidationError, WorkbenchError,
+)
+from infrastructure.rdb.agent_admission import AdmissionScopeError
+from infrastructure.agentos_identity import ServicePrincipal
+from management.clients.agentos import AgentOSClient
+from management.services.agent.agentos_events import (
+    active_run_error_response, debug_preparation_events, present_ephemeral_stream, present_public_resume,
+)
+from management.services.agent.workbench_debug_grant import (
+    WorkbenchDebugGrantUnavailable, close_workbench_debug_grant, open_workbench_debug_grant,
+)
+from nexent.core.concurrency import run_blocking
+
+logger = logging.getLogger(__name__)
 
 
-_HOP_BY_HOP_HEADERS = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-}
-_STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
-_REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
-_EVALUATION_DISPATCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
-_EVALUATION_TRIAL_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
-_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE = "Runtime service is unavailable"
+def _agentos_client() -> AgentOSClient:
+    return AgentOSClient(RUNTIME_SERVICE_URL, create_httpx_client)
 
 
-def _runtime_url(path: str) -> str:
-    return f"{RUNTIME_SERVICE_URL}/api{path}"
+async def _run_prepared_debug(client, prepared, user_id, tenant_id):
+    payload = prepared.payload
+    if prepared.workbench is None or not payload.resource.workbench_skill_refs:
+        return await client.run_ephemeral(payload, user_id, tenant_id)
 
-
-def _forwarded_headers(headers: httpx.Headers) -> dict[str, str]:
-    return {
-        name: value
-        for name, value in headers.items()
-        if name.lower() not in _HOP_BY_HOP_HEADERS
-    }
-
-
-def _authorization_headers(user_id: str, tenant_id: str) -> dict[str, str]:
-    try:
-        token = generate_internal_runtime_jwt(user_id, tenant_id)
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError(
-            "Internal runtime authentication is not configured"
-        ) from exc
-    return {"Authorization": f"Bearer {token}"}
-
-
-def dispatch_agent_evaluation_run(
-    agent_evaluation_id: int,
-    user_id: str,
-    tenant_id: str,
-) -> dict:
-    """Dispatch evaluation execution to the runtime service.
-
-    Evaluation setup remains in the config service, while agent execution and
-    scoring run in the runtime process that has access to the shared sandbox
-    workspace volume.  This synchronous wrapper is intentionally suitable for
-    the config service's existing background thread pool.
-    """
-    try:
-        with httpx.Client(
-            headers=_authorization_headers(user_id, tenant_id),
-            timeout=_EVALUATION_DISPATCH_TIMEOUT,
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = client.post(
-                _runtime_url("/agent-evaluations/internal/run"),
-                json={"agent_evaluation_id": agent_evaluation_id},
-            )
-    except httpx.TimeoutException as exc:
-        raise RuntimeServiceTimeoutError("Runtime evaluation dispatch timed out") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-
-    if response.status_code >= 400:
-        raise RuntimeUpstreamError(
-            status_code=response.status_code,
-            content=response.content,
-            headers=_forwarded_headers(response.headers),
-        )
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError(
-            "Runtime evaluation dispatch response is not valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RuntimeServiceUnavailableError(
-            "Runtime evaluation dispatch response is not a JSON object"
-        )
-    return payload
-
-
-async def forward_agent_evaluation_trial_run(
-    *,
-    agent_id: int,
-    agent_version_no: int,
-    query: str,
-    judge_model_id: int,
-    evaluator_ids: list[int] | None,
-    language: str,
-    user_id: str,
-    tenant_id: str,
-) -> dict:
-    """Execute an ad-hoc evaluation in the Runtime process and return its result."""
-    try:
-        async with create_httpx_client(
-            headers=_authorization_headers(user_id, tenant_id),
-            timeout=_EVALUATION_TRIAL_TIMEOUT,
-        ) as client:
-            response = await client.post(
-                _runtime_url("/agent-evaluations/internal/trial-run"),
-                json={
-                    "agent_id": agent_id,
-                    "agent_version_no": agent_version_no,
-                    "query": query,
-                    "judge_model_id": judge_model_id,
-                    "evaluator_ids": evaluator_ids,
-                    "language": language,
-                },
-            )
-    except httpx.TimeoutException as exc:
-        raise RuntimeServiceTimeoutError("Runtime trial evaluation timed out") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-
-    if response.status_code >= 400:
-        raise RuntimeUpstreamError(
-            status_code=response.status_code,
-            content=response.content,
-            headers=_forwarded_headers(response.headers),
-        )
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError(
-            "Runtime trial evaluation response is not valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RuntimeServiceUnavailableError(
-            "Runtime trial evaluation response is not a JSON object"
-        )
-    return payload
-
-
-async def forward_agent_run(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-) -> StreamingResponse:
-    """Start a runtime agent run and proxy its response without buffering."""
-    return await _forward_runtime_stream(
-        "POST", "/agent/internal/northbound/run", user_id, tenant_id,
-        payload=agent_request.model_dump(mode="json"),
+    scope = WorkbenchDebugSkillLookup(
+        run_id=payload.run_id, agent_id=payload.resource.agent_id, agent_version=payload.resource.version_no,
     )
-
-
-async def _forward_runtime_stream(
-    method: str,
-    path: str,
-    user_id: str,
-    tenant_id: str,
-    *,
-    payload: dict | None = None,
-    params: dict | None = None,
-) -> StreamingResponse:
-    """Forward SSE bytes and preserve runtime status, headers, and event IDs."""
-    client = create_httpx_client(
-        headers=_authorization_headers(user_id, tenant_id),
-        timeout=_STREAM_TIMEOUT,
-    )
+    mounts = WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in prepared.workbench.skill_mounts])
+    granted = False
+    keep_image_grant = False
     try:
-        request = client.build_request(
-            method,
-            _runtime_url(path),
-            json=payload,
-            params=params,
+        with CancelScope(shield=True):
+            try:
+                await run_blocking(
+                    "open-workbench-debug-grant", open_workbench_debug_grant,
+                    scope, ServicePrincipal(user_id, tenant_id), mounts, lane="control-io", owner="management",
+                )
+            except (RedisError, WorkbenchDebugGrantUnavailable) as exc:
+                raise HTTPException(status_code=503, detail={"code": "AGENTOS_WORKBENCH_SCOPE_UNAVAILABLE"}) from exc
+            granted = True
+        response = await client.run_ephemeral(payload, user_id, tenant_id)
+        # The browser may read signed images after Runtime has closed the stream.
+        keep_image_grant = response.status_code == 200 and any(
+            binding.tool_id == "ind_aidp_search" and binding.version == "4" for binding in payload.resource.tools
         )
-        upstream = await client.send(request, stream=True)
-    except httpx.TimeoutException as exc:
-        await client.aclose()
-        raise RuntimeServiceTimeoutError("Runtime agent run request timed out") from exc
-    except httpx.RequestError as exc:
-        await client.aclose()
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-    except Exception:
-        await client.aclose()
-        raise
+        return response
+    finally:
+        if granted and not keep_image_grant:
+            with CancelScope(shield=True):
+                try:
+                    await run_blocking(
+                        "close-workbench-debug-grant", close_workbench_debug_grant,
+                        payload.run_id, lane="control-io", owner="management",
+                    )
+                except (RedisError, WorkbenchDebugGrantUnavailable):
+                    logger.warning("Workbench debug grant will expire run_id=%s", payload.run_id)
 
-    async def body_iterator() -> AsyncIterator[bytes]:
+
+async def forward_creator_run(
+    payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
+) -> StreamingResponse:
+    return await _agentos_client().run_ephemeral(payload, user_id, tenant_id)
+
+
+async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: str) -> StreamingResponse:
+    from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
+
+    snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
+    response = await _agentos_client().run_ephemeral(snapshot, user_id, tenant_id)
+    return present_ephemeral_stream(response, user_id, snapshot.run_id)
+
+
+async def forward_northbound_run(
+    agent_request: AgentRequest, user_id: str, tenant_id: str,
+):
+    payload = CompatibilityConversationRun(request=agent_request.model_dump(mode="json"))
+    try:
+        response = await forward_conversation_run(payload, user_id, tenant_id, northbound=True)
+    except HTTPException as exc:
+        if exc.status_code != 409 or exc.detail != {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}:
+            raise
+    except RuntimeUpstreamError as exc:
+        if exc.status_code != 409 or exc.headers.get("X-Stream-Status") != "conflict":
+            raise
+    else:
+        if response.status_code != 409 or response.headers.get("X-Stream-Status") != "conflict":
+            return response
+        if response.background is not None:
+            await response.background()
+    return active_run_error_response(payload.language)
+
+
+async def forward_conversation_run(
+    payload: CompatibilityConversationRun, user_id: str, tenant_id: str, *,
+    northbound: bool = False,
+):
+    request = AgentRequest.model_validate(payload.request)
+    if payload.resume and (request.is_debug or (request.conversation_id or 0) <= 0):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RESUME_REQUEST"})
+    if request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=404, detail={"code": "WORKBENCH_DISABLED"})
+
+    from management.services.agent import prepared_turn
+    from management.services.agent.conversation_submission import submit_conversation
+
+    client = _agentos_client()
+    saved_user = None
+    if payload.user_message == "saved":
+        if request.is_debug or payload.resume or (request.conversation_id or 0) <= 0:
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_SAVED_USER_REQUEST"})
+        from management.services.agent.context import strip_current_time_prefix
+
+        message_index = 2 * sum(item.role == "user" for item in request.history or [])
         try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
+            saved_user = await run_blocking(
+                "saved-user-source", prepared_turn.store.read_saved_user_turn,
+                request.conversation_id, user_id, tenant_id, message_index,
+                strip_current_time_prefix(request.query), request.minio_files, lane="control-io", owner="management",
+            )
+        except AdmissionScopeError as exc:
+            raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+        except prepared_turn.store.PreparedTurnConflict as exc:
+            raise prepared_turn.active_turn_conflict() from exc
+        if payload.idempotency_key is None:
+            payload = payload.model_copy(update={"idempotency_key": f"saved-message-{saved_user.message_id}"})
+    if request.is_debug and not payload.resume and not northbound:
+        from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 
-    return StreamingResponse(
-        body_iterator(),
-        status_code=upstream.status_code,
-        headers=_forwarded_headers(upstream.headers),
-    )
+        try:
+            prepared = await prepare_debug_snapshot(
+                request, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
+            )
+        except RunModelControlsError as exc:
+            status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+            raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+        except WorkbenchError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+        if prepared is not None:
+            response = await _run_prepared_debug(client, prepared, user_id, tenant_id)
+            public = present_ephemeral_stream(
+                response, user_id, prepared.payload.run_id, opening_events=debug_preparation_events(prepared),
+            )
+            if public.status_code == 200 and request.conversation_id is not None:
+                public.headers["conversation_id"] = str(request.conversation_id)
+            return public
+
+    conversation_id = request.conversation_id
+    northbound = northbound or saved_user is not None
+    temporary_workbench_claim = request.entrypoint == "workbench" and payload.idempotency_key is None
+    candidate = prepared_turn.is_prepared_candidate(payload, request)
+
+    async def dispatch(claimed, owner, tenant):
+        if candidate:
+            saved_options = {"saved_user": saved_user} if saved_user is not None else {}
+            response = await prepared_turn.start_turn(
+                claimed, request, owner, tenant, client, include_journal_controls=not northbound,
+                metadata_from_northbound=northbound and request.metadata is not None,
+                **saved_options,
+            )
+            if response is not None:
+                return response
+        if conversation_id and conversation_id > 0 and not request.is_debug:
+            if claimed.resume:
+                response = await prepared_turn.resume_cursorless(conversation_id, owner, tenant, client)
+                if response is not None:
+                    return response
+                return await client.resume_legacy(
+                    AgentLegacyResume(conversation_id=conversation_id, workbench=request.entrypoint == "workbench"),
+                    owner, tenant,
+                )
+            elif await prepared_turn.find_pending_turn(conversation_id, owner, tenant) is not None:
+                raise prepared_turn.active_turn_conflict()
+        raise ValidationError("Agent resources could not be prepared for AgentOS")
+
+    if candidate or payload.idempotency_key is not None:
+        return await submit_conversation(
+            prepared_turn.with_submission_key(payload), user_id, tenant_id, dispatch,
+            include_claim_headers=not (northbound or temporary_workbench_claim),
+        )
+    return await dispatch(payload, user_id, tenant_id)
+
+
+async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
+    response = await _agentos_client().resume(payload, user_id, tenant_id)
+    return present_public_resume(response, payload, user_id)
 
 
 async def forward_agent_stop(
@@ -215,35 +213,94 @@ async def forward_agent_stop(
     user_id: str,
     tenant_id: str,
 ) -> dict:
-    """Ask the runtime service to stop a northbound agent run."""
-    try:
-        async with create_httpx_client(
-            headers=_authorization_headers(user_id, tenant_id),
-            timeout=_REQUEST_TIMEOUT,
-        ) as client:
-            response = await client.post(
-                _runtime_url(f"/agent/internal/northbound/stop/{conversation_id}")
-            )
-    except httpx.TimeoutException as exc:
-        raise RuntimeServiceTimeoutError("Runtime stop request timed out") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
+    """Cancel a Northbound conversation run through AgentOS."""
+    from management.services.agent.prepared_turn import find_pending_turn
 
-    if response.status_code >= 400:
-        raise RuntimeUpstreamError(
-            status_code=response.status_code,
-            content=response.content,
-            headers=_forwarded_headers(response.headers),
-        )
+    client = _agentos_client()
+    pending = await find_pending_turn(conversation_id, user_id, tenant_id)
+    if pending is None:
+        run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
+        if run_id is None:
+            return {"status": "success", "already_stopped": True,
+                    "message": f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"}
+        reference = AgentRunReference(run_id=run_id, conversation_id=conversation_id)
+    else:
+        reference = pending.reference
 
+    state = await client.stop_run(
+        AgentStop(**reference.model_dump(), prevent_start=pending is not None), user_id, tenant_id,
+    )
+    if state.cancellation_requested:
+        message = f"successfully stopped agent run for user_id {user_id}, run_id {conversation_id}"
+        return {"status": "success", "message": message}
+    message = f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"
+    return {"status": "success", "message": message, "already_stopped": True}
+
+
+async def forward_evaluation_case(payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
+    from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
+
+    prepared = await prepare_evaluation_snapshot(payload, user_id, tenant_id)
+    if prepared is None:
+        raise ValidationError("Evaluation resources could not be prepared for AgentOS")
+    return await _agentos_client().run_prepared_evaluation(prepared, user_id, tenant_id)
+
+
+async def forward_active_run(conversation_id: int, user_id: str, tenant_id: str) -> str | None:
+    return await _agentos_client().find_active_run(conversation_id, user_id, tenant_id)
+
+
+async def forward_scoped_stop(payload: AgentStop, user_id: str, tenant_id: str):
+    return await _agentos_client().stop_run(payload, user_id, tenant_id)
+
+
+async def forward_debug_stop(run_id: str, user_id: str, tenant_id: str):
+    return await _agentos_client().stop_debug_run(run_id, user_id, tenant_id)
+
+
+async def forward_tracked_background(
+    agent_request: AgentRequest, run_id: str, user_id: str, tenant_id: str,
+) -> TrackedBackgroundResult:
+    payload = BackgroundRun(run_id=run_id, request=agent_request.model_dump(mode="json"))
+    client = _agentos_client()
     try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError(
-            "Runtime stop response is not valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RuntimeServiceUnavailableError(
-            "Runtime stop response is not a JSON object"
-        )
-    return payload
+        from management.services.agent.background import dispatch_background
+        return await dispatch_background(payload, ServicePrincipal(user_id, tenant_id))
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as failure:
+        if isinstance(failure, RuntimeUpstreamError) and failure.status_code not in {503, 504}:
+            raise
+        if agent_request.conversation_id is not None and agent_request.conversation_id > 0:
+            from management.db.automation import repository as runs
+            from management.db.conversation.repository import get_prepared_projection_receipt
+
+            try:
+                record = await run_blocking(
+                    "background-recover-source", runs.get_run_by_runtime_id, run_id, tenant_id, user_id,
+                    conversation_id=agent_request.conversation_id, lane="control-io", owner="management",
+                )
+                if record is not None and record.get("projection_message_index") is not None:
+                    receipt = await run_blocking(
+                        "background-recover-receipt", get_prepared_projection_receipt,
+                        projection_run_id=run_id, conversation_id=agent_request.conversation_id,
+                        message_index=record["projection_message_index"], message_source=MessageSource.AUTOMATION,
+                        user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
+                    )
+                    if receipt is not None and receipt[1] == "completed":
+                        return TrackedBackgroundResult(
+                            run_id=run_id, conversation_id=agent_request.conversation_id,
+                            assistant_message_id=receipt[0], chunks=0,
+                        )
+            except (SQLAlchemyError, RuntimeError):
+                logger.warning("Management background receipt recovery deferred run_id=%s", run_id)
+            lookup = AgentRunLookup(run_id=run_id, conversation_id=agent_request.conversation_id)
+            try:
+                state = await client.inspect_run(lookup, user_id, tenant_id)
+            except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError):
+                state = None
+            if (state is not None and state.status == "completed" and state.assistant_message_id is not None
+                    and (state.run_id, state.conversation_id) == (lookup.run_id, lookup.conversation_id)):
+                return TrackedBackgroundResult(
+                    run_id=run_id, conversation_id=lookup.conversation_id,
+                    assistant_message_id=state.assistant_message_id, chunks=0,
+                )
+        raise

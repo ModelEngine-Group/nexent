@@ -107,7 +107,9 @@ class RuntimeStateService:
     async def reset_stream_async(self, user_id: str, conversation_id: int) -> None:
         await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
 
-    def register_run(self, user_id: str, conversation_id: int, message_id: Optional[int] = None) -> None:
+    def register_run(
+        self, user_id: str, conversation_id: int | str, message_id: Optional[int] = None, *, tenant_id: str | None = None,
+    ) -> None:
         if not self.enabled:
             return
         try:
@@ -120,6 +122,8 @@ class RuntimeStateService:
             }
             if message_id is not None:
                 payload["message_id"] = str(message_id)
+            if tenant_id is not None:
+                payload["tenant_id"] = tenant_id
             key = self._run_key(user_id, conversation_id)
             self.client.hset(key, mapping=payload)
             self.client.expire(key, RUNTIME_RUN_TTL_SECONDS)

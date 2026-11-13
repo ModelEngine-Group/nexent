@@ -36,9 +36,9 @@ async def test_partial_upstream_failure_closes_stream_without_retry():
 
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"),
-    ("POST", "/api/agent/run", "runtime"),
+    ("POST", "/api/agent/run", "management"),
     ("POST", "/api/agent/runner", None),
-    ("POST", "/api/file/storage", "runtime"),
+    ("POST", "/api/file/storage", "management"),
     ("GET", "/api/file/storage", "management"),
     ("POST", "/nb/v1/chat/run", "northbound"),
     ("GET", "/api/nb/a2a/test/.well-known/agent-card.json", "northbound"),

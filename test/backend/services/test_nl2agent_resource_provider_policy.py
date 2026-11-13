@@ -3,11 +3,11 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from services.nl2agent_service import (
+from management.services.agent.nl2agent import (
     _score_resource_requirement,
     search_installed_resources_impl,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceRequirement
+from management.services.agent.nl2agent_tools import ResourceRequirement
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def provider_catalog(mocker):
 async def test_provider_scoring_prefers_default_unless_named(
     mocker, provider_catalog, enabled, query, hint, expected_datamate
 ):
-    mocker.patch("services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE", enabled)
+    mocker.patch("management.services.agent.nl2agent.ENABLE_AIDP_KNOWLEDGE", enabled)
     result = await search_installed_resources_impl(
         requirements=[
             ResourceRequirement(
@@ -115,6 +115,6 @@ def test_bonus_is_small_and_does_not_override_name_hints(mocker, hint):
         resource_name_hint=hint,
     )
     actual = _score_resource_requirement(requirement, resource)
-    mocker.patch("services.nl2agent_service.MANAGED_KNOWLEDGE_NAMES", set())
+    mocker.patch("management.services.agent.nl2agent.MANAGED_KNOWLEDGE_NAMES", set())
     baseline = _score_resource_requirement(requirement, resource)
     assert actual == pytest.approx(min(1.0, baseline + (0.02 if hint is None else 0)))

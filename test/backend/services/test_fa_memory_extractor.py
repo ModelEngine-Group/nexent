@@ -493,3 +493,17 @@ class TestExtractionResult:
         result = ExtractionResult(items=[], reason="no_items")
         assert result.items == []
         assert result.reason == "no_items"
+
+
+@pytest.mark.asyncio
+async def test_agentos_extraction_model_preserves_scope_and_sampling(monkeypatch):
+    from management.services.memory import extraction
+
+    invoke = AsyncMock(return_value="<memory-item>fact</memory-item>")
+    monkeypatch.setattr(extraction, "invoke_chat_messages", invoke)
+    model = extraction.AgentOSMemoryExtractionModel(model_id=42, user_id="owner", tenant_id="tenant")
+    assert await model.chat([{"role": "user", "content": "question"}]) == "<memory-item>fact</memory-item>"
+    kwargs = invoke.await_args.kwargs
+    assert (kwargs["model_id"], kwargs["user_id"], kwargs["tenant_id"]) == (42, "owner", "tenant")
+    assert [message.model_dump() for message in kwargs["messages"]] == [{"role": "user", "content": "question"}]
+    assert (kwargs["options"].temperature, kwargs["options"].top_p) == (0.1, 0.9)

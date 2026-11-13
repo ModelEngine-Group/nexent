@@ -29,7 +29,7 @@ from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
 from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
 from runtime.api.identity_routes import is_runtime_service_request
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from backend.http.server.app_factory import create_app
 from gateway.mcp.credential_client import resolve_mcp_identity
 from gateway.mcp.identity_router import TenantMCPRouter
 from gateway.security.identity import sign_delegation
@@ -67,6 +67,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     monkeypatch.setattr(environment, "JWT_SECRET", secret)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
     monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
     accounts = {user: {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test"}
                 for user in ("u1", "u2", "su")}
     key_record = {"user_id": "u1", "token_id": 7, "delete_flag": "N"}
@@ -102,12 +103,11 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
             result = await manager.shutdown(timeout=2)
             assert result.stuck_execution_ids == ()
 
-    management = FastAPI(root_path="/api", lifespan=management_lifespan)
-    management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    management = create_app(enable_monitoring=False, lifespan=management_lifespan,
+                            gateway_identity_audience="management")
     management.include_router(lookup_routes.router)
-    runtime = FastAPI(root_path="/api")
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True,
-                           internal_runtime_request=is_runtime_service_request)
+    runtime = create_app(enable_monitoring=False, gateway_identity_audience="runtime",
+                         internal_runtime_request=is_runtime_service_request)
     reached = []
     context_checks = []
 
@@ -127,6 +127,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     management.add_middleware(ObserveContext)
     runtime.add_middleware(ObserveContext)
 
+    @management.post("/agent/run")
     @runtime.post("/agent/run")
     async def execute():
         identity = identity_context.get()

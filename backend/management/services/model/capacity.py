@@ -9,6 +9,7 @@ from typing import Any, Dict, Mapping, Optional
 
 from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED, CAPACITY_VISIBILITY_ENABLED, NEXENT_LITELLM_JSON
 from contracts.model import CapabilityProfileLike, CapacitySuggestionConfidence, CapacitySuggestionFields, CapacitySuggestionMatchKind, CapacitySuggestionResult, ProfileKey
+from infrastructure.model_provider import pick_provider_from_base_url
 from management.db.model.repository import get_model_records
 from management.services.model.names import add_repo_to_name
 
@@ -80,39 +81,7 @@ def _record_suggestion_request(
             pass
 
 
-# Substring patterns matched against the lower-cased base_url. Order matters:
-# `in` returns the first hit, so place more-specific patterns before broader
-# ones (e.g. `dashscope` before `aliyuncs`). Patterns mirror frontend
-# PROVIDER_HINTS in `frontend/const/modelConfig.ts` so backend provider-by-URL
-# detection stays consistent with the icon the user sees in the UI.
-HOST_PROVIDER_PATTERNS = (
-    ("open/router", "modelengine"),
-    ("dashscope", "dashscope"),
-    ("aliyuncs", "dashscope"),
-    ("siliconflow", "silicon"),
-    ("silicon", "silicon"),
-    ("modelengine", "modelengine"),
-    ("openai", "openai"),
-    ("deepseek", "deepseek"),
-    ("jina", "jina"),
-    ("tokenpony", "tokenpony"),
-    ("bytedance", "volcengine"),
-)
-
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
-
-
-def pick_provider_from_base_url(base_url: Optional[str]) -> Optional[str]:
-    # Match the entire lower-cased base_url, mirroring the frontend
-    # detectProviderFromUrl helper. Substring `in` check, first hit wins.
-    if not base_url:
-        return None
-
-    lowered = base_url.lower()
-    for pattern, provider in HOST_PROVIDER_PATTERNS:
-        if pattern in lowered:
-            return provider
-    return None
 
 
 def _normalize_provider(provider: Optional[str]) -> Optional[str]:

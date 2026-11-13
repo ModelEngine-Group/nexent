@@ -159,6 +159,15 @@ def test_invalid_source_writes_neither_user_message_nor_response(storage, varian
     assert storage.execute(text('SELECT count(*) FROM nexent.conversation_message_t')).scalar() == before
 
 
+def test_prepared_source_replacement_writes_neither_message_nor_response(storage):
+    with pytest.raises(AppException, match="Clarification source changed"):
+        db.create_conversation_message({
+            "conversation_id": 1, "message_idx": 2, "role": "user", "content": "Readable answers",
+            "clarification_response": RESPONSE,
+        }, "owner", expected_clarification_source_id=9)
+    assert storage.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 1
+
+
 def test_unit_write_failure_rolls_back_user_message(storage):
     storage.execute(text("CREATE TRIGGER nexent.fail_response BEFORE INSERT ON conversation_message_unit_t "
                          "WHEN NEW.unit_type='clarification_response' BEGIN SELECT RAISE(ABORT,'unit failed'); END"))

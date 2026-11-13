@@ -49,6 +49,7 @@ async def auto_summary(
             index_name=index_name,
             batch_size=batch_size,
             vdb_core=vdb_core,
+            user_id=user_id,
             tenant_id=tenant_id,
             language=language,
             model_id=model_id,

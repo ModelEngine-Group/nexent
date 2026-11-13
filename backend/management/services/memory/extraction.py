@@ -7,10 +7,28 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from contracts.agentos import ChatMessage, ChatOptions
+from management.clients.model import invoke_chat_messages
 from nexent.core.agents.prompt.memory import compose_memory_prompt, load_memory_template
 from nexent.memory.models import MemoryLayer, MemoryType
 
 logger = logging.getLogger("fa_memory_extractor")
+
+@dataclass(frozen=True)
+class AgentOSMemoryExtractionModel:
+    model_id: int
+    user_id: str
+    tenant_id: str
+
+    async def chat(self, messages: list[dict]) -> str:
+        return await invoke_chat_messages(
+            model_id=self.model_id,
+            user_id=self.user_id,
+            tenant_id=self.tenant_id,
+            messages=[ChatMessage.model_validate(message) for message in messages],
+            options=ChatOptions(temperature=0.1, top_p=0.9),
+        )
+
 
 @dataclass
 class ExtractionResult:
@@ -60,19 +78,21 @@ class FaMemoryExtractor:
         matches = re.findall(r"<memory-item>(.*?)</memory-item>", raw, re.DOTALL)
         return [m.strip() for m in matches if m.strip()]
 
+    async def select_items(self, final_answer: str, user_query: str = "") -> list[str]:
+        messages = self._build_messages(final_answer[: self.MAX_INPUT_CHARS], user_query=user_query)
+        return self._parse_items(await self.model_client.chat(messages))
+
+    async def store_item(self, item: str):
+        return await self.memory_service.store_memory(
+            content=item, tenant_id=self.tenant_id, user_id=self.user_id, agent_id=self.agent_id,
+            conversation_id=self.conversation_id, layer=MemoryLayer.AGENT, memory_type=MemoryType.SHORT_TERM,
+        )
+
     async def _store_items(self, items: list[str]) -> list[dict]:
         results: list[dict] = []
         for item in items:
             try:
-                result = await self.memory_service.store_memory(
-                    content=item,
-                    tenant_id=self.tenant_id,
-                    user_id=self.user_id,
-                    agent_id=self.agent_id,
-                    conversation_id=self.conversation_id,
-                    layer=MemoryLayer.AGENT,
-                    memory_type=MemoryType.SHORT_TERM,
-                )
+                result = await self.store_item(item)
                 results.append({
                     "content": item,
                     "memory_id": result.memory_id,
@@ -93,16 +113,12 @@ class FaMemoryExtractor:
         if not self.model_client:
             return ExtractionResult(items=[], reason="no_llm_configured")
 
-        truncated = final_answer_text[: self.MAX_INPUT_CHARS]
-        messages = self._build_messages(truncated, user_query=user_query)
-
         try:
-            raw = await self.model_client.chat(messages)
+            parsed = await self.select_items(final_answer_text, user_query)
         except Exception:
             logger.error("LLM call failed during memory extraction", exc_info=True)
             return ExtractionResult(items=[], reason="llm_error")
 
-        parsed = self._parse_items(raw)
         if not parsed:
             return ExtractionResult(items=[], reason="no_items")
 

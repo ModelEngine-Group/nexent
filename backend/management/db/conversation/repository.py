@@ -4,17 +4,21 @@ from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT
 from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
+import logging
+import re
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.agentos import RUN_ID_PATTERN
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
@@ -28,6 +32,8 @@ from management.db.models import (
     ConversationSourceSearch,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_unit_content(content: Any) -> str:
@@ -149,6 +155,9 @@ def create_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    *,
+    reserved_conversation_id: int | None = None,
+    db_session=None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation record
@@ -163,11 +172,13 @@ def create_conversation(
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         _enforce_user_conversation_limit(session, user_id)
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
+        if reserved_conversation_id is not None:
+            data["conversation_id"] = reserved_conversation_id
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -253,7 +264,9 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *,
-                                 message_source: MessageSource = MessageSource.CHAT) -> int:
+                                 message_source: MessageSource = MessageSource.CHAT, execution_identity=None,
+                                 streaming_owner: str | None = None, db_session=None,
+                                 expected_clarification_source_id: int | None = None) -> int:
     """
     Create a conversation message record
 
@@ -271,7 +284,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -289,6 +302,9 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             response = _resolve_clarification_response(
                 session, conversation_id, user_id, message_role, message_data['clarification_response'],
             )
+            if (expected_clarification_source_id is not None
+                    and response["source_message_id"] != expected_clarification_source_id):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification source changed")
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -301,6 +317,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_role,
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status, "message_source": message_source.value}
+        if streaming_owner is not None:
+            data["streaming_owner"] = streaming_owner
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -308,6 +326,10 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         stmt = insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
+        if execution_identity is not None:
+            from infrastructure.rdb.agent_execution import bind_assistant_message
+
+            bind_assistant_message(session, execution_identity, message_id)
         if response is not None:
             unit_data = {
                 'conversation_id': conversation_id, 'message_id': message_id,
@@ -422,6 +444,109 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+def _lock_projection_conversation(session, conversation_id: int, user_id: str) -> None:
+    conversation = session.scalar(
+        select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update()
+    )
+    if conversation is None:
+        raise ValueError("Conversation does not exist or is not accessible")
+
+
+def get_prepared_projection_receipt(
+    *, projection_run_id: str, conversation_id: int, message_index: int,
+    message_source: MessageSource, user_id: str, tenant_id: str,
+) -> tuple[int, str] | None:
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    receipt = ConversationProjectionReceipt
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return None
+        row = session.execute(
+            select(receipt.message_id, ConversationMessage.status)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+            .where(
+                receipt.run_id == projection_run_id, receipt.tenant_id == tenant_id,
+                receipt.created_by == user_id, receipt.delete_flag == "N",
+                ConversationMessage.conversation_id == conversation_id, ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_index == message_index,
+                ConversationMessage.message_source == MessageSource(message_source).value,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            )
+        ).one_or_none()
+        return (row.message_id, row.status) if row is not None else None
+
+
+def persist_prepared_assistant_projection(
+    *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
+    user_id: str, tenant_id: str, assistant_message_id: int | None = None, memory_agent_id: int | None = None,
+    memory_source_message_id: int | None = None, **batch,
+) -> int:
+    """Create or replay a remote projection in the same transaction as its receipt."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    if not isinstance(projection_run_id, str) or not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+        raise ValueError("Invalid assistant projection run ID")
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
+        receipt = ConversationProjectionReceipt
+        existing = session.execute(
+            select(receipt.message_id, receipt.created_by, receipt.tenant_id, ConversationMessage.conversation_id,
+                   ConversationMessage.message_index, ConversationMessage.message_source)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .where(receipt.run_id == projection_run_id, receipt.delete_flag == "N")
+        ).first()
+        source = MessageSource(message_source).value
+        if existing is not None:
+            if (existing.created_by, existing.tenant_id, existing.conversation_id) != (user_id, tenant_id, conversation_id):
+                raise ValueError("Conversation does not exist or is not accessible")
+            if (existing.message_index, existing.message_source) != (message_index, source):
+                raise ValueError("Assistant projection conflicts with the original message index or source")
+            message_id = existing.message_id
+            if assistant_message_id is not None and assistant_message_id != message_id:
+                raise ValueError("Assistant projection does not match the reserved message")
+        elif assistant_message_id is not None:
+            message_id = session.scalar(select(ConversationMessage.message_id).where(
+                ConversationMessage.message_id == assistant_message_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.created_by == user_id, ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_role == "assistant", ConversationMessage.message_source == source,
+                ConversationMessage.message_index == message_index, ConversationMessage.streaming_owner == "management",
+            ))
+            if message_id is None:
+                raise ValueError("Assistant projection does not match the reserved message")
+        else:
+            message_id = session.scalar(insert(ConversationMessage).values(
+                conversation_id=conversation_id, message_index=message_index, message_role="assistant",
+                message_source=source, message_content="", status="streaming",
+                created_by=user_id, updated_by=user_id, delete_flag="N",
+            ).returning(ConversationMessage.message_id))
+        persist_assistant_run_batch(
+            message_id, conversation_id, user_id=user_id, tenant_id=tenant_id,
+            projection_run_id=projection_run_id, db_session=session, **batch,
+        )
+        if memory_agent_id is not None:
+            from management.db.conversation.memory_completion import enqueue, read_omitted_memory_query
+
+            if (source == MessageSource.AUTOMATION.value and memory_source_message_id is None
+                    and read_omitted_memory_query(session, projection_run_id, conversation_id, message_id,
+                                                 user_id, tenant_id, memory_agent_id, source) is None):
+                raise ValueError("Automation Memory completion requires its original prompt message")
+            enqueue(session, projection_run_id, memory_agent_id, user_id,
+                    batch["terminal_status"], batch["message_content"] or "", source_message_id=memory_source_message_id)
+        return message_id
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -434,6 +559,8 @@ def persist_assistant_run_batch(
     automation_proposals: List[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    projection_run_id: str | None = None,
+    *, db_session=None, history_checkpoints: list[dict] | None = None,
 ) -> Dict[int, int]:
     """Persist one completed assistant stream in a single transaction.
 
@@ -445,24 +572,44 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
+    if history_checkpoints and projection_run_id is None:
+        raise ValueError("History checkpoints require a run projection receipt")
     if terminal_status not in {"completed", "failed", "stopped"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)
     conversation_id = int(conversation_id)
 
-    with get_db_session() as session:
+    payload_digest = None
+    if projection_run_id is not None:
+        if not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+            raise ValueError("Invalid assistant projection run ID")
+        from management.db.conversation.projection_receipt import (
+            ConversationProjectionReceipt,
+            find_projection_receipts,
+            projection_payload_digest,
+        )
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+        digest_payload = {
+            "message_content": message_content or "",
+            "terminal_status": terminal_status,
+            "message_units": message_units,
+            "search_records": search_records,
+            "image_urls": image_urls,
+            "skill_files": skill_files,
+            "automation_proposals": automation_proposals,
+        }
+        if history_checkpoints:
+            digest_payload["history_checkpoints"] = history_checkpoints
+        payload_digest = projection_payload_digest(digest_payload)
+
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
+        if projection_run_id is not None and not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
         # Match deletion's conversation-before-message lock order and reject
         # finalization if deletion committed while this locking read waited.
-        conversation = session.scalar(
-            select(ConversationRecord.conversation_id).where(
-                ConversationRecord.conversation_id == conversation_id,
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            ).with_for_update()
-        )
-        if conversation is None:
-            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
 
         parent = session.execute(
             select(ConversationMessage)
@@ -477,6 +624,21 @@ def persist_assistant_run_batch(
         ).scalar_one_or_none()
         if parent is None:
             raise ValueError("Assistant streaming message does not exist or is not accessible")
+        if projection_run_id is not None:
+            receipts = find_projection_receipts(session, projection_run_id, message_id)
+            if receipts:
+                existing = receipts[0]
+                if (
+                    len(receipts) == 1
+                    and existing.run_id == projection_run_id
+                    and existing.message_id == message_id
+                    and existing.tenant_id == tenant_id
+                    and existing.created_by == user_id
+                    and existing.payload_sha256 == payload_digest
+                    and parent.status == terminal_status
+                ):
+                    return {int(index): unit_id for index, unit_id in existing.unit_ids.items()}
+                raise ValueError("Assistant projection conflicts with a committed run")
         if parent.status != "streaming":
             raise ValueError(f"Assistant message is already finalized with status {parent.status}")
 
@@ -601,6 +763,16 @@ def persist_assistant_run_batch(
                 ensure_ascii=False,
             )
 
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
+
         parent.message_content = message_content or ""
         parent.status = terminal_status
         parent.updated_by = user_id
@@ -613,7 +785,39 @@ def persist_assistant_run_batch(
         ):
             _touch_conversation_activity(session, conversation_id, user_id)
 
+        if projection_run_id is not None:
+            session.add(ConversationProjectionReceipt(
+                run_id=projection_run_id,
+                message_id=message_id,
+                tenant_id=tenant_id,
+                payload_sha256=payload_digest,
+                unit_ids={str(index): unit_id for index, unit_id in unit_id_by_index.items()},
+                created_by=user_id,
+                updated_by=user_id,
+            ))
+
         return unit_id_by_index
+
+
+
+def fail_unfinished_assistant_projection(message_id: int, status: str, user_id: str, *, tenant_id: str) -> None:
+    """Preserve a committed projection if the sender lost the commit response."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return
+        session.execute(
+            update(ConversationMessage)
+            .where(
+                ConversationMessage.message_id == message_id,
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .values(status=status, updated_by=user_id, update_time=func.current_timestamp())
+        )
 
 
 def create_message_unit(
@@ -694,53 +898,6 @@ def update_conversation_message_status(message_id: int, status: str, user_id: Op
             .where(ConversationMessage.message_id == message_id, ConversationMessage.delete_flag == "N")
             .values(update_data)
         )
-
-
-def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
-    """Mark assistant messages left streaming by a stopped runtime as failed.
-
-    Returns the affected runtime identities so the caller can finish the
-    corresponding short-lived Redis state with the existing runtime-state API.
-    The conditional update makes repeated startup recovery idempotent.
-    """
-    with get_db_session() as session:
-        rows = (
-            session.query(
-                ConversationMessage.message_id,
-                ConversationMessage.conversation_id,
-                ConversationMessage.created_by,
-            )
-            .filter(
-                ConversationMessage.message_role == "assistant",
-                ConversationMessage.status == "streaming",
-                ConversationMessage.delete_flag == "N",
-            )
-            .with_for_update()
-            .all()
-        )
-        if not rows:
-            return []
-
-        message_ids = [int(row.message_id) for row in rows]
-        session.query(ConversationMessage).filter(
-            ConversationMessage.message_id.in_(message_ids),
-            ConversationMessage.status == "streaming",
-            ConversationMessage.delete_flag == "N",
-        ).update(
-            {
-                "status": "failed",
-                "update_time": func.current_timestamp(),
-            },
-            synchronize_session=False,
-        )
-        return [
-            {
-                "message_id": int(row.message_id),
-                "conversation_id": int(row.conversation_id),
-                "user_id": row.created_by,
-            }
-            for row in rows
-        ]
 
 
 def update_conversation_message_content(message_id: int, content: str, user_id: Optional[str] = None) -> None:
@@ -2402,17 +2559,24 @@ def save_history_summary(
     compaction_attempts: Optional[int] = None,
     compaction_trigger_threshold_tokens: Optional[int] = None,
     compaction_target_tokens: Optional[int] = None,
+    *, db_session=None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
         raise HistorySummaryPersistenceError("user_id, tenant_id and an object summary are required")
     conversation_id = int(conversation_id)
     covered_through_message_id = int(covered_through_message_id)
-    user_tenant = _get_user_tenant(user_id)
-    if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
-        raise HistorySummaryPersistenceError("conversation is not accessible")
+    if db_session is None:
+        user_tenant = _get_user_tenant(user_id)
+        if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+    else:
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
 
-    with get_db_session() as session:
+        if not tenant_membership_matches(db_session, user_id, tenant_id):
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         owner = session.execute(
             select(ConversationRecord.conversation_id).where(
                 ConversationRecord.conversation_id == conversation_id,
@@ -2566,9 +2730,10 @@ def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any
 
 def get_historical_context(
     conversation_id: int,
-    current_user_message_id: int,
+    current_user_message_id: int | None,
     user_id: str,
     tenant_id: str,
+    *, before_message_index: int | None = None,
 ) -> Optional[Dict[str, Any]]:
     """Load authorized completed and stopped turns after the latest valid checkpoint."""
     if not user_id or not tenant_id:
@@ -2577,25 +2742,32 @@ def get_historical_context(
     if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
         return None
     conversation_id = int(conversation_id)
-    current_user_message_id = int(current_user_message_id)
+    if (current_user_message_id is None) == (before_message_index is None):
+        raise ValueError("Historical context requires one message boundary")
     with get_db_session() as session:
-        current = session.execute(
-            select(
-                ConversationMessage.message_id,
-                ConversationMessage.message_index,
-            )
-            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-            .where(
-                ConversationMessage.message_id == current_user_message_id,
-                ConversationMessage.conversation_id == conversation_id,
-                ConversationMessage.message_role == "user",
-                ConversationMessage.delete_flag == "N",
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            )
-        ).first()
-        if not current:
-            return None
+        if before_message_index is None:
+            current = session.execute(
+                select(ConversationMessage.message_id, ConversationMessage.message_index)
+                .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+                .where(
+                    ConversationMessage.message_id == int(current_user_message_id),
+                    ConversationMessage.conversation_id == conversation_id,
+                    ConversationMessage.message_role == "user",
+                    ConversationMessage.delete_flag == "N",
+                    ConversationRecord.created_by == user_id,
+                    ConversationRecord.delete_flag == "N",
+                )
+            ).first()
+            if current is None:
+                return None
+            before_message_index = current.message_index
+        else:
+            owned = session.scalar(select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            ))
+            if owned is None:
+                return None
 
         candidates = session.execute(
             select(
@@ -2612,7 +2784,7 @@ def get_historical_context(
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessage.status == "completed",
                 ConversationMessage.delete_flag == "N",
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
             )
             .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))
         ).all()
@@ -2640,7 +2812,7 @@ def get_historical_context(
                 and boundary.message_role == "assistant"
                 and boundary.status == "completed"
                 and boundary.message_index == candidate.message_index
-                and boundary.message_index < current.message_index
+                and boundary.message_index < before_message_index
             ):
                 summary_record, summary_payload = candidate, payload
                 boundary_index = boundary.message_index
@@ -2658,7 +2830,7 @@ def get_historical_context(
             .where(
                 ConversationMessage.conversation_id == conversation_id,
                 ConversationMessage.message_index > boundary_index,
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
                 ConversationMessage.status.in_(["completed", "stopped"]),
                 ConversationMessage.delete_flag == "N",
                 ConversationMessage.message_role.in_(["user", "assistant"]),

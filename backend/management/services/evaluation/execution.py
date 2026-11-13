@@ -2,11 +2,11 @@
 
 from typing import Any
 
+from contracts.agentos import ChatMessage, EvaluationAgentRun
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
 from contracts.errors.exceptions import AppException
-from contracts.agent import AgentRequest
 
 try:
     from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
@@ -26,15 +26,10 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
-from runtime.thread_management import runtime_thread_manager
-from management.services.agent.service import prepare_agent_run
-from management.services.evaluation.common import (
-    agent_run_manager,
-    logger,
-)
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.services.evaluation.common import logger
+from management.clients.model import invoke_chat_messages, invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
-from runtime.adapters.nexent.runner import agent_run
+from nexent.core.concurrency import run_blocking
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -66,18 +61,21 @@ def _generate_friendly_error_message(
     model_id: int | None = None,
     tenant_id: str | None = None,
     language: str = "zh",
+    *,
+    user_id: str | None = None,
 ) -> str:
-    if not model_id or not _is_llm_related_error(exc):
+    if not model_id or not user_id or not tenant_id or not _is_llm_related_error(exc):
         return default_msg
     try:
         prompt = compose_auxiliary_prompt(
             language, "evaluation_error", {"error_message": str(exc)[:500]}
         )
-        response = call_llm_for_system_prompt(
+        response = invoke_chat_prompt_in_worker(
             model_id=model_id,
             user_prompt=prompt.user,
             system_prompt=prompt.system,
-            tenant_id=tenant_id or "",
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
         return (response or "").strip() or default_msg
     except Exception as llm_exc:
@@ -125,67 +123,18 @@ async def _run_agent_to_final_answer(
     conversation_id: int | None = None,
 ) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
-    run_conversation_id = conversation_id if conversation_id is not None else 0
-    agent_request = AgentRequest(
-        query=query,
-        conversation_id=run_conversation_id,
-        history=history,
-        minio_files=None,
-        agent_id=agent_id,
-        version_no=version_no,
-        is_debug=True,
-    )
-    agent_run_info = None
-    terminal_status = "failed"
-    try:
-        run_manager = agent_run_manager
-        if run_manager is None:
-            from management.services.agent.lifecycle import agent_run_manager as run_manager
+    from management.services.agent.runtime_client import forward_evaluation_case
 
-        agent_run_info, _memory_context = await prepare_agent_run(
-            agent_request=agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            allow_memory_search=False,
-        )
-        final_answer_parts: list[str] = []
-        runtime_events: list[dict] = []
-        async for chunk in agent_run(
-            agent_run_info,
-            thread_manager=runtime_thread_manager,
-        ):
-            try:
-                data = json.loads(chunk)
-                if isinstance(data, dict):
-                    runtime_events.append(data)
-                    if data.get("type") == "final_answer":
-                        content = data.get("content")
-                        if isinstance(content, str):
-                            final_answer_parts.append(content)
-            except Exception:
-                logger.debug(
-                    "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
-                )
-        remaining = agent_run_info.observer.get_cached_message()
-        for msg in remaining:
-            try:
-                data = json.loads(msg)
-                if isinstance(data, dict):
-                    runtime_events.append(data)
-            except Exception:
-                logger.debug(
-                    "Failed to parse straggler observer message", exc_info=True
-                )
-        terminal_status = "completed"
-        return "".join(final_answer_parts).strip(), runtime_events
-    finally:
-        if agent_run_info is not None:
-            run_manager.unregister_agent_run(
-                run_conversation_id,
-                user_id,
-                status=terminal_status,
-                agent_run_info=agent_run_info,
-            )
+    result = await forward_evaluation_case(
+        EvaluationAgentRun(
+            agent_id=agent_id, version_no=version_no, query=query, history=history,
+            conversation_id=conversation_id if conversation_id is not None else 0,
+        ),
+        user_id,
+        tenant_id,
+    )
+    return result.answer, result.events
+
 
 
 def _evaluation_conversation_id(agent_evaluation_id: int, case_id: int) -> int:
@@ -260,7 +209,7 @@ def _execute_single_case(
        scheduler sweeps do not re-pick it).
     2. Run the target agent via ``_evaluate_query``. The per-case managed
        worker is synchronous, so ``asyncio.run()`` provides its event loop.
-       LLM evaluators fan out through the runtime evaluation lane.
+       LLM evaluators fan out through the Management model lane.
     3. Build the ``{evaluator_name: pass_threshold}`` map from the evaluator
        rows already loaded for this run (one-time map per case, zero DB calls
        here).  Names missing from the map fall back to ``DEFAULT_PASS_THRESHOLD``
@@ -370,6 +319,7 @@ def _execute_single_case(
             str(exc),
             model_id=judge_model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=run.get("language", "zh"),
         )
         update_agent_evaluation_case_result(
@@ -429,6 +379,7 @@ def _setup_no_set_and_execute(
             model_id=gen_model_id,
             query_count=query_count,
             language=language,
+            user_id=user_id,
         )
 
         # Create virtual evaluation set
@@ -457,8 +408,7 @@ def _setup_no_set_and_execute(
             created_by=user_id,
         )
 
-        # Execute in the runtime process, which owns the shared workspace
-        # volume mounted by the sandbox container.
+        # Claim and schedule the evaluation through Management.
         _dispatch_agent_evaluation_run(
             agent_evaluation_id=agent_evaluation_id,
             user_id=user_id,
@@ -645,6 +595,7 @@ def execute_agent_evaluation_run(
             str(exc),
             model_id=judge_model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=run.get("language", "zh"),
         )
         update_agent_evaluation_status(
@@ -704,12 +655,26 @@ async def _evaluate_query(
             runtime_events=runtime_events or events,
             context_window=context_window,
             conversation_history=history,
+            user_id=user_id,
         )
     else:
-        score, reason = adapter.evaluate_semantic_consistency(
+        def invoke_judge(messages):
+            return asyncio.run(invoke_chat_messages(
+                model_id=judge_model_id,
+                messages=[ChatMessage(role=message.role, content=message.content or "") for message in messages],
+                user_id=user_id,
+                tenant_id=tenant_id,
+            ))
+
+        score, reason = await run_blocking(
+            "agent-evaluation-semantic-judge",
+            adapter.evaluate_semantic_consistency,
+            lane="model-tool-io",
+            owner="management",
             question=query,
             expected_answer="",
             model_answer=answer_text,
+            judge_invoker=invoke_judge,
         )
         score = {"semantic_consistency": score}
         reason = {"semantic_consistency": reason}
@@ -721,8 +686,8 @@ def _dispatch_agent_evaluation_run(
     user_id: str,
     tenant_id: str,
 ) -> dict:
-    """Lazily import the config-to-runtime proxy to keep service imports light."""
-    from management.services.agent.runtime_client import dispatch_agent_evaluation_run
+    """Claim and schedule an evaluation in Management."""
+    from management.services.evaluation.dispatch import dispatch_agent_evaluation_run
 
     return dispatch_agent_evaluation_run(
         agent_evaluation_id=agent_evaluation_id,

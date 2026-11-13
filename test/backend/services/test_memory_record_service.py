@@ -9,7 +9,7 @@ delegation to the index service.
 from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -242,11 +242,8 @@ def fake_db(monkeypatch):
     fake.get_memory_record = MagicMock(return_value={"memory_id": 1, "es_index_name": "mem_idx"})
     fake.list_memory_records = MagicMock(return_value=[])
 
-    fake_client = MagicMock(name="embedding_client")
-    fake_client.get_embeddings.return_value = [[0.1, 0.2]]
-
     monkeypatch.setattr(memory_record_service, "memory_record_db", fake)
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
+    monkeypatch.setattr(memory_record_service, "embed_memory_text", AsyncMock(return_value=[0.1, 0.2]))
     return fake
 
 
@@ -400,9 +397,8 @@ def test_create_memory_agent_auto_resolves_tenant_embedding_model(service, fake_
         "_resolve_tenant_embedding_model_info",
         lambda _tenant_id: fake_index_info,
     )
-    fake_client = MagicMock(name="embedding_client")
-    fake_client.return_value.get_embeddings.return_value = [[0.1, 0.2]]
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
+    embed = AsyncMock(return_value=[0.1, 0.2])
+    monkeypatch.setattr(memory_record_service, "embed_memory_text", embed)
 
     result = service.create_memory(
         tenant_id="t1",
@@ -416,17 +412,7 @@ def test_create_memory_agent_auto_resolves_tenant_embedding_model(service, fake_
     )
     assert result["event"] == "ADD"
     assert result["indexed"] is True
-    fake_client.assert_called_once_with(
-        model_name="text-embedding-3-small",
-        dimension=1536,
-        base_url="https://api.openai.com/v1",
-        api_key="sk-test",
-        model_repo="openai",
-        ssl_verify=True,
-    )
-    fake_client.return_value.get_embeddings.assert_called_once_with(
-        "hello", timeout=30, retries=2, retry_timeout_step=5.0
-    )
+    embed.assert_awaited_once_with("hello", fake_index_info, "u1", "t1")
     service.index_service.index_record.assert_called_once()
     index_call = service.index_service.index_record.call_args
     assert index_call.kwargs["embedding"] == [0.1, 0.2]
@@ -470,9 +456,7 @@ def test_create_memory_agent_embedding_compute_failure_degrades_gracefully(servi
         lambda _tenant_id: fake_index_info,
     )
 
-    fake_client = MagicMock(name="embedding_client")
-    fake_client.return_value.get_embeddings.side_effect = RuntimeError("upstream timeout")
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
+    monkeypatch.setattr(memory_record_service, "embed_memory_text", AsyncMock(return_value=None))
     service.index_service.index_record.side_effect = (
         lambda *, embedding, **_kwargs: embedding is not None
     )
@@ -642,8 +626,7 @@ def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
     )
 
 
-def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
-    # When api_key is missing, the function falls back to ``sk-no-api-key``.
+def test_resolve_tenant_embedding_model_keeps_provider_credentials_out_of_binding(monkeypatch):
     tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
@@ -655,7 +638,7 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
         "model_repo": "repo-x",
         "base_url": "https://embedding.example/v1",
         "max_tokens": 768,
-        # api_key intentionally absent -> falls back to placeholder
+        "api_key": "secret",
         "ssl_verify": False,
     }
     monkeypatch.setitem(
@@ -667,8 +650,8 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
 
     info = memory_record_service._resolve_tenant_embedding_model_info("t1")
     assert info is not None
-    assert info.api_key == "sk-no-api-key"
-    assert info.ssl_verify is False
+    assert info.model_id == 42 and info.revision == "legacy"
+    assert info.api_key == "" and info.base_url == ""
 
 
 def test_is_tenant_embedding_configured(monkeypatch):
@@ -720,102 +703,31 @@ def test_get_tenant_memory_index_name(monkeypatch):
     assert memory_record_service.get_tenant_memory_index_name("t1") is None
 
 
-def test_compute_content_embedding_empty_returns_none(monkeypatch):
-    fake_model_info = _FakeEmbeddingModelInfo(
-        index_name="mem_x",
-        model_name="m",
-        model_repo="openai",
-        dimension=1,
-        base_url="https://embedding.example/v1",
-        api_key="sk-test",
-        ssl_verify=True,
-    )
-
-    fake_client_instance = MagicMock(name="embedding_client_instance")
-    fake_client_instance.get_embeddings.return_value = []
-
-    fake_client_factory = MagicMock(name="embedding_client_factory")
-    fake_client_factory.return_value = fake_client_instance
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client_factory)
-
-    assert (
-        memory_record_service._compute_content_embedding("hello", fake_model_info)
-        is None
-    )
-
-
-def test_compute_content_embedding_invalid_vector_type(monkeypatch):
-    fake_model_info = _FakeEmbeddingModelInfo(
-        index_name="mem_x",
-        model_name="m",
-        model_repo="openai",
-        dimension=1,
-        base_url="https://embedding.example/v1",
-        api_key="sk-test",
-        ssl_verify=True,
-    )
-
-    fake_client_instance = MagicMock(name="embedding_client_instance")
-    fake_client_instance.get_embeddings.return_value = ["not-a-list"]
-
-    fake_client_factory = MagicMock(name="embedding_client_factory")
-    fake_client_factory.return_value = fake_client_instance
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client_factory)
-
-    assert (
-        memory_record_service._compute_content_embedding("hello", fake_model_info)
-        is None
-    )
-
-
-def test_compute_content_embedding_exception(monkeypatch):
-    fake_model_info = _FakeEmbeddingModelInfo(
-        index_name="mem_x",
-        model_name="m",
-        model_repo="openai",
-        dimension=1,
-        base_url="https://embedding.example/v1",
-        api_key="sk-test",
-        ssl_verify=True,
-    )
-
-    fake_client_instance = MagicMock(name="embedding_client_instance")
-    fake_client_instance.get_embeddings.side_effect = RuntimeError("upstream timeout")
-
-    fake_client_factory = MagicMock(name="embedding_client_factory")
-    fake_client_factory.return_value = fake_client_instance
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client_factory)
-
-    assert (
-        memory_record_service._compute_content_embedding("hello", fake_model_info)
-        is None
-    )
-
-
-def test_compute_content_embedding_success(monkeypatch):
-    fake_model_info = _FakeEmbeddingModelInfo(
-        index_name="mem_x",
-        model_name="m",
-        model_repo="openai",
-        dimension=3,
-        base_url="https://embedding.example/v1",
-        api_key="sk-test",
-        ssl_verify=True,
-    )
-
-    # ``get_embedding_client`` is replaced with a callable that returns a
-    # mock whose ``get_embeddings`` returns the configured embeddings.
-    fake_client_instance = MagicMock(name="embedding_client_instance")
-    fake_client_instance.get_embeddings.return_value = [[1, 2.5, 3]]
-
-    fake_client_factory = MagicMock(name="embedding_client_factory")
-    fake_client_factory.return_value = fake_client_instance
-    monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client_factory)
-
+@pytest.mark.parametrize("user_id", ["writer", None])
+def test_compute_content_embedding_uses_a_scoped_async_binding(monkeypatch, user_id):
+    model = _FakeEmbeddingModelInfo(index_name="mem_x")
+    embed = AsyncMock(return_value=[0.1, 0.2])
+    monkeypatch.setattr(memory_record_service, "embed_memory_text", embed)
     result = memory_record_service._compute_content_embedding(
-        "hello", fake_model_info
+        "write", model, user_id=user_id, tenant_id="tenant",
     )
-    assert result == [1.0, 2.5, 3.0]
+    if user_id:
+        assert result == [0.1, 0.2]
+        embed.assert_awaited_once_with("write", model, user_id, "tenant")
+    else:
+        assert result is None
+        embed.assert_not_awaited()
+
+
+def test_same_memory_content_replay_skips_vectorization(service, fake_db):
+    fake_db.find_by_idempotency.return_value = {"memory_id": 12, "content": "same"}
+    model = _FakeEmbeddingModelInfo(index_name="mem_x")
+    result = service.create_memory(
+        tenant_id="t1", user_id="writer", content="same", idempotency_key="key", embedding_model_info=model,
+    )
+    assert result["memory_id"] == 12 and result["event"] == "UNCHANGED"
+    memory_record_service.embed_memory_text.assert_not_awaited()
+    service.index_service.index_record.assert_not_called()
 
 
 def test_validate_layer_name_normalises_and_validates():

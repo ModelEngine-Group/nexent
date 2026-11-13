@@ -28,7 +28,12 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError
+from management.services.agent.nl2agent import Nl2AgentDraftSaveError
+from infrastructure.agentos_identity import ServicePrincipal
+# Load the Runtime dependencies before the local SDK stubs.
+import runtime.agentos.ephemeral
+import management.services.model.adapter
+from management.api.agent.creator import nl2agent_run_api, require_agent_create_permission, router as agent_creator_router
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -104,6 +109,7 @@ def pass_through_decorator(*args, **kwargs):
 
 
 monitoring_stub = types.ModuleType("monitor")
+monitoring_stub.agent_monitoring_context = MagicMock()
 monitoring_manager_mock = MagicMock()
 monitoring_manager_mock.monitor_endpoint = pass_through_decorator
 monitoring_manager_mock.monitor_llm_call = pass_through_decorator
@@ -146,6 +152,7 @@ sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
+sys.modules['management.services.agent.subscription'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
 sys.modules['management.services.configuration.user.memory'] = MagicMock()
@@ -154,7 +161,7 @@ sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
-from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
+from runtime.api.agent.execution import agent_runtime_router
 from backend.http.server.app_factory import register_exception_handlers
 
 
@@ -162,12 +169,30 @@ from backend.http.server.app_factory import register_exception_handlers
 # Create FastAPI apps for runtime and config routers
 runtime_app = FastAPI()
 runtime_app.include_router(agent_runtime_router)
-runtime_app.dependency_overrides[require_agent_create_permission] = lambda: None
+config_creator_app = FastAPI()
+config_creator_app.include_router(agent_creator_router)
+config_creator_app.dependency_overrides[require_agent_create_permission] = lambda: None
 runtime_client = TestClient(runtime_app)
 
 config_app = FastAPI()
 config_app.include_router(agent_config_router)
 config_client = TestClient(config_app)
+
+
+@pytest.fixture(autouse=True)
+def verified_runtime_session(mocker):
+    return mocker.patch("runtime.api.agent.execution.trusted_identity", return_value={
+        "user_id": "test_user", "tenant_id": "test_tenant", "kind": "session",
+    })
+
+
+@pytest.fixture
+def owned_runtime_conversation(mocker):
+    async def run_control_io(_name, function, *args, **kwargs):
+        return function(*args)
+
+    mocker.patch("runtime.api.agent.execution.run_blocking", side_effect=run_control_io)
+    return mocker.patch("infrastructure.rdb.conversation_state.conversation_belongs_to", return_value=True)
 
 
 @pytest.fixture
@@ -182,6 +207,20 @@ def mock_conversation_id():
 
 # Agent Runtime API Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("method", "path"), [("POST", "/agent/run"), ("GET", "/agent/stop/123")])
+def test_runtime_compatibility_ingress_does_not_accept_bearer_without_gateway_identity(
+    mocker, verified_runtime_session, method, path,
+):
+    verified_runtime_session.return_value = None
+    run = mocker.patch("runtime.api.agent.execution.run_agent_stream")
+    stop = mocker.patch("runtime.api.agent.execution.stop_registered_run")
+    request = {"json": {"query": "hello"}} if method == "POST" else {}
+    response = runtime_client.request(method, path, headers={"Authorization": "Bearer unsigned"}, **request)
+    assert response.status_code == 401
+    run.assert_not_called()
+    stop.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -297,6 +336,11 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
+        "runtime.api.agent.execution.dispatch_signed_start",
+        new_callable=AsyncMock,
+        side_effect=AppException(error_code, details={"reason": reason}),
+    )
+    mocker.patch(
         "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=AppException(
@@ -332,18 +376,16 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    prepared = object()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -361,46 +403,40 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
     assert request.persist_history is False
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     mocker, mock_auth_header
 ):
-    mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch("management.api.agent.creator.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
-    mocker.patch(
-        "runtime.api.agent.execution.get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=object())
+    mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
     prepare = mocker.patch(
-        "runtime.api.agent.execution.prepare_creation_history", return_value=(42, 1)
+        "management.api.agent.creator.prepare_creation_history", return_value=(42, 1)
     )
+
+    async def inline(_name, function, *args, lane, owner, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch("management.api.agent.creator.run_blocking", side_effect=inline)
     persist = mocker.patch(
-        "runtime.api.agent.execution.persist_creation_stream",
+        "management.api.agent.creator.persist_creation_stream",
         side_effect=lambda stream, **kwargs: stream,
     )
     response = await nl2agent_run_api(
@@ -452,6 +488,46 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
     assert call_kwargs["tenant_id"] == "tenant-a"
     assert call_kwargs["skip_user_save"] is True
     assert call_kwargs["http_request"] is None
+    assert call_kwargs["agent_request"]._track_execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("conversation_id", "debug", "tracked"), [(123, False, True), (None, True, False)])
+async def test_signed_compatibility_run_tracks_only_persistent_execution(mocker, conversation_id, debug, tracked):
+    from runtime.api.agent import execution
+
+    stream = mocker.patch.object(
+        execution, "run_agent_stream", new_callable=AsyncMock, return_value=StreamingResponse(iter(())),
+    )
+    dispatch = mocker.patch.object(execution, "dispatch_signed_start", new_callable=AsyncMock, return_value=stream.return_value)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    response = await execution.run_agentos_compatibility(
+        {"agent_id": 1, "conversation_id": conversation_id, "query": "hello", "is_debug": debug}, actor,
+    )
+
+    assert response is stream.return_value
+    if debug:
+        payload, principal = dispatch.await_args.args
+        assert payload.invocation == "northbound" and payload.request["is_debug"] is True and principal == actor
+        stream.assert_not_awaited()
+        return
+    options = stream.await_args.kwargs
+    assert options["agent_request"]._track_execution is tracked
+    assert (options["user_id"], options["tenant_id"], options["skip_user_save"]) == ("user-a", "tenant-a", True)
+
+
+@pytest.mark.asyncio
+async def test_signed_compatibility_run_reports_execution_conflict(mocker):
+    from infrastructure.rdb.agent_execution import ActiveExecutionError
+    from runtime.api.agent import execution
+
+    mocker.patch.object(execution, "run_agent_stream", side_effect=ActiveExecutionError)
+    response = await execution.run_agentos_compatibility(
+        {"agent_id": 1, "conversation_id": 123, "query": "hello"}, ServicePrincipal("user-a", "tenant-a"),
+    )
+
+    assert response.status_code == 409
+    assert response.headers["X-Stream-Status"] == "conflict"
 
 
 @pytest.mark.asyncio
@@ -523,13 +599,13 @@ def test_northbound_agent_run_api_maps_unexpected_error(mocker):
 
 
 @pytest.mark.asyncio
-async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
+async def test_northbound_agent_stop_api_uses_internal_identity(mocker, owned_runtime_conversation):
     mocker.patch(
         "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     stop_agent = mocker.patch(
-        "runtime.api.agent.execution.stop_agent_tasks",
+        "runtime.api.agent.execution.stop_registered_run",
         return_value={"message": "stopped"},
     )
 
@@ -559,22 +635,157 @@ def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
 
 
 @pytest.mark.asyncio
+async def test_agentos_prepared_legacy_fallback_uses_signed_actor_and_preserves_request_context(mocker):
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    auth = mocker.patch.object(execution, "trusted_identity")
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock(return_value=object()))
+    actor = ServicePrincipal("actor", "tenant")
+    payload = CompatibilityConversationRun(
+        request={"query": "question", "conversation_id": 42},
+        language="en", timezone="Asia/Shanghai", preparation="legacy",
+    )
+    result = await execution.run_agentos_conversation(payload, actor)
+    assert result is runner.return_value
+    args = runner.await_args.kwargs
+    assert (args["user_id"], args["tenant_id"]) == ("actor", "tenant")
+    assert args["agent_request"].conversation_id == 42
+    assert args["http_request"].cookies["NEXT_LOCALE"] == "en"
+    assert args["http_request"].headers["x-user-timezone"] == "Asia/Shanghai"
+    assert "skip_user_save" not in args
+    auth.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agentos_cursorless_resume_bypasses_management_subscription(mocker):
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("actor", "tenant")
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+    replay = mocker.patch.object(execution, "resume_legacy_conversation", new=AsyncMock(return_value=object()))
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock())
+
+    assert await execution.run_agentos_conversation(payload, actor) is replay.return_value
+    replay.assert_awaited_once_with(42, actor, workbench=False)
+    runner.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id,is_debug", [(None, False), (0, False), (-1, False), (42, True)])
+async def test_agentos_invalid_resume_never_reaches_legacy_subscription(mocker, conversation_id, is_debug):
+    from fastapi import HTTPException
+
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock())
+    replay = mocker.patch.object(execution, "resume_legacy_conversation", new=AsyncMock())
+    payload = CompatibilityConversationRun(
+        request={"query": "", "conversation_id": conversation_id, "is_debug": is_debug}, resume=True,
+    )
+    with pytest.raises(HTTPException) as error:
+        await execution.run_agentos_conversation(payload, ServicePrincipal("actor", "tenant"))
+
+    assert (error.value.status_code, error.value.detail) == (422, {"code": "AGENTOS_INVALID_RESUME_REQUEST"})
+    runner.assert_not_awaited()
+    replay.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [True, False])
+async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, owned):
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent.execution import stop_agentos_compatibility
+
+    async def run_control_io(_task_name, function, **_kwargs):
+        return function()
+
+    mocker.patch("runtime.api.agent.execution.run_blocking", side_effect=run_control_io)
+    lookup = mocker.patch(
+        "infrastructure.rdb.conversation_state.conversation_belongs_to",
+        return_value=owned,
+    )
+    stop = mocker.patch(
+        "runtime.api.agent.execution.stop_registered_run", return_value={"message": "stopped"},
+    )
+    actor = ServicePrincipal("user-a", "tenant-a")
+
+    if owned:
+        assert await stop_agentos_compatibility(123, actor) == {"message": "stopped"}
+        stop.assert_called_once_with(123, "user-a")
+    else:
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as error:
+            await stop_agentos_compatibility(123, actor)
+        assert error.value.status_code == 404
+        stop.assert_not_called()
+    lookup.assert_called_once_with(123, user_id="user-a", tenant_id="tenant-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [True, False])
+async def test_agentos_automation_checks_owner_before_tracked_background_run(mocker, owned):
+    from fastapi import HTTPException
+
+    from contracts.agentos import BackgroundRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    async def run_control_io(_task_name, function, *args, **_kwargs):
+        return function(*args)
+
+    async def chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(execution, "run_blocking", side_effect=run_control_io)
+    lookup = mocker.patch("infrastructure.rdb.conversation_state.conversation_belongs_to", return_value=owned)
+    read = mocker.patch.object(execution, "read_execution", side_effect=[None, {
+        "status": "completed", "assistant_message_id": 456,
+    }])
+    run = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock(return_value=StreamingResponse(chunks())))
+    actor = ServicePrincipal("user-a", "tenant-a")
+    payload = BackgroundRun(run_id="a" * 32, preparation="legacy", request={
+        "conversation_id": 123, "query": "scheduled", "agent_id": 7, "enable_automation_tool": True,
+    })
+
+    if owned:
+        result = await execution.run_agentos_tracked_background(payload, actor)
+        assert result.run_id == payload.run_id and result.assistant_message_id == 456 and result.chunks == 1
+        assert run.await_args.kwargs["skip_user_save"] is True
+        assert run.await_args.kwargs["tenant_id"] == "tenant-a"
+        request = run.await_args.kwargs["agent_request"]
+        assert request._track_execution and request._projection_run_id == payload.run_id
+        assert request._message_source == "AUTOMATION" and request.enable_automation_tool is False
+    else:
+        with pytest.raises(HTTPException) as denied_run:
+            await execution.run_agentos_tracked_background(payload, actor)
+        assert denied_run.value.status_code == 404
+        run.assert_not_called()
+        read.assert_not_called()
+    lookup.assert_called_once_with(123, user_id="user-a", tenant_id="tenant-a")
+
+
+@pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    prepared = object()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -592,29 +803,23 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
     assert request.persist_history is False
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         side_effect=UnauthorizedError("Invalid access token"),
     )
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-    )
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream")
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
@@ -628,17 +833,17 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid access token"
-    create_stream.assert_not_awaited()
+    create_stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=RuntimeError("private model configuration"),
     )
@@ -680,11 +885,11 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
     expected_code,
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=error,
     )
@@ -706,7 +911,7 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_requires_agent_id():
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=runtime_app),
+        transport=httpx.ASGITransport(app=config_creator_app),
         base_url="http://test",
     ) as client:
         response = await client.post(
@@ -821,7 +1026,6 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
         await agent_run_api(
             agent_request=request,
             http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
             resume=False,
         )
 
@@ -855,7 +1059,6 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
         await agent_run_api(
             agent_request=request,
             http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
             resume=False,
         )
 
@@ -863,12 +1066,11 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
     assert exc_info.value.detail == "Selected knowledge bases are incompatible"
 
 
-def test_agent_stop_api_success(mocker, mock_conversation_id):
+def test_agent_stop_api_success(mocker, mock_conversation_id, owned_runtime_conversation, verified_runtime_session):
     """Test agent_stop_api success case."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    verified_runtime_session.return_value = {"user_id": "test_user_id", "tenant_id": "test_tenant_id"}
 
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_registered_run")
     mock_stop_tasks.return_value = {"status": "success"}
 
     response = runtime_client.get(
@@ -877,18 +1079,20 @@ def test_agent_stop_api_success(mocker, mock_conversation_id):
     )
 
     assert response.status_code == 200
-    mock_get_user_id.assert_called_once_with("Bearer test_token")
+    verified_runtime_session.assert_called_once_with("session")
+    owned_runtime_conversation.assert_called_once_with(
+        mock_conversation_id, user_id="test_user_id", tenant_id="test_tenant_id",
+    )
     mock_stop_tasks.assert_called_once_with(
         mock_conversation_id, "test_user_id")
     assert response.json()["status"] == "success"
 
 
-def test_agent_stop_api_exception(mocker, mock_conversation_id):
+def test_agent_stop_api_exception(mocker, mock_conversation_id, owned_runtime_conversation, verified_runtime_session):
     """Test agent_stop_api exception handling - exception propagates without catch."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    verified_runtime_session.return_value = {"user_id": "test_user_id", "tenant_id": "test_tenant_id"}
 
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_registered_run")
     mock_stop_tasks.side_effect = Exception("Stop error")
 
     # The endpoint doesn't catch exceptions, so they propagate

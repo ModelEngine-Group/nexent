@@ -6,12 +6,18 @@ import management.services.permission.identity.session as depends_dependencies
 import json
 from dataclasses import dataclass, field
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from runtime.api.agent import execution as agent_app_execution
-from runtime.api.skill import creation as skill_app_creation
+from management.api.agent import creator as agent_creator_api
+from management.api.skill import creation as skill_app_creation
+from management.services.skill import creation as skill_service
+from management.services.model import creator_snapshot
+from gateway.security.context import identity_context
+from infrastructure import agent_model_config
+from infrastructure.agent_model_overrides import apply_turn_model_generation
 from management.services.model import run_bindings
 from contracts.errors.exceptions import ForbiddenError
 from management.services.model import run_controls
@@ -45,9 +51,25 @@ class ApiFixture:
         return self.client.post(path, json=body, headers={"Authorization": f"Bearer {token}"} if token else {})
 
 
+def install_fixture_gateway_session(app, user_id, tenant_id):
+    @app.middleware("http")
+    async def gateway_session(request: Request, call_next):
+        is_run = request.method == "POST" and request.url.path == "/api/agent/run"
+        is_stop = request.method == "GET" and request.url.path.startswith("/api/agent/stop/")
+        if not (is_run or is_stop) or not request.headers.get("Authorization"):
+            return await call_next(request)
+        token = identity_context.set({"kind": "session", "user_id": user_id, "tenant_id": tenant_id})
+        try:
+            return await call_next(request)
+        finally:
+            identity_context.reset(token)
+
+
 def api_fixture(monkeypatch):
     app = FastAPI()
+    install_fixture_gateway_session(app, "fixture-owner", "tenant")
     app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+    app.include_router(agent_creator_api.router, prefix="/api")
     app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
     records = {}
     for index, label in enumerate(["effort", "budget", "plain", "unavailable", "foreign", "embedding"], start=1):
@@ -74,18 +96,22 @@ def api_fixture(monkeypatch):
         "CREATOR": {"agent:create", "skill:create"}, "NO-AGENT-CREATE": {"skill:create"},
         "NO-SKILL-CREATE": {"agent:create"},
     })
-    monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(agent_app_execution, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
+    monkeypatch.setattr(agent_creator_api, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
     monkeypatch.setattr(skill_app_creation, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
 
     def lookup(model_id, tenant_id):
         return next((r for r in records.values() if r["model_id"] == model_id and r["tenant_id"] == tenant_id), None)
 
     monkeypatch.setattr(run_controls, "get_model_by_model_id", lookup)
-    monkeypatch.setattr(run_bindings, "_resolve_reasoning_capability",
-                        lambda model_name, **kwargs: BUDGET if model_name == "budget" else
-                        {"status": "unsupported", "levels": []} if model_name == "plain" else CAPABILITY)
+    monkeypatch.setattr(creator_snapshot, "get_model_by_model_id", lookup)
+    monkeypatch.setattr(creator_snapshot, "_resolve_input_budget", lambda _: (32768, {}, None))
+    monkeypatch.setattr(creator_snapshot, "_resolve_context_budget", lambda **_: None)
+    for module in (run_bindings, agent_model_config):
+        monkeypatch.setattr(module, "_resolve_reasoning_capability",
+                            lambda model_name, **kwargs: BUDGET if model_name == "budget" else
+                            {"status": "unsupported", "levels": []} if model_name == "plain" else CAPABILITY)
 
     async def stream(request, ordinary=False):
         if ordinary and request.entrypoint != "workbench" and request.model_id and request.model_id not in state.configured:
@@ -114,10 +140,30 @@ def api_fixture(monkeypatch):
     async def agent_run_stream(agent_request, **kwargs):
         return StreamingResponse(await stream(agent_request, True), media_type="text/event-stream")
 
-    async def creator_stream(request, **kwargs):
+    async def compile_agent(request, actor, language):
         return await stream(request)
 
     monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
-    monkeypatch.setattr(agent_app_execution, "create_nl2agent_stream", creator_stream)
-    monkeypatch.setattr(skill_app_creation, "create_nl2skill_stream", creator_stream)
+    monkeypatch.setattr(agent_creator_api, "prepare_nl2agent_snapshot", compile_agent)
+    monkeypatch.setattr(agent_creator_api, "create_nl2agent_stream", lambda prepared, actor: prepared)
+    def compile_skill(request, *scope):
+        snapshot = skill_service.prepare_nl2skill_snapshot(request, *scope)
+        state.calls.append(request.model_dump(exclude_unset=True))
+        return snapshot
+
+    def skill_stream(snapshot, user_id, tenant_id):
+        selected = lookup(snapshot.model.model_id, tenant_id)
+        root = run_bindings.create_model_config_from_record(selected)
+        if snapshot.model.turn_generation:
+            root = apply_turn_model_generation(root, snapshot.model.turn_generation, snapshot.model.alias)
+        payload = {"model_id": selected["model_id"], "enabled": root.enable_thinking,
+                   "effort": root.reasoning_effort, "budget": root.reasoning_budget_tokens,
+                   "temperature": root.temperature, "top_p": root.top_p}
+
+        async def chunks():
+            yield f"data: {json.dumps(payload)}\n\n"
+        return chunks()
+
+    monkeypatch.setattr(skill_app_creation, "prepare_nl2skill_snapshot", compile_skill)
+    monkeypatch.setattr(skill_app_creation, "create_nl2skill_stream", skill_stream)
     return state

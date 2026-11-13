@@ -34,7 +34,7 @@ spec:
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "managementImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
@@ -65,6 +65,8 @@ spec:
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "migrate"
+            - name: NEXENT_SQL_FILES_CHECKSUM
+              value: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

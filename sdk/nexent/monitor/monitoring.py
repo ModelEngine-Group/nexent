@@ -2630,7 +2630,7 @@ def _enqueue_monitoring_record(
 
 
 class MonitoringRecordBuffer:
-    """Thread-safe buffer that batches LLM monitoring records and flushes to PostgreSQL.
+    """Thread-safe buffer that batches LLM monitoring records for an injected writer.
 
     Uses collections.deque for non-blocking, lock-free appends. A daemon background
     thread periodically flushes records to the database in batches.
@@ -2639,19 +2639,24 @@ class MonitoringRecordBuffer:
     Automatically retries after 30 seconds.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        write_record: Optional[Callable[[dict], None]] = None,
+        *,
+        enabled: bool = True,
+        batch_size: int = 100,
+        flush_interval: int = 30,
+    ):
         from ..core.concurrency import (
             get_current_thread_manager,
             get_default_thread_manager,
         )
 
         self._buffer: deque = deque(maxlen=5000)
-        self._enabled: bool = os.getenv(
-            "ENABLE_MODEL_MONITORING", "true").lower() == "true"
-        self._batch_size: int = int(
-            os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
-        self._flush_interval: int = int(
-            os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
+        self._write_record = write_record
+        self._enabled = enabled and write_record is not None
+        self._batch_size = batch_size
+        self._flush_interval = flush_interval
         self._consecutive_failures: int = 0
         self._max_failures: int = 3
         self._degraded_until: float = 0.0
@@ -2757,34 +2762,15 @@ class MonitoringRecordBuffer:
                     f"Monitoring buffer: degraded mode for 30s after {self._max_failures} failures")
 
     def _write_batch(self, batch: List[dict]) -> None:
-        try:
-            import sys
-            import os
+        write_record = self._write_record
+        if write_record is None:
+            raise RuntimeError("No model monitoring record writer is configured")
 
-            repository_root = os.getcwd()
-            backend_path = os.path.join(repository_root, "backend")
-            if os.path.isdir(backend_path):
-                for source_root in (repository_root, backend_path):
-                    if source_root not in sys.path:
-                        sys.path.insert(0, source_root)
-
-            from infrastructure.rdb.client import get_monitoring_db_session
-            from management.db.models import ModelMonitoringRecord
-        except ImportError as e:
-            logger.debug(
-                f"Monitoring buffer: backend database not available: {e}")
-            raise RuntimeError("Backend database module not available")
-
-        # Write records individually so that one bad record (e.g. missing
-        # tenant_id) does not abort the entire batch.
         succeeded = 0
         failed = 0
         for record in batch:
             try:
-                with get_monitoring_db_session() as session:
-                    row = ModelMonitoringRecord(**record)
-                    session.add(row)
-                    session.flush()
+                write_record(record)
                 succeeded += 1
             except Exception as rec_err:
                 failed += 1
@@ -2824,13 +2810,29 @@ class MonitoringRecordBuffer:
 
 
 _monitoring_buffer: Optional[MonitoringRecordBuffer] = None
+_monitoring_buffer_factory: Optional[Callable[[], MonitoringRecordBuffer]] = None
+_monitoring_buffer_lock = threading.Lock()
+
+
+def configure_monitoring_records(
+    write_record: Optional[Callable[[dict], None]], *, batch_size: int = 100, flush_interval: int = 30,
+) -> None:
+    """Install the host application's record writer before models start running."""
+    global _monitoring_buffer_factory
+    with _monitoring_buffer_lock:
+        _monitoring_buffer_factory = (
+            functools.partial(
+                MonitoringRecordBuffer, write_record, batch_size=batch_size, flush_interval=flush_interval,
+            ) if write_record is not None else None
+        )
 
 
 def get_monitoring_buffer() -> Optional[MonitoringRecordBuffer]:
     global _monitoring_buffer
-    if _monitoring_buffer is None:
-        _monitoring_buffer = MonitoringRecordBuffer()
-    return _monitoring_buffer
+    with _monitoring_buffer_lock:
+        if _monitoring_buffer is None and _monitoring_buffer_factory is not None:
+            _monitoring_buffer = _monitoring_buffer_factory()
+        return _monitoring_buffer
 
 
 # Global singleton instance
@@ -2869,6 +2871,7 @@ __all__ = [
     'RecordModelCallContext',
     'get_monitoring_manager',
     'get_monitoring_buffer',
+    'configure_monitoring_records',
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',

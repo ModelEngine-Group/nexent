@@ -10,18 +10,27 @@ import threading
 import time
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
+import httpx
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from runtime.api.agent import execution as agent_app_execution
-from runtime.api.skill import creation as skill_app_creation
+from management.api.agent import creator as agent_creator_api, nl2agent_callback as callback_api
+from management.services.agent import nl2agent_callback
+from runtime.agentos import prepared_agent_creator
+from contracts.constants import environment
+from management.api.skill import creation as skill_app_creation
+from management.clients.agentos import AgentOSClient
+from management.services.agent import runtime_client
+from runtime.agentos import ephemeral
+from runtime.agentos.middleware import AgentOSMiddleware
 from management.services.agent.preparation import run as agent_preparation
+from model_controls.api import install_fixture_gateway_session
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
-from services import nl2agent_service as nl2agent_service
-from services import nl2skill_service as nl2skill_service
 from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency.helpers import shutdown_fallback_thread_manager
 from nexent.core.concurrency import ThreadManager
@@ -29,25 +38,30 @@ from tool_collection.mcp.local_mcp_service import local_mcp_service
 
 
 @contextmanager
-def mcp_server():
-    app = local_mcp_service.http_app(transport="sse", path="/sse")
+def serve_fixture(app, *, lifespan="off"):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan=lifespan))
     thread = threading.Thread(target=lambda: asyncio.run(server.serve(sockets=[listener])), daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.02)
     if not server.started:
-        raise RuntimeError("Case-owned MCP server did not start")
+        raise RuntimeError("Case-owned service did not start")
     try:
-        yield f"http://127.0.0.1:{port}/sse"
+        yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
         thread.join(timeout=10)
         listener.close()
+
+
+@contextmanager
+def mcp_server():
+    with serve_fixture(local_mcp_service.http_app(transport="sse", path="/sse"), lifespan="on") as url:
+        yield f"{url}/sse"
 
 
 class RuntimeFixture:
@@ -107,6 +121,8 @@ def runtime_fixture(monkeypatch):
             monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
+            monkeypatch.setattr(agent_app_execution, "runtime_thread_manager", manager)
+            monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
             for name, module in list(sys.modules.items()):
                 if name.startswith(("services.", "management.", "tool_collection.")) and getattr(module, "runtime_thread_manager", None) is runtime_thread_manager:
                     monkeypatch.setattr(module, "runtime_thread_manager", manager)
@@ -126,12 +142,12 @@ def runtime_fixture(monkeypatch):
             rbac.init_rbac()
             # Ordinary Agent preparation resolves MCP through this imported
             # boundary as well. Never fall back to a developer's deployment URL.
-            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, agent_preparation)
-            monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+            _bind_case_mcp(monkeypatch, mcp_url, agent_preparation)
+            monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
             runs = []
-            for module in (nl2agent_service, nl2skill_service, ordinary):
+            for module in (ephemeral, ordinary):
                 original = module.agent_run
                 async def observe(run_info, *args, _original=original, **kwargs):
                     runs.append(run_info)
@@ -160,9 +176,26 @@ def runtime_fixture(monkeypatch):
 
             provider.responder = respond
             app = FastAPI()
+            install_fixture_gateway_session(app, owner, tenant)
             app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            app.include_router(agent_creator_api.router, prefix="/api")
+            app.include_router(callback_api.router, prefix="/api")
+            grants = {}
+            monkeypatch.setattr(nl2agent_callback, "get_db_session", storage["sessions"])
+            monkeypatch.setattr(nl2agent_callback, "get_redis_client", lambda: SimpleNamespace(
+                set=lambda key, value, **_: grants.setdefault(key, value),
+                get=grants.get, delete=lambda key: grants.pop(key, None),
+            ))
             app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
-            with TestClient(app) as http:
+            runtime = FastAPI(root_path="/api")
+            runtime.add_middleware(AgentOSMiddleware)
+            runtime.include_router(ephemeral.create_ephemeral_run_router())
+            monkeypatch.setattr(environment, "JWT_SECRET", "model-controls-fixture-agentos-key")
+            with serve_fixture(runtime) as runtime_url, serve_fixture(app) as management_url, TestClient(app) as http:
+                monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", management_url)
+                monkeypatch.setattr(runtime_client, "_agentos_client", lambda: AgentOSClient(
+                    runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
+                ))
                 try:
                     yield RuntimeFixture(storage, provider, http, runs)
                 finally:

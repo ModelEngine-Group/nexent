@@ -1,7 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.authentication import AuthenticatedIdentity
-import asyncio
 import json
 import sys
 import types
@@ -17,14 +15,10 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
-from contracts.constants.environment import TOKEN
-from contracts.conversation import HistoryItem
-from contracts.agent import NL2AgentRunRequest
-from services.nl2agent_service import (
+from management.services.agent.nl2agent import (
     Nl2AgentCompletionError,
     Nl2AgentDraftSaveError,
     Nl2AgentResourceError,
-    _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
@@ -32,8 +26,6 @@ from services.nl2agent_service import (
     _normalize_tool_config,
     _redact_installation_snapshot,
     _resource_similarity,
-    build_nl2agent_run_info,
-    create_nl2agent_stream,
     recommend_installed_resources_impl,
     recommend_resources_impl,
     recommend_uninstalled_resources_impl,
@@ -43,16 +35,14 @@ from services.nl2agent_service import (
     search_installed_mcp_tools_by_query,
     validate_agent_generation_complete_impl,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
+from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
-    NL2AGENT_AGENT_ID_HEADER,
-    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     ResourceCandidate,
     ResourceRequirement,
 )
-from backend.http.client import create_httpx_client
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -176,7 +166,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         return_value="MEMBER",
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=1,
     )
 
@@ -219,11 +209,11 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=[{"agent_id": 22, "name": None}],
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=1,
     )
 
@@ -256,11 +246,11 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=[{"agent_id": 22, "name": None}],
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields", return_value=1,
+        "management.services.agent.nl2agent.update_agent_draft_fields", return_value=1,
     )
 
     result = save_agent_draft_fields_impl(
@@ -289,7 +279,7 @@ def test_nl2agent_cannot_rename_existing_display_name(mocker):
         "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
-    update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
+    update_fields = mocker.patch("management.services.agent.nl2agent.update_agent_draft_fields")
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
         save_agent_draft_fields_impl(
@@ -339,11 +329,11 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=existing_agents,
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields"
+        "management.services.agent.nl2agent.update_agent_draft_fields"
     )
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
@@ -418,7 +408,7 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
         return_value=role,
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields"
+        "management.services.agent.nl2agent.update_agent_draft_fields"
     )
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
@@ -451,7 +441,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         side_effect=RuntimeError("private database details"),
     )
 
@@ -485,7 +475,7 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=0,
     )
 
@@ -525,7 +515,7 @@ def test_agent_draft_fields_reject_non_string_name(name):
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
     query_tools = mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 8,
@@ -573,7 +563,7 @@ def test_search_filters_catalog_and_returns_safe_metadata(mocker):
 
 def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": tool_id,
@@ -586,9 +576,9 @@ def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
             for tool_id in [9, 2, 7, 1, 5, 3]
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=80)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=80)
     mocker.patch(
-        "services.nl2agent_service.fuzz.token_set_ratio",
+        "management.services.agent.nl2agent.fuzz.token_set_ratio",
         return_value=80,
     )
 
@@ -603,7 +593,7 @@ def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
 
 def test_search_filters_scores_below_threshold(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 1,
@@ -615,9 +605,9 @@ def test_search_filters_scores_below_threshold(mocker):
             }
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=44.9)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=44.9)
     mocker.patch(
-        "services.nl2agent_service.fuzz.token_set_ratio",
+        "management.services.agent.nl2agent.fuzz.token_set_ratio",
         return_value=20,
     )
 
@@ -629,7 +619,7 @@ def test_search_filters_scores_below_threshold(mocker):
 
 def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 1,
@@ -670,8 +660,8 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
             },
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=90)
-    mocker.patch("services.nl2agent_service.fuzz.token_set_ratio", return_value=90)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=90)
+    mocker.patch("management.services.agent.nl2agent.fuzz.token_set_ratio", return_value=90)
 
     result = search_installed_mcp_tools_by_query(
         "tenant-a",
@@ -789,7 +779,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         ],
     )
     mocker.patch(
-        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        "management.services.agent.nl2agent.ENABLE_AIDP_KNOWLEDGE",
         False,
     )
 
@@ -891,7 +881,7 @@ async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
         return_value=[],
     )
     mocker.patch(
-        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        "management.services.agent.nl2agent.ENABLE_AIDP_KNOWLEDGE",
         enable_aidp_knowledge,
     )
 
@@ -1072,7 +1062,7 @@ async def test_recommend_uninstalled_resources_overwrites_snapshot_and_redacts_s
         "default_option_id": "repository",
     }
     mocker.patch(
-        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        "management.services.agent.nl2agent._load_internal_uninstalled_resource_catalog",
         new=AsyncMock(return_value=[actual]),
     )
     supplied = ResourceCandidate(
@@ -1248,7 +1238,7 @@ async def test_recommend_uninstalled_resources_rejects_missing_and_mismatched_en
     mocker,
 ):
     load_catalog = mocker.patch(
-        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        "management.services.agent.nl2agent._load_internal_uninstalled_resource_catalog",
         new=AsyncMock(return_value=[]),
     )
     supplied = ResourceCandidate(
@@ -1303,11 +1293,11 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
     installed_result = MagicMock()
     uninstalled_result = MagicMock()
     installed_resolver = mocker.patch(
-        "services.nl2agent_service.recommend_installed_resources_impl",
+        "management.services.agent.nl2agent.recommend_installed_resources_impl",
         new=AsyncMock(return_value=installed_result),
     )
     uninstalled_resolver = mocker.patch(
-        "services.nl2agent_service.recommend_uninstalled_resources_impl",
+        "management.services.agent.nl2agent.recommend_uninstalled_resources_impl",
         new=AsyncMock(return_value=uninstalled_result),
     )
 
@@ -1342,7 +1332,7 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
 @pytest.mark.asyncio
 async def test_recommend_resources_overwrites_model_display_fields(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(
             return_value=[
                 {
@@ -1364,7 +1354,7 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
         ),
     )
     query_bound_tools = mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[{"tool_id": 7}],
     )
     supplied = ResourceCandidate(
@@ -1402,7 +1392,7 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
 @pytest.mark.asyncio
 async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries(mocker):
     load_catalog = mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(return_value=[]),
     )
     supplied = ResourceCandidate(
@@ -1414,7 +1404,7 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
         score=0.9,
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[],
     )
 
@@ -1449,7 +1439,7 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
 @pytest.mark.asyncio
 async def test_verified_binding_context_rereads_database_without_secret_values(mocker):
     mocker.patch(
-        "services.nl2agent_service.require_agent_draft_edit",
+        "management.services.agent.nl2agent.require_agent_draft_edit",
         return_value={
             "name": "current_assistant",
             "description": "Current authoritative description",
@@ -1457,7 +1447,7 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
         },
     )
     mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(
             return_value=[
                 {
@@ -1482,11 +1472,11 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
         ),
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[{"tool_id": 7, "params": {"api_key": "private-secret"}}],
     )
     mocker.patch(
-        "services.nl2agent_service.query_enabled_skill_instances",
+        "management.services.agent.nl2agent.query_enabled_skill_instances",
         return_value=[
             {
                 "skill_id": 11,
@@ -1534,7 +1524,7 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
         }
     ]
     load_state = mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(draft, facts),
     )
@@ -1558,7 +1548,7 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
     mocker, facts,
 ):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(
             {
@@ -1586,7 +1576,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
     mocker, prompt,
 ):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(
             {
@@ -1624,7 +1614,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=({"name": "draft_assistant", "description": " "}, []),
     )
@@ -1643,7 +1633,7 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_generated_name(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=({"display_name": "Draft", "description": "Ready"}, []),
     )
@@ -1657,268 +1647,3 @@ async def test_validate_agent_generation_complete_requires_generated_name(mocker
 
     assert exc_info.value.code == "draft_fields_incomplete"
     assert exc_info.value.failed_fields == ["name"]
-
-
-@pytest.mark.parametrize('query,clarification_required', [('Build an agent that summarizes weather risks.', 'false'), ('只关闭重试，不更改其他配置。', 'true')])
-@pytest.mark.asyncio
-async def test_build_run_info_is_ephemeral(mocker, query, clarification_required):
-    """UT-BE-NCR-014 and UT-BE-NCR-015: verified headers and attachments."""
-    default_model = {'model_factory': 'openai', 'model_name': 'gpt-4o', 'context_window_tokens': 32768}
-    capacity_snapshot = {'capacity_fingerprint': 'capacity-fingerprint'}
-    resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
-    context_budget_snapshot = _context_budget_snapshot()
-    join_query = mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='final query')
-    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=[])
-    get_model_config = mocker.patch('services.nl2agent_service.tenant_config_manager.get_model_config', return_value=default_model)
-    resolve_input_budget = mocker.patch('services.nl2agent_service._resolve_input_budget', return_value=(32768, capacity_snapshot, resolved_capacity_snapshot))
-    resolve_context_budget = mocker.patch('services.nl2agent_service._resolve_context_budget', return_value=context_budget_snapshot)
-    mocker.patch('services.nl2agent_service.get_tenant_local_mcp_server', return_value='http://local-mcp:5011')
-    verified_context = ContextItemInput(id='system:nl2agent_bound_resources', type=ContextItemType.SYSTEM, content={'text': 'verified draft state'}, source=('database:agent_bindings',))
-    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock, return_value=verified_context)
-    request = NL2AgentRunRequest(query=query, agent_id=42, history=[HistoryItem(role='user', content='Build an agent that summarizes weather risks.'), HistoryItem(role='assistant', content='I found matching weather tools.')])
-    run_info = await build_nl2agent_run_info(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    assert run_info.query == 'final query'
-    assert run_info.agent_config.name == '__nl2agent_runtime__'
-    assert run_info.agent_config.context_manager_config.token_threshold == 24000
-    assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
-    assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
-    assert run_info.agent_config.capacity_snapshot == capacity_snapshot
-    assert run_info.agent_config.context_budget_snapshot == context_budget_snapshot
-    assert run_info.capacity_snapshot == capacity_snapshot
-    assert run_info.context_budget_snapshot == context_budget_snapshot
-    assert run_info.history[0].content == 'Build an agent that summarizes weather risks.'
-    assert len(run_info.context_input.items) == 3
-    prompt_context = run_info.context_input.items[0]
-    assert prompt_context.id == 'system:nl2agent_prompt'
-    assert prompt_context.type == ContextItemType.SYSTEM
-    assert '### Role' in prompt_context.content['text']
-    assert run_info.context_input.items[1] == verified_context
-    history_item = run_info.context_input.items[2]
-    assert history_item.type.value == 'conversation_turn'
-    assert history_item.content == {'user_message': 'Build an agent that summarizes weather risks.', 'assistant_final_answer': 'I found matching weather tools.', 'attachments': [], 'user_message_id': -1, 'assistant_message_id': -2}
-    assert history_item.metadata == {'layout_order': 0}
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
-    assert run_info.sandbox_config is None
-    assert run_info.redis_client is None
-    assert run_info.enable_planning is False
-    assert run_info.observer.enable_nl2a_wrapper is True
-    assert isinstance(run_info.observer, _Nl2AgentBoundaryObserver)
-    assert run_info.observer._boundary_stop_event is run_info.stop_event
-    join_query.assert_awaited_once_with(minio_files=None, query=query, history=request.history, language='en')
-    get_model_config.assert_called_once_with(key='LLM_ID', tenant_id='tenant-a')
-    resolve_input_budget.assert_called_once_with(default_model)
-    resolve_context_budget.assert_called_once_with(capacity_snapshot=resolved_capacity_snapshot, tenant_id='tenant-a', agent_requested_output_tokens=None, request_requested_output_tokens=None)
-    build_verified_context.assert_awaited_once_with(agent_id=42, tenant_id='tenant-a', user_id='user-a')
-
-
-@pytest.mark.asyncio
-async def test_build_run_info_rejects_request_action_agent_mismatch(mocker):
-    mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='structured action')
-    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=[])
-    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
-    request = NL2AgentRunRequest(agent_id=42, query=json.dumps({'type': 'nl2agent_card_action', 'subtype': 'requirement_clarification', 'agent_id': 43, 'action': 'submit', 'result': {'answers': []}}))
-    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
-        await build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    assert exc_info.value.code == 'agent_context_mismatch'
-    build_verified_context.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_build_run_info_rejects_card_action_without_agent_id(mocker):
-    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
-    request = NL2AgentRunRequest(agent_id=42, query=json.dumps({'type': 'nl2agent_card_action', 'subtype': 'requirement_clarification', 'action': 'submit', 'result': {'answers': []}}))
-    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
-        await build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    assert exc_info.value.code == 'agent_context_mismatch'
-    build_verified_context.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_build_run_info_rejects_authenticated_tenant_mismatch(mocker):
-    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
-    with pytest.raises(PermissionError, match='tenant mismatch'):
-        await build_nl2agent_run_info(NL2AgentRunRequest(query='Update this Agent', agent_id=42), tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-b'))
-    build_verified_context.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
-    mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='Build a writing assistant')
-    model_configs = []
-    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=model_configs)
-    mocker.patch('services.nl2agent_service.tenant_config_manager.get_model_config', return_value={'model_name': 'tenant-default'})
-    capacity_snapshot = {'capacity_fingerprint': 'legacy-capacity'}
-    mocker.patch('services.nl2agent_service._resolve_input_budget', return_value=(8192, capacity_snapshot, None))
-    mocker.patch('services.nl2agent_service._resolve_context_budget', return_value=None)
-    mocker.patch('services.nl2agent_service.get_tenant_local_mcp_server', return_value='http://local-mcp:5011/base/')
-    verified_context = ContextItemInput(id='system:nl2agent_bound_resources', type=ContextItemType.SYSTEM, content={'text': 'verified draft state'}, source=('database:agent_bindings',))
-    mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock, return_value=verified_context)
-    run_info = await build_nl2agent_run_info(NL2AgentRunRequest(query='Build a writing assistant', agent_id=42), tenant_id='tenant-a', language='en', authorization=None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    context_config = run_info.agent_config.context_manager_config
-    assert context_config.token_threshold == 8192
-    assert context_config.context_window_tokens == 8192
-    assert context_config.compaction_trigger_threshold_tokens == 0
-    assert context_config.effective_input_limit_tokens == 0
-    assert context_config.compaction_target_tokens == 0
-    assert run_info.model_config_list == model_configs
-    assert run_info.history == []
-    assert len(run_info.context_input.items) == 2
-    prompt_context = run_info.context_input.items[0]
-    assert prompt_context.id == 'system:nl2agent_prompt'
-    assert prompt_context.type == ContextItemType.SYSTEM
-    assert '### Role' in prompt_context.content['text']
-    assert run_info.context_input.items[1] == verified_context
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
-
-
-@pytest.mark.asyncio
-async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
-    """UT-BE-NCR-017: preserve Agent event order and stop semantics."""
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    build_run_info = mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-
-    async def fake_agent_run(received_run_info, *, thread_manager):
-        assert received_run_info is run_info
-        assert thread_manager is not None
-        yield json.dumps({'type': 'tool', 'content': 'call'})
-        yield json.dumps({'type': 'nl2a', 'content': json.dumps({'status': 'success', 'recommendation_count': 0, 'recommendations': []})})
-        yield json.dumps({'type': 'execution_logs', 'content': 'must be hidden'})
-        yield json.dumps({'type': 'nl2a', 'content': 'must also be hidden'})
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=fake_agent_run)
-    request = NL2AgentRunRequest(query='Build a weather agent', agent_id=42)
-    stream = await create_nl2agent_stream(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    chunks = [chunk async for chunk in stream]
-    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    assert chunks == ['data: {"type": "tool", "content": "call"}\n\n', 'data: {"type": "nl2a", "content": "{\\"status\\": \\"success\\", \\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n']
-    run_info.stop_event.set.assert_called_once_with()
-
-
-@pytest.mark.asyncio
-async def test_create_stream_yields_process_chunks_without_waiting_for_later_output(mocker):
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
-    process_chunks = [
-        {"type": "step_count", "content": "1"},
-        {"type": "model_output_thinking", "content": "reason"},
-        {"type": "model_output_deep_thinking", "content": "deeper reason"},
-        {"type": "model_output_code", "content": "code"},
-        {"type": "parse", "content": "parsed"},
-        {"type": "tool", "content": "call"},
-        {"type": "execution_logs", "content": "observation"},
-        {
-            "type": "nl2a_state",
-            "content": json.dumps(
-                {
-                    "event": "agent_draft_fields_saved",
-                    "agent_id": 42,
-                    "updated_fields": ["prompt"],
-                }
-            ),
-        },
-        {
-            "type": "nl2a_state",
-            "content": json.dumps(
-                {
-                    "event": "agent_generation_completed",
-                    "agent_id": 42,
-                }
-            ),
-        },
-        {"type": "final_answer", "content": "plain answer"},
-    ]
-    release_next = [asyncio.Event() for _ in process_chunks]
-
-    async def gated_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
-        for payload, gate in zip(process_chunks, release_next, strict=True):
-            yield json.dumps(payload)
-            await gate.wait()
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=gated_agent_run)
-    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    for expected, gate in zip(process_chunks, release_next, strict=True):
-        chunk = await asyncio.wait_for(anext(stream), timeout=0.5)
-        assert json.loads(chunk.removeprefix('data: ').strip()) == expected
-        gate.set()
-    with pytest.raises(StopAsyncIteration):
-        await anext(stream)
-    run_info.stop_event.set.assert_called_once_with()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('content', ['The configuration still needs user input.', 'Run Agent Error: Model main_model not found'])
-async def test_create_stream_preserves_final_answers_without_fallback(mocker, content):
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-
-    async def final_answer_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
-        yield json.dumps({'type': 'final_answer', 'content': content})
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=final_answer_agent_run)
-    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    chunks = [chunk async for chunk in stream]
-    assert len(chunks) == 1
-    assert json.loads(chunks[0].removeprefix('data: ').strip()) == {'type': 'final_answer', 'content': content}
-
-
-@pytest.mark.asyncio
-async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-
-    async def no_action_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
-        yield json.dumps({'type': 'model_output_thinking', 'content': 'reason'})
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=no_action_agent_run)
-    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    chunks = [chunk async for chunk in stream]
-    assert [json.loads(chunk.removeprefix('data: ').strip()) for chunk in chunks] == [{'type': 'model_output_thinking', 'content': 'reason'}]
-
-
-@pytest.mark.asyncio
-async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
-    """UT-BE-NCR-018: runtime failures are redacted and terminate once."""
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-
-    async def failing_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
-        if False:
-            yield 'unreachable'
-        raise RuntimeError('private provider credentials')
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=failing_agent_run)
-    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    chunks = [chunk async for chunk in stream]
-    assert len(chunks) == 1
-    payload = json.loads(chunks[0].removeprefix('data: ').strip())
-    assert payload == {'type': 'error', 'content': 'NL2Agent execution failed.'}
-    assert 'credentials' not in chunks[0]
-    assert 'tenant-token' not in chunks[0]
-    run_info.stop_event.set.assert_called_once_with()
-
-
-@pytest.mark.asyncio
-async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
-    """UT-BE-NCR-019: cancellation stops the specialized Agent run."""
-    run_info = MagicMock()
-    run_info.stop_event = MagicMock()
-    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-
-    async def cancelled_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
-        if False:
-            yield 'unreachable'
-        raise asyncio.CancelledError
-    mocker.patch('services.nl2agent_service.agent_run', side_effect=cancelled_agent_run)
-    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    with pytest.raises(asyncio.CancelledError):
-        await anext(stream)
-    run_info.stop_event.set.assert_called_once_with()

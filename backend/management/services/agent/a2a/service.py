@@ -21,7 +21,7 @@ from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.agent import AgentRequest
 from management.services.agent.a2a.adapter import A2AAgentAdapter, A2AExecutionContext
 from management.services.agent.a2a.validation import validate_a2a_agent_name
-from management.services.agent.runtime_client import forward_agent_run
+from management.services.agent.runtime_client import forward_a2a_run
 
 logger = logging.getLogger(__name__)
 
@@ -749,9 +749,7 @@ class A2AServerService:
                 metadata=(internal_request.get("metadata")
                           if "metadata" in (parsed_message.get("message") or {}) else None),
             )
-            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
-
-            stream_response = await forward_agent_run(
+            stream_response = await forward_a2a_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=effective_tenant_id,
@@ -868,9 +866,7 @@ class A2AServerService:
                 metadata=(internal_request.get("metadata")
                           if "metadata" in (parsed_message.get("message") or {}) else None),
             )
-            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
-
-            stream_response = await forward_agent_run(
+            stream_response = await forward_a2a_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=effective_tenant_id,

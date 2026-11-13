@@ -31,8 +31,6 @@ app: {{ include "nexent.fullname" . }}
   value: "true"
 - name: KUBERNETES_NAMESPACE
   value: {{ .Values.global.namespace | quote }}
-- name: NEXENT_SQL_FILES_CHECKSUM
-  value: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
 - name: NEXENT_MCP_DOCKER_IMAGE
   valueFrom:
     configMapKeyRef:

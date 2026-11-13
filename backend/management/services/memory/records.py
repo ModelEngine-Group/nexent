@@ -16,18 +16,17 @@ distinct memory.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from management.db.memory import record as memory_record_db
-from nexent.memory.embedding_model import (
-    EmbeddingModelInfo,
-    get_embedding_client,
-)
+from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemoryType
 from nexent.memory.policy import MemoryAccessPolicy, MemoryStoragePolicy
 
+from management.services.memory.embedding import embed_memory_text
 from management.services.memory.index import MemoryIndexService, get_memory_index_service
 
 
@@ -142,14 +141,18 @@ def _resolve_tenant_embedding_model_info(
         )
         return None
 
+    revision = model_config.get("update_time") or model_config.get("create_time")
+    if isinstance(revision, datetime):
+        revision = revision.isoformat()
     try:
         return EmbeddingModelInfo(
             model_name=model_name,
             model_repo=model_config.get("model_repo"),
             dimension=int(dimension),
-            base_url=base_url,
-            api_key=model_config.get("api_key") or "sk-no-api-key",
-            ssl_verify=bool(model_config.get("ssl_verify", True)),
+            base_url="",
+            api_key="",
+            model_id=int(model_config.get("model_id") or record["config_value"]),
+            revision=revision or "legacy",
         )
     except (TypeError, ValueError):
         logger.exception(
@@ -176,32 +179,14 @@ def get_tenant_memory_index_name(tenant_id: str) -> Optional[str]:
 def _compute_content_embedding(
     content: str,
     embedding_model_info: EmbeddingModelInfo,
+    *,
+    user_id: str | None,
+    tenant_id: str,
 ) -> Optional[List[float]]:
-    """Compute an embedding for ``content`` using the resolved model."""
-    try:
-        instance = get_embedding_client(
-            model_name=embedding_model_info.model_name,
-            dimension=embedding_model_info.dimension,
-            base_url=embedding_model_info.base_url,
-            api_key=embedding_model_info.api_key,
-            model_repo=embedding_model_info.model_repo,
-            ssl_verify=embedding_model_info.ssl_verify,
-        )
-        embeddings = instance.get_embeddings(
-            content, timeout=30, retries=2, retry_timeout_step=5.0
-        )
-        if not embeddings:
-            return None
-        vector = embeddings[0]
-        if not isinstance(vector, list):
-            return None
-        return [float(value) for value in vector]
-    except Exception:
-        logger.exception(
-            "Failed to compute embedding for memory content using model=%s",
-            embedding_model_info.model_name,
-        )
+    """Vectorize a Memory write from a synchronous API or managed worker."""
+    if not user_id:
         return None
+    return asyncio.run(embed_memory_text(content, embedding_model_info, user_id, tenant_id))
 
 
 def _validate_layer_policy(layer: str, memory_type: str, actor: str) -> None:
@@ -304,22 +289,24 @@ class MemoryRecordService:
                 "Failed to store memory: tenant embedding model is not configured"
             )
 
-        if not embedding and embedding_model_info is not None:
-            embedding = _compute_content_embedding(content, embedding_model_info)
-
         existing = memory_record_db.find_by_idempotency(
             tenant_id=tenant_id,
             idempotency_key=record["idempotency_key"],
         )
+        if existing is not None and existing.get("content") == content:
+            return {
+                "memory_id": existing.get("memory_id"),
+                "layer": layer,
+                "memory_type": resolved_type,
+                "event": "UNCHANGED",
+                "indexed": False,
+            }
+        if not embedding and embedding_model_info is not None:
+            embedding = _compute_content_embedding(
+                content, embedding_model_info, user_id=created_by or user_id, tenant_id=tenant_id,
+            )
+
         if existing is not None:
-            if existing.get("content") == content:
-                return {
-                    "memory_id": existing.get("memory_id"),
-                    "layer": layer,
-                    "memory_type": resolved_type,
-                    "event": "UNCHANGED",
-                    "indexed": False,
-                }
             memory_id = memory_record_db.upsert_memory_record_by_idempotency(
                 {
                     # Existing primary key preserved implicitly via
@@ -433,7 +420,10 @@ class MemoryRecordService:
             embedding_model_info = _resolve_tenant_embedding_model_info(tenant_id)
             embedding = None
             if embedding_model_info is not None:
-                embedding = _compute_content_embedding(new_content, embedding_model_info)
+                writer = update_data.get("updated_by") or record.get("user_id") or record.get("created_by")
+                embedding = _compute_content_embedding(
+                    new_content, embedding_model_info, user_id=writer, tenant_id=tenant_id,
+                )
             self.index_service.index_record(
                 record={
                     "memory_id": memory_id,

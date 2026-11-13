@@ -22,14 +22,14 @@ from the target's pre-upgrade backup; Supabase cannot reconstruct application ro
 
 | Stage | Docker | Kubernetes |
 | --- | --- | --- |
-| Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
+| Database ready | Start selected infrastructure; PostgreSQL creates an empty database | Install/wait for infrastructure; PostgreSQL creates an empty database |
 | Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
 | Target transaction | Recheck account coverage under the account-writer lock, run consolidated 001, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
-| Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
+| Normal application SQL | Management startup runs init.sql and versioned SQL after import; other services wait for its HTTP readiness | Management startup runs init.sql and versioned SQL after import; other services wait for its HTTP readiness |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
-The infrastructure baseline `init.sql` does not create `user_account_t`. Account
-SQL is kept out of infrastructure bootstrap. A migration error stops deployment
+The baseline `init.sql` does not create `user_account_t`. Management owns ordinary
+application SQL initialization and migration. Infrastructure creates the database only. A migration error stops deployment
 before the subsequent application/Secret rollout. Direct Compose, Helm or
 `run-sql-migrations.sh` invocation bypasses this deployment sequence; complete the
 manual importer first when upgrading historical accounts.

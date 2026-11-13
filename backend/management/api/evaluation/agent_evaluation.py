@@ -24,8 +24,9 @@ from management.services.evaluation.runs import (
     list_agent_evaluations_by_agent_impl,
 )
 from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
-from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
+from management.services.evaluation.runs import run_evaluation_trial_in_worker
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info
+from nexent.core.concurrency import run_blocking
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -392,9 +393,14 @@ async def analyze_agent_evaluation_api(
     UI can render a friendly "wait or refresh" tooltip.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        data = generate_analysis_report_impl(
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = await run_blocking(
+            "agent-evaluation-analysis",
+            generate_analysis_report_impl,
+            lane="model-tool-io",
+            owner="management",
             agent_evaluation_id=agent_evaluation_id,
+            user_id=user_id,
             tenant_id=tenant_id,
             force=force,
         )
@@ -525,7 +531,11 @@ async def trial_run_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = await forward_agent_evaluation_trial_run(
+        result = await run_blocking(
+            "agent-evaluation-trial",
+            run_evaluation_trial_in_worker,
+            lane="evaluation",
+            owner="management",
             agent_id=payload.agent_id,
             agent_version_no=payload.agent_version_no,
             query=payload.query,

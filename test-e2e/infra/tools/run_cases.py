@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from xml.etree import ElementTree
 
 if __name__ == "__main__" and any(arg == "--test-home" or arg.startswith("--test-home=") for arg in sys.argv[1:]):
@@ -37,6 +38,7 @@ from test_asset_lib import repository_root
 from validate_execution import inspect
 from coverage_support import frontend_arguments, python_arguments, python_report
 from acceptance_integrity import execution_report
+from suite_runtime import CommandTimeoutCleanupError, logged
 
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -302,7 +304,7 @@ def playwright_outcome(result_dir: Path, case_id: str, env: dict[str, str]) -> d
 
 
 def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result_dir: Path | None = None,
-            coverage: bool = False) -> tuple[str, str, Path]:
+            coverage: bool = False, enforce_timeout: bool = True) -> tuple[str, str, Path]:
     case_id = record["case_id"]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     if result_dir is None:
@@ -319,19 +321,38 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
     commands, cwd = command_for(record, repo, result_dir, run_env, coverage=coverage)
     framework = record["execution"]["implementations"][0]["framework"]
     exit_code = 0
+    timeout_seconds = record["execution"].get("timeout_seconds") if enforce_timeout else None
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+    timed_out = False
+    cleanup_failed = False
     step_results = []
     last_log = result_dir / "step-1.log"
     for number, command in enumerate(commands, 1):
         log = result_dir / f"step-{number}.log"
         last_log = log
-        with log.open("w", encoding="utf-8") as output:
-            try:
-                result = subprocess.run(command, cwd=cwd, env=run_env, stdout=output, stderr=subprocess.STDOUT,
-                                        check=False)
-                code = result.returncode
-            except OSError as exc:
+        try:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout_seconds)
+                code = logged(command, cwd, run_env, log, remaining, raise_on_timeout=True)
+            else:
+                with log.open("w", encoding="utf-8") as output:
+                    result = subprocess.run(command, cwd=cwd, env=run_env, stdout=output, stderr=subprocess.STDOUT,
+                                            check=False)
+                    code = result.returncode
+        except CommandTimeoutCleanupError:
+            timed_out, cleanup_failed, code = True, True, 2
+            with log.open("a", encoding="utf-8") as output:
+                output.write("Case execution deadline exceeded; owned process cleanup failed.\n")
+        except subprocess.TimeoutExpired:
+            timed_out, code = True, 124
+            with log.open("a", encoding="utf-8") as output:
+                output.write("Case execution deadline exceeded; owned process cleanup completed.\n")
+        except OSError as exc:
+            with log.open("a", encoding="utf-8") as output:
                 output.write(f"Command could not start: {type(exc).__name__}\n")
-                code = 2
+            code = 2
         step_results.append({"step": number, "exit_code": code, "log": log.name})
         if code:
             exit_code = exit_code or code
@@ -362,7 +383,14 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
         else:
             status = "AUTOMATION_ERROR"
             details["reason"] = "D4 preparation or terminal evidence audit failed; inspect step logs"
-    if status == "PASS" and exit_code:
+    if timed_out:
+        status = "AUTOMATION_ERROR"
+        details["reason"] = (
+            "Case deadline exceeded and process cleanup failed; inspect step logs" if cleanup_failed else
+            f"Case execution deadline exceeded ({timeout_seconds} seconds); inspect step logs"
+        )
+        details["cleanup_failed"] = cleanup_failed
+    elif status == "PASS" and exit_code:
         status = "AUTOMATION_ERROR"
         details["reason"] = "Process exited nonzero despite a PASS result; inspect step logs"
     if status != "PASS" and not details["reason"]:
@@ -379,7 +407,7 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
         "stage": record["stage"], "status": status,
         "execution_status": execution_status, "acceptance_status": acceptance["status"],
         "acceptance_semantic_review": acceptance["semantic_review"],
-        "exit_code": exit_code, "steps_completed": number,
+        "exit_code": exit_code, "timed_out": timed_out, "steps_completed": number,
         "command_results": step_results, **details,
         **({"test_summary": summary} if summary is not None else {}),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

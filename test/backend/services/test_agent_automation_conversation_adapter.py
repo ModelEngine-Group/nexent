@@ -1,8 +1,48 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 
+import pytest
+
+from management.db.conversation.prepared_turn import PreparedTurnConflict, SavedUserTurn
+
 from management.services.automation import conversation as adapter_module
 from management.services.automation.conversation import AutomationConversationAdapter
+
+
+def test_preparation_retry_loads_only_history_before_the_recorded_source(mocker):
+    source = mocker.patch.object(adapter_module, "read_saved_user_turn_by_id", return_value=SavedUserTurn(31, 8, "AUTOMATION"))
+    mocker.patch.object(adapter_module, "get_conversation_history_service", return_value=[{"message": [
+        {"role": "user", "message_index": 0, "message": "question"},
+        {"role": "assistant", "message_index": 1, "message": "old answer"},
+        {"role": "assistant", "message_index": 1, "message": "latest answer"},
+        {"role": "user", "message_id": 20, "message": "unindexed older question"},
+        {"role": "user", "message_index": 8, "message": "persisted instruction"},
+        {"role": "assistant", "message_index": 9, "message": "later answer"},
+    ]}])
+    save = mocker.patch.object(adapter_module, "save_message", side_effect=AssertionError("second source"))
+    unit = mocker.patch.object(adapter_module, "save_message_unit", side_effect=AssertionError("second prompt unit"))
+    turn = AutomationConversationAdapter().load_run_prompt(100, 31, "persisted instruction", "user", "tenant")
+    source.assert_called_once_with(100, "user", "tenant", 31, "persisted instruction", None)
+    assert turn["user_message_id"] == 31 and turn["assistant_message_index"] == 9
+    assert [(item.role, item.content) for item in turn["history"]] == [
+        ("user", "question"), ("assistant", "latest answer"), ("user", "unindexed older question"),
+    ]
+    save.assert_not_called()
+    unit.assert_not_called()
+
+
+@pytest.mark.parametrize("wrong_origin", [False, True])
+def test_source_retry_rejects_unknown_order_or_non_automation_message(mocker, wrong_origin):
+    mocker.patch.object(adapter_module, "read_saved_user_turn_by_id", return_value=SavedUserTurn(
+        31, 8, "CHAT" if wrong_origin else "AUTOMATION",
+    ))
+    mocker.patch.object(adapter_module, "get_conversation_history_service", return_value=[{"message": [
+        {"role": "user", "message": "unscoped history"},
+    ]}])
+    save = mocker.patch.object(adapter_module, "save_message")
+    with pytest.raises(PreparedTurnConflict):
+        AutomationConversationAdapter().load_run_prompt(100, 31, "persisted instruction", "user", "tenant")
+    save.assert_not_called()
 
 
 def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
@@ -51,6 +91,7 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
     )
 
     assert turn["user_message_id"] == 31
+    assert turn["assistant_message_index"] == 5
     assert [(item.role, item.content) for item in turn["history"]] == [
         ("user", "原始请求"),
         ("assistant", "上次结果"),

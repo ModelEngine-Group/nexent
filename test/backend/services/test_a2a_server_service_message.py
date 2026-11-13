@@ -465,7 +465,7 @@ class TestHandleMessageSend:
                 }), \
                 patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response, \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "management.services.agent.a2a.service.forward_a2a_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -515,7 +515,7 @@ class TestHandleMessageSend:
                 }), \
                 patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response, \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "management.services.agent.a2a.service.forward_a2a_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -569,7 +569,7 @@ class TestHandleMessageSend:
             "build_a2a_message_response",
             return_value={"failed": True},
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "management.services.agent.a2a.service.forward_a2a_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):
@@ -619,7 +619,7 @@ class TestHandleMessageSend:
             "build_a2a_message_response",
             return_value={"failed": True},
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "management.services.agent.a2a.service.forward_a2a_run",
             new_callable=AsyncMock,
             side_effect=RuntimeServiceTimeoutError("Runtime agent run request timed out"),
         ) as forward_run:
@@ -671,7 +671,7 @@ class TestHandleMessageStream:
                 }), \
                 patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "management.services.agent.a2a.service.forward_a2a_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -731,7 +731,7 @@ class TestHandleMessageStream:
             "build_a2a_task_event",
             side_effect=lambda **kwargs: kwargs,
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "management.services.agent.a2a.service.forward_a2a_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):
@@ -795,7 +795,7 @@ class TestHandleMessageStream:
             "build_a2a_task_event",
             side_effect=lambda **kwargs: kwargs,
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "management.services.agent.a2a.service.forward_a2a_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):

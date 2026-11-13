@@ -5,12 +5,12 @@ import pytest
 
 from nexent.core.agents.agent_model import AgentConfig
 
-from management.services.agent.creation import create_nl2agent_agent_config
+from runtime.agentos.agent_creator_config import create_nl2agent_agent_config
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_creator_enables_strict_output_without_changing_target_defaults(language):
-    creator = create_nl2agent_agent_config(language)
+    creator = create_nl2agent_agent_config(language, [])
     target = AgentConfig(name="target", description="Target", tools=[], model_name="main_model")
 
     assert creator.output_protocol == "code_action"
@@ -25,6 +25,6 @@ def test_target_output_policy_remains_independent(strict):
         name="target", description="Target", tools=[], model_name="main_model",
         enable_protocol_repair_retry=strict,
     )
-    create_nl2agent_agent_config("zh")
+    create_nl2agent_agent_config("zh", [])
 
     assert target.enable_protocol_repair_retry is strict

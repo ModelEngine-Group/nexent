@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for DashScopeModelProvider module.
 
 Tests cover model fetching, type classification, error handling, and
@@ -11,7 +13,7 @@ from pytest_mock import MockFixture
 
 import httpx
 
-from management.services.model.providers.dashscope_provider import (
+from runtime.model.providers.dashscope_provider import (
     DashScopeModelProvider,
     _modality_set,
     _has_keyword,
@@ -255,7 +257,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
         return mock_cm
@@ -646,7 +648,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1011,7 +1013,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1058,7 +1060,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1086,7 +1088,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1110,7 +1112,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1134,7 +1136,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 
@@ -1179,11 +1181,11 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.asyncio.sleep",
+            "runtime.model.providers.dashscope_provider.asyncio.sleep",
             new=AsyncMock(),
         )
 
@@ -1225,7 +1227,7 @@ class TestDashScopeModelProvider:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cm.__aexit__ = AsyncMock(return_value=None)
         mocker.patch(
-            "management.services.model.providers.dashscope_provider.httpx.AsyncClient",
+            "runtime.model.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm,
         )
 

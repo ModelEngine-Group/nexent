@@ -14,7 +14,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
-from contracts.agent import NL2SkillRunRequest
 from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
 from permissions.depends import require
 from permissions.models import CurrentUser
@@ -23,7 +22,6 @@ from management.services.permission.asset_owner import can_view_skill
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.services.agent.authorization import require_agent_draft_edit
-from services.nl2skill_service import create_nl2skill_stream
 from management.services.conversation.creation_history import (
     prepare_creation_history,
     persist_creation_stream,

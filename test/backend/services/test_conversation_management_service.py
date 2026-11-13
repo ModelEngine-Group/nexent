@@ -499,12 +499,13 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
         mock_get_model_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://example.com",
@@ -516,24 +517,20 @@ class TestConversationManagementService(unittest.TestCase):
         )
         mock_get_prompt_template.return_value = mock_prompt_template
 
-        mock_llm_instance = mock_openai.return_value
-        mock_response = MagicMock()
-        mock_response.content = "AI Discussion"
-        mock_llm_instance.return_value = mock_response
+        mock_openai.return_value = "AI Discussion"
 
         # Execute
-        result = call_llm_for_title(
-            "What is AI? AI stands for Artificial Intelligence.", tenant_id=self.tenant_id)
+        result = asyncio.run(call_llm_for_title(
+            "What is AI? AI stands for Artificial Intelligence.", tenant_id=self.tenant_id, user_id="actor"))
 
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(
             'zh', 'chat_title', {'question': 'What is AI? AI stands for Artificial Intelligence.'}
         )
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     @patch('management.services.conversation.service.get_model_by_model_id')
@@ -547,10 +544,10 @@ class TestConversationManagementService(unittest.TestCase):
         }
         mock_get_model.return_value = selected_config
         mock_get_prompt.return_value = types.SimpleNamespace(system="Generate a short title", user="Question")
-        mock_adapter.return_value.return_value = MagicMock(content="Selected title")
+        mock_adapter.return_value = "Selected title"
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
-            result = call_llm_for_title("Question", self.tenant_id, "en", model_id=7)
+            result = asyncio.run(call_llm_for_title("Question", self.tenant_id, "en", model_id=7, user_id="actor"))
 
         self.assertEqual(result, "Selected title")
         self.assertIn(
@@ -559,35 +556,30 @@ class TestConversationManagementService(unittest.TestCase):
         )
         mock_get_model.assert_called_once_with(7, self.tenant_id)
         mock_get_default_model.assert_not_called()
-        mock_adapter.assert_called_once_with(
-            selected_config,
-            self.tenant_id,
-            temperature=0.7,
-            top_p=0.95,
-            stream=False,
-            timeout_seconds=None,
-            display_name="Selected LLM",
-        )
+        mock_adapter.assert_awaited_once()
+        sent = mock_adapter.await_args.kwargs
+        self.assertEqual((sent["model_id"], sent["tenant_id"], sent["user_id"]), (7, self.tenant_id, "actor"))
+        self.assertEqual((sent["options"].temperature, sent["options"].top_p), (0.7, 0.95))
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_unavailable_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = None
 
         with self.assertRaisesRegex(ValidationError, "Selected model is unavailable"):
-            call_llm_for_title("Question", self.tenant_id, model_id=7)
+            asyncio.run(call_llm_for_title("Question", self.tenant_id, model_id=7, user_id="actor"))
 
         mock_adapter.assert_not_called()
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_non_llm_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = {"model_id": 7, "model_type": "embedding"}
 
         with self.assertRaisesRegex(ValidationError, "Selected model is not an LLM model"):
-            call_llm_for_title("Question", self.tenant_id, model_id=7)
+            asyncio.run(call_llm_for_title("Question", self.tenant_id, model_id=7, user_id="actor"))
 
         mock_adapter.assert_not_called()
 
@@ -810,7 +802,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_delete_conversation.return_value = True
 
         # Execute
-        delete_conversation_service(123, self.user_id)
+        asyncio.run(delete_conversation_service(123, self.user_id, "tenant-1"))
 
         # Assert
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
@@ -1156,7 +1148,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
-            "How to use Python effectively?", self.tenant_id, "en", None)
+            "How to use Python effectively?", self.tenant_id, "en", None, user_id=self.user_id)
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "title_version": 0})
 
@@ -1173,7 +1165,7 @@ class TestConversationManagementService(unittest.TestCase):
 
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
-            "How to use Python?", self.tenant_id, "en", 7)
+            "How to use Python?", self.tenant_id, "en", 7, user_id=self.user_id)
         mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "title_version": 0})
 
     @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "title_version": 0})
@@ -1190,44 +1182,54 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_title.assert_not_called()
 
 
+    @patch("management.services.conversation.service.get_conversation", return_value=None)
+    @patch("management.services.conversation.service.call_llm_for_title")
+    def test_title_generation_requires_owned_conversation(self, model, lookup):
+        from contracts.errors.exceptions import ConversationNotFoundError
+
+        with self.assertRaises(ConversationNotFoundError):
+            asyncio.run(generate_conversation_title_service(123, "Question", self.user_id, self.tenant_id))
+
+        lookup.assert_called_once_with(123, user_id=self.user_id, tenant_id=self.tenant_id)
+        model.assert_not_awaited()
+
+
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
     """Verify call_llm_for_title sets monitoring context and operation."""
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.tenant_config_manager')
     @patch('management.services.conversation.service.set_monitoring_operation')
     @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_context_with_tenant_id(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
+            "model_id": 7,
             "model_repo": "openai", "model_name": "gpt-4",
             "base_url": "http://x", "api_key": "k",
             "display_name": "GPT-4",
         }
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model_cls.return_value = mock_llm
+        mock_model_cls.return_value = "Title"
 
-        call_llm_for_title("hello?", "tenant-123", "en")
+        asyncio.run(call_llm_for_title("hello?", "tenant-123", "en", user_id="actor"))
 
-        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
+        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id="actor")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.tenant_config_manager')
     @patch('management.services.conversation.service.set_monitoring_operation')
     @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_operation_with_display_name(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
+            "model_id": 7,
             "model_repo": "openai", "model_name": "gpt-4",
             "base_url": "http://x", "api_key": "k",
             "display_name": "GPT-4",
         }
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model_cls.return_value = mock_llm
+        mock_model_cls.return_value = "Title"
 
-        call_llm_for_title("hello?", "tenant-123", "zh")
+        asyncio.run(call_llm_for_title("hello?", "tenant-123", "zh", user_id="actor"))
 
         mock_op.assert_called_once_with(
             "title_generation", display_name="GPT-4")
@@ -1333,12 +1335,13 @@ class TestUpdateFunctions(unittest.TestCase):
 class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
-    def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
-        """Should flatten messages when model_factory is modelengine."""
+    def test_modelengine_factory_uses_text_prompts(self, mock_get_config, mock_get_prompt, mock_model):
+        """Pass text prompts to AgentOS for a ModelEngine model."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "modelengine-model",
             "model_repo": "modelengine",
             "model_factory": "modelengine",
@@ -1346,114 +1349,100 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test question")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "Title"
 
-        call_llm_for_title("test question", "tenant-1", "zh")
+        asyncio.run(call_llm_for_title("test question", "tenant-1", "zh", user_id="actor"))
 
-        # Verify messages were flattened
-        call_args = mock_llm.call_args[0][0]
-        self.assertIsInstance(call_args, list)
-        for msg in call_args:
-            self.assertIsInstance(msg, dict)
-            self.assertIn("role", msg)
-            self.assertIn("content", msg)
+        mock_model.assert_awaited_once()
+        self.assertEqual(mock_model.await_args.kwargs["system_prompt"], "SYS")
+        self.assertEqual(mock_model.await_args.kwargs["user_prompt"], "test question")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="  ")  # whitespace only
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "  "
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
-            result = call_llm_for_title("test", "tenant-1", "zh")
+            result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content=None)
-        mock_model.return_value = mock_llm
+        mock_model.return_value = None
 
-        result = call_llm_for_title("test", "tenant-1", "zh")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "新对话")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="  ")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "  "
 
-        result = call_llm_for_title("test", "tenant-1", "en")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "en", user_id="actor"))
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
         mock_get_config.return_value = {
+            "model_id": 7,
             "model_name": "gpt-4",
             "model_repo": "openai",
             "base_url": "http://x",
             "api_key": "k"
         }
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "<think>reasoning</think>Actual Title"
 
-        result = call_llm_for_title("test", "tenant-1", "zh")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
         self.assertEqual(result, "Actual Title")
 
-    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.invoke_chat_prompt')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
     @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""
         mock_get_config.return_value = None
         mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
-        mock_llm = MagicMock()
-        mock_llm.return_value = MagicMock(content="Title")
-        mock_model.return_value = mock_llm
+        mock_model.return_value = "Title"
 
-        # Note: This test documents that call_llm_for_title crashes when model_config is None
-        # The production code has a bug where it calls model_config.get() without checking for None first
-        # For now, we skip this test as the edge case is not handled properly
-        # result = call_llm_for_title("test", "tenant-1", "zh")
-        # self.assertEqual(result, "Title")
+        result = asyncio.run(call_llm_for_title("test", "tenant-1", "zh", user_id="actor"))
+        self.assertEqual(result, "新对话")
+        mock_model.assert_not_called()
 
 
 class TestUpdateConversationTitle(unittest.TestCase):
@@ -1518,7 +1507,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('management.services.conversation.service.delete_conversation')
@@ -1527,7 +1516,7 @@ class TestDeleteConversationService(unittest.TestCase):
         mock_delete.return_value = True
         from management.services.conversation.service import delete_conversation_service
 
-        result = delete_conversation_service(123, "user-1")
+        result = asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
 
         self.assertTrue(result)
 
@@ -1538,7 +1527,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1551,7 +1540,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101, 102]
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([101, 102, 999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 2)
         self.assertEqual(result["failed_ids"], [999])
@@ -1563,7 +1552,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = []
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["failed_ids"], [999])
@@ -1575,7 +1564,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         from management.services.conversation.service import delete_conversations_batch_service
 
         with self.assertRaises(RuntimeError) as ctx:
-            delete_conversations_batch_service([101], "user-1")
+            asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1586,14 +1575,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         calls = []
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 calls.append((conversation_id, user_id))
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102, 999], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(calls, [(101, "user-1"), (102, "user-1"), (999, "user-1")])
         self.assertEqual(result, {"deleted_count": 2, "failed_ids": [999]})
@@ -1605,14 +1594,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101]
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 raise RuntimeError("automation boom")
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": [102]})
         mock_delete_batch.assert_called_once_with([101, 102], "user-1")
@@ -1625,7 +1614,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         # No agent_automation_facade attribute -> `from ... import` raises AttributeError
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": []})
         mock_delete_batch.assert_called_once_with([101], "user-1")

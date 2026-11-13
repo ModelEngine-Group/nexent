@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: MODEL-MANAGEMENT
+  name: Model management
+feature:
+  feature_id: AOS-MODEL
+  name: AgentOS model capability
+  status: active
+  description: Tenant-scoped model lookup and typed invocation through Runtime.
+  business_rules:
+  - rule_id: AOS-MODEL-RULE-01
+    description: The signed tenant selects the model record and provider configuration. Missing, stale and incompatible models are rejected before provider access.
+  required_test_stages:
+  - D3
+  source:
+    requirement_ids:
+    - AOS-REQ-007
+    - AOS-REQ-008
+    spec_path: nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/spec.md

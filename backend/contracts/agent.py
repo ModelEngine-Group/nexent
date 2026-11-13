@@ -9,6 +9,7 @@ from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 from contracts.conversation import HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
+from contracts.model import WorkbenchGenerationConfig as WorkbenchGenerationConfig
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
 from contracts.agent_prompt import normalize_imported_agent_bundle
@@ -89,25 +90,6 @@ class RuntimeSkillMount(BaseModel):
     config_values: Dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkbenchGenerationConfig(BaseModel):
-    """Provider-neutral generation settings persisted with the conversation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    deep_thinking: bool = False
-    thinking_effort: Literal[
-        "auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"
-    ] = "low"
-    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
-    temperature: Optional[float] = Field(
-        default=None, ge=0, le=2, strict=True, allow_inf_nan=False
-    )
-    top_p: Optional[float] = Field(
-        default=None, ge=0, le=1, strict=True, allow_inf_nan=False
-    )
-    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
-
-
 class WorkbenchSessionConfig(BaseModel):
     """Canonical, persisted Workbench declaration; resolved artifacts are excluded."""
 
@@ -180,6 +162,9 @@ def reject_legacy_agent_fields(value):
 class AgentRequest(BaseModel):
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
+    _projection_run_id: str | None = PrivateAttr(default=None)
+    _run_admission_scope: str | None = PrivateAttr(default=None)
+    _track_execution: bool = PrivateAttr(default=False)
     query: str
     clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None

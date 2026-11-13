@@ -39,6 +39,7 @@ install_business_constant_stubs(consts_const_module)
 from nexent import MessageObserver
 from nexent.core.gateway import ModelContext, VLMContext
 
+from infrastructure import model_adapter as bridge
 from management.services.model import adapter as mgs
 
 # _normalize_factory
@@ -49,44 +50,44 @@ ALI_CN = "\u963f\u91cc\u4e91"  # alibaba CN alias
 
 
 def test_normalize_factory_volc_aliases():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
         for raw in ("volc", "volcano", "volcengine", VOLC_CN, "  VOLC  "):
-            assert mgs._normalize_factory(raw, "vlm") == "volc"
+            assert bridge._normalize_factory(raw, "vlm") == "volc"
         for raw in ("ali", "alibaba", ALI_CN):
-            assert mgs._normalize_factory(raw, "vlm") == "ali"
-        assert mgs._normalize_factory("dashscope", "vlm") == "dashscope"
+            assert bridge._normalize_factory(raw, "vlm") == "ali"
+        assert bridge._normalize_factory("dashscope", "vlm") == "dashscope"
 
 
 def test_normalize_factory_unknown_falls_back_to_modality_default():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         registry = mock_get_registry.return_value
         registry.has.return_value = False
-        assert mgs._normalize_factory("", "llm") == "openai"
-        assert mgs._normalize_factory(None, "llm") == "openai"
-        assert mgs._normalize_factory("unknown", "llm") == "openai"
-        assert mgs._normalize_factory("", "embedding") == "openai"
-        assert mgs._normalize_factory("", "multi_embedding") == "jina"
+        assert bridge._normalize_factory("", "llm") == "openai"
+        assert bridge._normalize_factory(None, "llm") == "openai"
+        assert bridge._normalize_factory("unknown", "llm") == "openai"
+        assert bridge._normalize_factory("", "embedding") == "openai"
+        assert bridge._normalize_factory("", "multi_embedding") == "jina"
 
 
 def test_normalize_factory_registered_factory_passthrough():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
-        assert mgs._normalize_factory("tokenpony", "llm") == "tokenpony"
+        assert bridge._normalize_factory("tokenpony", "llm") == "tokenpony"
 
 
 # _coalesce
 
 
 def test_coalesce_returns_first_non_none():
-    assert mgs._coalesce(None, None, 3) == 3
-    assert mgs._coalesce(None, "x") == "x"
-    assert mgs._coalesce(None, None) is None
+    assert bridge._coalesce(None, None, 3) == 3
+    assert bridge._coalesce(None, "x") == "x"
+    assert bridge._coalesce(None, None) is None
 
 
 def test_coalesce_preserves_falsy_values():
-    assert mgs._coalesce(0, 1) == 0
-    assert mgs._coalesce(False, True) is False
+    assert bridge._coalesce(0, 1) == 0
+    assert bridge._coalesce(False, True) is False
 
 
 def test_custom_extra_body_preserves_json_value_types():
@@ -98,7 +99,7 @@ def test_custom_extra_body_preserves_json_value_types():
         "nullable": None,
     }
 
-    assert mgs._custom_extra_body({"__custom__": custom}) == custom
+    assert bridge._custom_extra_body({"__custom__": custom}) == custom
 
 
 # _config_to_context
@@ -120,9 +121,9 @@ def test_config_to_context_vlm_full_override():
         "extra_body": {"max_completion_tokens": 200},
         "max_tokens": 64,
     }
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
-        ctx = mgs._config_to_context(
+        ctx = bridge._config_to_context(
             cfg,
             "vlm",
             "vlm",
@@ -154,9 +155,9 @@ def test_config_to_context_vlm_full_override():
 
 
 def test_config_to_context_cfg_none_uses_defaults_and_observer():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry,             mock.patch.object(mgs, "get_model_name_from_config", return_value="repo/model"):
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry,             mock.patch.object(bridge, "get_model_name_from_config", return_value="repo/model"):
         mock_get_registry.return_value.has.return_value = False
-        ctx = mgs._config_to_context(None, "vlm", "vlm", None)
+        ctx = bridge._config_to_context(None, "vlm", "vlm", None)
 
     assert ctx.model_name == "repo/model"
     assert ctx.factory == "openai"
@@ -175,9 +176,9 @@ def test_config_to_context_vlm4_defaults_audio_only_caps():
         "api_key": "sk-test",
         "display_name": "ASR Model",
     }
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
-        ctx = mgs._config_to_context(
+        ctx = bridge._config_to_context(
             cfg,
             "vlm",
             "vlm4",
@@ -199,9 +200,9 @@ def test_config_to_context_vlm4_explicit_caps_override_default():
         "base_url": "https://api.example.com/v1",
         "api_key": "sk-test",
     }
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
-        ctx = mgs._config_to_context(
+        ctx = bridge._config_to_context(
             cfg,
             "vlm",
             "vlm4",
@@ -215,10 +216,10 @@ def test_config_to_context_vlm4_explicit_caps_override_default():
 
 
 def test_config_to_context_unknown_modality_raises():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = False
         with pytest.raises(ValueError, match="Unknown modality: foo"):
-            mgs._config_to_context({}, "foo", "slot", None)
+            bridge._config_to_context({}, "foo", "slot", None)
 
 
 # Gateway / registry delegation
@@ -227,8 +228,8 @@ def test_config_to_context_unknown_modality_raises():
 def test_get_adapter_from_config_delegates_to_gateway():
     gateway = mock.MagicMock()
     gateway.get_adapter.return_value = "adapter"
-    with mock.patch.object(mgs, "get_gateway", return_value=gateway):
-        result = mgs.get_adapter_from_config({"model_factory": "openai"}, "vlm", "vlm", "t1", temperature=0)
+    with mock.patch.object(bridge, "get_gateway", return_value=gateway):
+        result = bridge.get_adapter_from_config({"model_factory": "openai"}, "vlm", "vlm", "t1", temperature=0)
 
     assert result == "adapter"
     gateway.get_adapter.assert_called_once()
@@ -240,7 +241,7 @@ def test_get_adapter_from_config_delegates_to_gateway():
 
 def test_build_adapter_fresh_constructs_without_gateway_cache():
     dummy_class = mock.MagicMock()
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+    with mock.patch.object(bridge, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = True
         mock_get_registry.return_value.resolve.return_value = dummy_class
         result = mgs.build_adapter_fresh({"model_factory": "openai"}, "vlm", "vlm", "t1")
@@ -254,8 +255,8 @@ def test_build_adapter_fresh_constructs_without_gateway_cache():
 def test_get_adapter_from_config_rerank_builds_model_context():
     gateway = mock.MagicMock()
     gateway.get_adapter.return_value = "adapter"
-    with mock.patch.object(mgs, "get_gateway", return_value=gateway):
-        result = mgs.get_adapter_from_config(
+    with mock.patch.object(bridge, "get_gateway", return_value=gateway):
+        result = bridge.get_adapter_from_config(
             {"model_factory": "openai", "base_url": "u", "api_key": "k"},
             "rerank", "rerank", "t1",
         )
@@ -352,9 +353,9 @@ def _user_cfg(**overrides):
 
 
 def test_config_to_context_llm_branch():
-    with mock.patch.object(mgs, "get_model_name_from_config", return_value="cfg-name"):
-        ctx = mgs._config_to_context(_user_cfg(), "llm", "llm", "t1", temperature=0.2)
-    assert isinstance(ctx, mgs.LLMContext)
+    with mock.patch.object(bridge, "get_model_name_from_config", return_value="cfg-name"):
+        ctx = bridge._config_to_context(_user_cfg(), "llm", "llm", "t1", temperature=0.2)
+    assert isinstance(ctx, bridge.LLMContext)
     assert ctx.model_name == "cfg-name"
     assert ctx.tenant_id == "t1"
     assert ctx.slot == "llm"
@@ -369,16 +370,16 @@ def test_config_to_context_llm_branch():
 
 
 def test_config_to_context_llm_long_context_branch():
-    ctx = mgs._config_to_context(
+    ctx = bridge._config_to_context(
         _user_cfg(), "llm_long_context", "llm", None, model_name="m"
     )
-    assert isinstance(ctx, mgs.LongContextLLMContext)
+    assert isinstance(ctx, bridge.LongContextLLMContext)
     assert ctx.max_tokens == 2048
     assert ctx.truncation_strategy == "end"
 
 
 def test_config_to_context_embedding_branch():
-    ctx = mgs._config_to_context(
+    ctx = bridge._config_to_context(
         _user_cfg(
             max_tokens=512,
             extra_params={
@@ -394,7 +395,7 @@ def test_config_to_context_embedding_branch():
         None,
         model_name="m",
     )
-    assert isinstance(ctx, mgs.EmbeddingContext)
+    assert isinstance(ctx, bridge.EmbeddingContext)
     assert ctx.embedding_dim == 512
     assert ctx.model_type == "llm"
     assert ctx.extra_body == {
@@ -406,15 +407,15 @@ def test_config_to_context_embedding_branch():
 def test_config_to_context_embedding_default_dim():
     cfg = _user_cfg()
     cfg.pop("max_tokens")
-    ctx = mgs._config_to_context(cfg, "embedding", "embedding", None, model_name="m")
+    ctx = bridge._config_to_context(cfg, "embedding", "embedding", None, model_name="m")
     assert ctx.embedding_dim == 1024
 
 
 def test_config_to_context_multi_embedding_branch():
-    ctx = mgs._config_to_context(
+    ctx = bridge._config_to_context(
         _user_cfg(), "multi_embedding", "multiEmbedding", None, model_name="m"
     )
-    assert isinstance(ctx, mgs.EmbeddingContext)
+    assert isinstance(ctx, bridge.EmbeddingContext)
     assert ctx.embedding_dim == 2048
     assert ctx.factory == "jina"  # openai has no multi_embedding adapter
 

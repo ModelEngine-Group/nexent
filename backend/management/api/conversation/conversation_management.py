@@ -247,7 +247,7 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        delete_conversation_service(conversation_id, user_id)
+        await delete_conversation_service(conversation_id, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -272,8 +272,8 @@ async def delete_conversations_batch_endpoint(
         ConversationResponse with deleted_count and failed_ids
     """
     try:
-        user_id, _ = get_current_user_id(authorization)
-        result = delete_conversations_batch_service(request.conversation_ids, user_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await delete_conversations_batch_service(request.conversation_ids, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=result)
     except TokenExpiredError as e:
         logging.warning("Session expired")

@@ -9,7 +9,7 @@ from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 from infrastructure.object_storage.client import minio_client
 from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
-from urllib.parse import quote
+from infrastructure.object_storage.read_access import build_attachment_proxy_url
 
 from infrastructure.trace.knowledge import set_span_attributes, trace_knowledge_operation
 
@@ -81,11 +81,7 @@ def _build_mcp_presigned_url(presigned_url: str) -> str:
     Returns:
         str: URL wrapped with northbound API proxy, with presigned_url URL-encoded
     """
-    if not presigned_url:
-        return ""
-    # URL-encode the presigned_url before embedding it as a query parameter
-    encoded_presigned_url = quote(presigned_url, safe="")
-    return f"{NORTHBOUND_EXTERNAL_URL}/nb/v1/file/fetch?presigned_url={encoded_presigned_url}"
+    return build_attachment_proxy_url(presigned_url, NORTHBOUND_EXTERNAL_URL)
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:

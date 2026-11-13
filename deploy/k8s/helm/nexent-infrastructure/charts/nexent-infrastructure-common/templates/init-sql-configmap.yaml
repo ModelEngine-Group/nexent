@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nexent-infrastructure-sql
-  namespace: {{ .Values.global.namespace }}
-data:
-  init.sql: |
-{{ default "" .Values.sqlFiles.init | nindent 4 }}

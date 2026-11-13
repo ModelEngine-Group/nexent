@@ -61,10 +61,8 @@ from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
-    delete_aidp_kb_impl,
     get_aidp_graph_template_impl,
     get_aidp_kb_impl,
-    get_bound_agents,
     list_aidp_channels_impl,
     list_aidp_doc_history_impl,
     list_aidp_docs_impl,
@@ -78,6 +76,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
+from management.services.knowledge_base.providers.shared_aidp import delete_aidp_kb_impl, get_bound_agents
 import management.services.permission.identity.session as auth_utils_module
 
 

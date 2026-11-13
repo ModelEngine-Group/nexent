@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import threading
 from concurrent.futures import CancelledError
@@ -266,3 +268,50 @@ def test_ut_sdk_tlm_032_run_cancel_cancels_active_call_future():
     assert context.exit_count == 1
     assert manager.snapshot().active_count == 0
     asyncio.run(manager.shutdown(timeout=1))
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_prepared_mcp_discovery_only_exposes_names_authorized_for_each_server(missing):
+    from contextlib import asynccontextmanager
+
+    manager = _manager()
+    seen_parameters = []
+
+    @asynccontextmanager
+    async def sessions(parameters, **_kwargs):
+        assert "allowed_tools" not in parameters
+        seen_parameters.append(parameters["url"])
+        first = parameters["url"] == "http://first.invalid/mcp"
+        names = ["own-first", "own_second"] if first else ["own-first"]
+        if not first and not missing:
+            names.append("own_second")
+        discovered = [
+            mcp.types.Tool(name=name, description=parameters["url"], inputSchema={"type": "object", "properties": {}})
+            for name in names
+        ]
+        yield object(), discovered
+
+    scope = RunCancellationScope()
+    try:
+        collection = ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://first.invalid/mcp", "allowed_tools": {"own-first": "own_first"}},
+                {"url": "http://second.invalid/mcp", "allowed_tools": {"own_second": "own_second"}},
+            ],
+            cancellation_scope=scope, tool_timeout_seconds=1, close_timeout_seconds=0.5,
+            session_context_factory=sessions,
+        )
+        if missing:
+            with pytest.raises(ValueError, match="missing from discovery"), collection:
+                pytest.fail("The session must fail before exposing tools")
+        else:
+            with collection:
+                assert [(tool.name, tool.description) for tool in collection.tools] == [
+                    ("own_first", "http://first.invalid/mcp"),
+                    ("own_second", "http://second.invalid/mcp"),
+                ]
+        assert seen_parameters == ["http://first.invalid/mcp", "http://second.invalid/mcp"]
+        assert manager.snapshot().active_count == 0
+    finally:
+        asyncio.run(manager.shutdown(timeout=1))

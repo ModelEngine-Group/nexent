@@ -110,7 +110,7 @@ class MockTenantGroupUser:
 
 # Add the mocked db_models module to sys.modules
 sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
+sys.modules['infrastructure.rdb.account_record'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()

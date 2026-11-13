@@ -4,12 +4,37 @@
 import ast
 import importlib.util
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tokenize
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_retired_in_process_execution_chain_is_removed():
+    retired = [
+        "backend/runtime/agentos/legacy_admission.py",
+        "backend/runtime/agentos/legacy_tracking.py",
+        "backend/runtime/agentos/legacy_producer.py",
+        "backend/runtime/agentos/admission.py",
+        "backend/management/services/agent/run.py",
+        "backend/management/services/agent/subscription.py",
+        "backend/management/services/agent/execution.py",
+        "backend/management/services/agent/lifecycle.py",
+        "backend/runtime/adapters/nexent/legacy_workspace.py",
+    ]
+    assert not [name for name in retired if (ROOT / name).exists()]
+
+
+def test_preparation_and_factory_have_no_in_process_materializer():
+    preparation = (ROOT / "backend/management/services/agent/preparation/run.py").read_text(encoding="utf-8")
+    factory = (ROOT / "backend/runtime/adapters/nexent/factory.py").read_text(encoding="utf-8")
+    assert "legacy_materializer" not in preparation
+    assert "LegacyRunFactory" not in factory
+    assert "materialize_legacy_run" not in factory
 
 
 def load_file(relative, name):
@@ -57,6 +82,44 @@ def test_ut_be_arb_001_product_callers_use_canonical_owners():
     assert not _legacy_agent_imports(ROOT)
 
 
+def test_management_app_serves_liveness_without_runtime_source():
+    script = """
+import asyncio
+import importlib.abc
+import sys
+from unittest.mock import patch
+
+import httpx
+
+class BlockRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"runtime", "backend.runtime"} or fullname.startswith(("runtime.", "backend.runtime.")):
+            raise AssertionError(f"Management imported peer source: {fullname}")
+
+sys.meta_path.insert(0, BlockRuntime())
+with patch("nexent.core.nlp.stopwords.load_stopwords"):
+    from management.api.application import app
+    from management.services.agent import runtime_client, prepared_turn
+
+assert not hasattr(runtime_client, "agent_run_manager")
+assert not hasattr(prepared_turn, "_agent_stream_producer_tasks")
+
+assert "post" in app.openapi()["paths"]["/agent/run"]
+
+async def verify():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        result = await client.get("/health/live")
+        assert result.status_code == 200 and result.json() == {"status": "alive"}
+
+asyncio.run(verify())
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_source_scan_ignores_dependencies_but_detects_owned_legacy_imports(tmp_path):
     for folder in [".venv/site-packages", "node_modules/package", "__pycache__", ".pytest-tmp", "vendor-env/site-packages"]:
         path = tmp_path / "backend" / folder / "non_utf8.py"
@@ -66,6 +129,53 @@ def test_source_scan_ignores_dependencies_but_detects_owned_legacy_imports(tmp_p
     owned = tmp_path / "backend/owned.py"
     owned.write_text("# Owned source\nfrom agents import legacy\n", encoding="utf-8")
     assert _legacy_agent_imports(tmp_path) == [("backend/owned.py", 2, "agents")]
+
+
+def test_management_compiler_and_legacy_streams_do_not_import_runtime_factory_or_sdk_alias():
+    for name in ("preparation/run.py", "prepared_projection.py", "runtime_client.py", "prepared_turn.py"):
+        path = ROOT / "backend" / "management" / "services" / "agent" / name
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        forbidden = "runtime" if name.startswith("preparation/") else "runtime.adapters"
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            assert all(
+                name != forbidden and not name.startswith(f"{forbidden}.")
+                for name in (module.removeprefix("backend.") for module in modules)
+            ), (path, node.lineno)
+
+
+def test_management_run_and_subscription_do_not_import_runtime_thread_manager():
+    for name in ("runtime_client.py", "prepared_turn.py"):
+        path = ROOT / "backend" / "management" / "services" / "agent" / name
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert not any(
+                module.removeprefix("backend.").split(".")[:2] == ["runtime", "thread_management"]
+                for module in modules
+            ), (path, node.lineno)
+
+
+def test_management_sources_do_not_import_runtime():
+    for path in (ROOT / "backend/management").rglob("*.py"):
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert all(module.removeprefix("backend.").split(".")[0] != "runtime" for module in modules), (path, node.lineno)
 
 
 def test_ut_be_arb_002_factory_preserves_prepared_values(monkeypatch):
@@ -159,9 +269,69 @@ def test_factory_owns_local_observer_and_stop_event(monkeypatch):
 def test_assistant_projection_is_a_separate_responsibility():
     path = ROOT / "backend/management/services/agent/persistence.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    functions = {n.name for n in tree.body if isinstance(n, ast.AsyncFunctionDef)}
-    assert "finalize_assistant_projection" in functions
-    execution = (ROOT / "backend/management/services/agent/execution.py").read_text(
+    functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert "canonicalize_assistant_units" in functions
+    execution = (ROOT / "backend/management/services/agent/prepared_projection.py").read_text(
         encoding="utf-8"
     )
-    assert "await finalize_assistant_projection(" in execution
+    assert "canonicalize_assistant_units(" in execution
+    assert "persist_prepared_assistant_projection" in execution
+
+
+def test_raw_preparation_does_not_load_legacy_subscription():
+    script = """
+import importlib.abc
+import sys
+from unittest.mock import patch
+
+class BlockLegacyExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"management.services.agent." + name for name in ("subscription", "run", "execution", "lifecycle")} | {"backend.management.services.agent." + name for name in ("subscription", "run", "execution", "lifecycle")}:
+            raise AssertionError(f"Preparation imported retired execution facade: {fullname}")
+        if fullname in {"runtime", "backend.runtime"} or fullname.startswith(("runtime.", "backend.runtime.")):
+            raise AssertionError(f"Preparation imported Runtime source: {fullname}")
+
+sys.meta_path.insert(0, BlockLegacyExecution())
+with patch("nexent.core.nlp.stopwords.load_stopwords"):
+    from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_runtime_sources_do_not_import_management():
+    for path in (ROOT / "backend/runtime").rglob("*.py"):
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            modules = ([node.module or ""] if isinstance(node, ast.ImportFrom) else
+                       [alias.name for alias in node.names] if isinstance(node, ast.Import) else [])
+            assert all(module.removeprefix("backend.").split(".")[0] != "management" for module in modules), (path, node.lineno)
+
+
+def test_runtime_app_serves_liveness_without_management_source():
+    script = """
+import asyncio, importlib.abc, sys
+from unittest.mock import patch
+import httpx
+class BlockManagement(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"management", "backend.management"} or fullname.startswith(("management.", "backend.management.")):
+            raise AssertionError(f"Runtime imported peer source: {fullname}")
+sys.meta_path.insert(0, BlockManagement())
+with patch("nexent.core.nlp.stopwords.load_stopwords"):
+    from runtime.api.application import app
+assert not any("/compat/" in getattr(route, "path", "") for route in app.routes)
+assert not {"/agent/run", "/agent/stop/{run_id}"} & {getattr(route, "path", "") for route in app.routes}
+async def verify():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://runtime") as client:
+        result=await client.get("/health/live")
+        assert result.status_code==200 and result.json()=={"status":"alive"}
+asyncio.run(verify())
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    result = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=env,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr

@@ -36,11 +36,11 @@ def _run_tenant_task(tenants, task, log_template, warn_label):
 
 
 def _dispatch_pending_runs(runs):
-    """Resume durable pending runs through the existing runtime dispatcher."""
+    """Resume durable pending runs through the Management dispatcher."""
     if not runs:
         return
 
-    from management.services.agent.runtime_client import dispatch_agent_evaluation_run
+    from management.services.evaluation.dispatch import dispatch_agent_evaluation_run
 
     for run in runs:
         run_id = run.get("agent_evaluation_id")
@@ -60,7 +60,7 @@ def _dispatch_pending_runs(runs):
             )
         except Exception as exc:
             # Keep the row PENDING. The next maintenance pass can use the same
-            # idempotent runtime claim once the runtime service is available.
+            # idempotent claim once worker capacity is available.
             logger.warning(
                 "Pending evaluation dispatch failed for run %s: %s",
                 run_id,

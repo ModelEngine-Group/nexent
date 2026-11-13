@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ModelEngineProvider module.
 
 Tests cover model fetching, type mapping, and error handling.
@@ -9,7 +11,7 @@ from pytest_mock import MockFixture
 
 import aiohttp
 
-from management.services.model.providers.modelengine_provider import (
+from runtime.model.providers.modelengine_provider import (
     ModelEngineProvider,
     MODEL_ENGINE_NORTH_PREFIX,
     get_model_engine_raw_url,
@@ -51,7 +53,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -103,7 +105,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -148,7 +150,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -187,7 +189,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -248,7 +250,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -285,7 +287,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -311,7 +313,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -359,7 +361,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -411,7 +413,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -454,7 +456,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
+            "runtime.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 

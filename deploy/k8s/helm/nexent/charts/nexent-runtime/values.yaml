@@ -5,7 +5,7 @@ strategy:
 
 images:
   backend:
-    repository: nexent/nexent
+    repository: nexent/nexent-runtime
     tag: latest
     pullPolicy: IfNotPresent
 

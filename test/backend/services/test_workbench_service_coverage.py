@@ -405,3 +405,20 @@ def test_resolve_skill_mounts_skips_unrelated_tool_values(monkeypatch):
     )
 
     assert [skill.skill_id for skill in result] == [1, 2]
+
+
+def test_portable_workbench_keeps_tools_required_by_mounted_skills(monkeypatch):
+    from contracts.agent import AgentRequest
+
+    config = WorkbenchSessionConfig(mode="generic_chat", skill_mounts=[{"skill_id": 11}])
+    request = AgentRequest(entrypoint="workbench", query="work", workbench=config)
+    plan = SimpleNamespace(
+        root=SimpleNamespace(identity=SimpleNamespace(agent_id=7, version_no=3)),
+        root_skills=(SimpleNamespace(tool_ids=(19,)),),
+    )
+    monkeypatch.setattr(workbench_service, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(workbench_service, "resolve_workbench_config", lambda *_args, **_kwargs: (config, plan))
+
+    result = workbench_service.prepare_portable_workbench(request, None, "actor", "tenant")
+
+    assert result.plan is plan and result.version == 1

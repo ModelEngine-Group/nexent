@@ -259,9 +259,7 @@ class TestSummarizeDocument:
 
     def test_summarize_document_with_model_success(self):
         """Test document summarization when model config exists and LLM returns value"""
-        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
-            mock_get_model.return_value = {"id": 1}
+        with patch('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker') as mock_llm:
             mock_llm.return_value = "Generated summary\n"
 
             result = summarize_document(
@@ -270,7 +268,7 @@ class TestSummarizeDocument:
                 language="en",
                 max_words=50,
                 model_id=1,
-                tenant_id="tenant"
+                tenant_id="tenant", user_id="actor"
             )
 
             assert result == "Generated summary"
@@ -305,9 +303,7 @@ class TestSummarizeCluster:
 
     def test_summarize_cluster_with_model_success(self):
         """Test cluster summarization when model config exists and LLM returns value"""
-        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
-            mock_get_model.return_value = {"id": 1}
+        with patch('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker') as mock_llm:
             mock_llm.return_value = "Cluster summary text  "
 
             result = summarize_cluster(
@@ -315,7 +311,7 @@ class TestSummarizeCluster:
                 language="en",
                 max_words=120,
                 model_id=1,
-                tenant_id="tenant"
+                tenant_id="tenant", user_id="actor"
             )
 
             assert result == "Cluster summary text"
@@ -354,7 +350,7 @@ class TestSummarizeClustersMapReduce:
                 document_samples=document_samples,
                 clusters=clusters,
                 model_id=1,
-                tenant_id="test_tenant"
+                tenant_id="test_tenant", user_id="actor"
             )
 
             assert isinstance(result, dict)
@@ -381,7 +377,7 @@ class TestSummarizeClustersMapReduce:
                 document_samples=document_samples,
                 clusters=clusters,
                 model_id=1,
-                tenant_id="test_tenant"
+                tenant_id="test_tenant", user_id="actor"
             )
 
             assert isinstance(result, dict)

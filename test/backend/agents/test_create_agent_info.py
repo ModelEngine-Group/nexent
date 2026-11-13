@@ -8,6 +8,7 @@ import types
 import importlib.util
 from pathlib import Path
 from contextlib import ExitStack
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace stubs.
 
@@ -576,7 +577,7 @@ setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
 # Import the canonical preparation owners using the isolated collaborators above.
 import management.services.agent.preparation.compiler as preparation_compiler
-import management.services.agent.preparation.inputs as input_preparation
+from runtime.adapters.nexent import factory as runtime_factory
 import management.services.agent.preparation.resources as resource_preparation
 import management.services.agent.preparation.run as run_preparation
 import management.services.agent.preparation.tools as tool_preparation
@@ -592,7 +593,6 @@ from management.services.agent.preparation.tools import create_tool_config_list
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.model.run_bindings import create_model_config_list
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
-from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preparation.inputs import join_minio_file_description_to_query
 from management.services.agent.preparation.inputs import prepare_prompt_templates
 from management.services.agent.resource_resolver import _get_skills_for_template
@@ -605,6 +605,7 @@ from management.services.agent.preparation.resources import _build_auth_header_f
 from management.services.agent.preparation.resources import _get_external_a2a_agents
 from management.services.agent.preparation.inputs import _build_internal_s3_url
 from management.services.agent.preparation.inputs import _format_minio_files_for_content
+
 from management.services.agent.preparation.inputs import _convert_history_with_minio_files
 from management.services.agent.preparation.tools import _normalize_tool_params_request
 from management.services.agent.preparation.tools import _get_agent_tool_overrides
@@ -613,6 +614,10 @@ from management.services.agent.resource_resolver import _resolve_runtime_tool_re
 from management.services.model.run_budget import _resolve_input_budget
 from management.services.model.run_budget import _resolve_context_budget
 from management.services.agent.preparation.compiler import _get_external_provider_service_for_search
+from runtime.adapters.nexent.factory import materialize_legacy_run
+
+
+create_agent_run_info = partial(run_preparation.create_agent_run_info, legacy_materializer=materialize_legacy_run)
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
@@ -626,12 +631,12 @@ def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        input_preparation,
+        runtime_factory.environment,
         "AGENT_WORKSPACE_ROOT",
         str(tmp_path),
     )
 
-    workspace = input_preparation._build_run_workspace("user-1", "run-1")
+    workspace, _ = runtime_factory.materialize_legacy_run.prepare_workspace("user-1", "tenant-1", "run-1", None)
 
     assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
 
@@ -4096,8 +4101,8 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name, \
-                patch('management.services.model.run_bindings.add_repo_to_name') as mock_add_repo:
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name, \
+                patch('infrastructure.agent_model_config.add_repo_to_name') as mock_add_repo:
 
             # Mock database records
             mock_get_records.return_value = [
@@ -4177,9 +4182,9 @@ class TestCreateModelConfigList:
         capability = {"status": "supported", "levels": ["low", "high"], "default": "high"}
         with patch('management.services.model.run_bindings.get_model_records') as records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config', return_value="default"), \
-                patch('management.services.model.run_bindings.add_repo_to_name', return_value="openai/o3"), \
-                patch('management.services.model.run_bindings._resolve_reasoning_capability', return_value=capability):
+                patch('infrastructure.agent_model_config.get_model_name_from_config', return_value="default"), \
+                patch('infrastructure.agent_model_config.add_repo_to_name', return_value="openai/o3"), \
+                patch('infrastructure.agent_model_config._resolve_reasoning_capability', return_value=capability):
             records.return_value = [{
                 "display_name": "O3",
                 "api_key": "key",
@@ -4210,7 +4215,7 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []
@@ -4245,7 +4250,7 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []
@@ -5929,8 +5934,9 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            tool_preparation._inject_plan_tools(tools, True)
-            tool_preparation._inject_plan_tools(tools, True)
+            with patch("infrastructure.agent_tool_config.ToolConfig", mock_tool_config):
+                tool_preparation._inject_plan_tools(tools, True)
+                tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 
@@ -5948,11 +5954,12 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            tool_preparation._inject_plan_tools(tools, False)
-            assert tools == []
-            assert mock_tool_config.call_count == 0
+            with patch("infrastructure.agent_tool_config.ToolConfig", mock_tool_config):
+                tool_preparation._inject_plan_tools(tools, False)
+                assert tools == []
+                assert mock_tool_config.call_count == 0
 
-            tool_preparation._inject_plan_tools(tools, True)
+                tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 
@@ -6121,7 +6128,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://external.com/a2a"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6147,7 +6154,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://default.com/agent"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6176,7 +6183,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://raw.com"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             call_kwargs = MockConfig.call_args[1]
@@ -6187,7 +6194,7 @@ class TestBuildExternalAgentConfig:
 
 @pytest.mark.parametrize("value", [True, False])
 def test_build_external_config_preserves_ssl_preference(value):
-    with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as config:
+    with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as config:
         _build_external_agent_config({"external_agent_id": 1, "ssl_verify": value}, "https://peer")
         assert config.call_args.kwargs["ssl_verify"] is value
 
@@ -8426,7 +8433,7 @@ class TestBuildSecurityHeaders:
             "security_requirements": [{"schemes": {"k": {}}}],
             "security_credentials": {"k": "secret-token"},
         }
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             _build_external_agent_config(agent, "http://test/a2a")
             call_kwargs = MockConfig.call_args[1]
             assert call_kwargs["custom_headers"] == {"X-Token": "secret-token"}

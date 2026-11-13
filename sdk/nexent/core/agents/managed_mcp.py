@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import asyncio
@@ -117,6 +119,8 @@ class ManagedMCPToolCollection:
         async with AsyncExitStack() as stack:
             connections = []
             for parameters in self.server_parameters:
+                parameters = parameters.copy()
+                allowed_tools = parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
                         stack.enter_async_context(
@@ -131,11 +135,14 @@ class ManagedMCPToolCollection:
                     raise MCPConnectionTimeoutError(
                         f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
                     ) from exc
-                connections.append(connection)
+                connections.append((*connection, allowed_tools))
 
             tools = []
-            for session, mcp_tools in connections:
+            for session, mcp_tools, allowed_tools in connections:
+                matched = set()
                 for mcp_tool in mcp_tools:
+                    if allowed_tools is not None and mcp_tool.name not in allowed_tools:
+                        continue
 
                     def call_tool(
                         arguments=None,
@@ -144,7 +151,14 @@ class ManagedMCPToolCollection:
                     ):
                         return self._call_tool(__session, __name, arguments)
 
-                    tools.append(adapter.adapt(call_tool, mcp_tool))
+                    tool = adapter.adapt(call_tool, mcp_tool)
+                    if allowed_tools is not None:
+                        if mcp_tool.name in matched or tool.name != allowed_tools[mcp_tool.name]:
+                            raise ValueError("MCP tool discovery does not match the authorized binding")
+                        matched.add(mcp_tool.name)
+                    tools.append(tool)
+                if allowed_tools is not None and matched != allowed_tools.keys():
+                    raise ValueError("Authorized MCP tool is missing from discovery")
 
             close_event = asyncio.Event()
             with self._lock:

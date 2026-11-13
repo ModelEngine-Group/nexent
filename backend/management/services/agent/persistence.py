@@ -11,6 +11,17 @@ from management.services.agent.stream import (
 from nexent.core.concurrency import ManagedTaskSpec
 
 
+def canonicalize_assistant_units(units):
+    """Finalize the canonical answer and shared persistence representation."""
+    remove_answer_only_steps(units)
+    total_bytes = _finalize_buffered_unit_fragments(units)
+    answer = next(
+        (unit["content"] for unit in reversed(units) if unit["type"] == "final_answer" and not unit.get("invocation_id")),
+        "",
+    )
+    return answer, total_bytes
+
+
 async def finalize_assistant_projection(
     *,
     thread_manager,
@@ -29,27 +40,20 @@ async def finalize_assistant_projection(
     persist_batch,
     mark_failed,
     logger,
+    projection_run_id: str | None = None,
 ):
     """Apply the established batch transaction and failure fallback through injected I/O."""
     persistence_failed = False
     if message_id is not None:
         try:
-            remove_answer_only_steps(buffered_units)
-            persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
-            final_answer_content = next(
-                (
-                    unit["content"]
-                    for unit in reversed(buffered_units)
-                    if unit["type"] == "final_answer" and not unit.get("invocation_id")
-                ),
-                "",
-            )
+            final_answer_content, persistence_bytes = canonicalize_assistant_units(buffered_units)
             logger.info(
                 "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                 conversation_id,
                 len(buffered_units),
                 persistence_bytes,
             )
+            projection_options = {"projection_run_id": projection_run_id} if projection_run_id is not None else {}
             await thread_manager.run(
                 "control-io",
                 ManagedTaskSpec(
@@ -68,6 +72,7 @@ async def finalize_assistant_projection(
                 automation_proposals=buffered_automation_proposals,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                **projection_options,
             )
         except Exception:
             persistence_failed = True

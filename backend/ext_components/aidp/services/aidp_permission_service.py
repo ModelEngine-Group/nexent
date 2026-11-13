@@ -32,8 +32,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
-from management.db.identity import group as group_db_module
-from management.db.identity import user_tenant as user_tenant_db_module
+from infrastructure.rdb import account_access
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbConflictError,
@@ -114,7 +113,7 @@ def _validate_group_ids_strict(
     """
     if not group_ids:
         return []
-    valid = set(group_db_module.filter_tenant_group_ids(list(group_ids), tenant_id))
+    valid = set(account_access.filter_tenant_group_ids(list(group_ids), tenant_id))
     invalid = [int(g) for g in group_ids if int(g) not in valid]
     if invalid:
         raise AidpGroupValidationError(invalid_ids=invalid, tenant_id=tenant_id)
@@ -122,11 +121,11 @@ def _validate_group_ids_strict(
 
 
 def _get_user_role(user_id: str, tenant_id: str) -> str:
-    return user_tenant_db_module.get_user_role_by_tenant(user_id, tenant_id)
+    return account_access.get_user_role_by_tenant(user_id, tenant_id)
 
 
 def _get_user_groups(user_id: str, tenant_id: str) -> list[int]:
-    return group_db_module.query_group_ids_by_user_in_tenant(user_id, tenant_id)
+    return account_access.query_group_ids_by_user_in_tenant(user_id, tenant_id)
 
 
 def _resolve_permission(

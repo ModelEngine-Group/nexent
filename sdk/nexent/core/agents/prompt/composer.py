@@ -13,6 +13,8 @@ from .bundle import AgentPromptBundle, _thaw
 from .knowledge import render_knowledge_base_summaries, render_knowledge_scope_resources
 
 
+EXECUTOR_CONTEXT_IDS = frozenset({"system:sandbox_workspace_guidance", "system:restricted_python_execution"})
+
 _RENDERER = Environment(undefined=StrictUndefined, autoescape=False)
 
 
@@ -82,6 +84,27 @@ class AgentPromptComposer:
             })
         )
         return self.render_system_section("restricted_python_execution", authorized_imports=imports)
+
+    def executor_context_item(
+        self, *, sandbox_workspace_enabled: bool, restricted_python_authorized_imports: List[str] | None = None,
+    ) -> ContextItemInput | None:
+        if sandbox_workspace_enabled:
+            section = "sandbox_workspace_guidance"
+            text = self.render_system_section(section)
+            priority = 99
+        elif restricted_python_authorized_imports is not None:
+            section = "restricted_python_execution"
+            text = self.render_restricted_python_execution(restricted_python_authorized_imports)
+            priority = 25
+        else:
+            return None
+        if not text:
+            return None
+        return ContextItemInput(
+            id=f"system:{section}", type=ContextItemType.SYSTEM, content={"text": text},
+            source=(f"agent_prompt:{section}",), priority=priority,
+            metadata={"authority": "platform", "layout_order": 32},
+        )
 
     def render_human_interaction(self, *, preserves_executor: bool) -> HumanInteractionPrompts:
         policy = load_prompt(self.bundle.language, "agent/human_interaction")
@@ -155,13 +178,12 @@ class AgentPromptComposer:
                 100, 0, "platform",
             )
 
-        if sandbox_workspace_enabled:
-            add_system(
-                "sandbox_workspace_guidance",
-                composer.render_system_section("sandbox_workspace_guidance"),
-                99, 32,
-                "platform",
-            )
+        executor_context = self.executor_context_item(
+            sandbox_workspace_enabled=sandbox_workspace_enabled,
+            restricted_python_authorized_imports=restricted_python_authorized_imports,
+        )
+        if sandbox_workspace_enabled and executor_context is not None:
+            inputs.append(executor_context)
 
         if enable_memory_tool_policy:
             policy = load_prompt(language, "agent/memory_tool_policy")["policy"]
@@ -338,13 +360,8 @@ class AgentPromptComposer:
                         "authority": "agent",
                     },
                 ))
-        if not sandbox_workspace_enabled and restricted_python_authorized_imports is not None:
-            add_system(
-                "restricted_python_execution",
-                composer.render_restricted_python_execution(restricted_python_authorized_imports),
-                25, 32,
-                "platform",
-            )
+        if not sandbox_workspace_enabled and executor_context is not None:
+            inputs.append(executor_context)
         code_norms = (
             composer.render_system_section("outline_constraints") + "\n"
             + composer.render_system_section("code_norms")

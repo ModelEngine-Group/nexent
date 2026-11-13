@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 from contracts.conversation import HistoryItem, MessageRequest, MessageUnit
 from contracts.conversation import MessageSource
+from management.db.conversation.prepared_turn import PreparedTurnConflict, read_saved_user_turn_by_id
 from management.services.conversation.service import (
     get_conversation_history_service,
     save_message,
@@ -15,8 +16,37 @@ from management.services.conversation.service import (
 logger = logging.getLogger("agent_automation.conversation_adapter")
 
 
+class AutomationPromptTurn(TypedDict):
+    user_message_id: int
+    assistant_message_index: int
+    history: list[HistoryItem]
+
+
 class AutomationConversationAdapter:
     """Persist automation UI events through the existing conversation service."""
+
+    def load_run_prompt(self, conversation_id, message_id, prompt, user_id, tenant_id) -> AutomationPromptTurn:
+        """Restore a persisted preparation attempt without appending its source again."""
+        source = read_saved_user_turn_by_id(conversation_id, user_id, tenant_id, message_id, prompt, None)
+        if source.message_source != MessageSource.AUTOMATION:
+            raise PreparedTurnConflict("Automation source has a different message origin")
+        payload = get_conversation_history_service(conversation_id, user_id)
+        messages = payload[0].get("message", []) if payload else []
+        before_source = []
+        for message in messages:
+            index = message.get("message_index")
+            if isinstance(index, int):
+                earlier = index < source.message_index
+            elif isinstance(message.get("message_id"), int):
+                earlier = message["message_id"] < source.message_id
+            else:
+                raise PreparedTurnConflict("Historical message has no ordering boundary")
+            if earlier:
+                before_source.append(message)
+        return {
+            "user_message_id": source.message_id, "assistant_message_index": source.message_index + 1,
+            "history": self._history_items(before_source),
+        }
 
     @staticmethod
     def _message_content(message: Dict[str, Any]) -> str:
@@ -71,7 +101,7 @@ class AutomationConversationAdapter:
         prompt: str,
         user_id: str,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> AutomationPromptTurn:
         """Append a new automation turn without regenerating an existing message."""
         history_payload = get_conversation_history_service(conversation_id, user_id)
         messages = history_payload[0].get("message", []) if history_payload else []
@@ -106,6 +136,7 @@ class AutomationConversationAdapter:
         )
         return {
             "user_message_id": message_id,
+            "assistant_message_index": next_message_index + 1,
             "history": self._history_items(messages),
         }
 

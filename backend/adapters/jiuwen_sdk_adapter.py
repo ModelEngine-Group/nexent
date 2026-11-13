@@ -591,6 +591,7 @@ class JiuwenSDKAdapter:
         expected_answer: str,
         model_answer: str,
         user_metrics: str = "",
+        judge_invoker=None,
     ) -> Tuple[float, str]:
         """LLM-as-judge semantic consistency scoring.
 
@@ -607,23 +608,30 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        try:
-            from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
-                LLMAsJudgeMetric,
+        if judge_invoker is None:
+            try:
+                from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
+                    LLMAsJudgeMetric,
+                )
+            except Exception as exc:
+                raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
+
+            request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+
+            metric = LLMAsJudgeMetric(
+                model_config=request_config,
+                model_client_config=client_config,
+                user_metrics=user_metrics or "",
             )
-        except Exception as exc:
-            raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
 
-        request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+            template = metric._template
+        else:
+            from openjiuwen.agent_evolving.evaluator.templates import LLM_METRIC_TEMPLATE
 
-        metric = LLMAsJudgeMetric(
-            model_config=request_config,
-            model_client_config=client_config,
-            user_metrics=user_metrics or "",
-        )
+            template = LLM_METRIC_TEMPLATE.format({"user_metrics": user_metrics or ""})
 
         # Build the same prompt that ``metric.compute()`` uses.
-        messages = metric._template.format({
+        messages = template.format({
             "question": str(question or ""),
             "expected_answer": str(expected_answer),
             "model_answer": str(model_answer),
@@ -650,7 +658,10 @@ class JiuwenSDKAdapter:
                 messages.append(UserMessage(content=chinese_directive.lstrip("\n")))
 
         try:
-            response = asyncio.run(metric._model.invoke(messages)).content
+            if judge_invoker is None:
+                response = asyncio.run(metric._model.invoke(messages)).content
+            else:
+                response = judge_invoker(messages)
         except Exception as exc:
             raise JiuwenSDKError(f"Judge LLM invoke failed: {exc}") from exc
 

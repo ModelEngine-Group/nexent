@@ -7,6 +7,20 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
+from management.api.agent.conversation_run import router as conversation_run_router
+from management.api.automation.agent_automation import (
+    conversation_automation_router,
+    router as agent_automation_router,
+)
+from management.api.skill.creation import skill_creator_router
+from management.api.agent.creator import router as agent_creator_router
+from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
+from management.api.agent.workbench_callback import router as workbench_callback_router
+from management.api.automation.agentos_callback import router as automation_callback_router
+from management.api.memory.agentos_callback import router as memory_callback_router
+from management.api.conversation.conversation_management import router as conversation_router
+from management.api.conversation.workbench_pins import router as workbench_pins_router
+from management.api.conversation.conversation_share import router as conversation_share_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.skill.skill_repository import skill_repository_router
 from management.api.configuration.config_sync import router as config_sync_router
@@ -17,6 +31,7 @@ from management.api.knowledge_base.idata import router as idata_router
 from management.api.knowledge_base.ragflow import router as ragflow_router
 from management.api.file.file_management import file_management_config_router as file_manager_router
 from management.api.file.image import router as proxy_router
+from management.api.file.storage import router as file_storage_router
 from management.api.knowledge_base.knowledge_summary import router as summary_router
 from management.api.identity.mock_user_management import router as mock_user_management_router
 from management.api.model.model_managment import router as model_manager_router
@@ -27,7 +42,6 @@ from management.api.skill.skill import router as skill_router
 from management.api.configuration.tenant_config import router as tenant_config_router
 from management.api.tool.tool_config import router as tool_config_router
 from management.api.identity.user_management import router as user_management_router
-from management.api.voice.voice import voice_config_router as voice_router
 from management.api.identity.tenant import router as tenant_router
 from management.api.identity.group import router as group_router
 from management.api.identity.user import router as user_router
@@ -100,7 +114,25 @@ async def stop_dreaming_scheduler():
 
 
 @asynccontextmanager
+async def automation_lifespan():
+    from management.services.automation.scheduler import agent_automation_scheduler, recover_automation_runs
+
+    await config_thread_manager.run(
+        "control-io",
+        ManagedTaskSpec(task_name="recover-automation-runs", owner="management.api.application"),
+        recover_automation_runs,
+    )
+    await agent_automation_scheduler.start()
+    try:
+        yield
+    finally:
+        await agent_automation_scheduler.stop()
+
+
+@asynccontextmanager
 async def config_lifespan(_app):
+    from management.services.agent.prepared_turn import prepared_turn_lifespan
+
     # One Management manager owns ordinary and Northbound requests and recovery.
     async with northbound_lifespan(_app):
         maintenance_started = False
@@ -111,7 +143,8 @@ async def config_lifespan(_app):
             await validate_external_service_configuration()
             dreaming_started = True
             await start_dreaming_scheduler()
-            yield
+            async with automation_lifespan(), prepared_turn_lifespan():
+                yield
         finally:
             try:
                 if dreaming_started:
@@ -142,12 +175,23 @@ async def thread_capacity():
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
+app.include_router(agent_creator_router)
+app.include_router(conversation_run_router)
+app.include_router(agent_automation_router)
+app.include_router(automation_callback_router)
+app.include_router(nl2agent_callback_router)
+app.include_router(workbench_callback_router)
+app.include_router(memory_callback_router)
+app.include_router(conversation_automation_router)
+app.include_router(workbench_pins_router)
+app.include_router(conversation_share_router)
+app.include_router(conversation_router)
 app.include_router(agent_repository_router)
 app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)
 app.include_router(datamate_router)
-app.include_router(voice_router)
 app.include_router(file_manager_router)
+app.include_router(file_storage_router)
 app.include_router(proxy_router)
 app.include_router(tool_config_router)
 app.include_router(dify_router)
@@ -168,6 +212,7 @@ app.include_router(cas_router)
 
 app.include_router(summary_router)
 app.include_router(skill_router)
+app.include_router(skill_creator_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)
 app.include_router(remote_mcp_router)

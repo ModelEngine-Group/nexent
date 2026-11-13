@@ -22,9 +22,7 @@ from typing import Any, Callable, Dict, Optional
 from management.db.automation import repository as agent_automation_db
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
-from nexent.core.tools.create_scheduled_task_tool import (
-    CreateScheduledTaskProposalTool,
-)
+from infrastructure.agent_tool_config import build_automation_proposal_tool
 
 from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationScheduleInvalidError
 from management.services.automation.service import agent_automation_facade
@@ -109,21 +107,7 @@ class AgentLoopAutomationToolAdapter:
             tool_params=tool_params,
             has_attachments=has_attachments,
         )
-        return ToolConfig(
-            class_name=CreateScheduledTaskProposalTool.__name__,
-            name=CreateScheduledTaskProposalTool.name,
-            description=CreateScheduledTaskProposalTool.description,
-            description_zh=CreateScheduledTaskProposalTool.description_zh,
-            inputs=json.dumps(
-                CreateScheduledTaskProposalTool.inputs,
-                ensure_ascii=False,
-            ),
-            output_type=CreateScheduledTaskProposalTool.output_type,
-            params={},
-            source="builtin",
-            usage="builtin",
-            metadata={"create_proposal": self.build_callback(context)},
-        )
+        return build_automation_proposal_tool(self.build_callback(context))
 
     def build_callback(
         self,

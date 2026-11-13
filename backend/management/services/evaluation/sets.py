@@ -17,8 +17,8 @@ from management.db.agent.version import query_version_list
 from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase, KnowledgeRecord
 from management.db.evaluation.sets import batch_delete_evaluation_set_cases, count_evaluation_set_cases, count_evaluation_sets, create_evaluation_set, get_cases_by_ids, get_evaluation_set, get_evaluation_set_cases_all, hard_delete_evaluation_set, insert_evaluation_set_cases, list_case_turn_orders_by_session, list_evaluation_set_cases, list_evaluation_sets, update_evaluation_set_case_count
-from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.db.knowledge_base.repository import get_index_name_by_knowledge_name, get_knowledge_record
+from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_evaluation_case_context_blocks,
@@ -493,7 +493,7 @@ def _build_kb_descriptions(kb_info, tenant_id):
     return "\n".join(lines) if lines else ""
 
 
-def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_block=None):
+def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_block=None, *, user_id):
     if kb_desc_block is None:
         kb_desc_block = _build_kb_descriptions(kb_info, tenant_id)
     if not kb_desc_block:
@@ -503,10 +503,11 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_bloc
             "zh", "evaluation_kb_plan",
             {"description": description, "knowledge_bases": kb_desc_block},
         )
-        response = call_llm_for_system_prompt(
+        response = invoke_chat_prompt_in_worker(
             model_id=model_id,
             user_prompt=prompt.user,
             system_prompt=prompt.system,
+            user_id=user_id,
             tenant_id=tenant_id,
         )
         data = json.loads(response) if isinstance(response, str) else response
@@ -522,7 +523,7 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_bloc
         return fallback_queries
 
 
-def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
+def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3, *, user_id):
     from management.services.knowledge_base.service import get_vector_db_core
 
     if not kb_info or not queries:
@@ -535,38 +536,34 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
         parts.append("\n" + render_evaluation_section("zh", "kb_result_header", {
             "name": kb["display_name"],
         }))
-        embedding_model = _get_kb_embedding_model(tenant_id, kb)
-        if embedding_model is None:
+        model_id = _get_kb_embedding_model_id(tenant_id, kb)
+        if model_id is None:
             continue
         for q in queries:
-            hits = _search_kb_for_query(es_core, kb, q, embedding_model, top_k)
+            hits = _search_kb_for_query(es_core, kb, q, model_id, top_k, user_id=user_id, tenant_id=tenant_id)
             parts.extend(hits)
     return "\n".join(parts) if len(parts) > 1 else ""
 
 
-def _get_kb_embedding_model(tenant_id: str, kb: dict) -> Any:
-    """Resolve the embedding model for a knowledge base.
-
-    Returns ``None`` (with a warning log) when the model is unavailable.
-    """
-    from management.services.knowledge_base.service import (
-        get_embedding_model_by_index_name,
-    )
-
+def _get_kb_embedding_model_id(tenant_id: str, kb: dict) -> int | None:
+    """Resolve the explicit embedding model binding without constructing an adapter."""
     try:
-        embedding_model, _, _ = get_embedding_model_by_index_name(
-            tenant_id, kb["index_name"]
-        )
-        if embedding_model is None:
-            logger.warning("No embedding model for KB %s", kb["index_name"])
-        return embedding_model
+        record = get_knowledge_record({
+            "index_name": kb["index_name"],
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
+        })
+        model_id = (record or {}).get("embedding_model_id")
+        if type(model_id) is int and model_id > 0:
+            return model_id
+        logger.warning("No embedding model configured for KB %s", kb["index_name"])
     except Exception as exc:
         logger.warning("No embedding model for KB %s: %s", kb["index_name"], exc)
-        return None
+    return None
 
 
 def _search_kb_for_query(
-    es_core, kb: dict, query: str, embedding_model: Any, top_k: int
+    es_core, kb: dict, query: str, model_id: int, top_k: int, *, user_id: str, tenant_id: str,
 ) -> list[str]:
     """Execute a single KB search and return formatted hit lines.
 
@@ -577,9 +574,9 @@ def _search_kb_for_query(
             "[KB-ES] Searching KB=%s query=%s model=%s",
             kb["display_name"],
             query,
-            type(embedding_model).__name__,
+            model_id,
         )
-        query_vector = embedding_model.get_embeddings([query])[0]
+        query_vector = embed_query_in_worker(model_id=model_id, query=query, user_id=user_id, tenant_id=tenant_id)
         search_body = {
             "size": top_k,
             "query": {
@@ -797,6 +794,7 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_i
             model_id,
             tenant_id,
             kb_desc_block=_build_aidp_kb_descriptions(kb_info),
+            user_id=user_id,
         )
         if not queries:
             return "", display_names
@@ -806,10 +804,10 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_i
         display_names = [kb["display_name"] for kb in kb_info]
         if not kb_info:
             return "", []
-        queries = _plan_search_queries(kb_info, description, model_id, tenant_id)
+        queries = _plan_search_queries(kb_info, description, model_id, tenant_id, user_id=user_id)
         if not queries:
             return "", display_names
-        kb_context = _execute_kb_searches(kb_info, queries, tenant_id)
+        kb_context = _execute_kb_searches(kb_info, queries, tenant_id, user_id=user_id)
     if kb_context:
         logger.info("KB search returned %d chars", len(kb_context))
     else:
@@ -950,14 +948,15 @@ def _normalize_one_generated_case(d) -> dict | None:
     return case
 
 
-def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
+def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id, *, user_id) -> list:
     """Call LLM for case generation, parse JSON response, return normalized case list."""
-    resp = call_llm_for_system_prompt(
+    resp = invoke_chat_prompt_in_worker(
         model_id=model_id,
         user_prompt=user_prompt,
         system_prompt=compose_evaluation_set_system(
             "zh", max_turns=MAX_TURNS_PER_SESSION
         ),
+        user_id=user_id,
         tenant_id=tenant_id,
     )
     data = _parse_llm_cases_response(resp)
@@ -1098,7 +1097,7 @@ def _generate_cases_async(
         )
         _report_progress(set_id, tenant_id, 10)
 
-        cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id)
+        cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id, user_id=user_id)
         _report_progress(set_id, tenant_id, 50)
 
         # Enforce requested count (LLM may return more than asked)

@@ -22,10 +22,8 @@ from contracts.tool import ToolParamsRequest
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.db.conversation.repository import get_conversation_list, get_conversation_messages
 from management.db.identity.token import get_latest_usage_metadata, log_token_usage
-from management.services.agent.service import (
-    get_agent_by_name_impl,
-)
-from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from management.services.agent.management import get_agent_by_name_impl
+from management.services.agent.runtime_client import forward_agent_stop, forward_northbound_run
 from management.thread_management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
@@ -37,7 +35,6 @@ from management.services.knowledge_base.scope import (
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.resolver import get_model_descriptor
 from management.services.conversation.service import (
-    save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
     get_conversation_service,
@@ -419,7 +416,6 @@ async def start_streaming_chat(
             query,
             metadata_key,
         )
-        await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
             agent_id=agent_id,
@@ -434,41 +430,18 @@ async def start_streaming_chat(
             enable_automation_tool=False,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
-
-        # Persist before starting the stream. External callers may not reconnect,
-        # so the managed control-I/O task preserves synchronous commit semantics.
-        try:
-            await config_thread_manager.run(
-                "control-io",
-                ManagedTaskSpec(
-                    task_name="northbound-save-user-message",
-                    owner="management.services.northbound",
-                ),
-                save_conversation_user,
-                agent_request,
-                ctx.user_id,
-                ctx.tenant_id,
-            )
-        except Exception as e:
-            raise Exception(f"Failed to persist user message: {str(e)}")
-
+        await idempotency_start(composed_key)
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
-    except UnauthorizedError as _:
+    except UnauthorizedError:
         raise UnauthorizedError("Cannot authenticate.")
-    except AppException:
+    except (AppException, PermissionError):
         raise
-    except PermissionError:
-        raise
-    except Exception as e:
-        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
+    except Exception as exc:
+        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {exc}") from exc
 
     try:
-        response = await forward_agent_run(
-            agent_request=agent_request,
-            user_id=ctx.user_id,
-            tenant_id=ctx.tenant_id,
-        )
+        response = await forward_northbound_run(agent_request, ctx.user_id, ctx.tenant_id)
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))

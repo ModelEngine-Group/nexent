@@ -69,7 +69,7 @@ COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
 
-FROM base AS final
+FROM base AS backend-common
 
 ENV VIRTUAL_ENV=/opt/backend/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
@@ -80,17 +80,11 @@ COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
-
-# Layer 2: copy backend code
-COPY backend /opt/backend
 COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
-COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
-COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
-COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
+COPY deploy/common/start-backend.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/start-backend.sh
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
@@ -100,3 +94,62 @@ WORKDIR /opt
 
 # Expose the service port
 EXPOSE 5010
+
+FROM backend-common AS management
+
+ENV NEXENT_SQL_STARTUP_MODE=migrate
+COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
+COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
+
+COPY backend/__init__.py /opt/backend/
+COPY backend/management /opt/backend/management
+COPY backend/contracts /opt/backend/contracts
+COPY backend/configs /opt/backend/configs
+COPY backend/permissions /opt/backend/permissions
+COPY backend/ext_components /opt/backend/ext_components
+COPY backend/adapters /opt/backend/adapters
+COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
+COPY backend/memory_provider_plugins /opt/backend/memory_provider_plugins
+COPY backend/services/__init__.py backend/services/skill_repository_service.py /opt/backend/services/
+COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
+COPY backend/http/config_service.py backend/http/client.py backend/http/logging.py /opt/backend/http/
+COPY backend/http/server /opt/backend/http/server
+COPY backend/gateway/__init__.py /opt/backend/gateway/
+COPY backend/gateway/downstream /opt/backend/gateway/downstream
+COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
+# File conversion and the Celery control client are used by Management without starting a worker.
+COPY backend/data_process/app.py /opt/backend/data_process/
+COPY backend/data_process/services/conversion.py /opt/backend/data_process/services/
+COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
+
+# Runtime target excludes Management business code.
+FROM backend-common AS runtime
+
+ENV NEXENT_SQL_STARTUP_MODE=off
+
+COPY backend/__init__.py /opt/backend/
+COPY backend/runtime /opt/backend/runtime
+COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
+COPY backend/contracts /opt/backend/contracts
+COPY backend/configs /opt/backend/configs
+COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
+COPY backend/permissions/__init__.py backend/permissions/dac.py backend/permissions/models.py /opt/backend/permissions/
+COPY backend/ext_components /opt/backend/ext_components
+COPY backend/adapters /opt/backend/adapters
+COPY backend/http/runtime_service.py backend/http/client.py backend/http/logging.py /opt/backend/http/
+COPY backend/http/server /opt/backend/http/server
+COPY backend/gateway/__init__.py /opt/backend/gateway/
+COPY backend/gateway/downstream /opt/backend/gateway/downstream
+COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
+COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
+
+# Keep the existing full backend as the default build target.
+FROM backend-common AS final
+COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
+COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
+COPY backend /opt/backend
+COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json

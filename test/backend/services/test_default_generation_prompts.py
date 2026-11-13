@@ -42,14 +42,17 @@ def test_missing_default_resource_is_reported(mocker):
 
 @pytest.mark.parametrize("language", ["zh", "en"])
 @pytest.mark.parametrize("field", ["name", "display_name"])
-def test_naming_renders_default_resources_without_private_lookup(mocker, language, field):
-    llm = mocker.patch.object(naming, "call_llm_for_system_prompt", return_value="fresh_name")
+@pytest.mark.asyncio
+async def test_naming_renders_default_resources_without_private_lookup(mocker, language, field):
+    llm = mocker.patch.object(naming, "invoke_chat_prompt", return_value="fresh_name")
 
-    assert naming.regenerate_agent_value(
+    assert await naming.regenerate_agent_value(
         field, "old_name", ["old_name"], "Find deployment documentation", 1, "tenant",
-        language=language, agents_cache=[],
+        language=language, agents_cache=[], user_id="actor",
     ) == "fresh_name"
     request = llm.call_args.kwargs
+    assert request["user_id"] == "actor"
+    assert request["tenant_id"] == "tenant"
     assert request["system_prompt"].strip()
     assert "old_name" in request["user_prompt"]
     assert "Find deployment documentation" in request["user_prompt"]

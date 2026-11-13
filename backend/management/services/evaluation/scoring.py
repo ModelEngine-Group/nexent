@@ -9,7 +9,7 @@ from typing import Any
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.errors.exceptions import AppException
-from runtime.thread_management import runtime_thread_manager
+from management.thread_management import config_thread_manager
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,
     _EVENT_LABELS,
@@ -18,7 +18,7 @@ from management.services.evaluation.common import (
     ALLOWED_BUILTINS,
     logger,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.clients.model import invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.evaluation import (
     compose_evaluator_run_prompt,
     render_evaluation_section,
@@ -569,6 +569,8 @@ def _call_one_llm_evaluator(
     runtime_events: list[dict] | None,
     context_window: int,
     conversation_history: list[dict[str, Any]] | None,
+    *,
+    user_id: str,
 ) -> tuple:
     """Call a single LLM evaluator — submitted to the thread pool.
 
@@ -583,10 +585,11 @@ def _call_one_llm_evaluator(
         context_window,
         conversation_history,
     )
-    response = call_llm_for_system_prompt(
+    response = invoke_chat_prompt_in_worker(
         model_id=judge_model_id,
         user_prompt=prompt,
         system_prompt=judge_system_prompt,
+        user_id=user_id,
         tenant_id=tenant_id,
     )
     # Defensive parsing: judge models occasionally return empty or non-JSON
@@ -685,9 +688,11 @@ def _score_with_evaluators(
     runtime_events: list[dict] | None = None,
     context_window: int = 4096,
     conversation_history: list[dict[str, Any]] | None = None,
+    *,
+    user_id: str,
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
-    LLM evaluators run in parallel through the Runtime evaluation lane."""
+    LLM evaluators run in the Management model lane, separately from the evaluation worker."""
     code_evals = {
         eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"
     }
@@ -703,11 +708,11 @@ def _score_with_evaluators(
         return scores, reasons
 
     futures = {
-        runtime_thread_manager.submit(
-            "evaluation",
+        config_thread_manager.submit(
+            "model-tool-io",
             ManagedTaskSpec(
                 task_name="agent-evaluation-judge",
-                owner="runtime",
+                owner="management",
             ),
             _call_one_llm_evaluator,
             eid,
@@ -721,6 +726,7 @@ def _score_with_evaluators(
             runtime_events,
             context_window,
             conversation_history,
+            user_id=user_id,
         ).future: eid
         for eid, ev in llm_evals.items()
     }

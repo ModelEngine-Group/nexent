@@ -222,6 +222,7 @@ _db_pkg.evaluation_set_db = _evaluation_set_db_mock
 # ── management.db.knowledge_base.repository stub ──
 _knowledge_db_mock = MagicMock()
 _knowledge_db_mock.get_index_name_by_knowledge_name = MagicMock()
+_knowledge_db_mock.get_knowledge_record = MagicMock()
 sys.modules["management.db.knowledge_base.repository"] = _knowledge_db_mock
 _db_pkg.knowledge_db = _knowledge_db_mock
 
@@ -1031,7 +1032,7 @@ class TestPlanSearchQueries:
     def test_returns_empty_without_descriptions(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(service, "_build_kb_descriptions", MagicMock(return_value=""))
-        assert service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1") == []
+        assert service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1", user_id="actor") == []
 
     def test_plans_from_llm(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1040,10 +1041,10 @@ class TestPlanSearchQueries:
         )
         monkeypatch.setattr(
             service,
-            "call_llm_for_system_prompt",
+            "invoke_chat_prompt_in_worker",
             MagicMock(return_value='{"queries": ["q1", "q2"]}'),
         )
-        queries = service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1")
+        queries = service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1", user_id="actor")
         assert queries == ["q1", "q2"]
 
     def test_falls_back_when_llm_fails(self, service_module, monkeypatch):
@@ -1052,10 +1053,10 @@ class TestPlanSearchQueries:
             service, "_build_kb_descriptions", MagicMock(return_value="block")
         )
         monkeypatch.setattr(
-            service, "call_llm_for_system_prompt", MagicMock(side_effect=ValueError("x"))
+            service, "invoke_chat_prompt_in_worker", MagicMock(side_effect=ValueError("x"))
         )
         queries = service._plan_search_queries(
-            [{"display_name": "kb1", "index_name": "i1"}], "d", "m", "t1"
+            [{"display_name": "kb1", "index_name": "i1"}], "d", "m", "t1", user_id="actor"
         )
         assert queries == ["kb1", "overview", "policy", "process", "rule"]
 
@@ -1063,8 +1064,8 @@ class TestPlanSearchQueries:
 class TestExecuteKbSearches:
     def test_returns_empty_when_nothing_to_search(self, service_module, monkeypatch):
         service, _ = service_module
-        assert service._execute_kb_searches([], ["q"], "t1") == ""
-        assert service._execute_kb_searches([{"display_name": "kb1"}], [], "t1") == ""
+        assert service._execute_kb_searches([], ["q"], "t1", user_id="actor") == ""
+        assert service._execute_kb_searches([{"display_name": "kb1"}], [], "t1", user_id="actor") == ""
 
     def test_searches_all_kbs(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1074,13 +1075,13 @@ class TestExecuteKbSearches:
             MagicMock(return_value="es_core"),
         )
         monkeypatch.setattr(
-            service, "_get_kb_embedding_model", MagicMock(return_value="model")
+            service, "_get_kb_embedding_model_id", MagicMock(return_value=7)
         )
         monkeypatch.setattr(
             service, "_search_kb_for_query", MagicMock(return_value=["- hit"])
         )
         text = service._execute_kb_searches(
-            [{"display_name": "kb1", "index_name": "i1"}], ["q1"], "t1", top_k=2
+            [{"display_name": "kb1", "index_name": "i1"}], ["q1"], "t1", top_k=2, user_id="actor"
         )
         assert "### kb1" in text
         assert "- hit" in text
@@ -1092,9 +1093,9 @@ class TestExecuteKbSearches:
             "get_vector_db_core",
             MagicMock(return_value="es_core"),
         )
-        monkeypatch.setattr(service, "_get_kb_embedding_model", MagicMock(return_value=None))
+        monkeypatch.setattr(service, "_get_kb_embedding_model_id", MagicMock(return_value=None))
         text = service._execute_kb_searches(
-            [{"display_name": "kb1", "index_name": "i1"}], ["q1"], "t1"
+            [{"display_name": "kb1", "index_name": "i1"}], ["q1"], "t1", user_id="actor"
         )
         assert text == ""
 
@@ -1103,56 +1104,57 @@ class TestGetKbEmbeddingModel:
     def test_returns_model(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["management.services.knowledge_base.service"],
-            "get_embedding_model_by_index_name",
-            MagicMock(return_value=("m", None, None)),
+            service,
+            "get_knowledge_record",
+            MagicMock(return_value={"embedding_model_id": 7}),
         )
-        assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) == "m"
+        assert service._get_kb_embedding_model_id("t1", {"index_name": "i1"}) == 7
 
     def test_returns_none_when_model_missing(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["management.services.knowledge_base.service"],
-            "get_embedding_model_by_index_name",
-            MagicMock(return_value=(None, None, None)),
+            service,
+            "get_knowledge_record",
+            MagicMock(return_value={}),
         )
-        assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) is None
+        assert service._get_kb_embedding_model_id("t1", {"index_name": "i1"}) is None
 
     def test_returns_none_on_error(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["management.services.knowledge_base.service"],
-            "get_embedding_model_by_index_name",
+            service,
+            "get_knowledge_record",
             MagicMock(side_effect=RuntimeError("x")),
         )
-        assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) is None
+        assert service._get_kb_embedding_model_id("t1", {"index_name": "i1"}) is None
 
 
 class TestSearchKbForQuery:
     def _hit(self, content, score=0.0):
         return {"_source": {"content": content}, "_score": score}
 
-    def test_formats_hits(self, service_module):
+    def test_formats_hits(self, service_module, monkeypatch):
         service, _ = service_module
         es_core = MagicMock()
         es_core.search.return_value = {"hits": {"hits": [self._hit("hello world", 0.5)]}}
-        embedding_model = MagicMock()
-        embedding_model.get_embeddings.return_value = [[0.1, 0.2]]
+        embed = MagicMock(return_value=[0.1, 0.2])
+        monkeypatch.setattr(service, "embed_query_in_worker", embed)
         hits = service._search_kb_for_query(
-            es_core, {"display_name": "kb1", "index_name": "i1"}, "q", embedding_model, 3
+            es_core, {"display_name": "kb1", "index_name": "i1"}, "q", 7, 3, user_id="actor", tenant_id="t1"
         )
         assert len(hits) == 1
         assert "[q]" in hits[0]
         assert "hello world" in hits[0]
+        embed.assert_called_once_with(model_id=7, query="q", user_id="actor", tenant_id="t1")
+        assert es_core.search.call_args.kwargs["query"]["query"]["script_score"]["script"]["params"]["query_vector"] == [0.1, 0.2]
 
-    def test_returns_empty_on_error(self, service_module):
+    def test_returns_empty_on_error(self, service_module, monkeypatch):
         service, _ = service_module
         es_core = MagicMock()
         es_core.search.side_effect = RuntimeError("boom")
-        embedding_model = MagicMock()
-        embedding_model.get_embeddings.return_value = [[0.1]]
+        monkeypatch.setattr(service, "embed_query_in_worker", MagicMock(return_value=[0.1]))
         hits = service._search_kb_for_query(
-            es_core, {"display_name": "kb1", "index_name": "i1"}, "q", embedding_model, 3
+            es_core, {"display_name": "kb1", "index_name": "i1"}, "q", 7, 3, user_id="actor", tenant_id="t1"
         )
         assert hits == []
 
@@ -1647,23 +1649,23 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "call_llm_for_system_prompt",
+            "invoke_chat_prompt_in_worker",
             MagicMock(
                 return_value='[{"inputs": {"query": "q1"}, "label": {"answer": "a1"}}, '
                 '{"inputs": {"query": "q2"}, "label": {"answer": "a2"}}]'
             ),
         )
-        cases = service._call_llm_and_extract_cases("m", "prompt", "t1")
+        cases = service._call_llm_and_extract_cases("m", "prompt", "t1", user_id="actor")
         assert len(cases) == 2
         assert cases[0]["inputs"]["query"] == "q1"
 
     def test_raises_when_no_valid_cases(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "call_llm_for_system_prompt", MagicMock(return_value="[]")
+            service, "invoke_chat_prompt_in_worker", MagicMock(return_value="[]")
         )
         with pytest.raises(_AppException) as excinfo:
-            service._call_llm_and_extract_cases("m", "prompt", "t1")
+            service._call_llm_and_extract_cases("m", "prompt", "t1", user_id="actor")
         assert (
             excinfo.value.error_code
             == service.ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY
