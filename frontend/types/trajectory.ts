@@ -72,7 +72,13 @@ export interface Percentiles {
   sample_count: number;
 }
 export interface TrajectorySummary {
-  conversation_count: number;
+  scope_type?: "tenant" | "global";
+  scope_id?: string;
+  computed_at?: string | null;
+  source_revision?: number;
+  computed_revision?: number;
+  execution_count?: number | null;
+  conversation_count: number | null;
   duration: Percentiles & { mean_ms: number | null };
   conversation_duration?: Percentiles;
   ttft: Percentiles;

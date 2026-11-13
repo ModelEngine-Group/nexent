@@ -43,7 +43,7 @@ import os
 import threading
 import time
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
@@ -428,6 +428,7 @@ class MonitoringConfig:
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
     local_span_processor: Any = None
+    local_execution_observer: Any = None
     excluded_elasticsearch_operations: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
     )
@@ -895,41 +896,43 @@ class MonitoringManager:
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
-        with agent_monitoring_context(agent_metadata):
-            if _monitoring_agent_run_active.get():
+        if _monitoring_agent_run_active.get():
+            with agent_monitoring_context(agent_metadata):
                 yield self.get_current_span()
-                return
-
-            active_token = _monitoring_agent_run_active.set(True)
-            attributes = self.build_agent_run_attributes(
-                agent_metadata,
-                span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
-                include_query=True,
-            )
-            trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
-            if trace_name:
-                # The main Agent owns the trace name; children retain their own node identities.
-                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
-            parent_span = self.get_current_span()
-            try:
-                with self.trace_operation(
-                    operation_name,
-                    OPENINFERENCE_SPAN_KIND_AGENT,
-                    **attributes,
-                ) as span:
-                    with agent_trace_name_scope(span, trace_name, parent_span):
-                        self.add_span_event(f"{operation_name}.started")
-                        try:
-                            yield span
-                            self.add_span_event(f"{operation_name}.completed")
-                        except Exception as error:
-                            self.add_span_event(f"{operation_name}.error", {
-                                "error.type": type(error).__name__,
-                                "error.message": str(error),
-                            })
-                            raise
-            finally:
-                _monitoring_agent_run_active.reset(active_token)
+            return
+        observer = getattr(self._config, "local_execution_observer", None) if operation_name == "agent.run" else None
+        with (observer(agent_metadata) if observer else nullcontext(agent_metadata)) as agent_metadata:
+            with agent_monitoring_context(agent_metadata):
+                active_token = _monitoring_agent_run_active.set(True)
+                attributes = self.build_agent_run_attributes(
+                    agent_metadata,
+                    span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+                    include_query=True,
+                )
+                trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
+                if trace_name:
+                    # The main Agent owns the trace name; children retain their own node identities.
+                    attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+                parent_span = self.get_current_span()
+                try:
+                    with self.trace_operation(
+                        operation_name,
+                        OPENINFERENCE_SPAN_KIND_AGENT,
+                        **attributes,
+                    ) as span:
+                        with agent_trace_name_scope(span, trace_name, parent_span):
+                            self.add_span_event(f"{operation_name}.started")
+                            try:
+                                yield span
+                                self.add_span_event(f"{operation_name}.completed")
+                            except Exception as error:
+                                self.add_span_event(f"{operation_name}.error", {
+                                    "error.type": type(error).__name__,
+                                    "error.message": str(error),
+                                })
+                                raise
+                finally:
+                    _monitoring_agent_run_active.reset(active_token)
 
     @contextmanager
     def with_agent_monitoring(

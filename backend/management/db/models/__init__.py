@@ -88,3 +88,5 @@ from management.db.tag.models import (
 from management.db.evaluation.models import AgentEvaluation, AgentEvaluationCase
 
 from management.db.identity.models import UserAccount
+
+from management.db.trajectory.models import TrajectoryExecution, TrajectoryStatistics

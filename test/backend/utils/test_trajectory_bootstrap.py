@@ -16,11 +16,18 @@ def test_backend_bootstrap_writes_full_local_agent_model_tool_trace(tmp_path):
 import asyncio
 import json
 import socket
+from contextlib import nullcontext
+from unittest.mock import patch
 
 def forbid_network(*args, **kwargs):
     raise AssertionError("Local Trace with Metrics disabled must not open outbound sockets")
 
 socket.socket.connect = forbid_network
+# PG remains a controlled external boundary for this bootstrap unit test.
+from management.db.trajectory.repository import ExecutionRepository
+patch.object(ExecutionRepository, "begin", return_value=1).start()
+patch.object(ExecutionRepository, "initialize", side_effect=lambda _: nullcontext()).start()
+patch.object(ExecutionRepository, "expire", return_value=None).start()
 from infrastructure.observability.bootstrap import monitoring_manager, local_trajectory_processor
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata

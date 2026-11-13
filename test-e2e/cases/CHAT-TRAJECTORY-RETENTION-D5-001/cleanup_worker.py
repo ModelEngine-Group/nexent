@@ -75,7 +75,7 @@ def main():
         Path(root)
         / identity.tenant_id
         / identity.owner_user_id
-        / meta["storage_agent_id"]
+        / meta["agent_id"]
         / identity.conversation_id
         / f"{run_id}.otlp.jsonl"
     )
@@ -87,8 +87,7 @@ def main():
     if fault == "hold_cleanup":
         with (
             store._root() as directory,
-            directory.child(".locks") as locks,
-            locks.lock("cleanup.lock"),
+            directory.lock(".cleanup.lock"),
         ):
             print("locked", flush=True)
             sys.stdin.read()

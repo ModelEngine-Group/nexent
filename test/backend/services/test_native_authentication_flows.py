@@ -148,7 +148,7 @@ def test_pending_token_verification_requires_signing_key(mocker):
 def test_membership_upsert_writes_profile_and_refreshes_read_projection(mocker, exists):
     session = MagicMock()
     row = SimpleNamespace(tenant_id="tenant", user_role="USER", user_id="native", updated_by="before") if exists else None
-    session.query.return_value.filter.return_value.first.return_value = row
+    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
     mocker.patch.object(user_tenant, "get_db_session", return_value=nullcontext(session))
     profile = mocker.patch.object(user_tenant, "set_account_profile")
     mocker.patch.object(user_tenant, "as_dict", return_value={"user_id": "native", "user_role": "USER"})
@@ -158,3 +158,21 @@ def test_membership_upsert_writes_profile_and_refreshes_read_projection(mocker, 
     session.expire.assert_called_once()
     assert session.expire.call_args.args[0] is (row if exists else session.add.call_args.args[0])
     assert result["user_role"] == "USER"
+
+
+def test_membership_migration_revokes_archive_projection_in_same_transaction(mocker):
+    session = MagicMock()
+    row = SimpleNamespace(tenant_id="old", user_role="USER", user_id="native")
+    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
+    mocker.patch.object(user_tenant, "get_db_session", return_value=nullcontext(session))
+    mocker.patch.object(user_tenant, "_validate_user_tenant_limit")
+    mocker.patch.object(user_tenant, "set_account_profile")
+    mocker.patch.object(user_tenant, "as_dict", return_value={})
+    revoke = mocker.patch("management.db.trajectory.repository.detach_owner")
+    user_tenant.upsert_user_tenant("native", "new")
+    revoke.assert_called_once_with(session, "native", "old", "new")
+    assert row.tenant_id == "new"
+    revoke.side_effect = RuntimeError("controlled database failure")
+    with pytest.raises(RuntimeError):
+        user_tenant.upsert_user_tenant("native", "another")
+    assert row.tenant_id == "new"

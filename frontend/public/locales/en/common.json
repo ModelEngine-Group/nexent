@@ -6738,7 +6738,7 @@
   "trajectory.close": "Close",
   "trajectory.clear": "Clear filters",
   "trajectory.query": "Query",
-  "trajectory.idSearch": "Trace ID / Conversation ID",
+  "trajectory.idSearch": "Conversation ID",
   "trajectory.currentTenant": "Current tenant",
   "trajectory.unknownAgent": "Unknown agent",
   "trajectory.agentVersion": "Agent version",
@@ -6899,7 +6899,7 @@
   "trajectory.previousRounds": "Load earlier rounds",
   "trajectory.availability.unknown": "Latest execution unknown",
   "trajectory.reasons.unknown": "Latest execution unknown",
-  "trajectory.idSearchLabel": "ID search",
+  "trajectory.idSearchLabel": "Conversation ID search",
   "trajectory.agentSession": "Agent / Conversation",
   "trajectory.latestVersion": "Latest version",
   "trajectory.roundUnit": "rounds",
@@ -6916,5 +6916,9 @@
   "trajectory.rootNode": "Root node",
   "trajectory.copyTraceId": "Copy Trace ID",
   "trajectory.versionName": "Version name",
-  "trajectory.loadedModelCalls": "Model calls: {{count}}"
+  "trajectory.loadedModelCalls": "Model calls: {{count}}",
+  "trajectory.statisticsGlobal": "Global statistics",
+  "trajectory.statisticsTenant": "Current tenant statistics",
+  "trajectory.statisticsComputedAt": "Computed at: {{time}}",
+  "trajectory.statisticsPreparing": "Preparing statistics"
 }

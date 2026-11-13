@@ -139,7 +139,7 @@ def files(tmp_path):
             root
             / identity.tenant_id
             / identity.owner_user_id
-            / meta["storage_agent_id"]
+            / meta["agent_id"]
         )
         return SimpleNamespace(
             id=run_id,
@@ -374,7 +374,7 @@ def test_retention_active_runs_and_fixed_storage_agent_survive_old_run_reclamati
         files.store.cleanup(switched)
         meta = files.store.manifest(switched)
         assert {item["trajectory_id"] for item in meta["runs"]} == {fresh.id, active.id}
-        assert meta["storage_agent_id"] == "42" and meta["expired_execution_count"] == 1
+        assert meta["agent_id"] == "42" and meta["expired_execution_count"] == 1
         assert meta["had_expired_history"]
         files.add(switched)
         assert {path: digest(path) for path in original} == original

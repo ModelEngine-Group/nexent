@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-SUMMARY-20261113
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-SUMMARY-20261113
+  title: 轨迹摘要与全量统计快照持久化
+  description: 两张PG表承担执行摘要和全量统计；records/facets只读PG，会话内锁串行文件登记。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 摘要主键幂等、占位、NULL累计、同执行条件匹配、最新状态与稳定分页；列表和候选零文件读取。
+    - 有效文件投影、清理状态、删除原子性、后台全量统计与线性插值、并发刷新和失败重试；会话目录锁。
+    - 搜索只匹配会话ID，卡片范围与时间、未就绪和旧快照展示。
+    reason: 既有UT验证文件集合与实时计算；本次增加PG摘要/快照边界。复用D2/D3/D4/D5，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_summary_projection.py
+    - test/backend/services/trajectory/test_summary_lifecycle.py
+    - test/backend/services/trajectory/test_summary_backfill.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/services/test_native_authentication_flows.py
+    - test/backend/utils/test_trajectory_bootstrap.py
+    - test/sdk/monitor/test_execution_observer.py
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: 责任域沿用runtime。D2独占TestClient、受控PG边界与临时文件，teardown释放线程和目录，preparation families为空。真实PG迁移、采集、浏览器和负载验收按用户要求暂缓，保留BLOCKED；UT不代替正式验收。
+    CAPTURE/RETENTION同步meta.agent_id和目录内锁合同及脚本；RETENTION的完整PG清理验收及execution绑定仍缺失，不将局部脚本当作完整验收。

@@ -184,6 +184,11 @@ export async function installTrajectoryFixture(
             page: Number(url.searchParams.get("page") || 1),
             page_size: Number(url.searchParams.get("page_size") || 10),
             summary: {
+              scope_type: "tenant",
+              scope_id: "tenant",
+              computed_at: "2026-11-13T01:00:00Z",
+              source_revision: 4,
+              computed_revision: 3,
               conversation_count: 20,
               duration: { ...percentiles, mean_ms: 2000 },
               conversation_duration: percentiles,

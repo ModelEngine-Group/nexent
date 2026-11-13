@@ -312,3 +312,47 @@ describe("admin list display", () => {
     expect(tenant).not.toHaveBeenCalled();
   });
 });
+
+describe("whole-scope statistics", () => {
+  it("shows scope and the original computation time", async () => {
+    const { TrajectorySummary } =
+      await import("@/app/observability/components/TrajectorySummary");
+    const summary = {
+      ...recordsPage().summary,
+      scope_type: "tenant" as const,
+      scope_id: "private-tenant-id",
+      computed_at: "2026-11-13T00:00:00Z",
+      source_revision: 8,
+      computed_revision: 7,
+    };
+    render(<TrajectorySummary summary={summary} />);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "trajectory.statisticsTenant"
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "trajectory.statisticsComputedAt"
+    );
+    expect(screen.queryByText("private-tenant-id")).not.toBeInTheDocument();
+  });
+
+  it("shows preparing before the first complete snapshot", async () => {
+    const { TrajectorySummary } =
+      await import("@/app/observability/components/TrajectorySummary");
+    render(
+      <TrajectorySummary
+        summary={{
+          ...recordsPage().summary,
+          complete: false,
+          scope_type: "global",
+          computed_at: null,
+        }}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "trajectory.statisticsPreparing"
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "trajectory.statisticsGlobal"
+    );
+  });
+});

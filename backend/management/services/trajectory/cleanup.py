@@ -61,8 +61,7 @@ def cleanup(service, actor, before_days, cursor=None):
         try:
             with (
                 store._root() as root,
-                root.child(".locks", create=True) as locks,
-                locks.lock("cleanup.lock", blocking=False),
+                root.lock(".cleanup.lock", blocking=False),
             ):
                 for row in candidates[:1000]:
                     if (

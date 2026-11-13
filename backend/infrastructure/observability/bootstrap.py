@@ -86,6 +86,8 @@ local_trajectory_processor = create_local_processor(trajectory_config, _agent_me
 
 def _initialize_monitoring():
     """Initialize monitoring configuration with OTLP settings."""
+    from infrastructure.observability.trajectory_execution import execution_observer
+
     config = MonitoringConfig(
         enable_telemetry=ENABLE_TELEMETRY,
         service_name=OTEL_SERVICE_NAME,
@@ -108,6 +110,10 @@ def _initialize_monitoring():
         trace_max_chars=MONITORING_TRACE_MAX_CHARS,
         trace_max_items=MONITORING_TRACE_MAX_ITEMS,
         local_span_processor=local_trajectory_processor,
+        local_execution_observer=execution_observer(
+            capturing=ENABLE_TELEMETRY and MONITORING_PROVIDER == "local_file",
+            store=local_trajectory_processor.store if local_trajectory_processor is not None else None,
+        ) if local_trajectory_processor is not None else None,
     )
 
     monitoring_manager.configure(config)

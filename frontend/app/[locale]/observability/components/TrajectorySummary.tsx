@@ -28,6 +28,27 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
   );
   return (
     <>
+      {summary?.scope_type && (
+        <div
+          className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500"
+          role="status"
+        >
+          <span>
+            {t(
+              summary.scope_type === "global"
+                ? "trajectory.statisticsGlobal"
+                : "trajectory.statisticsTenant"
+            )}
+          </span>
+          <span>
+            {summary.computed_at
+              ? t("trajectory.statisticsComputedAt", {
+                  time: new Date(summary.computed_at).toLocaleString(),
+                })
+              : t("trajectory.statisticsPreparing")}
+          </span>
+        </div>
+      )}
       <div className="trajectory-summary">
         <section style={{ borderLeftColor: "#0067D1", color: "#0067D1" }}>
           <header>{t("trajectory.conversationCount")}</header>

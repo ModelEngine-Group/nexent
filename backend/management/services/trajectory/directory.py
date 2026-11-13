@@ -73,17 +73,19 @@ def directory(
             continue
         # Check only bounded PG candidates. No OTLP body is scanned to fill a directory page.
         checked_after = sort_key
-        try:
-            service.archive.manifest(row)
-        except QueryError as error:
-            if error.status == 404:
-                continue
-            raise
+        if service.execution_catalog is None:
+            try:
+                service.archive.manifest(row)
+            except QueryError as error:
+                if error.status == 404:
+                    continue
+                raise
         options[sort_key] = (item, row)
     selected = sorted(options)[:limit]
     for key in selected:
         service.recheck(actor, options[key][1])
-        service.archive.manifest(options[key][1])
+        if service.execution_catalog is None:
+            service.archive.manifest(options[key][1])
     return {
         "items": [options[key][0] for key in selected],
         "included": [],

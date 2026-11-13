@@ -42,6 +42,10 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   }
   const steps = contract.expectedIds("steps");
   await contract.step(steps[0], async () => {
+    await expect(page.getByText("当前租户统计", { exact: true })).toBeVisible();
+    const statisticsTime = page.getByText(/^统计时间：/);
+    const originalStatisticsTime = await statisticsTime.innerText();
+
     for (const [label, option] of [
       ["用户", "Owner"],
       ["智能体", "Friday"],
@@ -53,6 +57,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(
       page.locator(".trajectory-summary").getByText("20", { exact: true }),
     ).toBeVisible();
+    await expect(statisticsTime).toHaveText(originalStatisticsTime);
     await page.locator(".ant-pagination-item-2").click();
     await expect
       .poll(() =>
@@ -62,6 +67,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
           ?.searchParams.get("query_id"),
       )
       .toBe("query-snapshot");
+    await expect(statisticsTime).toHaveText(originalStatisticsTime);
     await page.getByRole("button", { name: "查询", exact: true }).click();
     await expect
       .poll(() =>
@@ -171,14 +177,12 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       window.dispatchEvent(new Event("online"));
     });
     await expect.poll(() => state.records.length).toBe(count);
-    await page
-      .getByRole("textbox", { name: "Trace ID / 会话 ID" })
-      .fill("draft");
+    await page.getByRole("textbox", { name: "会话 ID" }).fill("draft");
     await page.getByRole("combobox", { name: "用户", exact: true }).click();
     await page.getByRole("option").filter({ hasText: "Owner" }).click();
-    await expect(
-      page.getByRole("textbox", { name: "Trace ID / 会话 ID" }),
-    ).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "会话 ID" })).toHaveValue(
+      "",
+    );
     expect(
       state.writes.filter((path) => /chat|run|tool/.test(path)),
     ).toHaveLength(0);

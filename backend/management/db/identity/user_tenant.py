@@ -258,13 +258,21 @@ def upsert_user_tenant(
     Create or update the active user-tenant relationship for an external identity login.
     """
     with get_db_session() as session:
-        result = session.query(UserTenant).filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N").first()
+        result = (
+            session.query(UserTenant)
+            .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+            .with_for_update()
+            .first()
+        )
 
         if result:
             is_new_tenant = result.tenant_id != tenant_id
             is_role_promotion = (result.user_role or "").upper() != (user_role or "").upper()
             if is_new_tenant:
                 _validate_user_tenant_limit(session, tenant_id, user_role)
+                from management.db.trajectory.repository import detach_owner
+
+                detach_owner(session, user_id, result.tenant_id, tenant_id)
             elif is_role_promotion and (user_role or "").upper() in {"ADMIN", "SU"}:
                 _validate_user_tenant_limit(session, tenant_id, user_role, include_user_count=False)
             result.tenant_id = tenant_id

@@ -34,7 +34,7 @@ def run(processor, *, owner="owner", conversation="1", agent="42", active=False)
     if not active:
         writer.finish("completed")
         writer.close()
-    fixed_agent = processor.store.manifest(identity)["storage_agent_id"]
+    fixed_agent = processor.store.manifest(identity)["agent_id"]
     writer.path = (
         processor.store.root / "tenant" / owner / (fixed_agent or "_unknown")
         / conversation / f"{writer.trajectory_id}.otlp.jsonl"

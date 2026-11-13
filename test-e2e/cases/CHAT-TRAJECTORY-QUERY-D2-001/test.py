@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Exercise the actual HTTP routers, signed references and private OTLP files."""
+"""Exercise actual HTTP routers, opaque references and private OTLP files."""
 
 import json
 import os
@@ -153,36 +153,81 @@ def test_trj_query_whole_result_metrics_filters_and_stable_membership(harness):
     assert get(harness, "/trajectory/records", agent_id="007").status_code == 422
     assert get(harness, "/trajectory/records", tenant_id="t2").status_code == 404
     assert get(harness, "/trajectory/records", actor="user").status_code == 403
-    conversation = data(get(harness, "/trajectory/records", view="conversation", id_query=second.model1))
+    conversation = data(
+        get(harness, "/trajectory/records", view="conversation", id_query=second.model1)
+    )
     assert conversation["total"] == 1
     row = conversation["items"][0]
     assert row["round_count"] == 3 and row["matching_execution_count"] == 1
     assert row["status"] == "success" and row["duration_ms"] == 8000
     assert conversation["summary"]["duration"]["mean_ms"] == 3000
     assert conversation["summary"]["conversation_duration"]["p50_ms"] == 3000
-    assert data(get(harness, "/trajectory/records", view="conversation", status="error"))["total"] == 0
-    detail = data(get(harness, "/trajectory/conversations/123", query_id=conversation["query_id"], limit=1))
+    assert (
+        data(get(harness, "/trajectory/records", view="conversation", status="error"))[
+            "total"
+        ]
+        == 0
+    )
+    detail = data(
+        get(
+            harness,
+            "/trajectory/conversations/123",
+            query_id=conversation["query_id"],
+            limit=1,
+        )
+    )
     assert detail["executions"][0]["round_no"] == 1
     assert detail["executions"][0]["matches_filters"] is False
     harness.add_run(status="failed", duration=7000)
-    remaining = data(get(harness, "/trajectory/conversations/123", cursor=detail["next_cursor"], limit=20))
+    remaining = data(
+        get(
+            harness,
+            "/trajectory/conversations/123",
+            cursor=detail["next_cursor"],
+            limit=20,
+        )
+    )
     assert [run["round_no"] for run in remaining["executions"]] == [2, 3]
     assert [run["matches_filters"] for run in remaining["executions"]] == [True, False]
-    old = data(get(harness, "/trajectory/records", view="conversation", id_query=second.model1,
-                   query_id=conversation["query_id"]))
+    old = data(
+        get(
+            harness,
+            "/trajectory/records",
+            view="conversation",
+            id_query=second.model1,
+            query_id=conversation["query_id"],
+        )
+    )
     assert old["items"][0]["status"] == "success"
-    assert data(get(harness, "/trajectory/records", view="conversation"))["items"][0]["status"] == "error"
+    assert (
+        data(get(harness, "/trajectory/records", view="conversation"))["items"][0][
+            "status"
+        ]
+        == "error"
+    )
     harness.add_conversation("125", "t1", "u1")
-    missing = data(get(harness, "/trajectory/records", view="conversation", status="not_captured"))
+    missing = data(
+        get(harness, "/trajectory/records", view="conversation", status="not_captured")
+    )
     assert missing["total"] == 1 and missing["items"][0]["conversation_id"] == "125"
     assert missing["items"][0]["duration_ms"] is None
     assert missing["summary"]["duration"]["sample_count"] == 0
     harness.now[0] += timedelta(days=40)
-    expired = data(get(harness, "/trajectory/records", view="conversation", status="expired"))
+    expired = data(
+        get(harness, "/trajectory/records", view="conversation", status="expired")
+    )
     assert expired["total"] == 1 and expired["items"][0]["status"] is None
     assert expired["summary"]["duration"]["sample_count"] == 0
     assert get(harness, "/trajectory/records", status="expired").status_code == 422
-    assert get(harness, "/trajectory/records", view="conversation", query_id=conversation["query_id"]).status_code == 422
+    assert (
+        get(
+            harness,
+            "/trajectory/records",
+            view="conversation",
+            query_id=conversation["query_id"],
+        ).status_code
+        == 422
+    )
     harness.service.seconds = -1
     assert get(harness, "/trajectory/records").status_code == 503
 
@@ -205,7 +250,9 @@ def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness
     harness.service.references = ReferenceStore()
     assert get(harness, prefix + content_id).status_code == 422
     refreshed = snapshot(harness)
-    new_id = next(node for node in refreshed["nodes"] if node["kind"] == "tool")["output"]["content_id"]
+    new_id = next(node for node in refreshed["nodes"] if node["kind"] == "tool")[
+        "output"
+    ]["content_id"]
     assert new_id != content_id
     assert get(harness, prefix + new_id).status_code == 200
 
@@ -389,8 +436,7 @@ def test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry(harness, caplog):
     )
     with (
         harness.store._root() as root,
-        root.child(".locks") as locks,
-        locks.lock("cleanup.lock"),
+        root.lock(".cleanup.lock"),
     ):
         busy = harness.client.post(
             "/trajectory/cleanup",
@@ -548,7 +594,7 @@ def test_trj_query_existing_directory_admin_branch_and_user_reuse(harness):
     assert switched["items"][0]["group_key"] == "agent:8"
     assert len(snapshot(harness)["nodes"]) == 5
     with harness.store._session(harness.run.identity) as folder:
-        assert folder.read_json("meta.json")["storage_agent_id"] == "7"
+        assert folder.read_json("meta.json")["agent_id"] == "7"
     # Two scoped groups give a signed cursor, which cannot be moved to another owner.
     harness.add_conversation("126", agent="9")
     page = data(get(harness, branch, view="trajectory", target_user_id="u1", limit=1))
@@ -891,3 +937,122 @@ def test_trj_query_private_validation_under_api_root(harness):
     )
     assert response.status_code == 422
     assert response.json() == {"detail": {"code": "invalid_parameters"}}
+
+
+def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch):
+    """Controlled PG results cross the real HTTP boundary; detail still opens the actual archive."""
+    from unittest.mock import Mock
+    from management.db.trajectory.queries import ExecutionCatalog
+    from management.services.trajectory.projection import execution_values
+    from management.services.trajectory.cache import ByteCache
+    from datetime import UTC, datetime
+
+    original_manifest = harness.service.archive.manifest
+    row = harness.catalog.resolve(["t1"], "123")
+    meta = original_manifest(row)
+    from management.services.trajectory.access import Actor
+
+    nodes, root, _ = harness.service.load(
+        Actor("admin", "t1", "ADMIN"), row, harness.run.id, harness.service.budget()
+    )
+    values = execution_values("123", meta["runs"][0], nodes, root)
+    projected = ExecutionCatalog._dto(
+        {
+            **row,
+            **values,
+            "runs": [
+                {
+                    "id": harness.run.id,
+                    "status": values["status"],
+                    "turn": 1,
+                    "matches": True,
+                }
+            ],
+            "execution_count": 1,
+            "matching_execution_count": 1,
+            "cumulative_duration_ms": values["duration_ms"],
+            "cumulative_input_tokens": values["input_tokens"],
+            "cumulative_output_tokens": values["output_tokens"],
+            "cumulative_total_tokens": values["total_tokens"],
+        },
+        "conversation",
+    )
+    summary = {
+        "complete": True,
+        "conversation_count": 9,
+        "computed_at": datetime.now(UTC).isoformat(),
+        "scope_type": "tenant",
+        "scope_id": "t1",
+        "computed_revision": 3,
+        "source_revision": 4,
+    }
+    catalog = Mock()
+    catalog.list_records.return_value = [projected]
+    catalog.statistics.return_value = summary
+    catalog.facets.return_value = [{"id": "m", "name": "model", "tenant_id": "t1"}]
+    harness.service.execution_catalog = catalog
+    harness.service.queries = ByteCache()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("List attempted a filesystem read")
+
+    monkeypatch.setattr(harness.service.archive, "manifest", forbidden)
+    monkeypatch.setattr(harness.service, "load", forbidden)
+    first = data(
+        get(
+            harness,
+            "/trajectory/records",
+            view="conversation",
+            id_query="123",
+            page_size=1,
+        )
+    )
+    assert first["items"][0]["conversation_id"] == "123" and first["summary"] == summary
+    catalog.list_records.assert_called_once()
+    second = data(
+        get(
+            harness,
+            "/trajectory/records",
+            view="conversation",
+            id_query="123",
+            page=2,
+            query_id=first["query_id"],
+            page_size=1,
+        )
+    )
+    assert (
+        second["total"] == 1 and second["items"] == [] and second["summary"] == summary
+    )
+    catalog.list_records.assert_called_once()
+    filtered = data(
+        get(harness, "/trajectory/records", view="conversation", model="absent")
+    )
+    assert filtered["summary"] == summary
+    assert (
+        data(get(harness, "/trajectory/records", facet="models"))["items"][0]["id"]
+        == "m"
+    )
+    catalog.validate.side_effect = QueryError("snapshot_reset", 409)
+    assert (
+        get(
+            harness,
+            "/trajectory/records",
+            view="conversation",
+            id_query="123",
+            query_id=first["query_id"],
+        ).status_code
+        == 409
+    )
+    catalog.validate.side_effect = None
+    monkeypatch.setattr(harness.service.archive, "manifest", original_manifest)
+    # The real snapshot reader has independent permissions and file confirmation.
+    from management.services.trajectory.service import TrajectoryService
+
+    monkeypatch.setattr(
+        harness.service, "load", TrajectoryService.load.__get__(harness.service)
+    )
+    detail = data(
+        get(harness, "/trajectory/conversations/123", query_id=first["query_id"])
+    )
+    assert detail["executions"][0]["trajectory_id"] == harness.run.id
+    assert snapshot(harness)["nodes"]

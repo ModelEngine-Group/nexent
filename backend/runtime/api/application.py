@@ -72,6 +72,8 @@ async def runtime_lifespan(_app):
     runtime_state_service.set_thread_manager(runtime_thread_manager)
     from infrastructure.observability.bootstrap import local_trajectory_processor
 
+    summary_worker = None
+    statistics_worker = None
     try:
         if local_trajectory_processor is not None:
             from infrastructure.observability.trajectory_runtime import (
@@ -87,9 +89,39 @@ async def runtime_lifespan(_app):
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
+            from management.db.trajectory.repository import ExecutionRepository
+            from management.services.trajectory.statistics import (
+                StatisticsWorker,
+                SummaryWorker,
+            )
+
+            summary_worker = SummaryWorker(local_trajectory_processor.store, ExecutionRepository())
+            execution = runtime_thread_manager.register_service(
+                ManagedThreadSpec(
+                    task_name="trajectory-summary-compensation",
+                    owner="management.services.trajectory.statistics",
+                    close_hook=summary_worker.request_stop,
+                ),
+                summary_worker.run,
+            )
+            runtime_thread_manager.start_service(execution.execution_id)
+            statistics_worker = StatisticsWorker(local_trajectory_processor.store, ExecutionRepository())
+            statistics_execution = runtime_thread_manager.register_service(
+                ManagedThreadSpec(
+                    task_name="trajectory-statistics-refresh",
+                    owner="management.services.trajectory.statistics",
+                    close_hook=statistics_worker.request_stop,
+                ),
+                statistics_worker.run,
+            )
+            runtime_thread_manager.start_service(statistics_execution.execution_id)
         await start_agent_automation_scheduler()
         yield
     finally:
+        if summary_worker is not None:
+            summary_worker.request_stop()
+        if statistics_worker is not None:
+            statistics_worker.request_stop()
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
         try:
             await stop_agent_automation_scheduler()

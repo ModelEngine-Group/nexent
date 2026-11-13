@@ -234,7 +234,8 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     str(metadata.conversation_id),
                     str(metadata.agent_id) if metadata.agent_id is not None else None,
                 )
-                run_id, turn_id = str(uuid4()), str(uuid4())
+                run_id = (metadata.extra_metadata or {}).get("trajectory_id") or str(uuid4())
+                turn_id = str(uuid4())
                 values = {
                     "tenant.id": identity.tenant_id,
                     "nexent.owner_user_id": identity.owner_user_id,
@@ -256,7 +257,8 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     values["nexent.source_message_id"] = source
                 else:
                     values["nexent.availability.source_message_id"] = "not_captured"
-                if not self._enqueue(run_id, "start", (identity, turn_id, core, _observed_time(span.start_time), source)):
+                if not self._enqueue(run_id, "start", (identity, turn_id, core, _observed_time(span.start_time), source,
+                                                                      (metadata.extra_metadata or {}).get("trajectory_turn_no"))):
                     return
             elif run_id:
                 values = {
@@ -549,10 +551,10 @@ class LocalTrajectoryProcessor(SpanProcessor):
                 if kind:
                     try:
                         if kind == "start":
-                            identity, turn_id, core, started_at, source = data
+                            identity, turn_id, core, started_at, source, turn_no = data
                             self._writers[run_id] = self.store.start(
                                 identity, run_id, turn_id, core_type=core, started_at=started_at,
-                                source_message_id=source,
+                                source_message_id=source, turn_no=turn_no,
                             )
                             self._offsets[run_id] = 0
                         elif kind == "span":

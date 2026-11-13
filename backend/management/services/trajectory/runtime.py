@@ -26,6 +26,8 @@ def get_service():
                 TrajectoryFileStore,
             )
             from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+            from management.db.trajectory.queries import ExecutionCatalog
+            from management.db.trajectory.repository import ExecutionRepository
 
             from .archive import storage_error
             from .service import TrajectoryService
@@ -40,8 +42,11 @@ def get_service():
                         identity.conversation_id,
                         target_user_id=identity.owner_user_id,
                     ),
+                    initialization_guard=ExecutionRepository().initialize,
+                    expire_callback=ExecutionRepository().expire,
                     retention_days=config.TRAJECTORY_RETENTION_DAYS,
                     storage_mode=config.TRAJECTORY_STORAGE_MODE,
+                    initialize_storage=False,
                 )
             except ValueError as error:
                 raise QueryError("trajectory_configuration_invalid", 503) from error
@@ -54,5 +59,6 @@ def get_service():
                 max_bytes=config.TRAJECTORY_QUERY_MAX_BYTES,
                 max_candidates=config.TRAJECTORY_QUERY_MAX_CANDIDATES,
                 source_query=capture_sources,
+                execution_catalog=ExecutionCatalog(),
             )
     return _service

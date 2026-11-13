@@ -6736,7 +6736,7 @@
   "trajectory.close": "关闭",
   "trajectory.clear": "清除筛选",
   "trajectory.query": "查询",
-  "trajectory.idSearch": "Trace ID / 会话 ID",
+  "trajectory.idSearch": "会话 ID",
   "trajectory.currentTenant": "当前租户",
   "trajectory.unknownAgent": "未知智能体",
   "trajectory.agentVersion": "智能体版本",
@@ -6897,7 +6897,7 @@
   "trajectory.previousRounds": "加载较早轮次",
   "trajectory.availability.unknown": "最新执行状态未知",
   "trajectory.reasons.unknown": "最新执行状态未知",
-  "trajectory.idSearchLabel": "ID 搜索",
+  "trajectory.idSearchLabel": "会话 ID 搜索",
   "trajectory.agentSession": "智能体 / 会话",
   "trajectory.latestVersion": "最近版本",
   "trajectory.roundUnit": "轮",
@@ -6914,5 +6914,9 @@
   "trajectory.rootNode": "根节点",
   "trajectory.copyTraceId": "复制 Trace ID",
   "trajectory.versionName": "版本名称",
-  "trajectory.loadedModelCalls": "{{count}} 次模型调用"
+  "trajectory.loadedModelCalls": "{{count}} 次模型调用",
+  "trajectory.statisticsGlobal": "全局统计",
+  "trajectory.statisticsTenant": "当前租户统计",
+  "trajectory.statisticsComputedAt": "统计时间：{{time}}",
+  "trajectory.statisticsPreparing": "统计准备中"
 }

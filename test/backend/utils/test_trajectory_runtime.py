@@ -251,3 +251,11 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
     assert request_conversation_cleanup([123], "owner") is present
     if processor:
         processor.request_conversation_cleanup.assert_called_once_with([123], "owner")
+
+
+@pytest.fixture(autouse=True)
+def isolated_summary_database(mocker):
+    from contextlib import nullcontext
+    repository=mocker.patch("management.db.trajectory.repository.ExecutionRepository")
+    repository.return_value.initialize.side_effect=lambda identity:nullcontext()
+    return repository

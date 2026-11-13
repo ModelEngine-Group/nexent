@@ -141,5 +141,15 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     from contracts.errors.trajectory import QueryError
 
     with pytest.raises(QueryError) as raised:
-        runtime.get_service()
+        reader = runtime.get_service()
+        reader.archive.store.authorize = lambda _: None
+        reader.archive.manifest({"tenant_id": "t", "user_id": "u", "conversation_id": "123"})
     assert raised.value.status == 503 and raised.value.code == "storage_busy"
+
+
+@pytest.fixture(autouse=True)
+def isolated_summary_database(mocker):
+    from contextlib import nullcontext
+    repository=mocker.patch("management.db.trajectory.repository.ExecutionRepository")
+    repository.return_value.initialize.side_effect=lambda identity:nullcontext()
+    return repository

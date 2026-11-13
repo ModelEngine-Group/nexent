@@ -95,17 +95,29 @@ class TrajectoryFileStore:
 
     def __init__(
         self, root, *, authorize, retention_days: int = 30, clock=None, source_query=None,
-        storage_mode="single_node",
+        storage_mode="single_node", initialization_guard=None, expire_callback=None,
+        initialize_storage=True,
     ):
         self.root = Path(root)
         self.storage_mode = self._mode(storage_mode)
         self.authorize = authorize
         self.source_query = source_query
+        self.initialization_guard = initialization_guard
+        self.expire_callback = expire_callback
+        self.on_publish = None
         self.retention_days = self._days(retention_days)
         self.clock = clock or (lambda: datetime.now(UTC))
         if not callable(authorize):
             raise TypeError("Trusted capture authorization is required")
-        self.provision(self.root, storage_mode=self.storage_mode)
+        if initialize_storage:
+            self.provision(self.root, storage_mode=self.storage_mode)
+
+    def notify(self, identity):
+        if self.on_publish is not None:
+            try:
+                self.on_publish(identity)
+            except Exception:  # noqa: BLE001 - A failed wakeup is repaired by periodic reconciliation.
+                logger.warning("trajectory.summary_notification_deferred", exc_info=False)
 
     @staticmethod
     def _days(days):
@@ -172,7 +184,7 @@ class TrajectoryFileStore:
                                     meta = conversation.read_json("meta.json")
                                 except FileNotFoundError as error:
                                     names = os.listdir(conversation.fd)
-                                    if any(not re.fullmatch(r"\.tmp-[0-9a-f-]{36}", name) for name in names):
+                                    if any(name != ".lock" and not re.fullmatch(r"\.tmp-[0-9a-f-]{36}", name) for name in names):
                                         raise TrajectoryCorrupt(
                                             "Trajectory directory has files but no manifest"
                                         ) from error
@@ -198,7 +210,7 @@ class TrajectoryFileStore:
         if (
             meta.get("schema_version") != 1
             or tenant != component(meta["tenant_id"])
-            or agent != (meta.get("storage_agent_id") or "_unknown")
+            or agent != (meta.get("agent_id", meta.get("storage_agent_id")) or "_unknown")
             or meta.get("trace_id") != identity.conversation_id
             or not isinstance(meta.get("runs"), list)
         ):
@@ -225,23 +237,49 @@ class TrajectoryFileStore:
         self.authorize(identity)
         with ExitStack() as stack:
             root = stack.enter_context(self._root())
-            locks = stack.enter_context(root.child(".locks", create=True))
-            owner = stack.enter_context(locks.child(component(identity.owner_user_id), create=True))
-            stack.enter_context(owner.lock(f"{identity.conversation_id}.lock", blocking=blocking))
             path = self._locate(root, identity)
             if path is None:
                 if not create:
                     raise FileNotFoundError("Conversation trajectory was not captured")
-                path = (
-                    component(identity.tenant_id),
-                    component(identity.owner_user_id),
-                    identity.root_agent_id or "_unknown",
-                    identity.conversation_id,
-                )
+                # Production supplies a PG conversation row lock. The root lock is only
+                # the standalone storage adapter's initialization guard.
+                guard = (self.initialization_guard(identity) if self.initialization_guard
+                         else root.lock(".storage-root.lock", blocking=blocking))
+                with guard:
+                    self.authorize(identity)
+                    path = self._locate(root, identity)
+                    if path is None:
+                        path = (component(identity.tenant_id), component(identity.owner_user_id),
+                                identity.root_agent_id or "_unknown", identity.conversation_id)
+                        with ExitStack() as creation:
+                            directory = root
+                            for part in path:
+                                directory = creation.enter_context(directory.child(part, create=True))
+                            with directory.lock(".lock", blocking=blocking):
+                                self._save_manifest(directory, self._initial_manifest(identity))
             directory = root
             for part in path:
-                directory = stack.enter_context(directory.child(part, create=create))
+                directory = stack.enter_context(directory.child(part))
+            stack.enter_context(directory.lock(".lock", blocking=blocking))
+            self.authorize(identity)
+            meta = directory.read_json("meta.json")
+            self._validate_manifest(meta, identity, path[0], path[2])
             yield directory
+
+    def _initial_manifest(self, identity):
+        now = timestamp(self.clock())
+        return {
+            "schema_version": 1, "tenant_id": identity.tenant_id,
+            "owner_user_id": identity.owner_user_id, "agent_id": identity.root_agent_id,
+            "conversation_id": identity.conversation_id, "trace_id": identity.conversation_id,
+            "revision": 0, "next_turn_no": 1, "publication_no": 0, "cleanup_version": 0,
+            "first_captured_at": now, "last_captured_at": now,
+            "captured_from_start": False, "has_uncaptured_history": True,
+            "had_capture_gap": False, "had_expired_history": False,
+            "expired_execution_count": 0, "earliest_expired_at": None,
+            "latest_expired_at": None, "had_manual_cleanup": False,
+            **initial_sources(), "runs": [],
+        }
 
     def _save_manifest(self, directory, meta):
         latest = max(meta["runs"], key=lambda run: run["turn_no"], default=None)
@@ -285,7 +323,7 @@ class TrajectoryFileStore:
                                                     meta["tenant_id"],
                                                     meta["owner_user_id"],
                                                     meta["conversation_id"],
-                                                    meta["storage_agent_id"],
+                                                    meta.get("agent_id", meta.get("storage_agent_id")),
                                                 )
                                                 self._validate_manifest(meta, identity, tenant, agent)
                                                 if (
@@ -300,43 +338,20 @@ class TrajectoryFileStore:
                                             logger.warning("trajectory.maintenance_identity_invalid", exc_info=False)
 
     def start(self, identity, trajectory_id: str, turn_id: str, *, core_type: str, ingress_ref=None,
-              started_at=None, source_message_id=None):
+              started_at=None, source_message_id=None, turn_no=None):
         uuid_string(trajectory_id)
         uuid_string(turn_id)
+        if turn_no is not None and (type(turn_no) is not int or not 1 <= turn_no <= 2147483647):
+            raise ValueError("Trajectory turn number must be a positive INT4")
         if source_message_id is not None:
             business_id(source_message_id)
         if core_type not in {"smolagents", "jiuwen"}:
             raise ValueError("Unsupported trajectory Agent Core")
         with self._session(identity, create=True) as directory:
             now = timestamp(started_at or self.clock())
-            try:
-                meta = directory.read_json("meta.json")
-            except FileNotFoundError:
-                meta = {
-                    "schema_version": 1,
-                    "tenant_id": identity.tenant_id,
-                    "owner_user_id": identity.owner_user_id,
-                    "storage_agent_id": identity.root_agent_id,
-                    "conversation_id": identity.conversation_id,
-                    "trace_id": identity.conversation_id,
-                    "revision": 0,
-                    "next_turn_no": 1,
-                    "publication_no": 0,
-                    "cleanup_version": 0,
-                    "first_captured_at": now,
-                    "last_captured_at": now,
-                    "captured_from_start": False,
-                    "has_uncaptured_history": True,
-                    "had_capture_gap": False,
-                    "had_expired_history": False,
-                    "expired_execution_count": 0,
-                    "earliest_expired_at": None,
-                    "latest_expired_at": None,
-                    "had_manual_cleanup": False,
-                    **initial_sources(),
-                    "runs": [],
-                }
-                self._save_manifest(directory, meta)
+            meta = directory.read_json("meta.json")
+            if turn_no is not None and any(r["turn_no"] == turn_no for r in meta["runs"]):
+                raise TrajectoryConflict("Trajectory turn number is already registered")
             if any(
                 r["trajectory_id"] == trajectory_id or (ingress_ref and r["ingress_ref"] == ingress_ref)
                 for r in meta["runs"]
@@ -351,7 +366,7 @@ class TrajectoryFileStore:
                     {
                         "trajectory_id": trajectory_id,
                         "turn_id": turn_id,
-                        "turn_no": meta["next_turn_no"],
+                        "turn_no": turn_no if turn_no is not None else meta["next_turn_no"],
                         "root_agent_id": identity.root_agent_id,
                         "core_type": core_type,
                         "ingress_ref": ingress_ref,
@@ -375,7 +390,7 @@ class TrajectoryFileStore:
                         "file_deleted_at": None,
                     }
                 )
-                meta["next_turn_no"] += 1
+                meta["next_turn_no"] = max(meta["next_turn_no"], (turn_no or meta["next_turn_no"]) + 1)
                 meta["last_captured_at"] = now
                 register_source(meta, source_message_id)
                 if source_message_id is not None and self.source_query is not None:
@@ -468,6 +483,8 @@ class TrajectoryFileStore:
                     self._publish(meta, run, "interrupted", run["last_durable_at"] or run["started_at"])
                     self._save_manifest(directory, meta)
 
+        self.notify(identity)
+
     def _publish(self, meta, run, status, finished_at):
         if run["cleanup_reason"] or run["capture_state"] in {"expired", "corrupt"}:
             raise TrajectoryConflict("Trajectory cannot be republished after cleanup or corruption")
@@ -513,8 +530,7 @@ class TrajectoryFileStore:
         }
         with (
             self._root() as root,
-            root.child(".locks", create=True) as locks,
-            nullcontext() if lock_held else locks.lock("cleanup.lock", blocking=False),
+            nullcontext() if lock_held else root.lock(".cleanup.lock", blocking=False),
         ):
             with self._session(identity) as directory:
                 meta = directory.read_json("meta.json")
@@ -565,6 +581,8 @@ class TrajectoryFileStore:
                         targets.append((run["trajectory_id"], run["confirmed_bytes"]))
                 if changed:
                     self._save_manifest(directory, meta)
+                if self.expire_callback:
+                    self.expire_callback(identity, [r["trajectory_id"] for r in meta["runs"] if r.get("cleanup_reason")])
             # Releasing the session lock before taking a run lock avoids lock inversion.
             for position, (trajectory_id, size) in enumerate(targets[:delete_limit]):
                 if deadline and time.monotonic() >= deadline:
@@ -840,6 +858,8 @@ class RunWriter:
             os.fsync(self.fd)
             self.store._publish(meta, run, status, timestamp(finished_at or self.store.clock()))
             self.store._save_manifest(directory, meta)
+
+        self.store.notify(self.identity)
 
     def mark_incomplete(self, reason: str):
         if not re.fullmatch(r"[a-z_]{1,64}", reason):

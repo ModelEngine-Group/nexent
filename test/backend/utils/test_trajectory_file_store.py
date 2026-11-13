@@ -118,7 +118,7 @@ def test_fixed_storage_agent_and_cross_tenant_conflict(store, identity):
     with start(store, changed) as writer:
         writer.finish("failed")
     manifest = store.manifest(changed)
-    assert manifest["storage_agent_id"] == "42"
+    assert manifest["agent_id"] == "42"
     assert [r["root_agent_id"] for r in manifest["runs"]] == ["42", "99"]
     assert [r["turn_no"] for r in manifest["runs"]] == [1, 2]
     with pytest.raises(TrajectoryConflict):

@@ -40,8 +40,11 @@ acceptance_bindings:
   - test_trj_query_facets_and_only_declared_trajectory_routes
   - test_trj_query_complete_subtree_and_static_node_paging
   - test_trj_query_expiry_rechecks_cached_records_and_content
+  - test_trj_query_pg_list_uses_snapshot_without_opening_archives
   AC-09:
   - test_trj_query_whole_result_metrics_filters_and_stable_membership
+  AC-10:
+  - test_trj_query_pg_list_uses_snapshot_without_opening_archives
 preparation:
   families: []
   anchors: false

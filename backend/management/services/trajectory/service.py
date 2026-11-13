@@ -33,7 +33,9 @@ class TrajectoryService:
         seconds=30,
         max_candidates=10_000,
         source_query=None,
+        execution_catalog=None,
     ):
+        self.execution_catalog = execution_catalog
         self.archive, self.catalog, self.references = (
             Archive(store, source_query=source_query),
             catalog,
@@ -367,13 +369,18 @@ class TrajectoryService:
             )
             if member is None or cached.get("view") != "conversation":
                 raise QueryError("invalid_reference")
-            if member["cleanup"] != (meta or {}).get("cleanup_version", 0):
+            if cached.get("pg"):
+                self.execution_catalog.validate([row["tenant_id"]], [member])
+                readable = {r["id"] for r in member["_runs"] if r["status"] in {"success", "error", "partial"}}
+                state.update(run_ids=list(readable), matching_runs=[r["id"] for r in member["_runs"] if r["matches"]])
+            elif member["cleanup"] != (meta or {}).get("cleanup_version", 0):
                 raise QueryError("snapshot_reset", 409)
-            state.update(
-                publication=member["publication"],
-                run_ids=member["runs"],
-                matching_runs=member["matching_runs"],
-            )
+            if not cached.get("pg"):
+                state.update(
+                    publication=member["publication"],
+                    run_ids=member["runs"],
+                    matching_runs=member["matching_runs"],
+                )
         after = state.get("run_after", 0)
         runs = [
             run

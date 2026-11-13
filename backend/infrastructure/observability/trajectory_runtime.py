@@ -25,12 +25,17 @@ def create_local_processor(config, metadata_provider):
     maintaining = config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
     if not capturing and not maintaining:
         return None
+    from management.db.trajectory.repository import ExecutionRepository
+
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
 
+    repository = ExecutionRepository()
     store = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
         authorize=authorize_capture,
+        initialization_guard=repository.initialize,
+        expire_callback=repository.expire,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
         source_query=capture_sources,
         storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
@@ -39,6 +44,8 @@ def create_local_processor(config, metadata_provider):
     maintenance = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
         authorize=lambda identity: None,
+        initialization_guard=repository.initialize,
+        expire_callback=repository.expire,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
         storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
     )

@@ -114,6 +114,10 @@ def records(
     sort_order="desc",
     all_items=False,
 ):
+    if service.execution_catalog is not None:
+        from .pg_collection import records as pg_records
+        return pg_records(service, actor, filters, view=view, query_id=query_id, page=page, page_size=page_size,
+                          sort_by=sort_by, sort_order=sort_order, all_items=all_items)
     if (
         view not in {"execution", "conversation"}
         or (
@@ -418,6 +422,9 @@ def records(
 
 
 def facets(service, actor, filters, facet, *, search="", cursor=None, limit=20):
+    if service.execution_catalog is not None:
+        from .pg_collection import facets as pg_facets
+        return pg_facets(service, actor, filters, facet, search=search, cursor=cursor, limit=limit)
     if (
         facet not in {"tenants", "users", "agents", "conversations", "models"}
         or not 1 <= limit <= 100

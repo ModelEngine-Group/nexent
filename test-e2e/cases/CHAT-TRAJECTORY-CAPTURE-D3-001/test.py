@@ -267,7 +267,7 @@ def test_capture_root_switch_keeps_directory_and_native_context(runtime, first_a
     manifests = list(runtime.root.rglob('meta.json'))
     assert len(manifests) == 1
     meta = json.loads(manifests[0].read_text())
-    assert meta['storage_agent_id'] == (str(first_agent) if first_agent is not None else None)
+    assert meta['agent_id'] == (str(first_agent) if first_agent is not None else None)
     assert len(meta['runs']) == 2
     assert len(list(runtime.root.rglob('*.otlp.jsonl'))) == 2
     roots = [span for span in runtime.spans() if attrs(span).get('nexent.trajectory.root')]
