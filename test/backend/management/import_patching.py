@@ -13,7 +13,7 @@ SPLIT_MODULES = (
         "management.services.file.service", "management.services.file.access",
         "management.services.file.preview", "management.services.file.image_proxy",
         "management.services.file.upload", "management.services.model.media",
-        "data_process.services.conversion",
+        "infrastructure.file_processing.conversion",
     ),
     (
         "management.services.permission.identity.session", "management.services.permission.identity.northbound",

@@ -13,6 +13,8 @@ nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/
     source-audit.md
 ```
 
+2026-11-12 补充 StorageInterface 前置，独立 SPEC 位于 `nexent-doc/docs/Developing/infrastructure-storage-access-interface/`。其中包含用例、proposal、接口合同、design、task 和脱敏访问盘点。四类存储请求统一进入 Record/Object/Vector/KV 端口，由 Infrastructure 实现；必要原子、事件和队列能力也纳入，不能继续暴露原生客户端。
+
 已扫描 822 份 Markdown，记录 63 份相关候选。最新 AgentOS 规格优先于旧四服务文档中保留 Data Process 的历史方案。
 
 | 能力 | 目标所有者 |
@@ -23,7 +25,9 @@ nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/
 
 Management 与 Runtime 只通过 AgentOS 交换授权请求、产物引用和状态。跨服务不传本地路径、不导入对方 Celery app、不拼接旧 /tasks URL。
 
-实施顺序为契约冻结、Management 清洗、Runtime KB、消费者切换、任务恢复与维护，最后删除旧镜像和部署资产。详细文件清单、接口、AC、测试设计及维护回滚门槛见独立 SPEC。
+先完成 StorageInterface 合同和默认适配器，再冻结清洗/KB 契约并迁移 Management 清洗、Runtime KB 和消费者。目标两服务及 worker 的存储调用归口验收通过后，才执行旧镜像退役。详细文件清单、9 项 DPR AC、测试设计及维护回滚门槛见独立 SPEC。
+
+四类存储之间没有默认事务。KB 删除采用权威可见版本并区分逻辑不可见与物理清理完成，不能只查墓碑后直接写 ES。对象访问由应用票据进入 ObjectStore，队列 broker/result/消费连接全部由 Infrastructure 拥有。
 
 开发前应确认三项设计决定。
 

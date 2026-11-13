@@ -8,6 +8,7 @@ change:
   affected_features:
     existing:
     - GW-AUTH
+    - F-101
     added:
     - AOS-TRANSPORT
     modified: []
@@ -23,6 +24,8 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Cleansing and KB request contracts carry logical versioned object references and content hashes, reject credentials and unsafe paths, and use existing directional body-bound AgentOS signing.
+    - Management owns uploaded-text projection and structure-only extraction; Infrastructure owns Office conversion with explicit profile configuration, preserving the existing response and error behavior.
     - Runtime and Management application imports succeed with the peer package denied, and source imports never cross the service boundary.
     - New Management runs use standard prepared AgentOS execution without legacy start fallback; retired Runtime starts and reverse start dispatch operations have no routes or protocol declarations.
     - Independent management and runtime build targets honor --version latest and deployment selects separate service images in Compose, Helm and offline packages.
@@ -112,6 +115,8 @@ change:
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
+    - test/backend/app/test_agentos_knowledge_contract.py
+    - test/backend/services/test_file_cleanse_boundary.py
     - test/backend/services/test_a2a_server_service_message.py
     - test/backend/app/test_northbound_app.py
     - test/backend/services/test_northbound_service.py

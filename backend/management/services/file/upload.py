@@ -53,7 +53,12 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
 
 
 
-from data_process.services.conversion import (
+from infrastructure.file_processing.conversion import (
     ensure_secure_libreoffice_profile_dir,
-    convert_office_to_pdf,
+    convert_office_to_pdf as _convert_office_to_pdf,
 )
+
+
+async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
+    """Bind Management configuration to the infrastructure converter."""
+    return await _convert_office_to_pdf(input_path, output_dir, timeout, profile_dir=LIBREOFFICE_PROFILE_DIR)

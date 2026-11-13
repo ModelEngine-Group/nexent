@@ -1,14 +1,15 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 
-from contracts.constants.environment import LIBREOFFICE_PROFILE_DIR
-from pathlib import Path
-import os
-from nexent.core.concurrency import run_blocking
-import subprocess
-
 import logging
-logger = logging.getLogger('management.services.file.upload')
+import os
+import subprocess
+from pathlib import Path
+
+from nexent.core.concurrency import run_blocking
+
+logger = logging.getLogger("management.services.file.upload")
+
 
 def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
     """Create the shared LibreOffice profile directory with owner-only permissions."""
@@ -18,7 +19,9 @@ def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
     return profile_path
 
 
-async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
+async def convert_office_to_pdf(
+    input_path: str, output_dir: str, timeout: int = 30, *, profile_dir: str
+) -> str:
     """
     Convert Office document to PDF using LibreOffice.
 
@@ -35,9 +38,7 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
 
     def _run_libreoffice_conversion():
         """Synchronous LibreOffice conversion to run in thread executor."""
-        profile_uri = ensure_secure_libreoffice_profile_dir(
-            LIBREOFFICE_PROFILE_DIR
-        ).as_uri()
+        profile_uri = ensure_secure_libreoffice_profile_dir(profile_dir).as_uri()
         cmd = [
             "soffice",
             "--headless",
@@ -48,16 +49,13 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
             "--invisible",
             "--nolockcheck",
             f"-env:UserInstallation={profile_uri}",
-            "--convert-to", "pdf",
-            "--outdir", output_dir,
-            input_path
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            output_dir,
+            input_path,
         ]
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     try:
         # Run blocking subprocess in thread executor to avoid blocking event loop
@@ -75,7 +73,7 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
 
         # Find generated PDF file
         input_filename = os.path.basename(input_path)
-        pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
+        pdf_filename = os.path.splitext(input_filename)[0] + ".pdf"
         pdf_path = os.path.join(output_dir, pdf_filename)
 
         if not os.path.exists(pdf_path):

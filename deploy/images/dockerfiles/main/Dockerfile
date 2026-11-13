@@ -119,9 +119,8 @@ COPY backend/http/server /opt/backend/http/server
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/gateway/downstream /opt/backend/gateway/downstream
 COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
-# File conversion and the Celery control client are used by Management without starting a worker.
+# Management still uses the Celery control client until queue migration completes.
 COPY backend/data_process/app.py /opt/backend/data_process/
-COPY backend/data_process/services/conversion.py /opt/backend/data_process/services/
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 
 # Runtime target excludes Management business code.

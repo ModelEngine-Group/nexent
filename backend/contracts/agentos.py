@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
 
 from contracts.model import WorkbenchGenerationConfig
+from contracts.agentos_knowledge import KnowledgeOperation
 from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
@@ -745,6 +746,8 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
+    FILE_CLEANSE = NAMESPACE + "v1/file/cleanse"
+    FILE_CLEANSE_STATUS = NAMESPACE + "v1/file/cleanse-status"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
@@ -757,11 +760,11 @@ MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in Manageme
 
 AgentOSOperation = (
     AgentOperation | ModelOperation | ModelAdministrationOperation | MemoryOperation
-    | ManagementOperation
+    | KnowledgeOperation | ManagementOperation
 )
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
-    for operations in (AgentOperation, ModelOperation, ModelAdministrationOperation, MemoryOperation)
+    for operations in (AgentOperation, ModelOperation, ModelAdministrationOperation, MemoryOperation, KnowledgeOperation)
     for operation in operations
 }
 

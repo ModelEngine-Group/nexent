@@ -703,47 +703,18 @@ class DataProcessService:
         Returns:
             Dict[str, Any]: Processing result including text and metadata
         """
-        start_time = time.time()
-        logger.info(
-            f"Processing uploaded file: {filename} using SDK DataProcessCore")
+        from management.services.file.cleanse import extract_uploaded_text
+        from nexent.core.concurrency import run_blocking
 
         global DataProcessCore
         if DataProcessCore is None:
             from nexent.data_process.core import DataProcessCore as _DataProcessCore
 
             DataProcessCore = _DataProcessCore
-
-        data_processor = DataProcessCore()
-        chunks, _ = data_processor.file_process(
-            file_data=file_content,
-            filename=filename,
-            chunking_strategy=chunking_strategy
+        return await run_blocking(
+            "file-cleanse-text", extract_uploaded_text, file_content, filename, chunking_strategy,
+            parser=DataProcessCore(), lane="control-io", owner="management",
         )
-
-        full_text = ""
-        chunk_texts: list[str] = []
-        for chunk in chunks:
-            if 'content' in chunk:
-                chunk_content = chunk['content']
-                full_text += chunk_content + "\n"
-                chunk_texts.append(chunk_content)
-
-        processing_time = time.time() - start_time
-        logger.info(
-            f"Successfully processed uploaded file: {filename}, extracted {len(full_text)} characters in {processing_time:.2f}s"
-        )
-
-        return {
-            "success": True,
-            "task_id": None,
-            "filename": filename,
-            "text": full_text.strip(),
-            "chunks": chunk_texts,
-            "chunks_count": len(chunks),
-            "text_length": len(full_text.strip()),
-            "processing_time": processing_time,
-            "chunking_strategy": chunking_strategy
-        }
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
         """Full conversion pipeline: download -> convert -> upload -> validate -> cleanup.
