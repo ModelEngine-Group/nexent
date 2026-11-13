@@ -103,7 +103,7 @@ export default function ResourceRepositoryPage() {
 
   const { user, isAuthzReady, canAccessRoute } = useAuthorizationContext();
   const queryClient = useQueryClient();
-  const identity = `${user?.id}:${user?.tenantId}:${user?.role}`;
+  const identity = `${user?.id}:${user?.tenantId}:${user?.roles?.join(",") ?? user?.role}`;
   const [preparedIdentity, setPreparedIdentity] = useState<string | null>(null);
   useEffect(() => {
     queryClient.removeQueries({

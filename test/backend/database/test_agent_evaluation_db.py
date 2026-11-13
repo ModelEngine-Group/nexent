@@ -428,8 +428,8 @@ class TestListAgentEvaluationsByAgent:
         r2.pass_count = 0
         r2.fail_count = 5
         rows = [
-            (r1, "Set1", "GPT-4"),
-            (r2, "Set2", "Claude"),
+            (r1, "Set1", "GPT-4", "Agent One"),
+            (r2, "Set2", "Claude", "Agent Two"),
         ]
         _make_query_chain(session, rows)
 
@@ -456,7 +456,7 @@ class TestListAgentEvaluationsByAgent:
         r1.progress_total = None
         r1.pass_count = None
         r1.fail_count = None
-        rows = [(r1, "Set1", "GPT-4")]
+        rows = [(r1, "Set1", "GPT-4", None)]
         _make_query_chain(session, rows)
         monkeypatch.setattr(agent_evaluation_db, "as_dict",
                             lambda _r: {"agent_evaluation_id": 1})

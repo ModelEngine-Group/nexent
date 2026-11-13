@@ -69,10 +69,7 @@ export function mapMyAgentDetail(
     description: detail.description?.trim() || "",
     author: detail.author?.trim() || null,
     authorCasUsername: detail.author_cas_username,
-    modelName:
-      detail.model_names?.filter(Boolean).join(", ") ||
-      detail.model_name?.trim() ||
-      null,
+    modelName: detail.model_name?.trim() || null,
     versionLabel: detail.version?.version_name?.trim() || null,
     tools: uniqueNames(
       detail.tools?.map(
@@ -216,6 +213,29 @@ export function mapRepositoryAgentDetail(
       models: resources?.models?.filter((model) =>
         versionDetail.model_ids?.includes(model.id)
       ),
+    },
+  };
+}
+
+export function mapOfficialRepositoryDetail(
+  detail: AgentRepositoryListingDetail,
+  tags: string[] = []
+): MyAgentDetailView {
+  return {
+    title: detail.display_name?.trim() || detail.name?.trim() || "",
+    description: detail.description?.trim() || "",
+    author: detail.author?.trim() || null,
+    authorCasUsername: detail.author_cas_username,
+    modelName: detail.model_name?.trim() || null,
+    versionLabel: detail.version_label?.trim() || null,
+    tools: uniqueNames(detail.tools ?? []),
+    skills: [],
+    knowledgeBases: [],
+    subAgents: [],
+    tags: uniqueNames(tags),
+    repositoryInfo: {
+      downloads: detail.downloads ?? 0,
+      createdAt: detail.created_at ?? null,
     },
   };
 }

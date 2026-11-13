@@ -23,6 +23,7 @@ import {
   Modal,
   Spin,
   Tooltip,
+  Pagination,
 } from "antd";
 const { TextArea } = Input;
 import {
@@ -87,7 +88,7 @@ import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentMo
 import TagChips from "@/components/tag/TagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
@@ -1767,7 +1768,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       }}
                       className="!h-8 !w-[116px]"
                     />
-                    <StandardPaginator
+                    <Pagination
                       current={currentDocumentPage}
                       pageSize={documentPageSize}
                       total={filteredDocumentCount}

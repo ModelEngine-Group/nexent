@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
-import type { ReactNode } from "react";
 import JSZip from "jszip";
 import { expect, test, vi } from "vitest";
 import RepositorySkillDetail from "@/components/skill/RepositorySkillDetail";
@@ -10,11 +9,6 @@ import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
-}));
-vi.mock("@/components/common/StandardModal", () => ({
-  StandardModal: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
 }));
 vi.mock("@/components/common/markdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
@@ -54,13 +48,17 @@ test("reads the frozen ZIP and removes its common root folder", async () => {
 
 test("uses snapshot content when the archive is absent", async () => {
   show({ skill_info_json: { content: "Snapshot content" } });
-  expect(await screen.findByText("Snapshot content")).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByText("Snapshot content")).toBeVisible()
+  );
 });
 
 test("reports corrupt archives while retaining the skill metadata", async () => {
   show({ skill_zip_base64: "invalid-archive" });
-  expect(
-    await screen.findByText("skillManagement.detail.fileReadFailed")
-  ).toBeVisible();
+  await waitFor(() =>
+    expect(
+      screen.getByText("skillManagement.detail.fileReadFailed")
+    ).toBeVisible()
+  );
   expect(screen.getByText("Example")).toBeVisible();
 });

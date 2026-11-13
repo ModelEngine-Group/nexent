@@ -1,6 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -18,23 +17,6 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { id: "u", tenantId: "t" } }),
 }));
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn() } }));
-vi.mock("@/components/common/StandardModal", () => ({
-  StandardModal: ({
-    open,
-    children,
-    onOpenChange,
-  }: {
-    open: boolean;
-    children: ReactNode;
-    onOpenChange: (open: boolean) => void;
-  }) =>
-    open ? (
-      <div role="dialog">
-        <button onClick={() => onOpenChange(false)}>Close dialog</button>
-        {children}
-      </div>
-    ) : null,
-}));
 vi.mock("@/app/newchat/assistant-ui/nl2skill-chat-panel", () => ({
   Nl2SkillChatPanel: ({
     onStreamEvent,
@@ -146,9 +128,9 @@ function show() {
   );
   return { ...result, props };
 }
-test("opens an independent dialog and feeds generated content to its editor", () => {
+test("opens an independent dialog and feeds generated content to its editor", async () => {
   const { props } = show();
-  expect(screen.getByRole("dialog")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
   expect(screen.getByLabelText("Generated name")).toHaveTextContent("empty");
   fireEvent.click(screen.getByText("Generate skill"));
   expect(screen.getByLabelText("Generated name")).toHaveTextContent(
@@ -190,13 +172,13 @@ test("refreshes Mine after saving and opens the result without leaving for the w
 });
 test("closing an empty dialog returns directly to the repository", () => {
   const { props } = show();
-  fireEvent.click(screen.getByText("Close dialog"));
+  fireEvent.click(screen.getByRole("button", { name: "common.close" }));
   expect(props.onClose).toHaveBeenCalledTimes(1);
 });
 test("requires explicit confirmation before discarding generated edits", async () => {
   const { props } = show();
   fireEvent.click(screen.getByText("Generate skill"));
-  fireEvent.click(screen.getByText("Close dialog"));
+  fireEvent.click(screen.getByRole("button", { name: "common.close" }));
   expect(props.onClose).not.toHaveBeenCalled();
   fireEvent.click(
     await screen.findByRole("button", { name: "common.confirm" })
@@ -206,11 +188,11 @@ test("requires explicit confirmation before discarding generated edits", async (
 test("prevents closing while generation or saving is active", () => {
   const { props } = show();
   fireEvent.click(screen.getByText("Start generation"));
-  fireEvent.click(screen.getByText("Close dialog"));
+  fireEvent.click(screen.getByRole("button", { name: "common.close" }));
   expect(props.onClose).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Fail generation"));
   fireEvent.click(screen.getByText("Start saving"));
-  fireEvent.click(screen.getByText("Close dialog"));
+  fireEvent.click(screen.getByRole("button", { name: "common.close" }));
   expect(props.onClose).not.toHaveBeenCalled();
 });
 test("rolls back a failed continuation to the last usable draft", () => {

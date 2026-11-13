@@ -21,7 +21,6 @@ import {
 import { useId, useState, type ReactNode } from "react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
@@ -595,12 +594,9 @@ export function AgentDetail({
           }
         >
           {presentation && showRepositoryInfo ? (
-            <StandardButton
-              className="min-w-[88px] max-w-[200px]"
-              onClick={onClose}
-            >
+            <Button className="min-w-[88px] max-w-[200px]" onClick={onClose}>
               {t("common.close")}
-            </StandardButton>
+            </Button>
           ) : (
             <Button onClick={onClose}>{t("common.close")}</Button>
           )}

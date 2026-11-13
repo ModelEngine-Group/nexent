@@ -42,6 +42,29 @@ def application(**updates):
     return SimpleNamespace(**{**values, **updates})
 
 
+@pytest.mark.parametrize(
+    "roles,resource_type,can_review,condition_count",
+    [
+        (("USER", "ADMIN"), "agent", True, 3),
+        (("USER", "DEV"), "agent", False, 4),
+        (("SU",), "mcp", True, 2),
+        (("SU",), "agent", False, 4),
+        ((), "mcp", False, 4),
+    ],
+)
+def test_review_permissions_and_query_scope_use_all_membership_roles(
+    roles, resource_type, can_review, condition_count
+):
+    assert reviews.can_decide(resource_type, roles) is can_review
+    conditions = scope_conditions(resource_type, "actor", "tenant", roles)
+    assert len(conditions) == condition_count
+    sql = str(conditions[-1].compile(dialect=postgresql.dialect()))
+    if condition_count == 4:
+        assert "submitted_user_id" in sql
+    elif condition_count == 3:
+        assert "tenant_id" in sql
+
+
 @pytest.fixture
 def isolated(mocker):
     session = MagicMock()

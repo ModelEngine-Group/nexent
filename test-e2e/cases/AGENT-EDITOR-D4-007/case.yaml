@@ -1,0 +1,46 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-EDITOR
+case:
+  case_id: AGENT-EDITOR-D4-007
+  feature_id: AGENT-EDITOR-WORKFLOWS
+  requirement_ids: [AGENT-EDITOR-REQ-007]
+  business_rule_ids: [AGENT-EDITOR-RULE-007]
+  title: Selected MCP tools group by service and save individual bindings
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Edit a subset of one MCP service through the Agent editor and reload the saved selection.
+  preconditions:
+  - A running frontend and isolated HTTP fixtures for the Agent draft and tool catalog are available.
+  test_data:
+    profile: mock
+    locale: zh
+  steps:
+  - order: 1
+    action: Open an Agent with two selected tools from a service with three available tools and one selected local tool.
+    expected: The service appears once with a count of two out of three, and the local tool appears separately.
+  - order: 2
+    action: Open the group, search for its unselected tool and check it.
+    expected: The selected count becomes three, and autosave persists the individual tool IDs including the existing bindings.
+  - order: 3
+    action: Reload the Agent and inspect the group and local tool.
+    expected: The service still appears once with three out of three selected and the local tool is present.
+  expected_results:
+  - The Agent editor restores the service group and the complete selection after reload.
+  forbidden_side_effects:
+  - Only tool binding and configuration autosave writes occur. Existing selected tool IDs remain bound.
+  actor: Authorized Agent development user
+  journey:
+  - Open the editable Agent, update the service selection in the popup and reload.
+  final_business_result:
+  - The intended tool IDs remain bound after reload and are displayed together under their MCP service.
+  failure_evidence:
+  - Audited Playwright steps and sanitized fixture write assertions.
+  acceptance:
+  - id: AC-01
+    description: Group selected tools and persist an independent service selection through autosave and reload.
+    steps: [1, 2, 3]
+    expected_results: [1]
+    forbidden_side_effects: [1]

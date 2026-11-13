@@ -26,10 +26,16 @@ from services.nl2skill_service import (
 from management.services.skill.creation import NL2SKILL_NAME, create_nl2skill_agent_config
 
 
+@pytest.fixture(autouse=True)
+def creator_identity(mocker):
+    from contracts.agent import SystemAgentRef
+    mocker.patch.object(nl2skill_service.system_agent_provider, "get_nl2skill_main_ref", return_value=SystemAgentRef("shared", "nl2skill_main", 78, 0))
+
+
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
-    assert config.name == "__skill_creator__"
+    assert config.name == "nl2skill_main"
     assert config.display_name == "技能创建助手"
     assert config.model_name == "model"
     assert config.instructions is None
@@ -181,6 +187,7 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
         language="en",
     )
 
+    assert result.tenant_id == "tenant"
     assert result.query == "rendered query"
     prompt_loader.assert_called_once()
     assert "complexity" not in prompt_loader.call_args.kwargs

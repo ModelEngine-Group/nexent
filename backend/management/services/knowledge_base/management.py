@@ -16,20 +16,33 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
-from contracts.constants.environment import IS_SPEED_MODE
+from fastapi import Body, Depends, Path, Query
+
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE, PERMISSION_READ
 from contracts.errors.exceptions import AppException, DuplicateError
+from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.file.attachment import get_file_stream
 from management.db.client import get_db_session
 from management.db.conversation.repository import remove_conversation_knowledge_bindings
+from management.db.file.attachment import get_file_stream
 from management.db.identity.group import query_group_ids_by_user
-from management.db.knowledge_base.repository import create_knowledge_record, delete_knowledge_record, get_knowledge_info_by_tenant_id, get_knowledge_record, update_embedding_model_by_index_name, update_knowledge_record, update_last_doc_update_time, update_model_name_by_index_name
-from management.db.knowledge_base.file_lifecycle import delete_file_records_for_knowledge_base
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.knowledge_base.file_lifecycle import (
+    delete_file_records_for_knowledge_base,
+)
+from management.db.knowledge_base.repository import (
+    create_knowledge_record,
+    delete_knowledge_record,
+    get_knowledge_info_by_tenant_id,
+    get_knowledge_record,
+    update_embedding_model_by_index_name,
+    update_knowledge_record,
+    update_last_doc_update_time,
+    update_model_name_by_index_name,
+)
 from management.db.model.repository import get_model_by_model_id
 from management.db.tool.repository import remove_tool_knowledge_references
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from fastapi import Body, Depends, Path, Query
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
     _SKIP_INDEX_SOURCE_CLEANUP,
@@ -38,10 +51,10 @@ from management.services.knowledge_base.common import (
     get_vector_db_core,
     logger,
 )
-
-# A knowledge base deletion is rejected while any file is still owned by the
-# ingestion pipeline. DELETE_REQUESTED/DELETED rows are already owned by a
-# file-deletion operation and therefore do not block the broader deletion.
+from management.services.knowledge_base.document_tasks import _document_delete_tasks
+from management.services.knowledge_base.files import (
+    KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES as KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
+)
 from management.services.knowledge_base.files import (
     KnowledgeBaseFileService,
 )
@@ -57,20 +70,29 @@ from management.services.knowledge_base.permission import (
     require_knowledge_base_read_permission,
     resolve_knowledge_base_permission,
 )
+from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import (
     create_embedding_model,
     get_embedding_model_by_id,
     get_model_descriptor,
 )
+from management.services.permission.asset_owner import postprocess_knowledge_visibility
+from management.services.permission.identity import groups as group_service
+from management.services.tag.projection import (
+    project_authorized_resource_tags,
+)
+from management.utils.serialization import (
+    convert_list_to_string,
+    convert_string_to_list,
+)
 from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
-from management.services.permission.asset_owner import postprocess_knowledge_visibility
-from management.services.permission.identity.groups import get_tenant_default_group_id
-from management.services.knowledge_base.task_state import get_redis_service
-from management.services.configuration.tenant.settings import tenant_config_manager
-from management.utils.serialization import convert_list_to_string, convert_string_to_list
+
+# A knowledge base deletion is rejected while any file is still owned by the
+# ingestion pipeline. DELETE_REQUESTED/DELETED rows are already owned by a
+# file-deletion operation and therefore do not block the broader deletion.
 
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):
@@ -187,9 +209,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 # A per-file deletion retry task is in-memory and can only
                 # exist in this process. A knowledge-base deletion supersedes
                 # it after the index and lifecycle rows have been removed.
-                from management.services.knowledge_base.deletion import (
-                    _document_delete_tasks,
-                )
 
                 pending_delete_task = _document_delete_tasks.pop(str(file_id), None)
                 if pending_delete_task and not pending_delete_task.done():
@@ -368,7 +387,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             }
 
             # Add group permission and group IDs if provided.
-            if str(user_role or "").upper() == "USER":
+            if has_any_role(user_role, {"USER"}) and not has_any_role(user_role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"}):
                 knowledge_data["ingroup_permission"] = PERMISSION_PRIVATE
                 knowledge_data["group_ids"] = None
             else:
@@ -466,7 +485,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 f"Invalid ingroup_permission. Must be one of: {valid_permissions}"
             )
 
-        if str(user_role or "").upper() == "USER":
+        if has_any_role(user_role, {"USER"}) and not has_any_role(user_role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"}):
             record = get_knowledge_record({"index_name": index_name})
             if not record:
                 raise ValueError(f"Knowledge base '{index_name}' not found")
@@ -720,6 +739,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         keyword: str | None = None,
         sources: List[str] | None = None,
         models: List[str] | None = None,
+        *,
+        inventory_read: bool = False,
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -728,7 +749,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         - SU: All knowledgebases visible, all editable
         - ADMIN: Knowledgebases from same tenant visible, all editable
         - DEV on ASSET_OWNER-scoped records: all visible, read-only (READ_ONLY)
-        - SU/ADMIN/SPEED cross-tenant view of ASSET_OWNER records: read-only
+        - SU/ADMIN cross-tenant view of ASSET_OWNER records: read-only
         - USER/DEV (non-ASSET_OWNER records): group intersection required; permission by:
             * If user is creator: editable
             * If ingroup_permission=EDIT: editable
@@ -752,10 +773,10 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         if not user_tenant:
             return {"indices": [], "count": 0}
 
-        user_role = user_tenant.get("user_role")
+        user_role = roles_from_record(user_tenant)
         user_tenant_id = str(user_tenant.get("tenant_id") or target_tenant_id or "")
         # Get user group IDs from tenant_group_user_t table
-        user_group_ids = query_group_ids_by_user(user_id)
+        user_group_ids = [] if inventory_read else query_group_ids_by_user(user_id)
 
         # Get all indices from Elasticsearch
         es_indices_list = vdb_core.get_user_indices(pattern)
@@ -781,38 +802,30 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             if index_name not in es_indices_list:
                 continue
 
-            # Fallback logic: if user_id equals user_tenant_id, treat as legacy admin user
-            # even if user_role is None or empty
             effective_user_role = user_role
-            if user_id == user_tenant_id:
-                effective_user_role = "ADMIN"
-                logger.info(f"User {user_id} identified as legacy admin")
-            elif IS_SPEED_MODE and not user_role:
-                effective_user_role = "SPEED"
-                logger.info("User under SPEED version is treated as admin")
-
-            # SPEED mode may run without a user_tenant_t row; trust the
-            # requested tenant for the check in that legacy deployment.
-            effective_user_tenant_id = user_tenant_id or str(
-                record.get("tenant_id") or ""
-            )
-            access = ResourceAccessControl.check(
-                Resource(
-                    resource_type="knowledge_base",
-                    resource_id=index_name,
-                    tenant_id=record.get("tenant_id"),
-                    created_by=record.get("created_by"),
-                    ingroup_permission=record.get("ingroup_permission"),
-                    group_ids=record.get("group_ids"),
-                    knowledge_sources=record.get("knowledge_sources"),
-                ),
-                user_id=user_id,
-                role=(effective_user_role or "").upper(),
-                user_groups=user_group_ids,
-                user_tenant_id=effective_user_tenant_id,
-                asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
-            )
-            permission = access.permission_label
+            effective_user_tenant_id = user_tenant_id
+            if has_any_role(user_role, {"SU"}):
+                effective_user_tenant_id = target_tenant_id
+            if inventory_read:
+                permission = PERMISSION_READ
+            else:
+                access = ResourceAccessControl.check(
+                    Resource(
+                        resource_type="knowledge_base",
+                        resource_id=index_name,
+                        tenant_id=record.get("tenant_id"),
+                        created_by=record.get("created_by"),
+                        ingroup_permission=record.get("ingroup_permission"),
+                        group_ids=record.get("group_ids"),
+                        knowledge_sources=record.get("knowledge_sources"),
+                    ),
+                    user_id=user_id,
+                    role=effective_user_role,
+                    user_groups=user_group_ids,
+                    user_tenant_id=effective_user_tenant_id,
+                    asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+                )
+                permission = access.permission_label
 
             # Add to visible list if permission is granted
             if permission:
@@ -825,7 +838,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                     )
                 else:
                     # If no group_ids specified, use tenant default group
-                    default_group_id = get_tenant_default_group_id(
+                    default_group_id = group_service.get_tenant_default_group_id(
                         record.get("tenant_id")
                     )
                     record_with_permission["group_ids"] = (
@@ -859,9 +872,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         if include_stats:
-            from management.services.tag.projection import (
-                project_authorized_resource_tags,
-            )
 
             visible_knowledgebases = project_authorized_resource_tags(
                 visible_knowledgebases,
@@ -938,7 +948,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                     )
 
                     # Update model name if missing
-                    if index_name in model_name_is_none_list:
+                    if not inventory_read and index_name in model_name_is_none_list:
                         update_model_name_by_index_name(
                             index_name,
                             index_stats.get("base_info", {}).get("embedding_model", ""),
@@ -1166,8 +1176,3 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             _rethrow_or_plain(e)
 
     DOCUMENT_DELETE_SCOPES = ("source_only", "full")
-
-
-from management.services.knowledge_base.files import (
-    KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES as KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
-)

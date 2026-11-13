@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
@@ -18,7 +19,10 @@ export default function ModelCapacityCoverageWidget({ onViewAll }: Props) {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
-  const visibleToOperator = canManageModels(user?.role, isSpeedMode);
+  const visibleToOperator = canManageModels(
+    user?.roles ?? user?.role,
+    isSpeedMode
+  );
 
   const { coverage, isLoading } = useCapacityCoverage({
     enabled: visibleToOperator,

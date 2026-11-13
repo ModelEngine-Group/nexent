@@ -11,7 +11,20 @@ import logging
 from typing import Any, Dict, List, Optional
 from management.db.repository_transactions import after_repository_commit
 
-from contracts.constants.constants import VALID_EVENT_TYPES, VALID_RESOURCE_TYPES, VALID_NOTIFICATION_SCOPES, TENANT_REQUIRED_SCOPES, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER, SU_ROLES, TENANT_ADMIN_ROLES, TENANT_USER_ROLES
+from contracts.constants.constants import (
+    SCOPE_SU,
+    SCOPE_TENANT,
+    SCOPE_TENANT_ADMIN,
+    SCOPE_TENANT_USER,
+    SCOPE_USER,
+    SU_ROLES,
+    TENANT_ADMIN_ROLES,
+    TENANT_REQUIRED_SCOPES,
+    TENANT_USER_ROLES,
+    VALID_EVENT_TYPES,
+    VALID_NOTIFICATION_SCOPES,
+    VALID_RESOURCE_TYPES,
+)
 from management.db.client import get_db_session
 from management.db.models import Notification, NotificationReceiver, UserTenant
 
@@ -30,18 +43,18 @@ def _resolve_receivers(
 
     query = session.query(UserTenant.user_id, UserTenant.tenant_id).filter(UserTenant.delete_flag == "N")
     if scope == SCOPE_SU:
-        query = query.filter(UserTenant.user_role.in_(SU_ROLES))
+        query = query.filter(UserTenant.roles.overlap(list(SU_ROLES)))
     elif scope == SCOPE_TENANT:
         query = query.filter(UserTenant.tenant_id == tenant_id)
     elif scope == SCOPE_TENANT_ADMIN:
         query = query.filter(
             UserTenant.tenant_id == tenant_id,
-            UserTenant.user_role.in_(TENANT_ADMIN_ROLES),
+            UserTenant.roles.overlap(list(TENANT_ADMIN_ROLES)),
         )
     elif scope == SCOPE_TENANT_USER:
         query = query.filter(
             UserTenant.tenant_id == tenant_id,
-            UserTenant.user_role.in_(TENANT_USER_ROLES),
+            UserTenant.roles.overlap(list(TENANT_USER_ROLES)),
         )
 
     seen: set = set()

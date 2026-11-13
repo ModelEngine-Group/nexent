@@ -14,3 +14,5 @@ helm upgrade --install nexent-infrastructure deploy/k8s/helm/nexent-infrastructu
 ```
 
 Use a distinct `nexent` release for the application chart. Do not put `ELASTICSEARCH_API_KEY` in infrastructure values; the key belongs only to the application-side `nexent-secrets` Secret.
+
+Historical account upgrades and failure recovery are documented in the [single migration runbook](../../../sql/tools/supabase_to_postgres/README.md).

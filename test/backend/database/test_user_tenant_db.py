@@ -1,12 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from test.common.contract_stubs import install_shared_contract_stub
-from test.common.contract_stubs import install_business_constant_stubs
-import sys
 import os
+import sys
+
+from test.common.contract_stubs import (
+    install_business_constant_stubs,
+    install_shared_contract_stub,
+)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
@@ -59,11 +64,14 @@ client_mock.filter_property = MagicMock()
 # Add the mocked client module to sys.modules
 sys.modules['management.db.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["management.db.client"])
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock db_models module
@@ -89,7 +97,19 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now import the functions to be tested
-from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id, get_all_tenant_ids, insert_user_tenant, get_users_by_tenant_id, update_user_tenant_role, soft_delete_user_tenant_by_user_id, soft_delete_users_by_tenant_id, get_user_tenant_in_tenant, get_user_tenant_by_email
+from management.db.identity.user_tenant import (
+    get_all_tenant_ids,
+    get_user_email_map,
+    get_user_tenant_by_email,
+    get_user_tenant_by_user_id,
+    get_user_tenant_in_tenant,
+    get_users_by_tenant_id,
+    insert_user_tenant,
+    soft_delete_user_tenant_by_user_id,
+    soft_delete_users_by_tenant_id,
+    update_user_tenant_role,
+)
+
 
 class MockUserTenant:
     def __init__(self, user_id="test_user_id", user_email="test@example.com", user_role="USER"):
@@ -114,6 +134,13 @@ class MockUserTenant:
             "update_time": "2024-01-01 00:00:00"
         }
 
+@pytest.fixture(autouse=True)
+def account_profile_writer(monkeypatch):
+    writer = MagicMock()
+    monkeypatch.setattr("management.db.identity.user_tenant.set_account_profile", writer)
+    return writer
+
+
 @pytest.fixture
 def mock_session():
     """Create mock database session"""
@@ -136,8 +163,8 @@ def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("management.db.identity.user_tenant.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.membership.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.membership.as_dict", lambda obj: obj.__dict__)
 
     result = get_user_tenant_by_user_id("test_user_id")
 
@@ -187,7 +214,7 @@ def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.membership.get_db_session", lambda: mock_ctx)
 
     result = get_user_tenant_by_user_id("nonexistent_user_id")
 
@@ -203,7 +230,7 @@ def test_get_user_tenant_by_user_id_database_error(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.membership.get_db_session", lambda: mock_ctx)
 
     # Should raise SQLAlchemyError
     with pytest.raises(SQLAlchemyError):
@@ -264,8 +291,6 @@ def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="",
         tenant_id="test_tenant_id",
-        user_role="USER",
-        user_email=None,
         created_by="",
         updated_by=""
     )
@@ -294,8 +319,6 @@ def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="test_user_id",
         tenant_id="",
-        user_role="USER",
-        user_email=None,
         created_by="test_user_id",
         updated_by="test_user_id"
     )
@@ -325,9 +348,10 @@ def test_user_tenant_lifecycle(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.identity.membership.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("management.db.identity.user_tenant.UserTenant", mock_user_tenant_class)
-    monkeypatch.setattr("management.db.identity.user_tenant.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.membership.as_dict", lambda obj: obj.__dict__)
 
     # 1. Insert user tenant relationship - should not raise exception
     insert_user_tenant("test_user_id", "test_tenant_id")
@@ -355,7 +379,7 @@ def test_get_user_tenant_by_user_id_with_deleted_record(monkeypatch, mock_sessio
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.membership.get_db_session", lambda: mock_ctx)
 
     result = get_user_tenant_by_user_id("deleted_user_id")
 
@@ -425,6 +449,12 @@ def test_soft_delete_user_tenant_by_user_id_success(monkeypatch, mock_session):
     monkeypatch.setattr(
         "management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
 
+    actor = {"user_id": "actor1", "tenant_id": "a", "roles": ["ADMIN"]}
+    target = {"user_id": "user123", "tenant_id": "a", "roles": ["DEV"]}
+    monkeypatch.setattr("management.db.identity.user_tenant.get_user_tenant_by_user_id", lambda uid: actor if uid == "actor1" else target)
+    monkeypatch.setattr("management.db.identity.user_tenant.lock_tenants", MagicMock())
+    monkeypatch.setattr("management.db.identity.user_tenant.locked_members", lambda session, ids: {"actor1": actor, "user123": target})
+    monkeypatch.setattr("management.db.identity.user_tenant.check_admin_removal", MagicMock())
     ok = soft_delete_user_tenant_by_user_id("user123", "actor1")
     assert ok is True
     mock_query.filter.assert_called_once()
@@ -533,7 +563,7 @@ def test_get_users_by_tenant_id_with_search_roles_and_groups(monkeypatch, mock_s
     monkeypatch.setattr("management.db.identity.user_tenant.as_dict", lambda obj: obj.__dict__)
 
     result = get_users_by_tenant_id(
-        "test_tenant", 1, 10, search=" alice ", roles=["ADMIN"], group_ids=[3]
+        "test_tenant", 1, 10, search=" alice ", roles=["ADMIN", "SU"], group_ids=[3]
     )
 
     assert result["total"] == 1
@@ -779,62 +809,24 @@ def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
     assert result["users"] == []
 
 
-def test_update_user_tenant_role_success(monkeypatch, mock_session):
-    """Test successfully updating user tenant role"""
-    session, query = mock_session
-
-    # Mock update query
-    mock_update_query = MagicMock()
-    mock_update_query.update.return_value = 1  # 1 row affected
-    query.filter.return_value = mock_update_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
-
-    result = update_user_tenant_role("user123", "ADMIN", "updater456")
-
-    assert result is True
-    # Verify the update was called with correct parameters
-    mock_update_query.update.assert_called_once_with({
-        "user_role": "ADMIN",
-        "updated_by": "updater456",
-        "update_time": "NOW()"
-    })
+def test_update_user_tenant_role_success(monkeypatch):
+    replace = MagicMock(return_value=({"tenant_id": "tenant"}, ("USER",), ("ADMIN",)))
+    monkeypatch.setattr("management.db.identity.user_tenant.replace_member_roles", replace)
+    monkeypatch.setattr("management.db.identity.user_tenant.get_user_tenant_by_user_id", lambda uid: {"roles": ["ADMIN"]})
+    assert update_user_tenant_role("user123", "ADMIN", "updater456")
+    replace.assert_called_once_with("updater456", "user123", "ADMIN", legacy=True)
 
 
-def test_update_user_tenant_role_no_user_found(monkeypatch, mock_session):
-    """Test updating user tenant role when user not found"""
-    session, query = mock_session
-
-    # Mock update query returning 0 (no rows affected)
-    mock_update_query = MagicMock()
-    mock_update_query.update.return_value = 0  # No rows affected
-    query.filter.return_value = mock_update_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
-
-    result = update_user_tenant_role("nonexistent_user", "ADMIN", "updater456")
-
-    assert result is False
+def test_update_user_tenant_role_no_user_found(monkeypatch):
+    replace = MagicMock(side_effect=ValueError("User not found"))
+    monkeypatch.setattr("management.db.identity.user_tenant.replace_member_roles", replace)
+    with pytest.raises(ValueError, match="not found"):
+        update_user_tenant_role("missing", "ADMIN", "updater456")
 
 
-def test_update_user_tenant_role_database_error(monkeypatch, mock_session):
-    """Test database error handling for update_user_tenant_role"""
-    session, query = mock_session
-
-    # Mock query.filter to raise an error
-    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
-
+def test_update_user_tenant_role_database_error(monkeypatch):
+    failure = MagicMock(side_effect=MockSQLAlchemyError("Database connection failed"))
+    monkeypatch.setattr("management.db.identity.user_tenant.replace_member_roles", failure)
     with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
         update_user_tenant_role("user123", "ADMIN", "updater456")
 

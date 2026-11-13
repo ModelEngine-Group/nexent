@@ -371,7 +371,7 @@ def test_update_status_admin_approves_pending_review():
         result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="shared",
             user_id="user-1", tenant_id="tenant-1", content="opinion")
     assert result["review_id"] == "41"
-    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", "ADMIN", "shared", "opinion")
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "shared", "opinion")
     _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
@@ -384,7 +384,7 @@ def test_update_status_admin_rejects_pending_review():
         result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="rejected",
             user_id="user-1", tenant_id="tenant-1", content="opinion")
     assert result["review_id"] == "41"
-    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", "ADMIN", "rejected", "opinion")
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "rejected", "opinion")
     _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
@@ -397,7 +397,7 @@ def test_update_status_admin_approves_without_content():
         result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="shared",
             user_id="user-1", tenant_id="tenant-1", content=None)
     assert result["review_id"] == "41"
-    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", "ADMIN", "shared", None)
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "shared", None)
     _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
@@ -731,7 +731,7 @@ def test_update_status_validates_input_and_missing_records():
         )
 
 
-@pytest.mark.parametrize("user_role", ["USER", "user", ""])
+@pytest.mark.parametrize("user_role", ["USER", "user", "OPS", ""])
 def test_skill_repository_access_rejects_ordinary_users(user_role):
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"user_role": user_role}
     permission = types.ModuleType("management.db.identity.role_permission")
@@ -1109,3 +1109,13 @@ def isolate_repository_transaction_boundary(monkeypatch):
 
     monkeypatch.setattr(transactions, "repository_unit_of_work", lambda: nullcontext())
     monkeypatch.setattr(srs, "enrich_repository_identities", lambda *_args: None)
+
+
+@pytest.mark.parametrize("roles,allowed", [(["USER", "DEV", "OPS"], True), (["USER", "OPS"], False)])
+def test_skill_repository_access_uses_the_authoritative_role_union(roles, allowed):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"roles": roles, "user_role": "USER"}
+    if allowed:
+        srs.ensure_skill_repository_access("user-1")
+    else:
+        with pytest.raises(ForbiddenError):
+            srs.ensure_skill_repository_access("user-1")

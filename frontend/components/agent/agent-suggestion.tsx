@@ -17,7 +17,6 @@ interface SuggestionListProps extends AgentSuggestionStyleProps {
   renderItem: (suggestion: AgentSuggestionItem) => ReactNode;
   itemClassName?: string;
   listClassName?: string;
-  headingClassName?: string;
 }
 
 function SuggestionList({
@@ -28,7 +27,6 @@ function SuggestionList({
   renderItem,
   itemClassName,
   listClassName,
-  headingClassName,
 }: SuggestionListProps) {
   const { t } = useTranslation("common");
   if (suggestions.length === 0) return null;
@@ -40,12 +38,7 @@ function SuggestionList({
         className
       )}
     >
-      <h2
-        className={cn(
-          "mb-4 text-center text-base font-medium leading-6 text-foreground",
-          headingClassName
-        )}
-      >
+      <h2 className="mb-3 text-left text-sm font-semibold leading-normal text-foreground">
         {t("agentSuggestion.heading")}
       </h2>
       <ul
@@ -106,7 +99,6 @@ export function CardSuggestion(props: AgentSuggestionStyleProps) {
   return (
     <SuggestionList
       {...props}
-      headingClassName="mb-3 text-left text-sm font-semibold leading-normal"
       itemClassName="flex items-start gap-3 rounded-xl px-3 py-3 enabled:hover:bg-accent/50 motion-reduce:transition-none"
       renderItem={({ id, title, description, icon }) => {
         const hash = Array.from(id).reduce(

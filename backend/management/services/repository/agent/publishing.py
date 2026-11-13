@@ -1,15 +1,29 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+
 from typing import Any, Dict, Optional
 from management.db.repository_transactions import repository_transaction, repository_unit_of_work
 
-from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_REPOSITORY_STATUSES
-from contracts.constants.constants import SYSTEM_TENANT_ID
-from contracts.errors.exceptions import UnauthorizedError
 from contracts.agent import AgentRepositorySnapshot
-from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.constants.constants import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_AGENT_REPOSITORY,
+    STATUS_PENDING_REVIEW,
+    STATUS_REJECTED,
+    STATUS_SHARED,
+    SYSTEM_TENANT_ID,
+    VALID_REPOSITORY_STATUSES,
+)
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.roles import has_any_role
+from management.db.agent.catalog import (
+    get_agent_repository_by_agent_id,
+    get_agent_repository_by_id,
+    insert_agent_repository_record,
+    update_agent_repository_by_id,
+    update_agent_repository_status_by_id,
+)
 from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.agent.catalog import get_agent_repository_by_agent_id, get_agent_repository_by_id, insert_agent_repository_record, update_agent_repository_by_id, update_agent_repository_status_by_id
 from management.db.agent.version import search_version_by_version_no
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import read_icon_image
@@ -31,16 +45,16 @@ from management.services.repository.agent.common import (
     _PUBLISHER_RESUBMIT_TRANSITIONS,
     _PUBLISHER_STATUS_TRANSITIONS,
     _SU_STATUS_TRANSITIONS,
+    _count_tools_in_snapshot,
     _get_user_role,
-    _resolve_submitter_email,
+    _normalize_listing_tags,
+    _repository_icon_object_name,
+    _repository_image_id,
     _reset_repository_peer_statuses,
+    _resolve_submitter_email,
     _to_summary_item,
     _validate_card_fields,
     _validate_create_listing_permission,
-    _count_tools_in_snapshot,
-    _normalize_listing_tags,
-    _repository_image_id,
-    _repository_icon_object_name,
 )
 
 
@@ -60,7 +74,7 @@ def _validate_repository_status_transition(
     """
     transition = (current_status, new_status)
 
-    if user_role == "SU":
+    if has_any_role(user_role, {'SU'}):
         if current_status == new_status:
             return None
         if transition not in _SU_STATUS_TRANSITIONS:
@@ -69,14 +83,14 @@ def _validate_repository_status_transition(
             )
         return None
 
-    if user_role in ("ADMIN", "DEV"):
+    if has_any_role(user_role, {'ADMIN','DEV'}):
         if record.get("publisher_tenant_id") != tenant_id:
             raise UnauthorizedError("Not authorized to update this repository listing")
-        if user_role == "DEV" and record.get("publisher_user_id") != user_id:
+        if has_any_role(user_role, {'DEV'}) and not has_any_role(user_role, {'ADMIN'}) and record.get("publisher_user_id") != user_id:
             raise UnauthorizedError("Not authorized to update this repository listing")
         if current_status == new_status:
             return None
-        if user_role == "ADMIN" and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
+        if has_any_role(user_role, {'ADMIN'}) and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
             return None
         if transition not in _PUBLISHER_STATUS_TRANSITIONS:
             raise ValueError(

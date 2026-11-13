@@ -12,9 +12,6 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/hooks/auth/useUserDisplayName", () => ({
   useUserDisplayName: () => (_: unknown, fallback: string) => fallback,
 }));
-vi.mock("@/components/common/StandardTable", () => ({
-  StandardTable: () => null,
-}));
 vi.mock("@/components/resource/CreateResourceCard", () => ({
   default: () => null,
 }));

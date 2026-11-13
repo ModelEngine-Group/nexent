@@ -6,6 +6,10 @@ import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: null }),
+}));
+
 const items = Array.from({ length: 25 }, (_, index) => index + 1);
 const renderItem = (id: number) => (
   <ResourceCard key={id} title={`Item ${id}`} />
@@ -30,8 +34,8 @@ describe("repository pagination", () => {
     expect(container.querySelector<HTMLElement>(".grid")?.style.height).toBe(
       ""
     );
-    fireEvent.click(screen.getByTitle("2"));
-    expect(props.onPageChange).toHaveBeenCalledWith(2, 12);
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    expect(props.onPageChange).toHaveBeenCalledWith(2);
     rerender(<ResourceCardGrid {...props} page={3} columns={2} rows={1} />);
     expect(screen.getAllByRole("heading")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Item 25" })).toBeVisible();

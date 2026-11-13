@@ -2,6 +2,8 @@
 
 "use client";
 
+import { Table } from "antd";
+
 import { useEffect, useId, useState } from "react";
 import {
   Alert,
@@ -16,8 +18,6 @@ import {
   Spin,
   Tag,
 } from "antd";
-import { StandardTable } from "@/components/common/StandardTable";
-import { StandardButton } from "@/components/common/StandardButton";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
@@ -217,7 +217,7 @@ export default function ResourceReviewCenter({
               }
             />
           )}
-          <StandardTable<ResourceReview>
+          <Table<ResourceReview>
             className="resource-review-table resource-scroll-table"
             size="middle"
             scroll={{ x: 1500, y: "100%" }}
@@ -485,15 +485,15 @@ export default function ResourceReviewCenter({
         onCancel={() => !decision.isPending && setAction(null)}
         footer={
           <div className="flex justify-end gap-2 pb-1 pt-2">
-            <StandardButton
+            <Button
               className="!min-w-[88px]"
               disabled={decision.isPending}
               onClick={() => setAction(null)}
             >
               {t("common.cancel")}
-            </StandardButton>
-            <StandardButton
-              variant="primary"
+            </Button>
+            <Button
+              type="primary"
               className="!min-w-[88px]"
               loading={decision.isPending}
               onClick={submit}
@@ -504,7 +504,7 @@ export default function ResourceReviewCenter({
               }
             >
               {t("common.confirm")}
-            </StandardButton>
+            </Button>
           </div>
         }
       >

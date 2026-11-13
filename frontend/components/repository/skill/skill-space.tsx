@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useRepositoryTagPredicates } from "@/hooks/useRepositoryTagPredicates";
 
@@ -14,9 +14,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { uninstallSkillRepositoryCopy } from "@/services/skillRepositoryService";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
-import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   useInstallSkillFromRepository,
   useSkillRepositoryListingDetail,
@@ -53,7 +52,7 @@ export function SkillSpace({
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = hasRole(user, "ADMIN");
   const [pageSize, setPageSize] = useRepositoryPageSize();
   const [repositoryPage, setRepositoryPage] = useRepositoryQueryState(
     "page",

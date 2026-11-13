@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -e
 
@@ -350,11 +351,6 @@ get_third_party_images() {
     echo "$REDIS_IMAGE"
     echo "$MINIO_IMAGE"
     echo_image_ref "nginx:alpine"
-  fi
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-    echo "$SUPABASE_KONG"
-    echo "$SUPABASE_GOTRUE"
-    echo "$SUPABASE_DB"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"

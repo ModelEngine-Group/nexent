@@ -6,8 +6,9 @@ import { Modal } from "antd";
 import type { CSSProperties, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { StandardDrawer } from "@/components/common/StandardDrawer";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
+import { Drawer } from "antd";
+import { Button } from "antd";
+import { X } from "lucide-react";
 
 export interface ResourceDetailProps {
   open: boolean;
@@ -34,30 +35,31 @@ export default function ResourceDetail({
     presentation?.resourceType === "mcp"
   ) {
     return (
-      <StandardDrawer
+      <Drawer
         open={open}
         onClose={onClose}
         width={608}
         title={null}
-        header={null}
+        closable={false}
         footer={null}
-        closeLabel={t("common.close")}
-        closeText={t("common.close")}
-        bodyClassName="!overflow-hidden !py-0"
-        maskClassName={
-          presentation.resourceType === "agent" ? "!bg-black/30" : undefined
-        }
+        classNames={{
+          body: "!flex !min-h-0 !flex-col !overflow-hidden !py-0",
+          mask:
+            presentation.resourceType === "agent" ? "!bg-black/30" : undefined,
+        }}
       >
         <div className="relative flex min-h-0 w-full flex-1 flex-col">
           <div className="absolute right-0 top-0 z-20">
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <Button
+              type="text"
+              icon={<X size={16} />}
+              aria-label={t("common.close")}
               onClick={onClose}
             />
           </div>
           {children}
         </div>
-      </StandardDrawer>
+      </Drawer>
     );
   }
   return (

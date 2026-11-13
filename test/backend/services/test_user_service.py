@@ -2,16 +2,17 @@
 """
 Unit tests for management.services.permission.identity.users module
 """
-import sys
-import os
 import importlib.machinery
+import os
+import sys
 import types
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 # Mock external dependencies before any imports
 boto3_module = types.ModuleType("boto3")
@@ -35,6 +36,8 @@ sys.modules['nexent.memory.memory_service'] = nexent_memory_service
 
 # Create mock ToolConfig class for imports
 from pydantic import BaseModel
+
+
 class MockToolConfig(BaseModel):
     name: str = ""
     description: str = ""
@@ -49,14 +52,18 @@ patch('management.db.client.MinioClient', return_value=MagicMock()).start()
 
 # Mock database functions before importing the service
 patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()
-patch('management.db.identity.user_tenant.update_user_tenant_role').start()
 patch('management.db.identity.user_tenant.get_user_tenant_by_user_id').start()
 patch('management.db.identity.user_tenant.soft_delete_user_tenant_by_user_id').start()
 patch('management.db.identity.group.remove_user_from_all_groups').start()
 patch('management.db.identity.group.query_groups_by_users', return_value={}).start()
 
+# Keep knowledge cleanup as an explicit service collaborator in this unit suite.
+sys.modules['management.services.knowledge_base.management'] = MagicMock()
+sys.modules['management.services.knowledge_base.common'] = MagicMock()
+
 # Import unit under test
-from contracts.errors.exceptions import ForbiddenError, NotFoundException
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, RoleAssignmentConflict
+from management.services.permission.identity import users as user_service
 from management.services.permission.identity.users import (
     delete_user_and_cleanup,
     get_users,
@@ -155,13 +162,10 @@ class TestUserAuthorization:
 @pytest.fixture(autouse=True)
 def reset_mocks():
     """Reset mock return values, call counts, and side effects for each test"""
-    from management.services.permission.identity import users as user_service
 
     # Reset all mocks and clear side effects
     user_service.get_users_by_tenant_id.reset_mock()
     user_service.get_users_by_tenant_id.side_effect = None
-    user_service.update_user_tenant_role.reset_mock()
-    user_service.update_user_tenant_role.side_effect = None
     user_service.get_user_tenant_by_user_id.reset_mock()
     user_service.get_user_tenant_by_user_id.side_effect = None
     user_service.soft_delete_user_tenant_by_user_id.reset_mock()
@@ -183,7 +187,6 @@ class TestGetUsers:
     ])
     def test_get_users_success_with_pagination(self, page, page_size, expected_page, expected_page_size):
         """Test successfully retrieving users with various pagination settings"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -218,7 +221,6 @@ class TestGetUsers:
 
     def test_get_users_success_without_pagination(self):
         """Test successfully retrieving users without pagination (returns all data)"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -248,7 +250,6 @@ class TestGetUsers:
 
     def test_get_users_success_with_only_page(self):
         """Test retrieving users with only page parameter (no pagination info in result)"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -271,7 +272,6 @@ class TestGetUsers:
 
     def test_get_users_success_with_only_page_size(self):
         """Test retrieving users with only page_size parameter (no pagination info in result)"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -294,7 +294,6 @@ class TestGetUsers:
 
     def test_get_users_success_with_asc_sort(self):
         """Test successfully retrieving users with ascending sort order"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -315,7 +314,6 @@ class TestGetUsers:
 
     def test_get_users_empty_result(self):
         """Test retrieving users when no users exist"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
@@ -330,7 +328,6 @@ class TestGetUsers:
 
     def test_get_users_with_null_email(self):
         """Test retrieving users when user_email is None"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_relationships = [
             {"user_id": "user1", "user_email": None, "user_role": "USER", "tenant_id": "tenant123"}
@@ -348,7 +345,6 @@ class TestGetUsers:
 
     def test_get_users_default_parameters(self):
         """Test get_users with default parameters"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
@@ -364,7 +360,6 @@ class TestGetUsers:
 
     def test_get_users_calculates_total_pages_correctly(self):
         """Test that total_pages is calculated correctly for pagination"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [
@@ -380,7 +375,6 @@ class TestGetUsers:
 
     def test_get_users_includes_group_names(self):
         """Test that get_users returns group_names populated from batch query"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
         tenant_id = "tenant123"
@@ -403,7 +397,6 @@ class TestGetUsers:
 
     def test_get_users_with_no_groups_returns_empty_list(self):
         """Test that users with no group memberships get empty group_names list"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
         tenant_id = "tenant123"
@@ -420,7 +413,6 @@ class TestGetUsers:
 
     def test_get_users_batch_query_passes_user_ids(self):
         """Test that query_groups_by_users is called with the tenant's user IDs"""
-        from management.services.permission.identity import users as user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
 
@@ -437,7 +429,6 @@ class TestGetUsers:
 
     def test_get_users_with_filters_passes_filter_arguments(self):
         """Test that resource filters are forwarded to the database layer."""
-        from management.services.permission.identity import users as user_service
 
         user_service.get_users_by_tenant_id.return_value = {
             "users": [], "total": 0
@@ -458,232 +449,25 @@ class TestGetUsers:
 
 @pytest.mark.asyncio
 class TestUpdateUser:
-    """Test cases for update_user function"""
+    @pytest.mark.parametrize("values,legacy", [({"role": "DEV"}, True), ({"roles": ["DEV", "OPS"]}, False)])
+    async def test_delegates_atomic_assignment(self, mocker, values, legacy):
+        assigned = ("DEV",) if legacy else ("DEV", "OPS")
+        replace = mocker.patch("management.services.permission.identity.users.replace_roles", return_value={
+            "user_id": "target", "user_email": "user@example.com", "user_role": "DEV", "roles": assigned})
+        result = await update_user("target", values, "actor")
+        assert result["roles"] == list(assigned)
+        assert result["role"] == "DEV"
+        replace.assert_called_once_with("actor", "target", values.get("roles", values.get("role")), legacy=legacy)
 
-    @pytest.mark.parametrize("role", ["ADMIN", "DEV", "USER"])
-    async def test_update_user_success_valid_roles(self, role):
-        """Test successfully updating user with valid roles"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
+    @pytest.mark.parametrize("values", [{}, {"username": "ignored"}])
+    async def test_missing_role_is_rejected(self, values):
+        with pytest.raises(ValueError, match="required"):
+            await update_user("target", values, "actor")
 
-        user_id = "user123"
-        updated_by = "updater456"
-
-        mock_update_role.return_value = True
-        mock_get_user.return_value = {
-            "user_id": user_id,
-            "user_email": "user@example.com",
-            "user_role": role,
-            "tenant_id": "tenant123"
-        }
-
-        # Execute
-        result = await update_user(user_id, {"role": role}, updated_by)
-
-        # Assert
-        assert result["id"] == user_id
-        assert result["username"] == "user@example.com"
-        assert result["role"] == role
-
-        # Verify database calls
-        mock_update_role.assert_called_once_with(user_id, role, updated_by)
-        mock_get_user.assert_called_once_with(user_id)
-
-    async def test_update_user_success_with_null_email(self):
-        """Test successfully updating user when user_email is None"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
-
-        user_id = "user123"
-        update_data = {"role": "USER"}
-        updated_by = "updater456"
-
-        mock_update_role.return_value = True
-        mock_get_user.return_value = {
-            "user_id": user_id,
-            "user_email": None,
-            "user_role": "USER",
-            "tenant_id": "tenant123"
-        }
-
-        result = await update_user(user_id, update_data, updated_by)
-
-        assert result["username"] is None
-        assert result["role"] == "USER"
-
-    async def test_update_user_invalid_role(self):
-        """Test updating user with invalid role"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-
-        user_id = "user123"
-        update_data = {"role": "INVALID_ROLE"}
-        updated_by = "updater456"
-
-        # Execute & Assert
-        with pytest.raises(ValueError, match="Invalid role. Must be one of: ADMIN, DEV, USER"):
-            await update_user(user_id, update_data, updated_by)
-
-        # Verify database function was not called
-        mock_update_role.assert_not_called()
-
-    async def test_update_user_update_failed(self):
-        """Test updating user when database update fails"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
-
-        user_id = "user123"
-        update_data = {"role": "ADMIN"}
-        updated_by = "updater456"
-
-        mock_update_role.return_value = False
-
-        # Execute & Assert
-        with pytest.raises(ValueError, match=f"User {user_id} not found or update failed"):
-            await update_user(user_id, update_data, updated_by)
-
-        # Verify calls
-        mock_update_role.assert_called_once_with(user_id, "ADMIN", updated_by)
-        mock_get_user.assert_not_called()
-
-    async def test_update_user_not_found_after_update(self):
-        """Test updating user when user not found after update"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
-
-        user_id = "user123"
-        update_data = {"role": "ADMIN"}
-        updated_by = "updater456"
-
-        mock_update_role.return_value = True
-        mock_get_user.return_value = None
-
-        # Execute & Assert
-        with pytest.raises(ValueError, match=f"User {user_id} not found after update"):
-            await update_user(user_id, update_data, updated_by)
-
-        # Verify calls
-        mock_update_role.assert_called_once_with(user_id, "ADMIN", updated_by)
-        mock_get_user.assert_called_once_with(user_id)
-
-    async def test_update_user_empty_update_data(self):
-        """Test updating user with empty update data"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
-
-        user_id = "user123"
-        update_data = {}
-        updated_by = "updater456"
-
-        mock_update_role.return_value = True
-        mock_get_user.return_value = {
-            "user_id": user_id,
-            "user_email": "user@example.com",
-            "user_role": "USER",
-            "tenant_id": "tenant123"
-        }
-
-        result = await update_user(user_id, update_data, updated_by)
-
-        # Assert role remains unchanged
-        assert result["role"] == "USER"
-
-        # Verify database called with None for role
-        mock_update_role.assert_called_once_with(user_id, None, updated_by)
-
-    async def test_update_user_unexpected_error(self):
-        """Test updating user with unexpected error"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-
-        user_id = "user123"
-        update_data = {"role": "ADMIN"}
-        updated_by = "updater456"
-
-        mock_update_role.side_effect = Exception("Database connection failed")
-
-        # Execute & Assert
-        with pytest.raises(Exception, match="Database connection failed"):
-            await update_user(user_id, update_data, updated_by)
-
-
-class TestDataValidation:
-    """Test data validation and edge cases"""
-
-    @pytest.mark.asyncio
-    async def test_update_user_role_validation_all_valid_roles(self):
-        """Test role validation with all valid roles"""
-        from management.services.permission.identity import users as user_service
-        valid_roles = ["ADMIN", "DEV", "USER"]
-
-        for role in valid_roles:
-            # Reset mocks for each iteration
-            mock_update_role = user_service.update_user_tenant_role
-            mock_get_user = user_service.get_user_tenant_by_user_id
-
-            # Reset return values for each iteration
-            mock_update_role.reset_mock()
-            mock_get_user.reset_mock()
-
-            mock_update_role.return_value = True
-            mock_get_user.return_value = {
-                "user_id": "user123",
-                "user_email": "user@example.com",
-                "user_role": role,
-                "tenant_id": "tenant123"
-            }
-
-            result = await update_user("user123", {"role": role}, "updater456")
-
-            assert result["role"] == role
-            mock_update_role.assert_called_once_with("user123", role, "updater456")
-
-    @pytest.mark.asyncio
-    async def test_update_user_without_role_key(self):
-        """Test updating user without role key in update_data"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-        mock_get_user = user_service.get_user_tenant_by_user_id
-
-        user_id = "user123"
-        update_data = {"some_other_field": "value"}
-        updated_by = "updater456"
-
-        mock_update_role.return_value = True
-        mock_get_user.return_value = {
-            "user_id": user_id,
-            "user_email": "user@example.com",
-            "user_role": "USER",
-            "tenant_id": "tenant123"
-        }
-
-        result = await update_user(user_id, update_data, updated_by)
-
-        # Assert - should call with None role (no role update)
-        mock_update_role.assert_called_once_with(user_id, None, updated_by)
-        assert result["role"] == "USER"  # Existing role preserved
-
-    @pytest.mark.parametrize("invalid_role", ["invalid", "SUPER_ADMIN", "GUEST", "", None])
-    async def test_update_user_invalid_role_various_cases(self, invalid_role):
-        """Test updating user with various invalid roles"""
-        from management.services.permission.identity import users as user_service
-        mock_update_role = user_service.update_user_tenant_role
-
-        user_id = "user123"
-        update_data = {"role": invalid_role}
-        updated_by = "updater456"
-
-        # Execute & Assert
-        with pytest.raises(ValueError, match="Invalid role. Must be one of: ADMIN, DEV, USER"):
-            await update_user(user_id, update_data, updated_by)
-
-        # Verify database function was not called
-        mock_update_role.assert_not_called()
+    async def test_atomic_assignment_failure_propagates(self, mocker):
+        mocker.patch("management.services.permission.identity.users.replace_roles", side_effect=RoleAssignmentConflict("last administrator"))
+        with pytest.raises(RoleAssignmentConflict):
+            await update_user("target", {"roles": ["USER"]}, "actor")
 
 
 class TestDeleteUserAndCleanup:
@@ -713,7 +497,7 @@ class TestDeleteUserAndCleanup:
             return_value=0
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "management.services.permission.identity.users.delete_account"
         )
 
         # Setup mock admin client
@@ -732,8 +516,7 @@ class TestDeleteUserAndCleanup:
         mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
         mock_soft_delete_convs.assert_called_once_with(user_id)
         mock_soft_delete_oauth.assert_called_once_with(user_id, user_id)
-        mock_get_admin.assert_called_once()
-        mock_admin.auth.admin.delete_user.assert_called_once_with(user_id)
+        mock_get_admin.assert_called_once_with(user_id)
 
     @pytest.mark.asyncio
     async def test_delete_user_and_cleanup_best_effort(self, mocker):
@@ -760,15 +543,16 @@ class TestDeleteUserAndCleanup:
             side_effect=Exception("oauth failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client",
-            side_effect=Exception("admin failed")
+            "management.services.permission.identity.users.delete_account",
+            return_value=None
         )
 
         user_id = "user123"
         tenant_id = "tenant456"
 
-        # Should not raise, errors are logged and swallowed
-        await delete_user_and_cleanup(user_id, tenant_id)
+        # A denied core deletion must never continue to credential/resource deletion.
+        with pytest.raises(Exception, match="tenant deletion failed"):
+            await delete_user_and_cleanup(user_id, tenant_id)
 
     def _mock_base_cleanup(self, mocker):
         mocker.patch(
@@ -791,7 +575,7 @@ class TestDeleteUserAndCleanup:
             return_value=0,
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "management.services.permission.identity.users.delete_account"
         )
         mock_admin = MagicMock()
         mock_admin.auth.admin.delete_user = MagicMock()
@@ -804,8 +588,12 @@ class TestDeleteUserAndCleanup:
         fake_vdb.ElasticSearchService.full_delete_knowledge_base = AsyncMock(
             side_effect=delete_side_effect
         )
-        mocker.patch.dict(
-            sys.modules, {"management.services.knowledge_base.service": fake_vdb}
+        mocker.patch(
+            "management.services.permission.identity.users.get_vector_db_core", fake_vdb.get_vector_db_core
+        )
+        mocker.patch(
+            "management.services.permission.identity.users.knowledge_management",
+            types.SimpleNamespace(KnowledgeBaseManagementService=fake_vdb.ElasticSearchService),
         )
         return fake_vdb
 
@@ -971,17 +759,17 @@ class TestCoverageGaps:
         mock_update.assert_awaited_once_with("user-2", {"role": "USER"}, "su-1")
 
     @pytest.mark.asyncio
-    async def test_cleanup_handles_missing_supabase_admin_client(self, mocker):
+    async def test_cleanup_disables_local_account(self, mocker):
         mocker.patch(
             "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mocker.patch("management.services.permission.identity.users.get_supabase_admin_client", return_value=None)
+        mocker.patch("management.services.permission.identity.users.delete_account", return_value=None)
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
     @pytest.mark.asyncio
-    async def test_cleanup_revokes_api_keys_and_skips_supabase_without_email(self, mocker):
+    async def test_cleanup_revokes_api_keys_and_disables_account_without_email(self, mocker):
         mocker.patch(
             "management.services.permission.identity.users.get_user_tenant_by_user_id",
             return_value={"user_id": "user-1", "user_email": None},
@@ -990,13 +778,13 @@ class TestCoverageGaps:
             "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mock_revoke = mocker.patch("management.db.identity.token.soft_delete_tokens_by_user")
-        mock_get_admin = mocker.patch("management.services.permission.identity.users.get_supabase_admin_client")
+        mock_revoke = mocker.patch("management.services.permission.identity.users.soft_delete_tokens_by_user")
+        mock_get_admin = mocker.patch("management.services.permission.identity.users.delete_account")
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
         mock_revoke.assert_called_once_with("user-1", "user-1")
-        mock_get_admin.assert_not_called()
+        mock_get_admin.assert_called_once_with("user-1")
 
 
 # Run tests when executed directly

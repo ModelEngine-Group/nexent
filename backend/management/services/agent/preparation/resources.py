@@ -6,6 +6,7 @@ import logging
 from typing import List, Optional
 
 from contracts.constants.constants import PROTOCOL_JSONRPC
+from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
 from management.services.knowledge_base.service import ElasticSearchService
 from nexent.core.agents.agent_model import ExternalA2AAgentConfig, ToolConfig
 
@@ -156,7 +157,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         transport_type=agent.get("transport_type", "http-streaming"),
         protocol_version=agent.get("protocol_version", "1.0"),
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
-        timeout=300.0,
+        timeout=A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
         ssl_verify=agent.get("ssl_verify", True),
         raw_card=agent.get("raw_card"),
         custom_headers=_build_security_headers(agent) or None,

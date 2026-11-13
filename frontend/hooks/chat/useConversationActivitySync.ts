@@ -2,166 +2,123 @@
 
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 import { useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
-import { conversationService } from "@/services/conversationService";
-import { getConversationDateBoundaries } from "@/lib/conversationViewport";
-import type { ConversationListPage } from "@/types/conversation";
 import log from "@/lib/logger";
-import { useForegroundRefresh } from "./useForegroundRefresh";
-import { CONVERSATION_SYNC_FRESHNESS_MS } from "@/const/conversationSync";
 
-/** Observe Workbench's first page; reload metadata only when it changes. */
+interface ConfirmedHistoryChanges {
+  serverConversationIds?: ReadonlyMap<string, string>;
+  generatedTitles?: ReadonlyMap<string, string>;
+}
+interface RefreshQueue {
+  request: (operation: boolean) => void;
+  observe: (revision: string) => void;
+  flush: () => void;
+}
+
+/** Initial loading belongs to the runtime adapter; refresh only on real events. */
 export function useConversationActivitySync(
   scopeKey: string | null,
-  conversationType: "workbench" | "agent_chat"
+  conversationType: "workbench" | "agent_chat",
+  { serverConversationIds, generatedTitles }: ConfirmedHistoryChanges = {}
 ) {
   const aui = useAui();
   const busy = useAuiState(
     (state) => state.threads.isLoading || state.threads.isLoadingMore
   );
-  const [visible, setVisible] = useState(
+  const queue = useRef<RefreshQueue | undefined>(undefined);
+  const revision = useMemo(
     () =>
-      typeof document !== "undefined" && document.visibilityState === "visible"
+      JSON.stringify([
+        [...(serverConversationIds ?? [])]
+          .filter(
+            ([, id]) =>
+              /^\d+$/.test(id) &&
+              Number.isSafeInteger(Number(id)) &&
+              Number(id) > 0
+          )
+          .sort(([a], [b]) => a.localeCompare(b)),
+        [...(generatedTitles ?? [])].sort(([a], [b]) => a.localeCompare(b)),
+      ]),
+    [serverConversationIds, generatedTitles]
   );
-  const applied = useRef<ConversationListPage | undefined>(undefined);
-  const pending = useRef(false);
-  const failures = useRef(0);
-  const lifecycle = useRef({ active: true });
-  useEffect(() => {
-    const lifetime = { active: true };
-    lifecycle.current = lifetime;
-    failures.current = 0;
-    return () => {
-      lifetime.active = false;
-    };
-  }, [scopeKey, conversationType]);
-  const queryKey = useMemo(
-    () => ["conversation-activity", scopeKey, conversationType],
-    [scopeKey, conversationType]
-  );
-  useForegroundRefresh(queryKey, Boolean(scopeKey));
-  const query = useQuery({
-    queryKey,
-    staleTime: CONVERSATION_SYNC_FRESHNESS_MS,
-    enabled: conversationType === "workbench" && Boolean(scopeKey) && visible,
-    queryFn: async () => {
-      const lifetime = lifecycle.current;
-      try {
-        const data = await conversationService.getList({
-          offset: 0,
-          limit: 30,
-          conversationType,
-          ...getConversationDateBoundaries(),
-        });
-        if (lifetime.active) failures.current = 0;
-        return data;
-      } catch (error) {
-        if (lifetime.active) failures.current++;
-        throw error;
-      }
-    },
-    refetchInterval: () => Math.min(5_000 * 2 ** failures.current, 60_000),
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  });
-  const refetch = query.refetch;
-  useAuiEvent({ scope: "*", event: "thread.runEnd" }, () => {
-    if (
-      conversationType === "workbench" &&
-      scopeKey &&
-      document.visibilityState === "visible" &&
-      navigator.onLine
-    )
-      void refetch({ cancelRefetch: false });
-  });
-  useEffect(() => {
-    applied.current = undefined;
-    const refresh = () => {
-      const active = document.visibilityState === "visible";
-      setVisible(active);
-      if (
-        conversationType === "workbench" &&
-        scopeKey &&
-        active &&
-        navigator.onLine
-      )
-        void refetch({ cancelRefetch: false });
-    };
-    document.addEventListener("visibilitychange", refresh);
-    return () => {
-      document.removeEventListener("visibilitychange", refresh);
-    };
-  }, [scopeKey, conversationType, refetch]);
 
   useEffect(() => {
-    const data = query.data;
-    if (
-      !scopeKey ||
-      !visible ||
-      busy ||
-      query.isFetching ||
-      pending.current ||
-      !data ||
-      data === applied.current
-    )
-      return;
-    const epoch = lifecycle.current;
-    const isCurrent = () => {
-      const state = aui.threads().getState();
-      const listed = new Set(state.threadIds);
-      const items = state.threadItems.filter((item) => listed.has(item.id));
-      return (
-        items.filter((item) => item.remoteId && /^\d+$/.test(item.remoteId))
-          .length <= data.metadata.total &&
-        data.items.every((row) => {
-          const timestamp = row.last_activity_time ?? row.create_time;
-          const expectedActivity = timestamp
-            ? new Date(timestamp).toISOString()
-            : undefined;
-          return items.some(
-            (item) =>
-              item.remoteId === String(row.conversation_id) &&
-              item.title ===
-                (row.conversation_title ?? "Untitled conversation") &&
-              ((item.custom as { agentId?: number } | undefined)?.agentId ??
-                null) === (row.agent_id ?? null) &&
-              (item.custom as { lastMessageAt?: string } | undefined)
-                ?.lastMessageAt === expectedActivity
-          );
-        })
-      );
+    if (!scopeKey || conversationType !== "workbench") return;
+    let active = true;
+    let pending = false;
+    let dirty = false;
+    let previousRevision: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const available = () =>
+      active && document.visibilityState === "visible" && navigator.onLine;
+    const isBusy = () => {
+      const threads = aui.threads().getState();
+      return threads.isLoading || threads.isLoadingMore;
     };
-    if (isCurrent()) {
-      applied.current = data;
-      return;
-    }
-    pending.current = true;
-    // Same-adapter list reload preserves the active thread runtime, including
-    // drafts, attachments, resources and an in-flight stream.
-    void aui
-      .threads()
-      .reload()
-      .then(() => {
-        if (!epoch.active) return;
-        if (isCurrent()) applied.current = data;
-      })
-      .catch((error: unknown) => {
-        log.warn("Failed to refresh conversation activity", error);
-      })
-      .finally(() => {
-        pending.current = false;
-      });
-  }, [
-    aui,
-    busy,
-    query.data,
-    query.dataUpdatedAt,
-    query.isFetching,
-    scopeKey,
-    visible,
-  ]);
+    const flush = () => {
+      if (!dirty || pending || timer !== undefined || !available() || isBusy())
+        return;
+      // Coalesce focus/visibility/reconnect and confirmed changes in one burst.
+      // This timer is one-shot: idle pages and failures never schedule polling.
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (!dirty || pending || !available() || isBusy()) return;
+        dirty = false;
+        pending = true;
+        void (async () => {
+          try {
+            // The adapter reloads the loaded range, preserving the active runtime.
+            await aui.threads().reload();
+          } catch (error) {
+            if (active)
+              log.warn("Failed to refresh conversation history", error);
+          } finally {
+            pending = false;
+            if (active) flush();
+          }
+        })();
+      }, 50);
+    };
+    const current: RefreshQueue = {
+      request(operation) {
+        if (!active || (!operation && pending)) return;
+        dirty = true;
+        flush();
+      },
+      observe(next) {
+        const changed =
+          previousRevision !== undefined && previousRevision !== next;
+        previousRevision = next;
+        if (changed) current.request(true);
+      },
+      flush,
+    };
+    queue.current = current;
+    const foreground = () => {
+      if (available()) current.request(false);
+    };
+    window.addEventListener("focus", foreground);
+    window.addEventListener("online", foreground);
+    document.addEventListener("visibilitychange", foreground);
+    return () => {
+      active = false;
+      dirty = false;
+      if (timer !== undefined) clearTimeout(timer);
+      if (queue.current === current) queue.current = undefined;
+      window.removeEventListener("focus", foreground);
+      window.removeEventListener("online", foreground);
+      document.removeEventListener("visibilitychange", foreground);
+    };
+  }, [aui, scopeKey, conversationType]);
+
+  useEffect(() => {
+    queue.current?.observe(revision);
+  }, [revision, scopeKey, conversationType]);
+  useEffect(() => {
+    queue.current?.flush();
+  }, [busy]);
+  useAuiEvent({ scope: "*", event: "thread.runEnd" }, () => {
+    queue.current?.request(true);
+  });
 }

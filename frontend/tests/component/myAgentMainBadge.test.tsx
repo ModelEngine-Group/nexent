@@ -1,11 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCard";
 import { fetchPagedAgentList } from "@/services/agentConfigService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
+
+vi.mock("next/navigation", () => ({ useParams: () => ({ locale: "zh" }) }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -24,7 +26,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("@/app/[locale]/agent-space/components/MyAgentIcon", () => ({
+vi.mock("@/components/repository/agent/components/MyAgentIcon", () => ({
   MyAgentIcon: () => <div data-testid="agent-icon" />,
 }));
 
@@ -34,17 +36,20 @@ vi.mock("@/components/resource/ResourceCard", () => ({
     badge,
     subtitle,
     statusRow,
+    headerActions,
   }: {
     title?: unknown;
     badge?: unknown;
     subtitle?: unknown;
     statusRow?: unknown;
+    headerActions?: unknown;
   }) => (
     <div>
       <div data-testid="card-title">{title as never}</div>
       <div data-testid="card-badge">{badge as never}</div>
       <div data-testid="card-subtitle">{subtitle as never}</div>
       <div data-testid="card-status">{statusRow as never}</div>
+      {headerActions as never}
     </div>
   ),
 }));
@@ -64,16 +69,42 @@ function renderCard(agent: MyEditableAgentItem) {
       agent={agent}
       onEdit={vi.fn()}
       onView={vi.fn()}
-      onApplyListing={vi.fn()}
       onViewReview={vi.fn()}
       onDelete={vi.fn()}
-      onEvaluate={vi.fn()}
       onUsageGuide={vi.fn()}
     />
   );
 }
 
 describe("MyAgentCard main-agent badge", () => {
+  it("keeps review and usage actions in the repository without listing or evaluation entries", async () => {
+    renderCard({
+      ...baseAgent,
+      repository_info: [
+        { agent_repository_id: 8, version_no: 1, status: "shared" },
+      ],
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
+    );
+    await screen.findByRole("menu");
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "agentRepository.mine.menu.apply",
+      })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: "agentRepository.mine.evaluate" })
+    ).toBeNull();
+    expect(
+      screen.getByRole("menuitem", { name: "agentRepository.mine.menu.review" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", {
+        name: "agentRepository.mine.menu.usageGuide",
+      })
+    ).toBeInTheDocument();
+  });
   it("marks an explicit main agent", () => {
     renderCard({ ...baseAgent, is_main_agent: true });
     expect(screen.getByText("主智能体")).toBeInTheDocument();

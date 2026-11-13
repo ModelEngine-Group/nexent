@@ -408,10 +408,11 @@ export const updateToolList = async () => {
 /**
  * checkMcpServerHealth
  */
-export const checkMcpServerHealth = async (mcpId: number) => {
+export const checkMcpServerHealth = async (mcpId: number, tenantId?: string | null) => {
   try {
     const query = new URLSearchParams();
     query.set('mcp_id', mcpId.toString());
+    if (tenantId) query.set('tenant_id', tenantId);
     const response = await fetch(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
       method: 'GET',
       headers: getAuthHeaders(),

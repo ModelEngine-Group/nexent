@@ -3,7 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ResourceDetail from "@/components/resource/ResourceDetail";
-import { StandardDrawer } from "@/components/common/StandardDrawer";
+import { Drawer, Button } from "antd";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
@@ -140,17 +140,17 @@ describe("repository detail container compatibility", () => {
     }
   );
 
-  it("preserves the standard drawer header and footer defaults", () => {
+  it("renders the native drawer title, dismissal and footer actions", () => {
     render(
-      <StandardDrawer
+      <Drawer
         open
         title="Default title"
-        closeLabel="Dismiss"
-        closeText="Close"
+        closable={{ "aria-label": "Dismiss" }}
+        footer={<Button>Close</Button>}
         onClose={vi.fn()}
       >
         <p>Body</p>
-      </StandardDrawer>
+      </Drawer>
     );
     expect(screen.getByText("Default title")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy();

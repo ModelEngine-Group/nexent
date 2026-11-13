@@ -2,6 +2,8 @@
 
 "use client";
 
+import { Table } from "antd";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -20,7 +22,6 @@ import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { Search } from "lucide-react";
-import { StandardTable } from "@/components/common/StandardTable";
 import type { CSSProperties, ReactNode } from "react";
 
 import CreateResourceCard from "./CreateResourceCard";
@@ -361,7 +362,7 @@ export default function ResourceCardGrid<T>({
           </div>
         )}
       {presentation?.layout === "list" ? (
-        <StandardTable<T & object>
+        <Table<T & object>
           className="resource-scroll-table w-full"
           scroll={{ x: 1200, y: "100%" }}
           tableLayout="fixed"

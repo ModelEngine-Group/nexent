@@ -5,7 +5,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { App, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Nl2SkillChatPanel } from "@/app/newchat/assistant-ui/nl2skill-chat-panel";
 import {
@@ -130,20 +130,25 @@ export default function SkillChatCreateModal({
       setEditorOpen(true);
     });
   return (
-    <StandardModal
+    <Modal
+      centered
       open={open}
+      closable={{ "aria-label": t("common.close") }}
       title={t("skillChat.title")}
-      closeLabel={t("common.close")}
       cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      onOpenChange={(next) => {
-        if (!next) close();
-      }}
+      okText={t("common.confirm")}
+      onCancel={() => close()}
       width="min(1800px, calc(100vw - 48px))"
-      height="calc(100dvh - 64px)"
-      bodyClassName="!max-h-none min-h-0 flex-1 !overflow-hidden !p-0"
+      styles={{
+        container: {
+          height: "calc(100dvh - 64px)",
+          display: "flex",
+          flexDirection: "column",
+        },
+        body: { minHeight: 0, flex: 1, overflow: "hidden", padding: 0 },
+      }}
       footer={null}
-      closeOnEscape={!running && !saving}
+      keyboard={!running && !saving}
     >
       <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
         <section
@@ -249,6 +254,6 @@ export default function SkillChatCreateModal({
           }}
         />
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

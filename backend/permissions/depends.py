@@ -3,26 +3,19 @@
 
 from typing import Callable
 
-from contracts.constants.environment import IS_SPEED_MODE
 from fastapi import Depends, HTTPException
+
+from gateway.authentication.auth import authenticate
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
-from gateway.authentication.auth import authenticate
 
 
-
-
-
-
-def require(permission: str) -> Callable[[CurrentUser], CurrentUser]:
+def require(permission: str, *, alternative: str | None = None) -> Callable[[CurrentUser], CurrentUser]:
     """Return a dependency that requires the given permission string."""
 
     def dependency(current_user: CurrentUser = Depends(authenticate)) -> CurrentUser:
-        if IS_SPEED_MODE and current_user.normalized_role == "SPEED":
-            # Speed mode has no role_permission_t seeds, so allow the built-in
-            # SPEED account to pass through permission checks.
-            return current_user
-        if not has_permission(current_user.normalized_role, permission):
+        roles = current_user.effective_roles
+        if not has_permission(roles, permission) and not (alternative and has_permission(roles, alternative)):
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing required permission: {permission}",

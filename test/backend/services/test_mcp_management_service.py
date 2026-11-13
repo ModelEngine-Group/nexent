@@ -311,10 +311,10 @@ class TestGetMcpReviewAdminScope(unittest.TestCase):
         self.assertEqual(result, "tid")
 
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
-    def test_super_admin_returns_none(self, mock_get):
+    def test_unknown_legacy_role_cannot_grant_platform_scope(self, mock_get):
         mock_get.return_value = {"user_role": "SUPER_ADMIN"}
-        result = _get_mcp_review_admin_scope("uid", "tid")
-        self.assertIsNone(result)
+        with self.assertRaises(ValueError):
+            _get_mcp_review_admin_scope("uid", "tid")
 
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_su_returns_none(self, mock_get):

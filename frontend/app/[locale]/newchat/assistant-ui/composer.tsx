@@ -2,9 +2,6 @@
 
 "use client";
 
-import type { ReasoningEffort } from "@/types/modelConfig";
-import { isReasoningEffort } from "@/lib/modelReasoning";
-
 import {
   useMemo,
   useState,
@@ -16,7 +13,6 @@ import { useTranslation } from "react-i18next";
 import { App } from "antd";
 import log from "@/lib/logger";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 import { SkillPicker } from "@/features/workbench/components/SkillPicker";
 import type { WorkbenchSkillMount } from "@/features/workbench/types";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
@@ -41,6 +37,8 @@ import {
   ComposerPrimitive,
   useAui,
   useAuiState,
+  type CompleteAttachment,
+  type ThreadRuntime,
 } from "@assistant-ui/react";
 import {
   LexicalComposerInput,
@@ -82,6 +80,11 @@ import {
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
+import { ComposerAnnotationChip } from "./annotation-chip";
+import {
+  toMessageAnnotationWireItems,
+  type MessageAnnotationsControl,
+} from "../utils/message-annotations";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
@@ -135,20 +138,31 @@ const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
 
 export type ChatMode = "planning" | "execution";
 
+/**
+ * Drops the annotation payload from the composer runConfig.
+ *
+ * The fallback send path (in-flight attachment uploads) parks the structured
+ * annotations on the composer runConfig because the library owns the append
+ * there. Once the run settles the payload must be cleared again so it cannot
+ * ride a later programmatic send that bypasses `prepareSend` (edit resends,
+ * clarification cards).
+ */
+function clearComposerMessageAnnotations(thread: ThreadRuntime) {
+  const config = thread.composer.getState().runConfig;
+  thread.composer.setRunConfig({
+    ...config,
+    custom: { ...config.custom, messageAnnotations: undefined },
+  });
+}
+
 export interface ComposerProps {
+  conversationId?: number;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   children?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -170,6 +184,8 @@ export interface ComposerProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  /** Pending reply annotations attached to the next outgoing message. */
+  annotations?: MessageAnnotationsControl;
 }
 
 // Simple tooltip wrapper
@@ -289,19 +305,13 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
 );
 
 export const Composer: FC<ComposerProps> = ({
+  conversationId,
   models,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   children,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -320,6 +330,7 @@ export const Composer: FC<ComposerProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  annotations,
 }) => {
   const conversationResources =
     !workbenchResources &&
@@ -329,15 +340,27 @@ export const Composer: FC<ComposerProps> = ({
   const aui = useAui();
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const [sendError, setSendError] = useState("");
-  const prepareSend = () => {
+  const prepareSend = (event?: { preventDefault: () => void }) => {
     if (!runtime || runtime.thread.getState().isRunning) return;
     const threadId = runtime.threads.getState().mainThreadId;
     const thread = runtime.threads.getById(threadId);
-    const config = thread.composer.getState().runConfig;
+    const composerState = thread.composer.getState();
+    const config = composerState.runConfig;
     setSendError("");
+    const pendingAnnotations = annotations?.annotations ?? [];
     const feedback = protectOrdinarySend(thread, {
       restoreDraft: true,
+      // Annotations attach to exactly one outgoing message: consume them
+      // once the run accepts them. A rejected send keeps them (together
+      // with the restored draft) so the user can retry.
+      onStarted: pendingAnnotations.length
+        ? () => {
+            annotations?.consumeAnnotations();
+            clearComposerMessageAnnotations(thread);
+          }
+        : undefined,
       onRejected: (error) => {
+        clearComposerMessageAnnotations(thread);
         if (runtime.threads.getState().mainThreadId === threadId) {
           setSendError(
             ordinarySendError(error, i18n.language, (value) =>
@@ -347,10 +370,77 @@ export const Composer: FC<ComposerProps> = ({
         }
       },
     });
-    thread.composer.setRunConfig({
-      ...config,
-      custom: { ...config.custom, ...feedback },
+    if (!pendingAnnotations.length) {
+      // Ordinary send: keep the library-managed composer submit untouched.
+      // The explicit undefined drops any annotation payload left on the
+      // composer runConfig by a previous fallback send.
+      thread.composer.setRunConfig({
+        ...config,
+        custom: {
+          ...config.custom,
+          ...feedback,
+          modelPreferenceScope: modelParameterScope,
+          messageAnnotations: undefined,
+        },
+      });
+      return;
+    }
+
+    // Reply annotations travel as a structured field alongside the clean
+    // composer text; the backend persists them as a unit and merges them
+    // into the model-facing text at request time.
+    const annotationItems = toMessageAnnotationWireItems(pendingAnnotations);
+    const attachmentsReady = composerState.attachments.every(
+      (attachment) => attachment.status.type === "complete"
+    );
+    if (!attachmentsReady) {
+      // In-flight uploads must go through the library submission flow,
+      // which waits for uploads before appending; ride the annotations via
+      // the runConfig channel there (the optimistic bubble shows no cards
+      // until reload).
+      thread.composer.setRunConfig({
+        ...config,
+        custom: {
+          ...config.custom,
+          ...feedback,
+          modelPreferenceScope: modelParameterScope,
+          messageAnnotations: annotationItems,
+        },
+      });
+      return;
+    }
+
+    // Take over the append so the optimistic message carries the structured
+    // annotation metadata (rendered as cards on the user bubble). Preventing
+    // the default keeps the library from appending a second message; the
+    // composer draft is cleared manually to match the library send behavior.
+    event?.preventDefault();
+    if (composerState.dictation) {
+      thread.composer.stopDictation();
+    }
+    const completeAttachments = composerState.attachments.filter(
+      (attachment): attachment is CompleteAttachment =>
+        attachment.status.type === "complete"
+    );
+    thread.append({
+      role: "user",
+      content: composerState.text
+        ? [{ type: "text", text: composerState.text }]
+        : [],
+      attachments: completeAttachments,
+      metadata: { custom: { annotations: annotationItems } },
+      runConfig: {
+        ...config,
+        custom: {
+          ...config.custom,
+          ...feedback,
+          modelPreferenceScope: modelParameterScope,
+          messageAnnotations: annotationItems,
+        },
+      },
     });
+    thread.composer.setText("");
+    void thread.composer.clearAttachments();
   };
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [conversationSkills, setConversationSkills] = useState<
@@ -466,9 +556,6 @@ export const Composer: FC<ComposerProps> = ({
     }
     const scope: ConversationKnowledgeScope = {
       schema_version: 1,
-      ...(knowledgeScope?.retrieval_config
-        ? { retrieval_config: knowledgeScope.retrieval_config }
-        : {}),
       local: {
         mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
         knowledge_ids: enableAidpKnowledge ? [] : ids,
@@ -624,7 +711,7 @@ export const Composer: FC<ComposerProps> = ({
             className="flex w-full flex-col gap-2.5 outline-none"
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
-              else prepareSend();
+              else prepareSend(event);
             }}
             onKeyDownCapture={(event) => {
               if (isRunning && event.key === "Enter" && !event.shiftKey)
@@ -638,6 +725,15 @@ export const Composer: FC<ComposerProps> = ({
             }}
           >
             {hasAttachments && <ComposerAttachments className="px-0" />}
+            <ComposerAnnotationChip
+              annotations={annotations?.annotations ?? []}
+              disabled={isRunning || disabled}
+              onEditComment={(id, comment) =>
+                annotations?.updateAnnotationComment(id, comment)
+              }
+              onRemove={(id) => annotations?.removeAnnotation(id)}
+              onClear={() => annotations?.clearAnnotations()}
+            />
             {conversationResources &&
               (selectedSkillNames.length > 0 ||
                 (canSelectKnowledge &&
@@ -819,23 +915,14 @@ export const Composer: FC<ComposerProps> = ({
               <div className="flex min-w-0 flex-[1_1_16rem] items-center justify-end gap-1">
                 {showModelSelector && (
                   <ModelSelector
+                    conversationId={conversationId}
                     models={models}
                     disabled={(modelSelectionDisabled ?? disabled) || isRunning}
-                    budgetTokens={reasoningBudgetTokens}
-                    onBudgetTokensChange={onReasoningBudgetTokensChange}
-                    parameterSettings={modelParameterSettings}
                     parameterSettingsScopeKey={modelParameterScope}
                     parameterSettingsDisabled={disabled || isRunning}
                     showEffort
                     value={selectedModelId}
                     onValueChange={onModelChange}
-                    deepThinking={deepThinking}
-                    onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    onEffortChange={(value) => {
-                      if (isReasoningEffort(value))
-                        onThinkingEffortChange?.(value);
-                    }}
                     variant="ghost"
                     size="sm"
                     className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
@@ -845,6 +932,7 @@ export const Composer: FC<ComposerProps> = ({
                 <ComposerSendOrCancel
                   onSend={prepareSend}
                   disabled={disabled || knowledgeSaving}
+                  hasAnnotations={(annotations?.annotations.length ?? 0) > 0}
                 />
               </div>
             </div>
@@ -960,9 +1048,10 @@ const WorkbenchPlanningMenu: FC<{
 // Trigger can use `asChild` against the Button. `AuiIf` toggles between the
 // two branches declaratively based on `thread.isRunning`.
 const ComposerSendOrCancel: FC<{
-  onSend: () => void;
+  onSend: (event?: { preventDefault: () => void }) => void;
   disabled?: boolean;
-}> = ({ onSend, disabled }) => {
+  hasAnnotations?: boolean;
+}> = ({ onSend, disabled, hasAnnotations = false }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -999,7 +1088,7 @@ const ComposerSendOrCancel: FC<{
             <Button
               size="icon"
               className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
-              disabled={disabled || !hasText}
+              disabled={disabled || (!hasText && !hasAnnotations)}
               aria-label={t("chat.composer.send")}
             >
               <Send />

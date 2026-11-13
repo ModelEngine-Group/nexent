@@ -8,36 +8,10 @@ import json
 import logging
 import re
 from http import HTTPStatus
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 from urllib.parse import unquote, urlparse
 
 import httpx
-from contracts.constants.environment import MINIO_ENDPOINT
-from contracts.a2a import JSONRPCRequest
-from contracts.agent import reject_legacy_agent_fields
-from contracts.authentication import NorthboundContext
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.constants.constants import RATE_LIMIT_EXCEEDED_DETAIL
-from contracts.knowledge import VectorDatabaseType
-from contracts.constants.constants import NORTHBOUND_SERVICE_NAME
-from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ForbiddenError,
-    LimitExceededError,
-    NotFoundException,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
-from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
-from contracts.knowledge import HybridSearchRequest, ProcessParams
-from contracts.tool import ToolParamsRequest
 from fastapi import (
     APIRouter,
     Body,
@@ -57,8 +31,39 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
+from pydantic import ValidationError as PydanticValidationError
+
+from contracts.a2a import JSONRPCRequest
+from contracts.agent import reject_legacy_agent_fields
+from contracts.authentication import NorthboundContext
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    NORTHBOUND_SERVICE_NAME,
+    RATE_LIMIT_EXCEEDED_DETAIL,
+)
+from contracts.constants.environment import MINIO_ENDPOINT
+from contracts.conversation import GenerateTitleRequest
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    LimitExceededError,
+    NotFoundException,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
+)
+from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
+from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
+from contracts.tool import ToolParamsRequest
 from gateway.authentication.auth import generate_session_jwt, get_user_language
-from gateway.authentication.northbound_auth import get_northbound_context as _get_northbound_context
+from gateway.authentication.northbound_auth import (
+    get_northbound_context as _get_northbound_context,
+)
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (
@@ -88,8 +93,10 @@ from management.services.permission.api_keys import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from management.utils.file_http import build_content_disposition_header, build_storage_proxy_url
-from pydantic import ValidationError as PydanticValidationError
+from management.utils.file_http import (
+    build_content_disposition_header,
+    build_storage_proxy_url,
+)
 from services.northbound_service import (
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
@@ -127,15 +134,13 @@ def _resolve_proxy_download_filename(presigned_url: str, content_disposition: st
     return filename or "download"
 
 
-
-
 @router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "northbound-api"}
 
 
-def _role_for_context(user_id: str, tenant_id: str) -> str:
-    return get_user_role_by_tenant(user_id, tenant_id).upper()
+def _role_for_context(user_id: str, tenant_id: str) -> tuple[str, ...]:
+    return get_user_role_by_tenant(user_id, tenant_id)
 
 
 def _raise_api_key_http_exception(exc: Exception) -> None:
@@ -405,6 +410,12 @@ async def run_chat(
         ],
     ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    final_answer_mode: Literal["complete", "delta"] = Body(
+        "complete",
+        embed=True,
+        description="Final answer delivery: complete returns one full root answer (default); "
+                    "delta preserves incremental final_answer events and their completion phase.",
+    ),
 ):
     try:
         reject_legacy_agent_fields(await request.json())
@@ -420,6 +431,7 @@ async def run_chat(
             tool_params=tool_params,
             model_id=model_id,
             idempotency_key=idempotency_key,
+            final_answer_mode=final_answer_mode,
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
@@ -434,6 +446,10 @@ async def run_chat(
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
+    except AppException:
+        # Let the global AppException handler map error codes to HTTP status
+        # (runtime metadata / MCP header passthrough failures rely on this).
+        raise
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -447,7 +463,6 @@ async def stop_chat_stream(
     conversation_id: int,
     meta_data: Optional[str] = Query(None, description="Optional metadata as JSON string"),
 ):
-    import json
 
     parsed_meta_data = None
     if meta_data:
@@ -636,7 +651,6 @@ async def update_convs_title(
     meta_data: Optional[str] = Query(None, description="Optional metadata as JSON string"),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
-    import json
 
     parsed_meta_data = None
     if meta_data:

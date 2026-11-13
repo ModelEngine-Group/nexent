@@ -1,33 +1,103 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
-from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
-from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
 from copy import deepcopy
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
-from contracts.constants.constants import MESSAGE_ROLE
+from contracts.clarification import ClarificationResponse, normalize_form
+from contracts.constants.constants import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    CHAT_MODE_VALUES,
+    DEFAULT_TENANT_ID,
+    HISTORY_SUMMARY_UNIT_TYPE,
+    MESSAGE_ROLE,
+)
+from contracts.constants.environment import (
+    MAX_CONVERSATION_TURNS,
+    MAX_CONVERSATIONS_PER_USER,
+)
+from contracts.conversation import (
+    ConversationHistory,
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    MessageSource,
+    decode_activity_cursor,
+    encode_activity_cursor,
+    format_annotations_for_llm,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
-from management.db.models import KnowledgeRecord
-
-from management.utils.orm import as_dict
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    HistorySummaryPersistenceError,
+    RuntimeMetadataVersionConflict,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
+from contracts.roles import has_any_role, roles_from_record
 from management.db.client import db_client, get_db_session
+from management.db.conversation.branch_titles import build_branch_title as _build_branch_title
+from management.db.conversation.classification import (
+    executor_system_key,
+    is_workbench_history,
+)
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.models import (
+    AgentAutomationProposal,
     ConversationMessage,
     ConversationMessageUnit,
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
+    KnowledgeRecord,
+    UserTenant,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
+from management.utils.orm import as_dict
+
+
+def load_execution_result_content(
+    user_id: str, tenant_id: str, conversation_id: int, message_id: int, unit_index: int,
+) -> str:
+    """Load one execution unit in the caller's current conversation scope."""
+
+    membership = select(UserTenant.user_id).where(
+        UserTenant.user_id == user_id,
+        UserTenant.tenant_id == tenant_id,
+        UserTenant.delete_flag == "N",
+    ).exists()
+    statement = (
+        select(ConversationMessageUnit.unit_content)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+        .where(
+            membership,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.delete_flag == "N",
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.delete_flag == "N",
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.unit_index == unit_index,
+            ConversationMessageUnit.unit_type == "execution_result",
+            ConversationMessageUnit.delete_flag == "N",
+        )
+    )
+    with get_db_session() as session:
+        rows = session.execute(statement).scalars().all()
+    if not rows:
+        raise PermissionError("Execution result is unavailable or not authorized")
+    if len(rows) != 1:
+        raise ValueError("Ambiguous execution result reference")
+    payload = json.loads(rows[0])
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+        raise ValueError("Invalid persisted execution content")
+    return payload["content"]
 
 
 def _serialize_unit_content(content: Any) -> str:
@@ -60,19 +130,17 @@ def _parse_history_summary_content(content: Any) -> Optional[Dict[str, Any]]:
 
 def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
     """Resolve tenant ownership lazily to keep database modules decoupled."""
-    from management.db.identity.user_tenant import get_user_tenant_by_user_id
 
     return get_user_tenant_by_user_id(user_id)
 
 
 def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
     """Resolve legacy empty tenant fields consistently with authentication."""
-    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     tenant_id = user_tenant.get("tenant_id")
     if tenant_id:
         return tenant_id
-    if (user_tenant.get("user_role") or "").upper() == ASSET_OWNER_ROLE:
+    if has_any_role(roles_from_record(user_tenant), {ASSET_OWNER_ROLE}):
         return ASSET_OWNER_TENANT_ID
     return DEFAULT_TENANT_ID
 
@@ -149,6 +217,9 @@ def create_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    target: Optional[Dict[str, Any]] = None,
+    model_parameter_preferences: Optional[Dict[str, Any]] = None,
+    selected_model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation record
@@ -168,6 +239,8 @@ def create_conversation(
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
+        if target is not None:
+            data["target"] = deepcopy(target)
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -180,6 +253,10 @@ def create_conversation(
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
             data["workbench_config_version"] = 1
+        if selected_model_id is not None:
+            data["selected_model_id"] = selected_model_id
+        if model_parameter_preferences:
+            data["model_parameter_preferences"] = deepcopy(model_parameter_preferences)
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -190,6 +267,7 @@ def create_conversation(
                 ConversationRecord.conversation_id,
                 ConversationRecord.conversation_title,
                 ConversationRecord.agent_id,
+                _optional_conversation_column("target", None),
                 ConversationRecord.chat_mode,
                 ConversationRecord.knowledge_scope,
                 ConversationRecord.runtime_metadata,
@@ -208,6 +286,7 @@ def create_conversation(
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
             "agent_id": record.agent_id,
+            "target": record.target if isinstance(getattr(record, "target", None), dict) else None,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
             "runtime_metadata": record.runtime_metadata or {},
@@ -290,6 +369,9 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             response = _resolve_clarification_response(
                 session, conversation_id, user_id, message_role, message_data['clarification_response'],
             )
+        annotations = None
+        if message_data.get('annotations') is not None:
+            annotations = normalize_message_annotations(message_data['annotations'])
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -319,6 +401,22 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             if user_id:
                 unit_data = add_creation_tracking(unit_data, user_id)
             session.execute(insert(ConversationMessageUnit).values(**unit_data))
+        if annotations is not None and message_role == MESSAGE_ROLE["USER"]:
+            # Reply annotations ride as a structured unit so the stored
+            # message_content stays clean; the unit drives history rendering
+            # and the model-facing merge for later turns.
+            annotation_unit = {
+                'conversation_id': conversation_id, 'message_id': message_id,
+                'unit_index': 0, 'unit_type': MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                'unit_content': json.dumps(
+                    [item.model_dump(mode="json") for item in annotations],
+                    ensure_ascii=False,
+                ),
+                'unit_status': 'completed', 'delete_flag': 'N',
+            }
+            if user_id:
+                annotation_unit = add_creation_tracking(annotation_unit, user_id)
+            session.execute(insert(ConversationMessageUnit).values(**annotation_unit))
         if message_role == MESSAGE_ROLE["USER"] or (
             message_role == MESSAGE_ROLE["ASSISTANT"] and message_data["content"] and status != "streaming"
         ):
@@ -328,7 +426,6 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
 
 def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
     """Resolve an owned latest form before writing either side of the response."""
-    from contracts.clarification import ClarificationResponse, normalize_form
 
     response = ClarificationResponse.model_validate(raw)
     if role != MESSAGE_ROLE['USER'] or not user_id:
@@ -421,6 +518,338 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
             unit_ids.append(unit_id)
 
         return unit_ids
+
+
+def _select_branch_turn_rows(
+    rows: Sequence[ConversationMessage],
+    turn_index: int,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> List[ConversationMessage]:
+    """Select one answer per turn, ending at the explicitly selected version.
+
+    Keep regenerated assistant rows until version selection. Collapsing them
+    by message_index first would lose older answers still visible in the UI.
+    Runtime answer ordinals follow the same message_index/message_id ordering
+    as history loading; a persisted ID takes precedence when available.
+    """
+    latest_users = {
+        int(row.message_index): row
+        for row in rows
+        if row.message_role == MESSAGE_ROLE["USER"]
+    }
+    turns: List[List[ConversationMessage]] = []
+    preamble: List[ConversationMessage] = []
+    for row in rows:
+        if row.message_role == MESSAGE_ROLE["USER"]:
+            if row is not latest_users[int(row.message_index)]:
+                continue
+            turns.append([row])
+        elif turns:
+            turns[-1].append(row)
+        else:
+            preamble.append(row)
+    if turn_index < 1 or turn_index > len(turns):
+        raise ValueError(f"turn_index {turn_index} exceeds the {len(turns)} turns in the conversation")
+
+    branch_rows = list(preamble)
+    for index, turn in enumerate(turns[:turn_index], start=1):
+        answers = [row for row in turn if row.message_role == MESSAGE_ROLE["ASSISTANT"]]
+        selected = answers[-1] if answers else None
+        if index == turn_index:
+            if source_message_id is not None:
+                selected = next(
+                    (row for row in answers if int(row.message_id) == source_message_id), None
+                )
+                if selected is None:
+                    raise ValueError("source_message_id does not identify an answer in the selected turn")
+            elif answer_index is not None:
+                if not 1 <= answer_index <= len(answers):
+                    raise ValueError("answer_index does not identify an answer in the selected turn")
+                selected = answers[answer_index - 1]
+        for row in turn:
+            if row.message_role != MESSAGE_ROLE["ASSISTANT"] or row is selected:
+                branch_rows.append(row)
+            if row is selected:
+                break
+    return branch_rows
+
+
+def branch_conversation(
+    conversation_id: int,
+    turn_index: int,
+    user_id: Optional[str] = None,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Branch a conversation into a new one up to and including the given turn.
+
+    Copies conversation-level configuration plus the active messages, units and
+    search/image sources of every turn up to and including ``turn_index``
+    (1-based over active user rows). MinIO file references inside
+    ``minio_files`` are shared, not copied; the original conversation and its
+    rows stay untouched.
+
+    Args:
+        conversation_id: Source conversation ID (integer)
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User that must own the source conversation
+        source_message_id: Exact persisted answer to retain in the final turn
+        answer_index: 1-based answer version for messages with runtime-only IDs
+
+    Returns:
+        Optional[Dict[str, Any]]: New conversation data, or None when the
+        source conversation does not exist or is not accessible
+    """
+    conversation_id = int(conversation_id)
+    turn_index = int(turn_index)
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+
+    with get_db_session() as session:
+        # Take the user-quota advisory lock before any row lock so the lock
+        # ordering matches create_conversation (advisory -> row).
+        _enforce_user_conversation_limit(session, user_id)
+
+        conversation = session.scalars(
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                *([ConversationRecord.created_by == user_id] if user_id else []),
+            )
+            .with_for_update()
+        ).first()
+        if conversation is None:
+            return None
+
+        message_rows = session.scalars(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.delete_flag == "N",
+            )
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
+            .with_for_update()
+        ).all()
+
+        branch_rows = _select_branch_turn_rows(
+            message_rows, turn_index, source_message_id=source_message_id, answer_index=answer_index
+        )
+
+        # The existing user advisory lock serializes numbering for branches
+        # created by the same owner. Other users and deleted rows do not count.
+        existing_titles = session.scalars(
+            select(ConversationRecord.conversation_title).where(
+                ConversationRecord.created_by == (user_id or conversation.created_by),
+                ConversationRecord.delete_flag == "N",
+            )
+        ).all()
+        conversation_data = {
+            "conversation_title": _build_branch_title(
+                conversation.conversation_title, existing_titles
+            ),
+            "delete_flag": "N",
+            "agent_id": conversation.agent_id,
+            "chat_mode": conversation.chat_mode,
+            "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
+            "runtime_metadata_version": 1,
+        }
+        # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
+        # value null (not SQL NULL), and agent-chat history filters on
+        # "workbench_config IS NULL": binding an absent declaration would hide
+        # the branched conversation from every agent-chat list. Copy nullable
+        # JSONB values only when the source actually declares them, mirroring
+        # create_conversation.
+        if conversation.knowledge_scope is not None:
+            conversation_data["knowledge_scope"] = deepcopy(
+                conversation.knowledge_scope
+            )
+        if conversation.workbench_config is not None:
+            conversation_data["workbench_config"] = deepcopy(
+                conversation.workbench_config
+            )
+            conversation_data["workbench_config_version"] = 1
+        if user_id:
+            conversation_data = add_creation_tracking(conversation_data, user_id)
+
+        new_conversation = session.execute(
+            insert(ConversationRecord)
+            .values(**conversation_data)
+            .returning(
+                ConversationRecord.conversation_id,
+                ConversationRecord.conversation_title,
+                ConversationRecord.agent_id,
+                ConversationRecord.chat_mode,
+                ConversationRecord.knowledge_scope,
+                ConversationRecord.runtime_metadata,
+                ConversationRecord.runtime_metadata_version,
+                _optional_conversation_column("workbench_config", None),
+                _optional_conversation_column("workbench_config_version", 0),
+                (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+                (func.extract("epoch", ConversationRecord.update_time) * 1000).label("update_time"),
+            )
+        ).fetchone()
+
+        new_conversation_id = int(new_conversation.conversation_id)
+        branch_message_ids = [int(row.message_id) for row in branch_rows]
+
+        units_by_message: Dict[int, List[ConversationMessageUnit]] = {}
+        searches_by_message: Dict[int, List[ConversationSourceSearch]] = {}
+        images_by_message: Dict[int, List[ConversationSourceImage]] = {}
+        if branch_message_ids:
+            for unit in session.scalars(
+                select(ConversationMessageUnit)
+                .where(
+                    ConversationMessageUnit.message_id.in_(branch_message_ids),
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+                .order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))
+            ).all():
+                units_by_message.setdefault(int(unit.message_id), []).append(unit)
+
+            for search in session.scalars(
+                select(ConversationSourceSearch).where(
+                    ConversationSourceSearch.message_id.in_(branch_message_ids),
+                    ConversationSourceSearch.delete_flag == "N",
+                )
+            ).all():
+                searches_by_message.setdefault(int(search.message_id), []).append(search)
+
+            for image in session.scalars(
+                select(ConversationSourceImage).where(
+                    ConversationSourceImage.message_id.in_(branch_message_ids),
+                    ConversationSourceImage.delete_flag == "N",
+                )
+            ).all():
+                images_by_message.setdefault(int(image.message_id), []).append(image)
+
+        copied_unit_ids = {
+            int(unit.unit_id)
+            for units in units_by_message.values()
+            for unit in units
+        }
+
+        message_id_map: Dict[int, int] = {}
+        for row in branch_rows:
+            # opinion_flag is intentionally not copied: user feedback stays
+            # attached to the original conversation's messages.
+            message_data = {
+                "conversation_id": new_conversation_id,
+                "message_index": row.message_index,
+                "message_role": row.message_role,
+                "message_source": row.message_source or MessageSource.CHAT.value,
+                "message_content": row.message_content,
+                "minio_files": row.minio_files,
+                "status": row.status or "completed",
+                "delete_flag": "N",
+            }
+            if user_id:
+                message_data = add_creation_tracking(message_data, user_id)
+            message_id_map[int(row.message_id)] = int(
+                session.execute(
+                    insert(ConversationMessage)
+                    .values(**message_data)
+                    .returning(ConversationMessage.message_id)
+                ).scalar_one()
+            )
+
+        unit_id_map: Dict[int, int] = {}
+        for old_message_id, units in units_by_message.items():
+            for unit in units:
+                unit_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_index": unit.unit_index,
+                    "unit_type": unit.unit_type,
+                    "unit_content": unit.unit_content,
+                    "unit_status": unit.unit_status or "completed",
+                    "tool_call_id": unit.tool_call_id,
+                    "invocation_id": unit.invocation_id,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    unit_data = add_creation_tracking(unit_data, user_id)
+                unit_id_map[int(unit.unit_id)] = int(
+                    session.execute(
+                        insert(ConversationMessageUnit)
+                        .values(**unit_data)
+                        .returning(ConversationMessageUnit.unit_id)
+                    ).scalar_one()
+                )
+
+        for old_message_id, searches in searches_by_message.items():
+            for search in searches:
+                search_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(search.unit_id))
+                        if search.unit_id is not None and int(search.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "source_type": search.source_type,
+                    "source_title": search.source_title,
+                    "source_location": search.source_location,
+                    "source_content": search.source_content,
+                    "score_overall": search.score_overall,
+                    "score_accuracy": search.score_accuracy,
+                    "score_semantic": search.score_semantic,
+                    "retrieval_highlight_terms": search.retrieval_highlight_terms,
+                    "aidp_metadata": search.aidp_metadata,
+                    "aidp_source_reference": search.aidp_source_reference,
+                    "published_date": search.published_date,
+                    "cite_index": search.cite_index,
+                    "search_type": search.search_type,
+                    "tool_sign": search.tool_sign,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    search_data = add_creation_tracking(search_data, user_id)
+                session.execute(insert(ConversationSourceSearch).values(**search_data))
+
+        for old_message_id, images in images_by_message.items():
+            for image in images:
+                image_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(image.unit_id))
+                        if image.unit_id is not None and int(image.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "image_url": image.image_url,
+                    "cite_index": image.cite_index,
+                    "search_type": image.search_type,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    image_data = add_creation_tracking(image_data, user_id)
+                session.execute(insert(ConversationSourceImage).values(**image_data))
+
+        return {
+            "conversation_id": new_conversation_id,
+            "conversation_title": new_conversation.conversation_title,
+            "agent_id": new_conversation.agent_id,
+            "chat_mode": new_conversation.chat_mode or "execution",
+            "knowledge_scope": new_conversation.knowledge_scope,
+            "runtime_metadata": new_conversation.runtime_metadata or {},
+            "runtime_metadata_version": new_conversation.runtime_metadata_version or 0,
+            "workbench_config": (
+                new_conversation.workbench_config
+                if isinstance(getattr(new_conversation, "workbench_config", None), dict)
+                else None
+            ),
+            "workbench_config_version": (
+                new_conversation.workbench_config_version
+                if isinstance(getattr(new_conversation, "workbench_config_version", None), int)
+                else 0
+            ),
+            "create_time": int(new_conversation.create_time),
+            "update_time": int(new_conversation.update_time),
+            "branched_message_count": len(branch_rows),
+        }
 
 
 def persist_assistant_run_batch(
@@ -562,7 +991,7 @@ def persist_assistant_run_batch(
             session.execute(insert(ConversationSourceImage), image_rows)
 
         if automation_proposals:
-            from management.db.models import AgentAutomationProposal
+            pass
 
         for proposal_link in automation_proposals:
             unit_index = int(proposal_link["unit_index"])
@@ -899,7 +1328,7 @@ def resolve_conversation_runtime_metadata(
 def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
     """Keep entrypoint and creation workflows stable while allowing chat mounts to change."""
     current = record.workbench_config
-    if not isinstance(current, dict) or current.get("schema_version") != 3:
+    if not isinstance(current, dict) or current.get("schema_version") != 4:
         raise WorkbenchError("WORKBENCH_CONVERSATION_REQUIRED", status_code=409)
     creation_modes = {"skill_create", "agent_create"}
     if current.get("mode") in creation_modes or config.get("mode") in creation_modes:
@@ -1154,6 +1583,8 @@ def get_conversation_list_page(
     offset: int = 0,
     conversation_type: Optional[str] = None,
     cursor: Optional[str] = None,
+    creator_agent_id: Optional[int] = None,
+    creator_target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return activity-ordered histories with full-scope bucket counts.
 
@@ -1164,6 +1595,8 @@ def get_conversation_list_page(
         raise ValueError("Invalid conversation type")
     if cursor is not None and offset:
         raise ValueError("Conversation cursor cannot be combined with offset")
+    if (creator_agent_id is None) != (creator_target is None):
+        raise ValueError("Creator executor and target must be supplied together")
     boundary = decode_activity_cursor(cursor) if cursor is not None else None
     with get_db_session() as session:
         activity = _activity_time_expression()
@@ -1186,9 +1619,14 @@ def get_conversation_list_page(
             ConversationRecord.created_by == user_id,
         )
         if conversation_type == "workbench":
-            scope = scope.where(ConversationRecord.workbench_config.is_not(None))
+            scope = scope.where(is_workbench_history())
         elif conversation_type == "agent_chat":
-            scope = scope.where(ConversationRecord.workbench_config.is_(None))
+            scope = scope.where(~is_workbench_history())
+        if creator_agent_id is not None:
+            scope = scope.where(
+                ConversationRecord.agent_id == creator_agent_id,
+                ConversationRecord.target == creator_target,
+            )
         rows = scope.subquery()
         statement = select(rows).order_by(rows.c.activity_time.desc(), rows.c.conversation_id.desc())
         if boundary:
@@ -1247,7 +1685,10 @@ def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: O
     """
     with get_db_session() as session:
         conversation_id = int(conversation_id)
-        update_data = {"agent_id": int(agent_id), "update_time": func.current_timestamp()}
+        update_data = {
+            "agent_id": int(agent_id),
+            "update_time": func.current_timestamp(),
+        }
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
@@ -1667,6 +2108,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
+            executor_system_key().label("agent_system_key"),
+            _optional_conversation_column("target", None),
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
@@ -1783,6 +2226,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             "conversation_id": conversation["conversation_id"],
             "conversation_title": conversation.get("conversation_title"),
             "agent_id": conversation.get("agent_id"),
+            "target": conversation.get("target"),
+            "agent_system_key": conversation.get("agent_system_key"),
             "chat_mode": conversation.get("chat_mode") or "execution",
             "knowledge_scope": conversation.get("knowledge_scope"),
             "runtime_metadata": conversation.get("runtime_metadata") or {},
@@ -2557,9 +3002,15 @@ def _stopped_history_text(message, session, conversation_id: int) -> str:
     return _STOPPED_CONTEXT_NOTE + ("\n" + body if body else "")
 
 
-def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any]:
+def _history_turn(user, assistant_text: str, assistant_id=None,
+                  annotations=None) -> Dict[str, Any]:
+    # Annotations merge into the model-facing user text only; the stored
+    # message_content stays clean.
+    user_message = user.message_content or ""
+    if annotations:
+        user_message = format_annotations_for_llm(user_message, annotations)
     return {
-        "user_message": user.message_content or "",
+        "user_message": user_message,
         "assistant_final_answer": assistant_text,
         "attachments": user.minio_files,
         "user_message_id": user.message_id,
@@ -2669,12 +3120,45 @@ def get_historical_context(
             .order_by(asc(ConversationMessage.message_index))
         ).all()
 
+        # Fetch reply-annotation units for the historical user messages so the
+        # model keeps seeing quoted excerpts on later turns while the stored
+        # message_content stays clean.
+        user_message_ids = [
+            message.message_id
+            for message in messages
+            if message.message_role == "user"
+        ]
+        annotations_by_message: Dict[int, Any] = {}
+        if user_message_ids:
+            annotation_rows = session.execute(
+                select(
+                    ConversationMessageUnit.message_id,
+                    ConversationMessageUnit.unit_content,
+                ).where(
+                    ConversationMessageUnit.conversation_id == conversation_id,
+                    ConversationMessageUnit.message_id.in_(user_message_ids),
+                    ConversationMessageUnit.unit_type == MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                    ConversationMessageUnit.unit_status == "completed",
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+            ).all()
+            for row in annotation_rows:
+                items = parse_message_annotation_unit(row.unit_content)
+                if items is not None:
+                    annotations_by_message[int(row.message_id)] = items
+
         turns: List[Dict[str, Any]] = []
         pending_user = None
         for message in messages:
             if message.message_role == "user":
                 if pending_user is not None:
-                    turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+                    turns.append(
+                        _history_turn(
+                            pending_user,
+                            _UNANSWERED_CONTEXT_NOTE,
+                            annotations=annotations_by_message.get(pending_user.message_id),
+                        )
+                    )
                 pending_user = message
             elif pending_user is not None:
                 answer = (
@@ -2682,10 +3166,23 @@ def get_historical_context(
                     if message.status == "stopped"
                     else message.message_content or ""
                 )
-                turns.append(_history_turn(pending_user, answer, message.message_id))
+                turns.append(
+                    _history_turn(
+                        pending_user,
+                        answer,
+                        message.message_id,
+                        annotations=annotations_by_message.get(pending_user.message_id),
+                    )
+                )
                 pending_user = None
         if pending_user is not None:
-            turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+            turns.append(
+                _history_turn(
+                    pending_user,
+                    _UNANSWERED_CONTEXT_NOTE,
+                    annotations=annotations_by_message.get(pending_user.message_id),
+                )
+            )
 
         summary_result = None
         if summary_record and summary_payload:
@@ -2757,3 +3254,16 @@ def remove_conversation_knowledge_bindings(
             record.workbench_config = workbench
             record.workbench_config_version += 1
         record.update_time = func.current_timestamp()
+
+
+def bind_creation_conversation_target(conversation_id, executor_id, expected_target, target, user_id):
+    """Compare-and-set a resource target without changing the executor or messages."""
+    with get_db_session() as session:
+        predicate = ConversationRecord.target.is_(None) if expected_target is None else ConversationRecord.target == expected_target
+        result = session.execute(update(ConversationRecord).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.agent_id == executor_id,
+            ConversationRecord.delete_flag == "N", predicate,
+        ).values(target=target, updated_by=user_id))
+        return result.rowcount == 1

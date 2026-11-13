@@ -3,6 +3,7 @@
 """
 Tenant service for managing tenant operations
 """
+
 import asyncio
 import logging
 import os
@@ -10,25 +11,61 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from management.db.skill import repository as skill_db
-from management.db.configuration.tenant import create_tenant_with_default_group, get_single_config_info, insert_config, update_config_by_tenant_config_id, get_all_tenant_ids, delete_config_by_tenant_config_id, get_all_configs_by_tenant_id
-from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
-from management.services.permission.identity.users import delete_user_and_cleanup
-from management.db.identity.group import query_groups_by_tenant, remove_group
-from management.db.model.repository import get_model_records, delete_model_record
-from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
-from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
-from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
-from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
-from management.db.tool.repository import delete_tools_by_agent_id
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
-from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
-from management.services.skill.transfer import install_skills_from_zip_for_tenant
-from management.services.agent.system import (
-    ensure_workbench_main_agent,
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    TENANT_ID,
+    TENANT_NAME,
 )
+from contracts.constants.environment import CONTAINER_SKILLS_PATH
+from contracts.errors.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    UserRegistrationException,
+    ValidationError,
+)
+from contracts.roles import has_any_role
+from management.db.agent.repository import (
+    delete_agent_by_id,
+    delete_agent_relationship,
+    query_all_agent_info_by_tenant_id,
+)
+from management.db.configuration.tenant import (
+    create_tenant_with_default_group,
+    delete_config_by_tenant_config_id,
+    get_all_configs_by_tenant_id,
+    get_all_tenant_ids,
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+)
+from management.db.identity.group import query_groups_by_tenant, remove_group
+from management.db.identity.invitation import (
+    query_invitations_by_tenant,
+    remove_invitation,
+)
+from management.db.identity.user_tenant import (
+    get_users_by_tenant_id,
+    soft_delete_users_by_tenant_id,
+)
+from management.db.knowledge_base.repository import (
+    delete_knowledge_record,
+    get_knowledge_info_by_tenant_id,
+)
+from management.db.mcp.remote import (
+    delete_mcp_record_by_name_and_url,
+    get_mcp_records_by_tenant,
+)
+from management.db.model.repository import delete_model_record, get_model_records
+from management.db.skill import repository as skill_db
+from management.db.tool.repository import delete_tools_by_agent_id
+from management.services.permission.identity import users as user_service
+from management.services.skill.transfer import (
+    install_skills_for_tenant as install_by_ids,
+)
+from management.services.skill.transfer import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +76,7 @@ def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
     return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
-def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
+def get_tenant_info(tenant_id: str, *, initialize_name: bool = True) -> Dict[str, Any]:
     """
     Get tenant information by tenant ID
 
@@ -56,7 +93,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
 
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config:
+    if not name_config and initialize_name:
         logger.warning(
             f"The name of tenant {tenant_id} not found, creating default config.")
         # Auto-create TENANT_NAME config with default name
@@ -82,10 +119,12 @@ def get_tenant_info_for_user(
     requester_role: str,
 ) -> Dict[str, Any]:
     """Get tenant information after enforcing tenant-scoped access."""
-    role = (requester_role or "").upper()
-    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
-    if role != "SU" and not is_speed_admin and tenant_id != requester_tenant_id:
+    role = requester_role
+
+    if not has_any_role(role, {'SU'}) and tenant_id != requester_tenant_id:
         raise ForbiddenError("Not authorized to access this tenant")
+    if has_any_role(role, {"OPS"}) and not has_any_role(role, {"ADMIN", "SU"}):
+        return get_tenant_info(tenant_id, initialize_name=False)
     return get_tenant_info(tenant_id)
 
 
@@ -205,52 +244,10 @@ def get_tenants_paginated_for_user(
     requester_role: str,
 ) -> Dict[str, Any]:
     """List tenants for platform administrators only."""
-    role = (requester_role or "").upper()
-    if role != "SU" and not (IS_SPEED_MODE and role == "SPEED"):
+    role = requester_role
+    if not has_any_role(role, {'SU'}):
         raise ForbiddenError("Only super administrators can list tenants")
     return get_tenants_paginated(page=page, page_size=page_size)
-
-
-def backfill_workbench_main_agents() -> Dict[str, int]:
-    """Ensure the tenant-scoped workbench Agent for every existing real tenant.
-
-    The operation is deliberately reentrant. Each tenant is isolated so that a
-    malformed or temporarily unavailable tenant does not prevent the remaining
-    tenants from being upgraded.
-    """
-    if not ENABLE_AGENT_WORKBENCH:
-        return {"total": 0, "succeeded": 0, "failed": 0}
-
-    tenant_ids = [
-        tenant_id
-        for tenant_id in get_all_tenant_ids()
-        if _is_displayable_tenant_id(tenant_id)
-    ]
-    succeeded = 0
-    failed = 0
-
-    for tenant_id in tenant_ids:
-        try:
-            ensure_workbench_main_agent(
-                tenant_id=tenant_id,
-                user_id="system",
-            )
-            succeeded += 1
-        except Exception as exc:
-            failed += 1
-            logger.warning(
-                "Failed to backfill workbench_main for tenant %s: %s",
-                tenant_id,
-                exc,
-            )
-
-    result = {
-        "total": len(tenant_ids),
-        "succeeded": succeeded,
-        "failed": failed,
-    }
-    logger.info("Workbench system Agent backfill completed: %s", result)
-    return result
 
 
 def create_tenant(
@@ -308,7 +305,6 @@ def create_tenant(
                     f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
         elif skill_ids:
             try:
-                from management.services.skill.transfer import install_skills_for_tenant as install_by_ids
                 installed_by_ids = install_by_ids(
                     skill_ids=skill_ids,
                     tenant_id=tenant_id,
@@ -321,22 +317,6 @@ def create_tenant(
             except Exception as e:
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
-
-        if ENABLE_AGENT_WORKBENCH:
-            try:
-                ensure_workbench_main_agent(
-                    tenant_id=tenant_id,
-                    user_id=created_by or "system",
-                    locale=locale,
-                )
-            except Exception as e:
-                # Tenant creation remains recoverable because Workbench runtime also
-                # calls the provider lazily before using the system Agent.
-                logger.warning(
-                    "Failed to provision workbench_main for tenant %s: %s",
-                    tenant_id,
-                    e,
-                )
 
         tenant_info = {
             "tenant_id": tenant_id,
@@ -499,18 +479,19 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
-        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
             tenant_id, page=1, page_size=10000, email_required=False)
         users = users_result.get("users", [])
 
         if users:
+            soft_delete_users_by_tenant_id(tenant_id, deleted_by)
             async def delete_single_user(user: Dict[str, Any]) -> None:
                 user_id = user.get("user_id")
                 if user_id:
                     try:
-                        await delete_user_and_cleanup(user_id, tenant_id)
+                        await user_service.delete_user_and_cleanup(user_id, tenant_id, actor_id=deleted_by, membership_removed=True)
                         logger.info(
                             f"Deactivated user {user_id} for tenant {tenant_id}")
                     except Exception as e:

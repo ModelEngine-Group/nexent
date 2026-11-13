@@ -3,19 +3,35 @@
 """
 User service layer - handles user-related business logic
 """
+
 import logging
 from typing import Any, Dict, List, Optional
 
-from management.db.identity.user_tenant import get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id, soft_delete_user_tenant_by_user_id
-from management.db.identity.group import remove_user_from_all_groups, query_groups_by_users
-from management.db.memory.config import soft_delete_all_configs_by_user_id
-from management.db.conversation.repository import soft_delete_all_conversations_by_user
-from management.db.knowledge_base.repository import get_private_knowledge_info_by_creator
-from management.db.identity.oauth_account import soft_delete_all_oauth_accounts_by_user_id
-from contracts.constants.environment import IS_SPEED_MODE
 from contracts.errors.exceptions import ForbiddenError, NotFoundException
-from gateway.authentication.auth import get_supabase_admin_client
+from contracts.roles import has_any_role, primary_role, roles_from_record
+from management.db.conversation.repository import soft_delete_all_conversations_by_user
+from management.db.identity.account import delete_account
+from management.db.identity.group import (
+    query_groups_by_users,
+    remove_user_from_all_groups,
+)
+from management.db.identity.oauth_account import (
+    soft_delete_all_oauth_accounts_by_user_id,
+)
+from management.db.identity.token import soft_delete_tokens_by_user
+from management.db.identity.user_tenant import (
+    get_user_tenant_by_user_id,
+    get_users_by_tenant_id,
+    soft_delete_user_tenant_by_user_id,
+)
+from management.db.knowledge_base.repository import (
+    get_private_knowledge_info_by_creator,
+)
+from management.db.memory.config import soft_delete_all_configs_by_user_id
+from management.services.knowledge_base import management as knowledge_management
+from management.services.knowledge_base.common import get_vector_db_core
 from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.permission.identity.roles import replace_roles
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +79,7 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
             "id": r["user_id"],
             "username": r.get("user_email"),
             "role": r["user_role"],
+            "roles": list(roles_from_record(r)),
             "tenant_id": r["tenant_id"],
             "group_names": user_group_map.get(r["user_id"], []),
         }
@@ -101,11 +118,11 @@ def get_users_for_requester(
     search_cas_username: bool = False,
 ) -> Dict[str, Any]:
     """List users after enforcing role and tenant boundaries."""
-    role = (requester_role or "").upper()
-    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
-    if role == "SU" or is_speed_admin:
+    role = requester_role
+
+    if has_any_role(role, {'SU'}):
         pass
-    elif role == "ADMIN" and tenant_id == requester_tenant_id:
+    elif has_any_role(role, {'ADMIN', 'OPS'}) and tenant_id == requester_tenant_id:
         pass
     else:
         raise ForbiddenError("Not authorized to list users for this tenant")
@@ -122,52 +139,19 @@ def get_users_for_requester(
 
 
 async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str) -> Dict[str, Any]:
-    """
-    Update user information
-
-    Args:
-        user_id (str): User ID to update
-        update_data (Dict[str, Any]): Update data containing role
-        updated_by (str): ID of the user making the update
-
-    Returns:
-        Dict[str, Any]: Updated user information
-
-    Raises:
-        ValueError: When user not found or invalid data
-    """
-    try:
-        # Validate role if provided
-        if "role" in update_data:
-            valid_roles = ["ADMIN", "DEV", "USER"]
-            if update_data["role"] not in valid_roles:
-                raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
-
-        # Update user role in database
-        success = update_user_tenant_role(user_id, update_data.get("role"), updated_by)
-
-        if not success:
-            raise ValueError(f"User {user_id} not found or update failed")
-
-        # Get updated user information
-        user_tenant_data = get_user_tenant_by_user_id(user_id)
-
-        if not user_tenant_data:
-            raise ValueError(f"User {user_id} not found after update")
-
-        user_info = {
-            "id": user_tenant_data["user_id"],
-            "username": user_tenant_data.get("user_email"),
-            "role": user_tenant_data["user_role"]
-        }
-
-        enrich_cas_usernames([user_info], {"cas_username": "id"})
-        logger.info(f"Updated user {user_id} role to {update_data.get('role')} by user {updated_by}")
-        return user_info
-
-    except Exception as exc:
-        logger.error(f"Failed to update user {user_id}: {str(exc)}")
-        raise
+    """Replace roles atomically; preserve compatibility fields in the response."""
+    values = update_data.get("roles")
+    legacy = values is None
+    if legacy:
+        values = update_data.get("role")
+    if values is None:
+        raise ValueError("Role update is required")
+    member = replace_roles(updated_by, user_id, values, legacy=legacy)
+    roles = roles_from_record(member)
+    result = {"id": user_id, "username": member.get("user_email"),
+              "role": primary_role(roles, member.get("user_role")), "roles": list(roles)}
+    enrich_cas_usernames([result], {"cas_username": "id"})
+    return result
 
 
 async def update_user_for_requester(
@@ -183,14 +167,14 @@ async def update_user_for_requester(
     if not target_user:
         raise NotFoundException(f"User {user_id} not found")
 
-    role = (requester_role or "").upper()
-    target_role = str(target_user.get("user_role") or "").upper()
+    role = requester_role
+    target_role = roles_from_record(target_user)
     target_tenant_id = target_user.get("tenant_id")
-    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
 
-    if role == "SU" or is_speed_admin:
+
+    if has_any_role(role, {'SU'}):
         pass
-    elif role == "ADMIN" and target_tenant_id == requester_tenant_id and target_role != "SU":
+    elif has_any_role(role, {'ADMIN'}) and target_tenant_id == requester_tenant_id and not has_any_role(target_role, {'SU'}):
         pass
     else:
         raise ForbiddenError("Not authorized to update this user")
@@ -204,10 +188,6 @@ async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optio
     if not private_kbs:
         return None
 
-    from management.services.knowledge_base.service import (
-        ElasticSearchService,
-        get_vector_db_core,
-    )
 
     vdb_core = get_vector_db_core()
     succeeded = 0
@@ -224,7 +204,7 @@ async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optio
             )
             continue
         try:
-            await ElasticSearchService.full_delete_knowledge_base(
+            await knowledge_management.KnowledgeBaseManagementService.full_delete_knowledge_base(
                 index_name, vdb_core, user_id
             )
             succeeded += 1
@@ -246,7 +226,7 @@ async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optio
     return cleanup_result
 
 
-async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
+async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str = None, membership_removed: bool = False) -> None:
     """
     Permanently delete user account and all related data.
 
@@ -255,7 +235,7 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     2) Soft-delete memory user configs and all conversations
     3) Clear user-level memories in memory store
     4) Delete personal KBs created by the user
-    5) Permanently delete user from Supabase
+    5) Disable the local authentication account
 
     Args:
         user_id (str): User ID to delete
@@ -263,19 +243,20 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     try:
         logger.debug(f"Start permanently deleting user {user_id} and all related data...")
-        user_tenant = get_user_tenant_by_user_id(user_id)
-        has_supabase_identity = bool(user_tenant and user_tenant.get("user_email"))
-
         # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
-            tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, user_id)
+            tenant_deleted = membership_removed or soft_delete_user_tenant_by_user_id(user_id, actor_id or user_id)
             if not tenant_deleted:
                 raise ValueError(f"User {user_id} not found in any tenant")
 
-            remove_user_from_all_groups(user_id, user_id)
-            logger.debug("\tUser tenant relationship and groups deleted.")
         except Exception as e:
             logger.error(f"Failed core deletion for user {user_id}: {e}")
+            raise
+
+        try:
+            remove_user_from_all_groups(user_id, actor_id or user_id)
+        except Exception:
+            logger.exception("Failed group cleanup for user %s", user_id)
 
         # 2) Soft-delete memory configs
         try:
@@ -304,24 +285,14 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
 
         # 6) Revoke all API keys before the identity is removed.
         try:
-            from management.db.identity.token import soft_delete_tokens_by_user
 
             soft_delete_tokens_by_user(user_id, user_id)
             logger.debug("\tUser API keys revoked.")
         except Exception as e:
             logger.error(f"Failed revoking API keys for user {user_id}: {e}")
 
-        # 7) Delete from Supabase
-        if has_supabase_identity:
-            try:
-                admin_client = get_supabase_admin_client()
-                if admin_client and hasattr(admin_client.auth, "admin"):
-                    admin_client.auth.admin.delete_user(user_id)
-                    logger.debug("\tSupabase user deleted.")
-                else:
-                    raise RuntimeError("Supabase admin client not available")
-            except Exception as e:
-                logger.error(f"Failed deleting Supabase user {user_id}: {e}")
+        # Disable credentials even if a preceding best-effort resource cleanup failed.
+        delete_account(user_id)
 
         # 7) Delete PRIVATE personal KBs created by the user. Shared KBs
         # created by the user are intentionally left untouched.

@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: MODEL-DEADLINE-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_deadline_interrupts_actual_http_and_releases_resources
+  profiles: [mock]
+acceptance_bindings:
+  AC-DEADLINE: [test_deadline_interrupts_actual_http_and_releases_resources]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

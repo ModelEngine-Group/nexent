@@ -1,18 +1,20 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Rendering boundary for selected fine-grained context items."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from html import escape
 from typing import Any
 
 from nexent.core.prompts import load_prompt
 
 from .formatting import (
     _format_external_agents_description,
-    _format_worker_agents_description,
     _format_skills_inventory,
     _format_tools_description,
+    _format_worker_agents_description,
 )
 from .models import ContextItem, ContextItemType
 
@@ -89,53 +91,57 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
-def _render_tool_arguments(arguments: Any) -> str:
-    """Render tool arguments without dropping string-typed interpreter source."""
-    if isinstance(arguments, str):
-        return arguments
-    return json.dumps(arguments, ensure_ascii=False, default=str)
+def _render_legacy_tool_call(call: Any) -> str:
+    """Keep ordinary calls as evidence; only interpreter source is code."""
+    if isinstance(call, dict) and call.get("name") == "python_interpreter":
+        source = call.get("arguments")
+        if isinstance(source, dict) and set(source) == {"code"}:
+            source = source["code"]
+        if isinstance(source, str):
+            return f"<code>\n{source}\n</code>"
+    record = escape(json.dumps(call, ensure_ascii=False, default=str))
+    return f"<TOOL_RECORD>{record}</TOOL_RECORD>"
 
 
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
+    from .execution_history import result_text
+
     c = item.content
-    labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
-    parts = [
-        '<completed_action_history read_only="true">',
-        labels["completed_action_notice"],
-        labels["completed_action_format_notice"],
-        "<completed_action>",
-    ]
-    if "step_number" in c:
-        parts.append(f"index: {c['step_number']}")
-    if "tool_calls" in c:
-        tc = c["tool_calls"]
-        if isinstance(tc, dict) and "name" in tc:
-            parts.append(f"tool: {tc['name']}")
-            parts.append(f"input:\n{_render_tool_arguments(tc.get('arguments', {}))}")
-        elif isinstance(tc, list):
-            for call in tc:
-                if isinstance(call, dict) and "name" in call:
-                    parts.append(f"tool: {call['name']}")
-                    parts.append(f"input:\n{_render_tool_arguments(call.get('arguments', {}))}")
-                else:
-                    parts.append(f"tool_record: {json.dumps(call, ensure_ascii=False, default=str)}")
-        else:
-            parts.append(f"tool_records: {json.dumps(tc, ensure_ascii=False, default=str)}")
-    if "observations" in c:
-        parts.append(f"outcome:\n{c['observations']}")
-    if "error" in c:
-        parts.append(f"recorded_error:\n{c['error']}")
-    if "result" in c:
-        parts.append(f"recorded_result:\n{c['result']}")
-    parts.extend(["</completed_action>", "</completed_action_history>"])
-    # This record describes work already performed by the assistant in the
-    # current run.  Rendering it as ``user`` gives framework-generated history
-    # the authority of a fresh user request and can prompt smaller models to
-    # repeat the completed tool call.  Keep the neutral, read-only envelope but
-    # preserve the actual speaker semantics.
-    return [_text_message("assistant", "\n".join(parts))]
+    messages = []
+    original = c.get("assistant_output")
+    if original:
+        messages.append(_text_message("assistant", original))
+    fields = c.get("execution_fields")
+    if fields is None:
+        # Compatibility for externally supplied ContextItems, without duplicating result text.
+        fields = {}
+        if c.get("observations") is not None:
+            fields["OUTPUT"] = str(c["observations"])
+        result = c.get("result")
+        if result is not None and str(result) != str(c.get("observations", "")):
+            fields["RETURN_VALUE"] = str(result)
+        if c.get("error"):
+            fields["ERROR"] = str(c["error"])
+    if not original and c.get("tool_calls"):
+        calls = c["tool_calls"]
+        calls = calls if isinstance(calls, list) else [calls]
+        messages.extend(_text_message("assistant", _render_legacy_tool_call(call)) for call in calls)
+    if not fields:
+        fields = {"STDOUT": ""}
+    if c.get("summary"):
+        body = f"<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>"
+    elif c.get("preview") is not None:
+        body = '<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>"
+    else:
+        body = result_text(fields)
+    if (c.get("summary") or c.get("preview") is not None) and fields.get("ERROR"):
+        body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
+    if c.get("output_ref"):
+        body += "\n<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>"
+    messages.append(_text_message("assistant", "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>"))
+    return messages
 
 
 class ContextItemRenderer:

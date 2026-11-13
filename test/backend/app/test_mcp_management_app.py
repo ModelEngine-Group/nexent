@@ -384,14 +384,14 @@ class TestCommunityPublish:
     def test_publish_success(self, mock_publish, mock_auth):
         """Test successful publishing creates a review and returns review_id."""
         mock_auth.return_value = ("uid", "tid", "en")
-        mock_publish.return_value = 42
+        mock_publish.return_value = {"review_id": "42", "repository_id": None}
         resp = client.post("/mcp-tools/community/publish", json={
             "mcp_id": 1, "name": "svc", "description": "desc",
             "tags": ["a"],
             "mcp_server": "http://srv", "config_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
-        assert resp.json()["data"]["market_id"] == 42
+        assert resp.json()["data"] == {"review_id": "42", "repository_id": None}
 
     @patch('management.api.mcp.mcp_management.get_current_user_info')
     @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
@@ -670,14 +670,14 @@ class TestCreateCommunity:
     def test_create_success(self, mock_publish, mock_auth):
         """Test successful community MCP creation."""
         mock_auth.return_value = ("uid", "tid", "en")
-        mock_publish.return_value = 42
+        mock_publish.return_value = {"review_id": "42", "repository_id": None}
         resp = client.post("/mcp-tools/community", json={
             "mcp_id": 1, "name": "svc", "description": "desc",
             "tags": ["a"],
             "mcp_server": "http://srv", "config_json": None,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
-        assert resp.json()["data"]["market_id"] == 42
+        assert resp.json()["data"] == {"review_id": "42", "repository_id": None}
 
     @patch('management.api.mcp.mcp_management.get_current_user_info')
     @patch('management.api.mcp.mcp_management.publish_community_mcp_service')

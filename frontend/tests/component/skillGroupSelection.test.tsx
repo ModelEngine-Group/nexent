@@ -36,10 +36,10 @@ test("renders actual group descriptions and zero member counts", () => {
 test("keeps cross-page selections and limits select-all to the current page", () => {
   render(<Selection />);
   fireEvent.click(screen.getByRole("checkbox", { name: "Group 1" }));
-  fireEvent.click(screen.getByTitle("Next Page"));
+  fireEvent.click(document.querySelector(".ant-pagination-next button")!);
   fireEvent.click(screen.getByRole("checkbox", { name: "Group 11" }));
   expect(screen.getByLabelText("Selected IDs")).toHaveTextContent("1,11");
-  fireEvent.click(screen.getByTitle("Previous Page"));
+  fireEvent.click(document.querySelector(".ant-pagination-prev button")!);
   expect(screen.getByRole("checkbox", { name: "Group 1" })).toBeChecked();
   fireEvent.click(screen.getAllByRole("checkbox")[0]);
   const ids = screen

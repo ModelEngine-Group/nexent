@@ -102,7 +102,7 @@ describe("mine ownership controls", () => {
     }
     expect(screen.getByText("Created")).toBeVisible();
     expect(screen.getByText("Shared")).toBeVisible();
-    fireEvent.click(screen.getByTitle("2"));
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
     await waitFor(() =>
       expect(vi.mocked(useAgentList).mock.lastCall?.[0]).toMatchObject({
         page: 2,

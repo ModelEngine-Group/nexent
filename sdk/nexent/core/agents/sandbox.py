@@ -1993,7 +1993,9 @@ class _DockerKernelLease:
                     result = content["data"].get("text/plain")
                     status_deadline = time.monotonic() + self._receive_timeout_seconds
                 elif msg_type == "error":
-                    raise AgentError("\n".join(content.get("traceback", [])), self.logger)
+                    error = AgentError("\n".join(content.get("traceback", [])), self.logger)
+                    error.execution_logs = "".join(outputs)
+                    raise error
                 elif msg_type == "status" and content.get("execution_state") == "idle":
                     break
 

@@ -1,221 +1,101 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"""Tenant capability resolution stays outside shared publication."""
+
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
-from contracts.errors.exceptions import WorkbenchAgentError
 from management.services.agent import system as module
 
 
-def _provider():
-    return module.SystemAgentProvider(app_version="2.5.3", aidp_enabled=False)
-
-
-def _draft(provider, **updates):
-    value = {
-        "agent_id": 17,
-        "current_version_no": 2,
-        "system_revision": provider.release_manifest.system_revision,
-        **provider._editable_fields(),
-    }
-    value.update(updates)
-    return value
-
-
-def test_provider_requires_non_blank_revision():
-    with pytest.raises(ValueError, match="app_version is required"):
-        module.SystemAgentProvider(app_version=" ")
-
-
-def test_get_ref_requires_existing_draft(monkeypatch):
-    monkeypatch.setattr(module, "search_system_agent", lambda *_args, **_kwargs: None)
-
-    with pytest.raises(WorkbenchAgentError, match="system_agent_not_ready"):
-        _provider().get_workbench_main_ref("tenant-a")
-
-
-def test_ensure_requires_created_draft_to_be_visible(monkeypatch):
-    provider = _provider()
-    monkeypatch.setattr(module, "search_system_agent", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(provider, "_create_draft", MagicMock())
-
-    with pytest.raises(WorkbenchAgentError, match="draft was not created"):
-        provider.ensure_workbench_main("tenant-a")
-
-
-def test_create_draft_reraises_unique_conflict_without_concurrent_row(monkeypatch):
-    provider = _provider()
-    monkeypatch.setattr(
-        module,
-        "create_agent",
-        MagicMock(side_effect=IntegrityError("insert", {}, RuntimeError("duplicate"))),
+def test_only_official_tenant_skills_are_selected(monkeypatch):
+    lookup = MagicMock(
+        return_value=[
+            {"skill_id": 1, "name": "docx", "source": "community"},
+            {"skill_id": 2, "name": "pdf_12", "source": "official"},
+            {"skill_id": 3, "name": "pdf", "source": "OFFICIAL"},
+            {"skill_id": 4, "name": "unrelated", "source": "official"},
+            {"skill_id": 5, "name": "docx_7", "source": "official"},
+        ]
     )
-    monkeypatch.setattr(module, "search_system_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module.skill_db, "list_skills", lookup)
+    skills = module.SystemAgentProvider().get_workbench_default_skills("tenant-a")
+    assert {skill["skill_id"] for skill in skills} == {3, 5}
+    lookup.assert_called_once_with("tenant-a")
 
-    with pytest.raises(IntegrityError):
-        provider._create_draft("tenant-a", "user-a")
 
-
-def test_prepare_official_skills_tolerates_import_failure_and_filters_sources(monkeypatch):
-    provider = _provider()
+def test_optional_skill_import_failure_keeps_available_official_skills(monkeypatch):
+    provider = module.SystemAgentProvider()
+    existing = [{"skill_id": 5, "name": "docx_7", "source": "official"}]
     monkeypatch.setattr(
-        module,
-        "install_skills_from_zip_for_tenant",
-        MagicMock(side_effect=RuntimeError("archive unavailable")),
+        provider, "get_workbench_default_skills", lambda tenant: existing
     )
+    install = MagicMock(side_effect=RuntimeError("archive unavailable"))
+    monkeypatch.setattr(module, "install_skills_from_zip_for_tenant", install)
+    assert provider._prepare_official_skills("tenant-a", "user-a") == existing
+    assert "docx" not in install.call_args.kwargs["skill_names"]
+    assert install.call_args.kwargs["tenant_id"] == "tenant-a"
 
-    def lookup(name, _tenant):
-        if name == "docx":
-            return {"skill_id": 1, "skill_name": name, "source": "community"}
-        if name == "pdf":
-            return {"skill_id": 2, "skill_name": name, "source": "official"}
-        return None
 
-    monkeypatch.setattr(module.skill_db, "get_skill_by_name", lookup)
-
-    assert provider._prepare_official_skills("tenant-a", "user-a") == [
-        {"skill_id": 2, "skill_name": "pdf", "source": "official"}
+def test_available_defaults_do_not_reinstall(monkeypatch):
+    provider = module.SystemAgentProvider()
+    existing = [
+        {"name": name} for name in provider.release_manifest.official_skill_names
     ]
-
-
-def test_ensure_maps_unexpected_release_failure(monkeypatch):
-    provider = _provider()
-    existing = _draft(provider, current_version_no=1, system_revision="2.5.2")
-    monkeypatch.setattr(module, "search_system_agent", MagicMock(return_value=existing))
     monkeypatch.setattr(
-        provider, "_prepare_official_skills", MagicMock(side_effect=RuntimeError("broken"))
+        provider, "get_workbench_default_skills", lambda tenant: existing
     )
-
-    with pytest.raises(WorkbenchAgentError, match="broken") as caught:
-        provider.ensure_workbench_main("tenant-a")
-    assert caught.value.retryable is True
-
-
-def test_ensure_preserves_specific_workbench_error(monkeypatch):
-    provider = _provider()
-    existing = _draft(provider, current_version_no=1, system_revision="2.5.2")
-    expected = WorkbenchAgentError("official_skill_missing")
-    monkeypatch.setattr(module, "search_system_agent", MagicMock(return_value=existing))
-    monkeypatch.setattr(
-        provider, "_prepare_official_skills", MagicMock(side_effect=expected)
-    )
-
-    with pytest.raises(WorkbenchAgentError) as caught:
-        provider.ensure_workbench_main("tenant-a")
-    assert caught.value is expected
-
-
-def test_ensure_uses_publish_result_when_draft_version_is_stale(monkeypatch):
-    provider = _provider()
-    existing = _draft(provider, current_version_no=1, system_revision="2.5.2")
-    resolved = _draft(provider, current_version_no=None)
-    published = {"version_no": 5}
-    search = MagicMock(side_effect=[existing, resolved, {**resolved, "current_version_no": 5}])
-    monkeypatch.setattr(module, "search_system_agent", search)
-    monkeypatch.setattr(provider, "_prepare_official_skills", MagicMock(return_value=[]))
-    monkeypatch.setattr(provider, "_replace_release_capabilities", MagicMock())
-    monkeypatch.setattr(module, "update_agent", MagicMock())
-    monkeypatch.setattr(module, "publish_version_impl", MagicMock(return_value=published))
-    monkeypatch.setattr(module, "update_system_agent_revision", MagicMock())
-
-    ref = provider.ensure_workbench_main("tenant-a")
-
-    assert ref.version_no == 5
-
-
-def test_ensure_requires_resolved_draft_after_publish(monkeypatch):
-    provider = _provider()
-    existing = _draft(provider, current_version_no=1, system_revision="2.5.2")
-    monkeypatch.setattr(module, "search_system_agent", MagicMock(side_effect=[existing, None]))
-    monkeypatch.setattr(provider, "_prepare_official_skills", MagicMock(return_value=[]))
-    monkeypatch.setattr(provider, "_replace_release_capabilities", MagicMock())
-    monkeypatch.setattr(module, "update_agent", MagicMock())
-    monkeypatch.setattr(module, "publish_version_impl", MagicMock(return_value={"version_no": 5}))
-    monkeypatch.setattr(module, "update_system_agent_revision", MagicMock())
-
-    with pytest.raises(WorkbenchAgentError, match="system_agent_not_ready"):
-        provider.ensure_workbench_main("tenant-a")
-
-
-def test_release_state_rejects_unexpected_tool_and_invalid_skills(monkeypatch):
-    provider = _provider()
-    existing = _draft(provider)
-    monkeypatch.setattr(provider, "_find_available_tool", lambda *_args, **_kwargs: {"tool_id": 9})
-    monkeypatch.setattr(
-        module,
-        "query_tool_instances_by_agent_id",
-        lambda *_args, **_kwargs: [{"tool_id": 10, "enabled": True}],
-    )
-    assert provider._release_state_matches(existing, "tenant-a") is False
-
-    monkeypatch.setattr(module, "query_tool_instances_by_agent_id", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        module.skill_db,
-        "query_skill_instances_by_agent_id",
-        lambda *_args, **_kwargs: [{"skill_id": 1, "enabled": True}],
-    )
-    monkeypatch.setattr(module.skill_db, "get_skill_by_id", lambda *_args: None)
-    assert provider._release_state_matches(existing, "tenant-a") is False
-
-    monkeypatch.setattr(
-        module.skill_db,
-        "get_skill_by_id",
-        lambda *_args: {"source": "official", "name": "unknown"},
-    )
-    assert provider._release_state_matches(existing, "tenant-a") is False
-
-
-def test_release_state_rejects_editable_field_drift():
-    provider = _provider()
-    existing = _draft(provider, display_name="Changed")
-
-    assert provider._release_state_matches(existing, "tenant-a") is False
-
-
-def test_official_skill_base_name_accepts_numeric_import_alias():
-    assert _provider()._official_skill_base_name("docx_12") == "docx"
-
-
-def test_find_available_tool_required_and_optional(monkeypatch):
-    provider = _provider()
-    monkeypatch.setattr(module, "query_all_tools", lambda _tenant: [])
-
-    assert provider._find_available_tool("missing", "tenant-a", required=False) is None
-    with pytest.raises(WorkbenchAgentError, match="Required Tool is unavailable"):
-        provider._find_available_tool("missing", "tenant-a")
+    install = MagicMock()
+    monkeypatch.setattr(module, "install_skills_from_zip_for_tenant", install)
+    assert provider._prepare_official_skills("tenant-a", "user-a") == existing
+    install.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "draft",
-    [
-        {"agent_id": 17, "current_version_no": 0},
-        {"agent_id": 17, "current_version_no": 2},
-    ],
+    "aidp,expected", [(False, "knowledge_base_search"), (True, "aidp_search")]
 )
-def test_resolve_published_ref_rejects_unready_snapshot(monkeypatch, draft):
-    provider = _provider()
-    monkeypatch.setattr(module, "search_system_agent", lambda *_args, **_kwargs: None)
+def test_default_tools_use_requesting_tenant_and_deployment_policy(
+    monkeypatch, aidp, expected
+):
+    query = MagicMock(
+        return_value=[
+            {"tool_id": 1, "name": expected, "is_available": False},
+            {"tool_id": 2, "origin_name": expected, "is_available": True},
+            {"tool_id": 3, "name": "unrelated"},
+        ]
+    )
+    monkeypatch.setattr(module, "query_all_tools", query)
+    result = module.SystemAgentProvider(aidp_enabled=aidp).get_workbench_default_tools(
+        "tenant-b"
+    )
+    assert [tool["tool_id"] for tool in result] == [2]
+    assert result[0]["enabled"] is True
+    query.assert_called_once_with("tenant-b")
 
-    with pytest.raises(WorkbenchAgentError, match="system_agent_not_ready"):
-        provider._resolve_published_ref("tenant-a", draft)
+
+def test_missing_optional_tool_is_empty(monkeypatch):
+    monkeypatch.setattr(module, "query_all_tools", lambda tenant: [])
+    assert module.SystemAgentProvider().get_workbench_default_tools("tenant-a") == []
 
 
-@pytest.mark.parametrize("tenant_id", ["", "   "])
-def test_validate_tenant_rejects_blank_value(tenant_id):
-    with pytest.raises(ValueError, match="tenant_id is required"):
-        _provider()._validate_tenant_id(tenant_id)
+def test_default_knowledge_scope_does_not_copy_catalog_indices_or_mutate_definition(
+    monkeypatch,
+):
+    tool = {
+        "name": "knowledge_base_search",
+        "params": [{"name": "index_names", "default": ["catalog-index"]}],
+    }
+    monkeypatch.setattr(module, "query_all_tools", lambda tenant: [tool])
+    resolved = module.SystemAgentProvider(
+        aidp_enabled=False
+    ).get_workbench_default_tools("tenant-a")
+    assert resolved[0]["params"][0]["default"] == []
+    assert tool["params"][0]["default"] == ["catalog-index"]
 
 
-def test_invalid_semantic_version_is_not_newer():
-    assert _provider()._is_newer_release("not-a-version") is False
-
-
-def test_convenience_entrypoint_delegates(monkeypatch):
-    expected = module.SystemAgentRef("tenant-a", module.WORKBENCH_MAIN_SYSTEM_KEY, 17, 2)
-    ensure = MagicMock(return_value=expected)
-    monkeypatch.setattr(module.system_agent_provider, "ensure_workbench_main", ensure)
-
-    assert module.ensure_workbench_main_agent("tenant-a", "user-a", "en") == expected
-    ensure.assert_called_once_with("tenant-a", "user-a", locale="en")
+def test_runtime_provider_exposes_no_creation_or_migration_entrypoints():
+    provider = module.SystemAgentProvider()
+    assert not hasattr(provider, "ensure_workbench_main")
+    assert not hasattr(provider, "ensure_nl2agent_main")
+    assert not hasattr(module, "ensure_workbench_main_agent")

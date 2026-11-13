@@ -85,13 +85,29 @@ beforeEach(() => {
 });
 
 describe("published agent access information", () => {
+  it("uses the northbound service default for the API example when no public URL is configured", async () => {
+    mocks.config.mockResolvedValue({});
+    setup();
+    await waitFor(() =>
+      expect(screen.getByText(/published_name/)).toBeInTheDocument()
+    );
+    const example = screen.getByText(/published_name/).textContent;
+    expect(example).toContain("http://localhost:5013/api/nb/v1/chat/run");
+    expect(example).toContain("Authorization: Bearer <YOUR_API_KEY>");
+    expect(example).not.toContain(`${window.location.origin}/nb/`);
+    expect(example).not.toContain("Cookie");
+  });
+
   it("uses the published name and configured service address for the API example", async () => {
+    mocks.config.mockResolvedValue({
+      northboundBaseUrl: "https://api.example.test/api/",
+    });
     setup();
     await waitFor(() =>
       expect(screen.getByText(/published_name/)).toBeInTheDocument()
     );
     expect(screen.getByText(/published_name/).textContent).toContain(
-      "https://api.example.test/nb/v1/chat/run"
+      "https://api.example.test/api/nb/v1/chat/run"
     );
     expect(screen.getByText(/published_name/).textContent).toContain(
       "<YOUR_API_KEY>"

@@ -27,15 +27,15 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
+import gateway.authentication.auth as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, UnauthorizedError
-from management.db.identity.user_tenant import get_user_role_by_tenant
+from contracts.roles import has_any_role
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -78,8 +78,10 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-import gateway.authentication.auth as auth_utils_module
-
+from management.db.identity.user_tenant import get_user_role_by_tenant
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.tag.library import TagManagementService
+from nexent.core.concurrency import run_blocking
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -144,7 +146,6 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
 ) -> None:
     """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
 
-    from management.services.tag.library import TagManagementService
 
     TagManagementService.cleanup_document_assignments_for_knowledge_base(
         tenant_id, "aidp", knowledge_base_id, user_id
@@ -435,7 +436,7 @@ def _is_user_role(user_id: str, tenant_id: str) -> bool:
     provisioned.
     """
     role = get_user_role_by_tenant(user_id, tenant_id)
-    return (role or "USER").upper() == "USER"
+    return has_any_role(role, {"USER"}) and not has_any_role(role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"})
 
 
 def _current_accessible_rows(
@@ -680,7 +681,6 @@ async def list_knowledge_bases(
         sum(1 for row in page_rows if not _has_kb_card_metadata(row)),
     )
 
-    from management.services.permission.identity.display import enrich_cas_usernames
 
     await run_blocking(
         "aidp-list-creator-names", enrich_cas_usernames,
@@ -878,7 +878,6 @@ async def get_knowledge_base(
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
     detail["creator_name"] = permission_record.get("creator_name")
-    from management.services.permission.identity.display import enrich_cas_usernames
 
     await run_blocking(
         "aidp-detail-creator-name", enrich_cas_usernames,

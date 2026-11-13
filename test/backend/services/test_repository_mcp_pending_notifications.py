@@ -2,22 +2,22 @@
 
 """Pending notifications follow actual submission rounds, including legacy writes."""
 
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from test.backend.services.test_mcp_management_service import svc_mod
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("description,replaced", [
-    (None, False),
-    ("Same description", False),
-    ("Replacement description", True),
-])
-async def test_pending_status_replaces_notification_only_for_new_round(
-    mocker, description, replaced,
+@pytest.mark.parametrize("description", [None, "Same description", "Replacement description"])
+async def test_pending_update_preserves_published_record_and_delegates_review_round(
+    mocker, description,
 ):
     record = {
-        "market_id": 1, "tenant_id": "tenant", "user_id": "owner",
+        "market_id": 1, "source_mcp_id": 9, "tenant_id": "tenant", "user_id": "owner",
         "submitted_user_id": "submitter", "review_status": "pending_review",
         "submission_revision": 2, "mcp_name": "MCP", "submit_description": "Same description",
     }
@@ -30,15 +30,25 @@ async def test_pending_status_replaces_notification_only_for_new_round(
     pending = mocker.patch.object(svc_mod, "_create_mcp_pending_review_notification")
     result = mocker.patch.object(svc_mod, "create_repository_review_notification")
 
-    await svc_mod.update_community_mcp_service(
-        tenant_id="tenant", user_id="admin", market_id=1,
-        name=None, description=None, tags=None, registry_json=None, content=description,
-    )
+    review_service = ModuleType("management.services.repository.reviews")
+    review_service.save_submission = MagicMock(return_value={"review_id": "41"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": review_service}):
+        await svc_mod.update_community_mcp_service(
+            tenant_id="tenant", user_id="admin", market_id=1,
+            name=None, description=None, tags=None, registry_json=None, content=description,
+        )
 
-    assert deactivate.call_count == int(replaced)
-    assert pending.call_count == int(replaced)
-    assert status.call_args.kwargs["is_resubmission"] is replaced
+    # The review unit of work owns notification replacement and frozen snapshots.
+    args = review_service.save_submission.call_args.args
+    assert args[:5] == ("mcp", 9, "tenant", "admin", "ADMIN")
+    assert args[5]["content"] == (description or "")
+    assert record["submit_description"] == "Same description"
+    assert record["review_status"] == "pending_review"
+    status.assert_not_called()
+    deactivate.assert_not_called()
+    pending.assert_not_called()
     result.assert_not_called()
+
 
 
 def test_review_result_targets_actual_submitter(mocker):

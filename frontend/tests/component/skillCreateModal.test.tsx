@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { File as NativeFile } from "node:buffer";
-import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import JSZip from "jszip";
@@ -16,23 +15,6 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
-}));
-vi.mock("@/components/common/StandardModal", () => ({
-  StandardModal: ({
-    children,
-    footer,
-    open,
-  }: {
-    children: ReactNode;
-    footer: ReactNode;
-    open: boolean;
-  }) =>
-    open ? (
-      <div>
-        {children}
-        {footer}
-      </div>
-    ) : null,
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({

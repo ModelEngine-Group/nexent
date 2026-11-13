@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { AidpRetrievalParamsForm } from "./AidpRetrievalParamsForm";
+import { isAidpTool } from "@/lib/aidpRetrievalConfig";
 import { Input, InputNumber, Select, Switch, Tooltip } from "antd";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -124,12 +126,26 @@ export function KnowledgeRetrievalParamsForm({
   params,
   values,
   onChange,
+  toolName,
+  onPatch,
+  disabled,
 }: {
+  disabled?: boolean;
+  toolName?: string;
+  onPatch?: (patch: Record<string, unknown>) => void;
   params: ToolParam[];
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
 }) {
   const { t, i18n } = useTranslation("common");
+  if (isAidpTool(toolName) && onPatch)
+    return (
+      <AidpRetrievalParamsForm
+        values={values}
+        onChange={onPatch}
+        disabled={disabled}
+      />
+    );
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {params.map((param) => {

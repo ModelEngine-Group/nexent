@@ -2,6 +2,7 @@
 
 """Authorized review-table queries and legacy repository mappings."""
 
+from contracts.roles import has_any_role
 from management.db.agent.models import AgentRepository
 from management.db.mcp.models import McpMarketRecord
 from management.db.resource_review_model import ResourceReview
@@ -36,10 +37,10 @@ REVIEW_MODELS = {
 def scope_conditions(resource_type, user_id, tenant_id, role):
     r = ResourceReview
     conditions = [r.delete_flag == "N", r.resource_type == resource_type]
-    global_mcp = resource_type == "mcp" and role in {"SU", "SUPER_ADMIN"}
+    global_mcp = resource_type == "mcp" and has_any_role(role, {"SU", "SUPER_ADMIN"})
     if not global_mcp:
         conditions.append(r.tenant_id == tenant_id)
-    if role != "ADMIN" and not global_mcp:
+    if not has_any_role(role, {"ADMIN"}) and not global_mcp:
         conditions.append(r.submitted_user_id == user_id)
     return conditions
 

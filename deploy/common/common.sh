@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Shared deployment configuration helpers for Docker and Kubernetes deploy scripts.
 # This file is intentionally dependency-light so it can be sourced from Bash-only
 # install environments.
 
 DEPLOYMENT_SCHEMA_VERSION="1"
-DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
+DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_SANDBOX_MODE_DEFAULT="lightweight"
@@ -33,7 +34,7 @@ DEPLOYMENT_DOCKER_PORTS=""
 DEPLOYMENT_ROOT_ENV=""
 DEPLOYMENT_LANGUAGE="${DEPLOYMENT_LANGUAGE:-}"
 
-deployment_component_list="infrastructure application data-process supabase terminal monitoring"
+deployment_component_list="infrastructure application data-process terminal monitoring"
 deployment_https_mode_list="disabled self-signed custom"
 deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
@@ -145,7 +146,6 @@ deployment_i18n_format() {
       tui.component.infrastructure) printf '必需核心依赖：Elasticsearch、PostgreSQL、Redis、MinIO' ;;
       tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、northbound API、web UI' ;;
       tui.component.data_process) printf '后台文件解析、索引和知识处理 Worker' ;;
-      tui.component.supabase) printf '用户、租户、登录、邀请和权限服务' ;;
       tui.component.terminal) printf '终端工具使用的 OpenSSH 容器' ;;
       tui.component.monitoring) printf 'OpenTelemetry Collector 和可选链路追踪看板' ;;
       tui.monitoring.title) printf '选择监控 provider' ;;
@@ -241,7 +241,6 @@ deployment_i18n_format() {
       tui.component.infrastructure) printf 'required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO' ;;
       tui.component.application) printf 'Nexent app services: config, runtime, MCP, northbound API, web UI' ;;
       tui.component.data_process) printf 'background file parsing, indexing, and knowledge processing workers' ;;
-      tui.component.supabase) printf 'user, tenant, login, invitation, and permission services' ;;
       tui.component.terminal) printf 'OpenSSH container used by the terminal tool' ;;
       tui.component.monitoring) printf 'OpenTelemetry collector and optional tracing dashboard' ;;
       tui.monitoring.title) printf 'Select monitoring provider' ;;
@@ -405,6 +404,18 @@ deployment_super_admin_password() {
   printf '%s' "${NEXENT_SUPER_ADMIN_PASSWORD:-$DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT}"
 }
 
+deployment_report_super_admin_creation() {
+  local result="$1"
+  local password="$2"
+  local display_password="${3:-true}"
+  printf '%s\n' "$result"
+  # Only the process that created the account may disclose its initial password.
+  if [ "$display_password" = "true" ] && printf '%s' "$result" | grep -Eq '"created"[[:space:]]*:[[:space:]]*true'; then
+    printf 'Super administrator email: %s\n' 'suadmin@nexent.com'
+    printf 'Super administrator password: %s\n' "$password"
+  fi
+}
+
 deployment_should_prompt_super_admin_password() {
   [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" = "true" ] &&
     [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
@@ -452,12 +463,21 @@ deployment_merge_env_from_example() {
       if (key != "") {
         existing[key] = 1
       }
+      # Preserve existing installations when adding the dedicated MCP key.
+      if (key == "TOKEN") {
+        legacy_mcp_token = $0
+        sub(/TOKEN[[:blank:]]*=/, "NEXENT_MCP_INTERNAL_TOKEN=", legacy_mcp_token)
+      }
       next
     }
     {
       key = assignment_key($0)
       if (key != "" && !(key in existing)) {
-        print $0
+        if (key == "NEXENT_MCP_INTERNAL_TOKEN" && legacy_mcp_token != "") {
+          print legacy_mcp_token
+        } else {
+          print $0
+        }
       }
     }
   ' "$env_file" "$example_file")" || {
@@ -528,6 +548,16 @@ deployment_source_root_env() {
   # shellcheck source=/dev/null
   source "$DEPLOYMENT_ROOT_ENV"
   set +a
+}
+
+deployment_upgrade_local_accounts() {
+  local mode="$1" namespace="${2:-nexent}" database="${3:-nexent-postgresql}"
+  local common_dir env_file config="${4:-nexent-config}"
+  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
+  bash "$common_dir/../sql/tools/supabase_to_postgres/migrate.sh" \
+    --deployment "$mode" --namespace "$namespace" --database-target "$database" --config-target "$config" \
+    --env-file "$env_file" --apply --wait-timeout 300
 }
 
 deployment_env_dir() {
@@ -1102,10 +1132,15 @@ deployment_apply_legacy_inputs() {
         DEPLOYMENT_COMPONENTS="infrastructure,application"
         ;;
       full)
-        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application,data-process,supabase."
-        DEPLOYMENT_COMPONENTS="infrastructure,application,data-process,supabase"
+        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application,data-process."
+        DEPLOYMENT_COMPONENTS="infrastructure,application,data-process"
         ;;
     esac
+  fi
+
+  # Legacy component choices never disable authentication.
+  if [ "${DEPLOYMENT_VERSION:-}" = "speed" ]; then
+    DEPLOYMENT_VERSION="full"
   fi
 
   if [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then
@@ -1200,6 +1235,12 @@ deployment_ensure_required_components() {
   local source_components="$DEPLOYMENT_COMPONENTS"
   local normalized=""
   local component
+
+  if deployment_csv_contains "$source_components" "supabase"; then
+    deployment_warn "The legacy supabase component now uses application PostgreSQL authentication."
+    source_components="$(deployment_join_csv "$source_components" "application")"
+    DEPLOYMENT_VERSION="full"
+  fi
 
   if ! deployment_csv_contains "$source_components" "infrastructure"; then
     deployment_warn "Component infrastructure is required and has been added."
@@ -1390,12 +1431,11 @@ deployment_tui_multiselect_components() {
   [ -n "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && return 0
   [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
-  local components=(infrastructure application data-process supabase terminal monitoring)
+  local components=(infrastructure application data-process terminal monitoring)
   local details=(
     "$(deployment_i18n tui.component.infrastructure)"
     "$(deployment_i18n tui.component.application)"
     "$(deployment_i18n tui.component.data_process)"
-    "$(deployment_i18n tui.component.supabase)"
     "$(deployment_i18n tui.component.terminal)"
     "$(deployment_i18n tui.component.monitoring)"
   )
@@ -2055,16 +2095,12 @@ deployment_compute_selection() {
     helm_charts+=(nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
-    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
+    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
+    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     docker_services+=(nexent-data-process)
     helm_charts+=(nexent-data-process)
-  fi
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-    docker_services+=(kong auth db)
-    helm_charts+=(nexent-supabase-kong nexent-supabase-auth nexent-supabase-db)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     docker_services+=(nexent-openssh-server)
@@ -2084,7 +2120,7 @@ deployment_compute_docker_ports() {
   local ports=()
 
   if [ "$DEPLOYMENT_PORT_POLICY" = "production" ]; then
-    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013)
+    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013 "${OPS_PORT:-5016}")
     deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && ports+=(2222)
     printf '%s\n' "${ports[*]}"
     return 0
@@ -2094,13 +2130,10 @@ deployment_compute_docker_ports() {
     ports+=(9210 9310 5434 6379 9010 9011)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    ports+=(5010 5014 5011 5015 5013 3000)
+    ports+=(5010 5014 5011 5015 5013 3000 "${OPS_PORT:-5016}")
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     ports+=(5012 5555)
-  fi
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-    ports+=(8000 8443 "${SUPABASE_POSTGRES_PORT:-5436}")
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     ports+=(2222)
@@ -2201,9 +2234,6 @@ deployment_apply_image_source() {
   # Nginx image for the optional HTTPS reverse proxy (docker and k8s).
   export NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
   export OPENSSH_SERVER_IMAGE="${OPENSSH_SERVER_IMAGE:-nexent/nexent-ubuntu-terminal:$version}"
-  export SUPABASE_KONG="${SUPABASE_KONG:-kong:2.8.1}"
-  export SUPABASE_GOTRUE="${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}"
-  export SUPABASE_DB="${SUPABASE_DB:-supabase/postgres:15.8.1.060}"
 
   export OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.151.0}"
   export PHOENIX_IMAGE="${PHOENIX_IMAGE:-arizephoenix/phoenix:15}"
@@ -2230,9 +2260,6 @@ deployment_apply_image_source() {
       MINIO_IMAGE \
       NGINX_IMAGE \
       OPENSSH_SERVER_IMAGE \
-      SUPABASE_KONG \
-      SUPABASE_GOTRUE \
-      SUPABASE_DB \
       OTEL_COLLECTOR_IMAGE \
       PHOENIX_IMAGE \
       TEMPO_IMAGE \
@@ -2318,9 +2345,6 @@ deployment_render_docker_env() {
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
     printf 'MINIO_IMAGE="%s"\n' "$MINIO_IMAGE"
     printf 'OPENSSH_SERVER_IMAGE="%s"\n' "$OPENSSH_SERVER_IMAGE"
-    printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
-    printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
-    printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
     printf 'OTEL_COLLECTOR_IMAGE="%s"\n' "$OTEL_COLLECTOR_IMAGE"
     printf 'PHOENIX_IMAGE="%s"\n' "$PHOENIX_IMAGE"
     printf 'TEMPO_IMAGE="%s"\n' "$TEMPO_IMAGE"
@@ -2361,6 +2385,8 @@ deployment_render_image_values() {
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-northbound:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf 'nexent-ops:\n'
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf 'nexent-data-process:\n'
@@ -2375,12 +2401,6 @@ deployment_render_image_values() {
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$MINIO_IMAGE")" "$(deployment_image_tag "$MINIO_IMAGE")"
   printf 'nexent-openssh:\n'
   printf '  images:\n    openssh:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$OPENSSH_SERVER_IMAGE")" "$(deployment_image_tag "$OPENSSH_SERVER_IMAGE")" "$local_pull_policy"
-  printf 'nexent-supabase-kong:\n'
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_KONG")" "$(deployment_image_tag "$SUPABASE_KONG")"
-  printf 'nexent-supabase-auth:\n'
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_GOTRUE")" "$(deployment_image_tag "$SUPABASE_GOTRUE")"
-  printf 'nexent-supabase-db:\n'
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_DB")" "$(deployment_image_tag "$SUPABASE_DB")"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
   printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
@@ -2411,6 +2431,8 @@ deployment_render_k8s_port_values() {
   fi
   printf 'nexent-northbound:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-config:\n'
   printf '  service:\n    type: "%s"\n    nodePort: 30010\n' "$internal_type"
   printf 'nexent-runtime:\n'
@@ -2427,12 +2449,6 @@ deployment_render_k8s_port_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30379\n' "$internal_type"
   printf 'nexent-minio:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      api: 30090\n      console: 30091\n' "$internal_type"
-  printf 'nexent-supabase-kong:\n'
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      proxy: 30080\n      proxySsl: 30443\n' "$internal_type"
-  printf 'nexent-supabase-auth:\n'
-  printf '  service:\n    type: "%s"\n    nodePort: 30999\n' "$internal_type"
-  printf 'nexent-supabase-db:\n'
-  printf '  service:\n    type: "%s"\n    nodePort: 30436\n' "$internal_type"
 }
 
 deployment_chart_enabled() {
@@ -2470,6 +2486,10 @@ deployment_render_helm_chart_values() {
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
@@ -2512,19 +2532,6 @@ deployment_render_helm_chart_values() {
       sed 's/^/      /' "$DEPLOYMENT_HTTPS_KEY_PATH"
     fi
   fi
-  printf 'nexent-supabase-kong:\n'
-  printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_KONG")" "$(deployment_image_tag "$SUPABASE_KONG")"
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      proxy: 30080\n      proxySsl: 30443\n' "$internal_type"
-  printf 'nexent-supabase-auth:\n'
-  printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_GOTRUE")" "$(deployment_image_tag "$SUPABASE_GOTRUE")"
-  printf '  initImage:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$POSTGRESQL_IMAGE")" "$(deployment_image_tag "$POSTGRESQL_IMAGE")"
-  printf '  service:\n    type: "%s"\n    nodePort: 30999\n' "$internal_type"
-  printf 'nexent-supabase-db:\n'
-  printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
-  printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_DB")" "$(deployment_image_tag "$SUPABASE_DB")"
-  printf '  service:\n    type: "%s"\n    nodePort: 30436\n' "$internal_type"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
   printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
@@ -2693,11 +2700,7 @@ deployment_render_helm_values() {
     printf '  deploymentSchemaVersion: "%s"\n' "$DEPLOYMENT_SCHEMA_VERSION"
     printf '  deploymentComponents:\n'
     deployment_render_component_values
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-      printf '  deploymentVersion: "full"\n'
-    else
-      printf '  deploymentVersion: "speed"\n'
-    fi
+    printf '  deploymentVersion: "%s"\n' "${DEPLOYMENT_VERSION:-full}"
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
     printf '  sandboxMode: "%s"\n' "$DEPLOYMENT_SANDBOX_MODE"

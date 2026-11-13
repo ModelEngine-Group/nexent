@@ -162,7 +162,7 @@ def selected_files(batch, rows):
         parts = relative.parts
         allowed = parts[0] == "logs" and path.suffix == ".log" and path.name != "notification.log"
         allowed |= relative.as_posix() == "d0/static-assets.json"
-        allowed |= relative.as_posix() in {"deployment-plan.json", "restoration.json"}
+        allowed |= relative.as_posix() in {"deployment-plan.json", "restoration.json", "asset-validation.json"}
         if parts[0] in deployment_profiles:
             allowed |= len(parts) == 2 and parts[1] == "mode-verification.json"
             allowed |= len(parts) == 3 and parts[1] == "logs" and path.suffix == ".log" and path.name != "notification.log"

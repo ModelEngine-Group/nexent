@@ -5,6 +5,31 @@ import type { AssistantRuntime } from "@assistant-ui/react";
 
 const pendingTransitions = new WeakSet<AssistantRuntime>();
 
+async function switchToFreshThread(runtime: AssistantRuntime): Promise<void> {
+  const threads = runtime.threads.getState();
+  if (threads.newThreadId) {
+    // Reserve an unsent draft so the next action cannot reuse its composer.
+    await runtime.threads.getItemById(threads.newThreadId).initialize();
+  }
+  await runtime.threads.switchToNewThread();
+}
+
+/** A new conversation stays independent of drafts, including active runs. */
+export async function startWorkbenchConversation(
+  runtime: AssistantRuntime,
+  prepare: () => void
+): Promise<void> {
+  if (pendingTransitions.has(runtime))
+    throw new Error(translate("ui.localization.conversationSwitching"));
+  pendingTransitions.add(runtime);
+  try {
+    await switchToFreshThread(runtime);
+    prepare();
+  } finally {
+    pendingTransitions.delete(runtime);
+  }
+}
+
 /** Creation workflows always own a separate thread, including empty drafts. */
 export async function changeCreationThread(
   runtime: AssistantRuntime,
@@ -22,13 +47,7 @@ export async function changeCreationThread(
         .attachments.some((attachment) => attachment.status.type === "running")
     )
       throw new Error(translate("ui.localization.waitUploadConversation"));
-    const threads = runtime.threads.getState();
-    if (threads.newThreadId) {
-      // Nexent initializes locally; reserving the draft prevents assistant-ui
-      // from reusing the same empty thread for a different creation mode.
-      await runtime.threads.getItemById(threads.newThreadId).initialize();
-    }
-    await runtime.threads.switchToNewThread();
+    await switchToFreshThread(runtime);
     applyMode();
   } finally {
     pendingTransitions.delete(runtime);

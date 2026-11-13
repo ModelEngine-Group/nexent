@@ -15,7 +15,6 @@ import {
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { StandardButton } from "@/components/common/StandardButton";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import {
@@ -193,11 +192,11 @@ export function McpDetail({
               </section>
             </div>
             <footer className="flex shrink-0 justify-end gap-2 pt-8">
-              <StandardButton className="min-w-[88px]" onClick={onClose}>
+              <Button className="min-w-[88px]" onClick={onClose}>
                 {t("common.close")}
-              </StandardButton>
-              <StandardButton
-                variant="primary"
+              </Button>
+              <Button
+                type="primary"
                 className="min-w-[88px] max-w-[200px]"
                 disabled={installed}
                 onClick={() => onInstall(service)}
@@ -207,7 +206,7 @@ export function McpDetail({
                     ? "mcpTools.repository.installed"
                     : "mcpTools.repository.install"
                 )}
-              </StandardButton>
+              </Button>
             </footer>
           </div>
         ) : (

@@ -4,8 +4,15 @@
 
 import type { FC } from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ConfigProvider, Dropdown, Tabs } from "antd";
-import type { MenuProps } from "antd";
+import {
+  ConfigProvider,
+  Dropdown,
+  Tabs,
+  type MenuProps,
+  Input,
+  Pagination,
+} from "antd";
+
 import antdZhCn from "antd/locale/zh_CN";
 import antdEnUs from "antd/locale/en_US";
 import {
@@ -21,8 +28,6 @@ import { useRouter } from "next/navigation";
 import type { PublishedAgent, Agent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useTranslation } from "react-i18next";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
 
 const LAST_USED_AGENT_KEY = "nexent_last_used_agent_id";
 const RECENT_AGENT_IDS_KEY = "nexent_recent_agent_ids";
@@ -213,7 +218,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
         {t("chat.agentLanding.discoverTitle")}
       </h1>
 
-      <ConfigProvider theme={{ token: { colorPrimary: "#2673e5" } }}>
+      <ConfigProvider>
         <Tabs
           activeKey={activeTab}
           onChange={handleTabChange}
@@ -223,7 +228,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
       </ConfigProvider>
 
       <div className="w-[360px] max-w-full">
-        <StandardInput
+        <Input
           value={search}
           onChange={(event) => handleSearchChange(event.target.value)}
           placeholder={t("chat.agentLanding.searchPlaceholderName")}
@@ -256,7 +261,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
           </span>
         </div>
         <ConfigProvider locale={antdLocale}>
-          <StandardPaginator
+          <Pagination
             current={page}
             pageSize={pageSize}
             total={totalCount}

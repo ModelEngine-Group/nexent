@@ -45,8 +45,8 @@ case:
     action: 按创建响应的run ID定位新行，检查等待中/运行中或已完成状态。
     expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 9
-    action: 等待COMPLETED或明确失败终态。
-    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
+    action: 等待终态，屏蔽已发布智能体选项后刷新评测列表。
+    expected: 完成的任务在列表接口和智能体列中仍显示智能体名称。
   - order: 10
     action: 成功后点击该run的查看按钮进入/evaluation/{id}。
     expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
@@ -58,7 +58,21 @@ case:
   - Try it out真实调用Agent/Evaluator。
   - Run可轮询到终态且详情可打开。
   - 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
+  - 已发布智能体选项不包含任务的智能体时，刷新后仍按名称展示该任务的智能体。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-PREPARATION
+    description: 在当前评测页使用正确的智能体、版本、Judge、评测集和评估器配置。
+    expected_results: [1]
+    steps: [1, 2, 3, 4, 5]
+  - id: AC-RUN-RESULTS
+    description: 试运行并创建正式任务，轮询后打开任务结果。
+    expected_results: [2, 3, 4]
+    steps: [6, 7, 8, 9, 10, 11]
+  - id: AC-AGENT-NAME
+    description: 刷新后无需已发布智能体选项即可显示智能体名称。
+    expected_results: [5]
+    steps: [9]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
@@ -74,7 +88,7 @@ case:
   - 点击【Try it out】，等待真实Agent+Evaluator试运行并检查Trial Result。
   - 提交正式Run。
   - 按创建响应的run ID定位新行，检查等待中/运行中或已完成状态。
-  - 等待COMPLETED或明确失败终态。
+  - 等待终态，屏蔽已发布智能体选项后刷新评测列表。
   - 成功后点击该run的查看按钮进入/evaluation/{id}。
   - 检查case结果、score/evaluator输出等满足expected结构。
   final_business_result:
@@ -82,6 +96,7 @@ case:
   - Try it out真实调用Agent/Evaluator。
   - Run可轮询到终态且详情可打开。
   - 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
+  - 已发布智能体选项不包含任务的智能体时，刷新后仍按名称展示该任务的智能体。
   failure_evidence:
   - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-EVAL-RUN-01/
 

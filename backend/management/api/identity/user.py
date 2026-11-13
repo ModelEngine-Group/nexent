@@ -4,7 +4,6 @@
 User management API endpoints
 """
 
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -12,14 +11,29 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
+from contracts.errors.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    RoleAssignmentConflict,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    tenant_resource_limit_error_payload,
+)
 from contracts.identity import UserListRequest, UserUpdateRequest
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
-from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.users import (
-    delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
+from gateway.authentication.auth import (
+    extract_session_id_from_authorization,
+    get_current_user_context,
+    get_current_user_id,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.auth import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.roles import assignable_roles
+from management.services.permission.identity.users import (
+    delete_user_and_cleanup,
+    get_users_for_requester,
+    update_user_for_requester,
+)
+from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -110,7 +124,7 @@ async def update_user_endpoint(
         # Update user
         updated_user = await update_user_for_requester(
             user_id,
-            request.model_dump(),
+            request.model_dump(exclude_unset=True),
             updated_by=current_user_id,
             requester_tenant_id=requester_tenant_id,
             requester_role=requester_role,
@@ -144,6 +158,8 @@ async def update_user_endpoint(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
             content=tenant_resource_limit_error_payload(exc),
         )
+    except RoleAssignmentConflict as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc))
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
@@ -164,7 +180,7 @@ async def delete_user_endpoint(
     - Soft-delete user-tenant relationship and groups
     - Soft-delete memory configs and conversations
     - Clear user-level memories
-    - Permanently delete user from Supabase
+    - Permanently delete user from local account store
 
     Args:
         user_id: User identifier
@@ -184,8 +200,14 @@ async def delete_user_endpoint(
 
         tenant_id = user_tenant["tenant_id"]
 
+        actor = get_user_tenant_by_user_id(current_user_id)
+        if not actor:
+            raise UnauthorizedError("User not found")
+        check_managed_target(actor, user_tenant)
+        if current_user_id == user_id:
+            raise RoleAssignmentConflict("Cannot delete your own managed identity")
         # Perform complete user cleanup
-        await delete_user_and_cleanup(user_id, tenant_id)
+        await delete_user_and_cleanup(user_id, tenant_id, actor_id=current_user_id)
 
         logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
 
@@ -198,6 +220,12 @@ async def delete_user_endpoint(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User deleted successfully"})
 
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    except RoleAssignmentConflict as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc))
     except ValueError as exc:
         logger.warning(f"User deletion validation error for user {user_id}: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
@@ -205,3 +233,17 @@ async def delete_user_endpoint(
         logger.error(f"Unexpected error deleting user {user_id}: {str(exc)}")
         # Include the actual error message for debugging
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to delete user: {str(exc)}")
+
+
+@router.get("/{user_id}/assignable_roles")
+async def get_assignable_roles_endpoint(user_id: str, authorization: Optional[str] = Header(None)):
+    """Return server-derived role choices without trusting client role claims."""
+    try:
+        actor_id, _ = get_current_user_id(authorization)
+        return {"data": assignable_roles(actor_id, user_id)}
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except NotFoundException as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: User identity and authorization
+feature:
+  feature_id: AUTH-MULTI-ROLE
+  name: 新增运维管理员权限
+  status: active
+  description: Add built-in multi-role assignments, invitations and OPS grants while
+    preserving existing business boundaries.
+  business_rules:
+  - rule_id: AUTH-MULTI-ROLE-RULE-01
+    description: Roles are stored as normalized nonempty arrays on existing account and
+      invitation rows; no role relation or role version is added.
+  - rule_id: AUTH-MULTI-ROLE-RULE-02
+    description: Action grants and their scopes are unioned without removing existing
+      resource and tenant protections; OPS is not a general business editor.
+  - rule_id: AUTH-MULTI-ROLE-RULE-03
+    description: SU and tenant ADMIN may grant or revoke ADMIN DEV USER OPS within
+      managed user scope; self ADMIN removal and last active ADMIN removal are rejected.
+  - rule_id: AUTH-MULTI-ROLE-RULE-04
+    description: Invitation roles are fixed at creation and assigned together on signup;
+      issuer revocation does not invalidate a usable invitation.
+  - rule_id: AUTH-MULTI-ROLE-RULE-05
+    description: OPS has two operations entry grants plus read-only resource management;
+      SU has equivalent operations grants across all tenants; combined roles retain
+      existing grants.
+  - rule_id: AUTH-MULTI-ROLE-RULE-06
+    description: Successful complete role replacements use last successful commit;
+      subsequent protected requests read current roles and stale single-role clients
+      cannot truncate arrays.
+  - rule_id: AUTH-MULTI-ROLE-RULE-07
+    description: Legacy data and external identity formats migrate without expanding
+      existing source synchronization or machine-credential privileges.
+  - rule_id: AUTH-MULTI-ROLE-RULE-08
+    description: Retire SPEED from active role data, grant validation and authentication
+      bypasses; reject unresolved active SPEED-only subjects before destructive migration.
+      Preserve ASSET_OWNER business rules and exclude operations business CRUD.
+  required_test_stages:
+  - D2
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - AUTH-MULTI-ROLE-20261031
+    spec_path: nexent-doc/docs/Developing/auth-multi-role-ops/proposal.md
+    notes: OPS administrator permissions are the feature; role arrays and union checks
+      are supporting refactors. User authorized an in-project document root. Monitoring/configuration
+      business CRUD and external OAuth/CAS journeys are outside this implementation
+      scope.

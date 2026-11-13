@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Select, Steps } from "antd";
 import { FileUp, SquarePen } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -279,7 +279,7 @@ export default function SkillCreateModal({
         createdId
       ) {
         const updated = await updateSkillById(id, data);
-        if (!updated.success) throw updated.error || new Error(updated.message);
+        if (!updated.success) throw new Error(updated.message);
       }
       if (values.tag_value_ids?.length || tagsAttempted.current) {
         tagsAttempted.current = true;
@@ -313,21 +313,20 @@ export default function SkillCreateModal({
     onClose();
   };
   return (
-    <StandardModal
+    <Modal
+      centered
       open={open}
-      width={860}
-      height={step === 1 ? "min(900px, calc(100dvh - 48px))" : undefined}
-      maxHeight="calc(100dvh - 48px)"
-      bodyClassName="!overflow-y-auto"
-      title={t("skillCreation.title")}
-      closeLabel={t("common.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      onClose={() => !savingRef.current}
-      onCancel={() => !savingRef.current}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen && !savingRef.current) close();
+      closable={{ "aria-label": t("common.close") }}
+      onCancel={() => {
+        if (!savingRef.current) close();
       }}
+      width={860}
+      styles={{
+        body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" },
+      }}
+      title={t("skillCreation.title")}
+      cancelText={t("common.cancel")}
+      okText={t("common.confirm")}
       footer={
         <div className="flex justify-end gap-2">
           <Button disabled={saving} onClick={close}>
@@ -587,6 +586,6 @@ export default function SkillCreateModal({
           </Form.Item>
         </div>
       </Form>
-    </StandardModal>
+    </Modal>
   );
 }

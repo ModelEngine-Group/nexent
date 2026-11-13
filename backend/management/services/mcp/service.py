@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+
 import asyncio
 import logging
 import os
@@ -9,22 +10,93 @@ import tempfile
 from contextlib import AsyncExitStack
 from typing import Awaitable, Callable
 
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
-from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_DOCKER_IMAGE
-from contracts.errors.exceptions import MCPConnectionError, MCPContainerError, McpNameConflictError, MCPNameIllegal, McpNotFoundError, McpPortConflictError, McpValidationError
-from contracts.tool import MCPConfigRequest
-from management.db.identity.group import query_group_ids_by_user
-from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
-from management.db.mcp.remote import check_enabled_mcp_name_exists, check_mcp_name_exists, create_mcp_record, delete_mcp_record_by_container_id, delete_mcp_record_by_id, get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_records_by_tenant, update_mcp_record_by_name_and_url, update_mcp_record_container_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_manage_fields_by_id, update_mcp_record_registry_json_by_id, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
-from management.db.tool.repository import set_mcp_tools_unavailable
-from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+)
+from contracts.constants.environment import (
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_DOCKER_IMAGE,
+)
+from contracts.errors.exceptions import (
+    MCPConnectionError,
+    MCPContainerError,
+    McpNameConflictError,
+    MCPNameIllegal,
+    McpNotFoundError,
+    McpPortConflictError,
+    McpValidationError,
+)
+from contracts.roles import has_any_role, roles_from_record
+from contracts.tool import MCPConfigRequest
 from infrastructure.http.client import create_httpx_client
+from management.db.identity.group import query_group_ids_by_user
+from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id
+from management.db.mcp.market import (
+    get_mcp_market_record_by_source_mcp_id,
+    update_mcp_market_record,
+)
+from management.db.mcp.remote import (
+    check_enabled_mcp_name_exists,
+    check_mcp_name_exists,
+    create_mcp_record,
+    delete_mcp_record_by_container_id,
+    delete_mcp_record_by_id,
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_custom_headers_by_name_and_url,
+    get_mcp_record_by_id_and_tenant,
+    get_mcp_records_by_tenant,
+    update_mcp_record_by_name_and_url,
+    update_mcp_record_container_fields_by_id,
+    update_mcp_record_enabled_by_id,
+    update_mcp_record_manage_fields_by_id,
+    update_mcp_record_registry_json_by_id,
+    update_mcp_record_status_by_id,
+    update_mcp_status_by_name_and_url,
+)
+from management.db.tag.repository import TagManagementDB
+from management.db.tool.repository import set_mcp_tools_unavailable
 from management.services.mcp.common import (
     logger,
 )
 from management.services.mcp.containers import MCPContainerManager
+from management.services.mcp.health import (
+    _format_mcp_connection_error,
+    _iter_exception_chain,
+    _mcp_protocol_connect,
+    _mcp_protocol_health_check,
+    check_mcp_health_and_update_db,
+    check_mcp_service_health,
+    mcp_server_health,
+    test_mcp_connection,
+)
+from management.services.mcp.provisioning import (
+    _is_container_record,
+    add_container_mcp_service,
+    check_container_port_conflict,
+    check_container_port_conflict_records,
+    check_runtime_host_port_available,
+    suggest_container_port,
+    upload_and_start_mcp_image,
+)
+from management.services.mcp.registration import (
+    _build_mcp_headers,
+    _check_mcp_connectivity,
+    add_mcp_service,
+    add_remote_mcp_server_list,
+)
+from management.services.mcp.tools import (
+    list_mcp_service_tools_by_id,
+    refresh_mcp_service_tool_count,
+)
+from management.services.tool.configuration import (
+    _refresh_openapi_services_in_mcp,
+    delete_openapi_service,
+)
 
 
 async def update_remote_mcp_server_list(
@@ -449,10 +521,6 @@ async def delete_mcp_service(
         # API-to-MCP services have a separate service record and all their
         # persisted tools use the shared ``outer-apis`` usage value.
         try:
-            from management.services.tool.configuration import (
-                _refresh_openapi_services_in_mcp,
-                delete_openapi_service,
-            )
 
             delete_openapi_service(
                 service_name=current_record.get("mcp_name") or "",
@@ -479,9 +547,8 @@ async def delete_mcp_service(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    from management.services.tag.library import TagManagementService
 
-    TagManagementService.cleanup_resource_assignments(
+    TagManagementDB.soft_delete_resource_assignments(
         tenant_id, "mcp_service", str(mcp_id), user_id
     )
 
@@ -508,9 +575,8 @@ async def delete_mcp_by_container_id(
         user_id=user_id,
     )
     if deleted_mcp_id is not None:
-        from management.services.tag.library import TagManagementService
 
-        TagManagementService.cleanup_resource_assignments(
+        TagManagementDB.soft_delete_resource_assignments(
             tenant_id, "mcp_service", str(deleted_mcp_id), user_id
         )
 
@@ -541,8 +607,8 @@ async def get_remote_mcp_server_list(
     user_groups: list[str] | None = None
     if user_id:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-        user_role = str(user_tenant_record.get("user_role") or "").upper()
-        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        user_role = roles_from_record(user_tenant_record)
+        can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
         try:
             raw_groups = query_group_ids_by_user(user_id) or []
             user_groups = [str(g) for g in raw_groups]
@@ -698,8 +764,8 @@ def attach_mcp_container_permissions(
     can_edit_all = False
     if user_id:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-        user_role = str(user_tenant_record.get("user_role") or "").upper()
-        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        user_role = roles_from_record(user_tenant_record)
+        can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
 
     created_by_by_container_id = {}
     try:
@@ -768,34 +834,3 @@ async def get_mcp_record_by_id(
         "authorization_token": mcp_record.get("authorization_token"),
         "custom_headers": mcp_record.get("custom_headers"),
     }
-
-
-from management.services.mcp.health import (
-    _format_mcp_connection_error,
-    _iter_exception_chain,
-    _mcp_protocol_connect,
-    _mcp_protocol_health_check,
-    check_mcp_health_and_update_db,
-    check_mcp_service_health,
-    mcp_server_health,
-    test_mcp_connection,
-)
-from management.services.mcp.provisioning import (
-    _is_container_record,
-    add_container_mcp_service,
-    check_container_port_conflict,
-    check_container_port_conflict_records,
-    check_runtime_host_port_available,
-    suggest_container_port,
-    upload_and_start_mcp_image,
-)
-from management.services.mcp.registration import (
-    _build_mcp_headers,
-    _check_mcp_connectivity,
-    add_mcp_service,
-    add_remote_mcp_server_list,
-)
-from management.services.mcp.tools import (
-    list_mcp_service_tools_by_id,
-    refresh_mcp_service_tool_count,
-)

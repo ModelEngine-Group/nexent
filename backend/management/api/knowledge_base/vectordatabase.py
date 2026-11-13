@@ -1,30 +1,49 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.constants import INTERNAL_INDEX_NAME_DESC
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
-from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
-from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 import json
 import logging
 import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+)
 from fastapi.responses import JSONResponse
-from nexent.core.concurrency import run_blocking
-from nexent.vector_database.base import VectorDatabaseCore
 
-from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    INTERNAL_INDEX_NAME_DESC,
+    SUMMARY_FREQUENCY_OPTIONS_FOR_API,
+    VALID_SUMMARY_FREQUENCIES,
+)
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
-from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from contracts.constants.constants import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
-from management.db.knowledge_base.repository import get_index_name_by_knowledge_name, get_knowledge_record
+from contracts.knowledge import (
+    ChunkCreateRequest,
+    ChunkUpdateRequest,
+    HybridSearchRequest,
+    IndexingResponse,
+)
+from contracts.roles import has_any_role
+from permissions.resource_access import resource_read_tenant
+from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from management.db.knowledge_base.file_lifecycle import get_file_record
+from management.db.knowledge_base.repository import (
+    get_index_name_by_knowledge_name,
+    get_knowledge_record,
+    update_summary_frequency,
+)
 from management.db.model.repository import get_model_by_model_id
+from management.services.file.service import check_file_access
+from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
@@ -32,13 +51,19 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from management.services.knowledge_base.status import get_all_files_status
+from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
-from management.services.file.service import check_file_access
-from management.services.knowledge_base.quota import QuotaService
-from management.services.knowledge_base.task_state import get_redis_service
-from gateway.authentication.auth import get_current_user_context, get_current_user_id
-
+from management.services.tag.library import TagManagementService
+from management.services.tag.projection import (
+    project_authorized_document_tags,
+)
+from management.utils.knowledge_permission import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
+from nexent.core.concurrency import run_blocking
+from nexent.vector_database.base import VectorDatabaseCore
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -175,7 +200,7 @@ async def get_knowledge_base_bound_agents(
     except TokenExpiredError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
     target_tenant_id = tenant_id or auth_tenant_id
-    if target_tenant_id != auth_tenant_id and role != "SU":
+    if target_tenant_id != auth_tenant_id and not has_any_role(role, {'SU'}):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
     try:
         require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
@@ -205,7 +230,6 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
-        from management.services.tag.library import TagManagementService
 
         TagManagementService.cleanup_resource_assignments(tenant_id, "knowledge_base", index_name, user_id)
         TagManagementService.cleanup_document_assignments_for_knowledge_base(tenant_id, "local", index_name, user_id)
@@ -302,7 +326,6 @@ async def update_summary_frequency_endpoint(
                 detail=f"Invalid summary_frequency. Must be one of: {valid_frequencies}",
             )
 
-        from management.db.knowledge_base.repository import update_summary_frequency
 
         success = update_summary_frequency(
             index_name=index_name, summary_frequency=summary_frequency, _tenant_id=tenant_id, user_id=user_id
@@ -478,6 +501,7 @@ def get_list_indices(
     models: Optional[List[str]] = Query(None, description="Embedding model names to include"),
     vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
 ):
     """List all user indices with optional stats"""
     try:
@@ -493,6 +517,11 @@ def get_list_indices(
                 "sources": sources,
                 "models": models,
             }
+        if authorized_tenant := resource_read_tenant(request, shared=True):
+            return ElasticSearchService.list_indices(
+                pattern, include_stats, authorized_tenant, user_id, vdb_core,
+                inventory_read=True, **pagination_args,
+            )
         if tenant_id is None:
             if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
                 prefix_limit = offset + limit
@@ -538,6 +567,8 @@ def get_list_indices(
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
 
@@ -647,9 +678,6 @@ async def get_index_files(
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
-        from management.services.tag.projection import (
-            project_authorized_document_tags,
-        )
 
         # The read permission check above authorized this page; project tags in
         # one batch so each row never issues its own assignment request.
@@ -695,7 +723,6 @@ async def delete_documents(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         if file_id:
             try:
-                from management.db.knowledge_base.file_lifecycle import get_file_record
 
                 lifecycle_record = get_file_record(
                     file_id=file_id,
@@ -741,7 +768,6 @@ async def delete_documents(
         )
 
         if scope == "full":
-            from management.services.tag.library import TagManagementService
 
             TagManagementService.cleanup_document_assignments(tenant_id, "local", index_name, path_or_url, user_id)
             # The deletion service performs Redis cleanup for new callers. Keep
@@ -822,7 +848,6 @@ async def get_document_error_info(
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         try:
-            from management.db.knowledge_base.file_lifecycle import get_file_record
 
             lifecycle_record = get_file_record(
                 file_id=file_id,

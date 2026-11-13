@@ -1,0 +1,57 @@
+schema_version: '1.0'
+change:
+  change_id: SYSTEM-TAB-TITLE-RACE-20261029
+  change_type: bugfix
+  bug_id: SYSTEM-TAB-TITLE-RACE-20261029
+  title: Preserve configured browser titles through login and navigation
+  description: Remove the competing static Nexent metadata title, leave unavailable titles blank, and reduce homepage logo dimensions while preserving collapsed clipping.
+  observed_behavior: Login or sidebar navigation can overwrite the configured title with Nexent; refresh briefly renders Nexent before configuration arrives. The homepage logo is oversized.
+  expected_behavior: A single configuration-owned title stays correct across login and sidebar navigation, is blank before a name is available, and the logo remains proportionally smaller without resizing during collapse.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT overwrites document.title before pathname effects, so it misses late streamed metadata overwrites. The D4 journey did not delay branding requests or assert title history across actual login/sidebar transitions.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-184]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [SYSTEM-BRANDING-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Initial server rendering and delayed or unavailable configuration leave the browser title blank.
+    - Route metadata never supplies a competing title; configuration-owned title persists across route changes and provider remounts.
+    - Loaded titles localize and update; blank names remain blank and markup remains plain text.
+    - Homepage logos use smaller dimensions; blank-title logos keep those dimensions across expanded and collapsed states.
+    test_selectors:
+    - frontend/tests/component/browserTabBranding.test.tsx
+    - frontend/tests/component/sidebarHover.test.tsx
+    reason: Strengthen existing frontend regression tests and the real browser journey. No Python or API behavior changes, and no additional D1 or API Case provides necessary evidence.
+  notes: |
+    The sibling nexent-doc repository is unavailable, as previously confirmed by the user;
+    do not create a second SPEC root in this product repository. Continue the existing
+    SYSTEM-TAB-BRANDING-20261028 capability and preserve its historical evidence.
+    Root cause: app/[locale]/layout.tsx exports title Nexent while I18nProviderWrapper
+    writes document.title in a pathname/config effect. Streamed navigation metadata
+    can commit later than that effect. projectBranding also defaults missing names
+    to Nexent. Final ownership should reside in one React title element, including
+    initial SSR, without a second server metadata title or an empty-name fallback.
+    UT reproduces missing-name/loading/metadata conflicts and route/remount behavior.
+    D4 strengthens AC-03 with delayed custom.json requests, observed title history,
+    and tenant administrator login plus sidebar navigation. SUPER_ADMIN only has the
+    resource-management navigation surface. AC-02 covers the reduced logo layout.
+    Logo-only frame changes from 184x48 to a 160x40 image within a 48px-high row;
+    explicit-title images return to 40x40. Both maintain aspect ratio and clipping.
+    Implementation and targeted unit/static checks are complete; detailed execution
+    evidence stays in machine-local verification notes outside Git. Actual browser
+    refresh and collapsed logo measurements were inspected on the development page.
+    Formal execution remains blocked by an absent isolated test-home; full validation
+    has the existing missing ConversationResumeBranch UT reference. Neither unit
+    success nor the limited current-session browser observations certify the entire
+    login/sidebar D4 journey. Preserve user images and operational containers.

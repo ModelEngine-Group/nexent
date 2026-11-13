@@ -10,7 +10,10 @@ import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
 import { fetchAgentVersionDetail } from "@/services/agentVersionService";
 import { useAgentRepositoryListingDetail } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { mapRepositoryAgentDetail } from "@/lib/myAgentDetail";
+import {
+  mapOfficialRepositoryDetail,
+  mapRepositoryAgentDetail,
+} from "@/lib/myAgentDetail";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
 export function useRepositoryAgentDetail(
@@ -27,7 +30,9 @@ export function useRepositoryAgentDetail(
   const versionQuery = useAgentVersionDetail(
     agentId,
     versionNo,
-    enabled && listing != null,
+    enabled &&
+      repositoryDetail != null &&
+      repositoryDetail.is_official !== true,
     60_000
   );
   const versionDetail = versionQuery.agentVersionDetail;
@@ -91,12 +96,13 @@ export function useRepositoryAgentDetail(
     ],
   }));
   const missingVersion =
-    repositoryDetail != null && (agentId == null || versionNo == null);
-
-  return {
-    repositoryDetail,
-    detail: listing
-      ? versionDetail && repositoryDetail
+    repositoryDetail?.is_official !== true &&
+    repositoryDetail != null &&
+    (agentId == null || versionNo == null);
+  const detail =
+    listing && repositoryDetail?.is_official === true
+      ? mapOfficialRepositoryDetail(repositoryDetail, listing.tags)
+      : listing && versionDetail && repositoryDetail
         ? mapRepositoryAgentDetail(
             versionDetail,
             {
@@ -113,18 +119,24 @@ export function useRepositoryAgentDetail(
               subAgents,
             }
           )
-        : undefined
-      : null,
+        : listing
+          ? undefined
+          : null;
+
+  return {
+    repositoryDetail,
+    detail,
     isLoading:
       listing != null &&
       !repositoryQuery.isError &&
       !versionQuery.isError &&
       !missingVersion &&
-      (!repositoryDetail || !versionDetail),
+      (!repositoryDetail ||
+        (repositoryDetail.is_official !== true && !versionDetail)),
     isError: repositoryQuery.isError || versionQuery.isError || missingVersion,
     isFetching: repositoryQuery.isFetching || versionQuery.isFetching,
     retry: () => {
-      if (!repositoryDetail || missingVersion) {
+      if (!repositoryDetail || missingVersion || repositoryDetail.is_official) {
         return repositoryQuery.refetch();
       }
       return versionQuery.refetch();

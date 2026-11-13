@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import JSZip from "jszip";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "antd";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 import type { SkillFileContent } from "@/types/skill";
 import SkillReadOnlyDetail from "./SkillReadOnlyDetail";
@@ -36,6 +36,7 @@ export default function RepositorySkillDetail({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset the previous archive before reading the selected listing.
     setFiles([]);
     setFileError(false);
     setLoadingFiles(true);
@@ -90,18 +91,19 @@ export default function RepositorySkillDetail({
   }, [open, detail]);
   const source = detail?.source;
   return (
-    <StandardModal
+    <Modal
+      centered
       open={open}
+      closable={{ "aria-label": t("common.close") }}
       width={860}
-      maxHeight="calc(100dvh - 48px)"
-      bodyClassName="!overflow-y-auto"
-      title={t("skillManagement.detail.title")}
-      closeLabel={t("common.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      onOpenChange={(next) => {
-        if (!next) onClose();
+      styles={{
+        body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" },
       }}
+      title={t("skillManagement.detail.title")}
+      cancelText={t("common.cancel")}
+      okText={t("common.confirm")}
+      onCancel={onClose}
+      onOk={onClose}
     >
       {isLoading ? (
         <div className="flex min-h-64 items-center justify-center">
@@ -138,6 +140,6 @@ export default function RepositorySkillDetail({
           />
         </Spin>
       ) : null}
-    </StandardModal>
+    </Modal>
   );
 }

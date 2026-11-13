@@ -21,7 +21,6 @@ import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
 import McpGroupSelectionTable from "../../shared/McpGroupSelectionTable";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { Can } from "@/components/permission/Can";
@@ -537,20 +536,17 @@ export default function AddMcpServiceLocalSection({
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-4">
           {deploymentStarted && (
-            <StandardButton
-              className="mr-auto"
-              onClick={() => setLogsOpen(true)}
-            >
+            <Button className="mr-auto" onClick={() => setLogsOpen(true)}>
               {t("mcpTools.detail.viewContainerLogs")}
-            </StandardButton>
+            </Button>
           )}
-          <StandardButton disabled={submitting} onClick={onClose}>
+          <Button disabled={submitting} onClick={onClose}>
             {t("common.close")}
-          </StandardButton>
+          </Button>
           {showGroupStep && (
-            <StandardButton disabled={submitting} onClick={() => setStep(0)}>
+            <Button disabled={submitting} onClick={() => setStep(0)}>
               {t("common.back")}
-            </StandardButton>
+            </Button>
           )}
           <Button
             type="primary"

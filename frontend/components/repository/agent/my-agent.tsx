@@ -26,7 +26,6 @@ import { deleteAgent } from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
-  useCreateAgentRepositoryListing,
   useMyEditableAgents,
   useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
@@ -51,11 +50,9 @@ import {
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
-  type AgentRepositoryListingCreatePayload,
   type MyAgentRepositoryInfoItem,
   type MyEditableAgentItem,
 } from "@/types/agentRepository";
-import { MineApplyListingModal } from "./components/MineApplyListingModal";
 import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
 import { AgentUsageGuideModal } from "./components/AgentUsageGuideModal";
 import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
@@ -209,7 +206,6 @@ export function MyAgent({
   const [reviewModalMode, setReviewModalMode] = useState<
     "review" | "reviewUpdate"
   >("review");
-  const [applyingAgentId, setApplyingAgentId] = useState<number | null>(null);
   const [detailTarget, setDetailTarget] = useState<{
     agentId: number;
     versionNo: number;
@@ -264,9 +260,6 @@ export function MyAgent({
     detailListings,
     versionDetail,
   ]);
-  const [applyModalOpen, setApplyModalOpen] = useState(false);
-  const [applyModalAgent, setApplyModalAgent] =
-    useState<MyEditableAgentItem | null>(null);
   const [usageGuideAgent, setUsageGuideAgent] =
     useState<MyEditableAgentItem | null>(null);
   const [guidedMenuAgentId, setGuidedMenuAgentId] = useState<number | null>(
@@ -275,7 +268,6 @@ export function MyAgent({
   const consumedDeepLinkRef = useRef<number | null>(null);
   const consumedUsageGuideRef = useRef<number | null>(null);
 
-  const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
   const deleteAgentMutation = useMutation({
     mutationFn: (agentId: number) => deleteAgent(agentId),
@@ -379,62 +371,10 @@ export function MyAgent({
     });
   };
 
-  const handleEvaluate = (agent: MyEditableAgentItem) => {
-    const versionNo = agent.current_version_no ?? 0;
-    if (versionNo <= 0) {
-      return;
-    }
-    router.push(
-      `/${locale}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agent.agent_id]))}`
-    );
-  };
-
   const closeReviewModal = () => {
     setReviewModalOpen(false);
     setReviewModalAgent(null);
     setReviewModalInfo(null);
-  };
-
-  const handleApplyListing = (agent: MyEditableAgentItem) => {
-    const versionNo = agent.current_version_no ?? 0;
-    if (versionNo <= 0) {
-      return;
-    }
-    setApplyModalAgent(agent);
-    setApplyModalOpen(true);
-  };
-
-  const closeApplyModal = () => {
-    setApplyModalOpen(false);
-    setApplyModalAgent(null);
-  };
-
-  const handleSubmitApplyListing = async (
-    payload: AgentRepositoryListingCreatePayload
-  ) => {
-    if (!applyModalAgent) {
-      return;
-    }
-
-    const versionNo = applyModalAgent.current_version_no ?? 0;
-    if (versionNo <= 0) {
-      return;
-    }
-
-    setApplyingAgentId(applyModalAgent.agent_id);
-    try {
-      await createListingMutation.mutateAsync({
-        agentId: applyModalAgent.agent_id,
-        versionNo,
-        payload,
-      });
-      message.success(t("repository.mine.applySuccess"));
-      closeApplyModal();
-    } catch {
-      message.error(t("repository.mine.applyError"));
-    } finally {
-      setApplyingAgentId(null);
-    }
   };
 
   const handleViewReview = (
@@ -691,10 +631,8 @@ export function MyAgent({
                       agent,
                     })
                   }
-                  onApplyListing={() => handleApplyListing(agent)}
                   onViewReview={handleViewReview}
                   onDelete={() => handleDeleteAgent(agent)}
-                  onEvaluate={() => handleEvaluate(agent)}
                   onUsageGuide={() => {
                     setGuidedMenuAgentId(null);
                     setUsageGuideAgent(agent);
@@ -708,10 +646,6 @@ export function MyAgent({
                       setGuidedMenuAgentId(null);
                     }
                   }}
-                  isApplying={
-                    applyingAgentId === agent.agent_id &&
-                    createListingMutation.isPending
-                  }
                   isDeleting={
                     deleteAgentMutation.isPending &&
                     deleteAgentMutation.variables === agent.agent_id
@@ -728,14 +662,6 @@ export function MyAgent({
           </>
         )}
       </div>
-
-      <MineApplyListingModal
-        open={active && applyModalOpen}
-        agent={applyModalAgent}
-        isSubmitting={createListingMutation.isPending}
-        onClose={closeApplyModal}
-        onSubmit={handleSubmitApplyListing}
-      />
 
       <MineReviewStatusModal
         open={active && reviewModalOpen}

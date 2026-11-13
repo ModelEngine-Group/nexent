@@ -17,8 +17,6 @@ import AgentListIndicators from "./agent-list-indicators";
 export interface AgentListCardProps {
   agent: Agent;
   onOpen: (agent: Agent) => void;
-  onConfigure: (agentId: number) => void;
-  onPublish: (agentId: number) => void;
   onManageVersions: (agentId: number) => void;
 }
 
@@ -43,8 +41,6 @@ export function formatAgentListDate(agent: Agent): {
 export default function AgentListCard({
   agent,
   onOpen,
-  onConfigure,
-  onPublish,
   onManageVersions,
 }: AgentListCardProps) {
   const { t } = useTranslation("common");
@@ -57,7 +53,7 @@ export default function AgentListCard({
   const agentId = Number(agent.id);
 
   return (
-    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
+    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-lg bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[var(--color-brand)] focus-within:ring-[var(--color-brand)]">
       <button
         type="button"
         onClick={() => onOpen(agent)}
@@ -91,7 +87,7 @@ export default function AgentListCard({
           {category ? (
             <Tag
               title={category}
-              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-full !border-0 !bg-[#E6F2FD] !px-2.5 !text-[12px] font-normal !leading-5 !text-[#0067D1]"
+              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-base !border-0 !bg-[var(--color-select)] !px-2.5 !text-[12px] font-normal !leading-5 !text-[var(--color-brand)]"
             >
               <span className="min-w-0 truncate">{category}</span>
             </Tag>
@@ -128,7 +124,7 @@ export default function AgentListCard({
           <span
             data-testid="agent-card-status-dot"
             aria-hidden="true"
-            className={`size-2 shrink-0 rounded-full ${agent.current_version_no ? "bg-[#0067d1]" : "bg-[#d9d9d9]"}`}
+            className={`size-2 shrink-0 rounded-full ${agent.current_version_no ? "bg-[var(--color-brand)]" : "bg-[#d9d9d9]"}`}
           />
           {agent.current_version_no
             ? t("agentConfig.list.online")
@@ -143,8 +139,6 @@ export default function AgentListCard({
           agentName={title}
           readOnly={agent.permission === "READ_ONLY"}
           variant="menu"
-          onConfigure={onConfigure}
-          onPublish={onPublish}
           onManageVersions={onManageVersions}
         />
       </div>

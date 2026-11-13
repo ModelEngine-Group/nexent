@@ -6,9 +6,10 @@ Database operations for role permission management
 
 from typing import Any, Dict, List, Optional
 
-from management.utils.orm import as_dict
+from contracts.roles import normalize_roles
 from management.db.client import get_db_session
 from management.db.models import RolePermission
+from management.utils.orm import as_dict
 
 
 def get_all_role_permissions() -> List[Dict[str, Any]]:
@@ -43,7 +44,7 @@ def check_role_permission(
         bool: Whether the role has the permission
     """
     with get_db_session() as session:
-        query = session.query(RolePermission).filter(RolePermission.user_role == user_role)
+        query = session.query(RolePermission).filter(RolePermission.user_role.in_(normalize_roles(user_role, allow_empty=True)))
 
         if permission_category:
             query = query.filter(RolePermission.permission_category == permission_category)

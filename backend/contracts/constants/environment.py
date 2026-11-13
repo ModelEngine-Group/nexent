@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -12,6 +12,9 @@ from ..configuration import parse_positive_float, parse_positive_int, _require_p
 # avoids silently replacing operator-provided service addresses.
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
+
+# Operations service configuration
+OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -58,6 +61,8 @@ AGENT_AUTOMATION_LEASE_SECONDS = int(os.getenv('AGENT_AUTOMATION_LEASE_SECONDS',
 AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(os.getenv('AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS', '1800'))
 AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(os.getenv('AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS', '30'))
 AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(os.getenv('AGENT_AUTOMATION_MIN_INTERVAL_SECONDS', '5'))
+# Timeout in seconds for invoking external A2A agents (runtime sub-agent path and northbound direct calls)
+A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')
@@ -72,18 +77,13 @@ OFFICIAL_AGENT_PROFILES = os.getenv('OFFICIAL_AGENT_PROFILES', '')
 # LibreOffice profile directory
 LIBREOFFICE_PROFILE_DIR = os.getenv('LIBREOFFICE_PROFILE_DIR', str(Path.home() / '.cache' / 'nexent' / 'libreoffice-profile'))
 
-# Supabase Configuration
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
-
-# JWT secret for verifying Supabase-signed access tokens.
-# GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+# Native account authentication
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_ISSUER = os.getenv("JWT_ISSUER", "nexent")
 
 # Dedicated signing key for opaque independent-AIDP image references. The JWT
 # fallback keeps existing deployments functional while allowing key separation.
-IND_AIDP_IMAGE_SIGNING_KEY = os.getenv('IND_AIDP_IMAGE_SIGNING_KEY') or SUPABASE_JWT_SECRET
+IND_AIDP_IMAGE_SIGNING_KEY = os.getenv('IND_AIDP_IMAGE_SIGNING_KEY') or JWT_SECRET
 
 # OAuth Configuration
 OAUTH_CALLBACK_BASE_URL = os.getenv('OAUTH_CALLBACK_BASE_URL', '').rstrip('/')
@@ -174,8 +174,7 @@ CAPACITY_SUGGESTION_ENABLED = os.getenv('CAPACITY_SUGGESTION_ENABLED', 'true').l
 CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Deployment Version Configuration
-DEPLOYMENT_VERSION = os.getenv('DEPLOYMENT_VERSION', 'speed')
-IS_SPEED_MODE = DEPLOYMENT_VERSION == 'speed'
+DEPLOYMENT_VERSION = validate_deployment_version(os.getenv('DEPLOYMENT_VERSION', 'full'))
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv('ENABLE_AIDP_KNOWLEDGE', 'false').lower() in ('true', '1', 'yes', 'on')
@@ -289,13 +288,6 @@ WORKER_NAME = os.getenv('WORKER_NAME')
 # Keep the historical default when the variable is not provided.
 WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_COUNT + 1)))
 
-# Voice Service Configuration
-APPID = os.getenv('APPID', '')
-TOKEN = os.getenv('TOKEN', '')
-CLUSTER = os.getenv('CLUSTER', 'volcano_tts')
-VOICE_TYPE = os.getenv('VOICE_TYPE', 'zh_male_jieshuonansheng_mars_bigtts')
-SPEED_RATIO = float(os.getenv('SPEED_RATIO', '1.3'))
-
 # ===== Memory System =====
 # MMR (Maximal Marginal Relevance) configuration
 MMR_LAMBDA = float(os.getenv('MMR_LAMBDA', '0.7'))
@@ -336,6 +328,7 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(os.getenv('PROVIDER_REQUEST_TIMEOUT_SECON
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv('NEXENT_MCP_SERVER')
+NEXENT_MCP_INTERNAL_TOKEN = os.getenv('NEXENT_MCP_INTERNAL_TOKEN', '')
 MCP_MANAGEMENT_API = os.getenv('MCP_MANAGEMENT_API', 'http://localhost:5015')
 
 # Maximum number of configured MCP services per tenant.
@@ -348,15 +341,13 @@ MCP_REQUEST_TIMEOUT_SECONDS = parse_positive_float(os.getenv('MCP_REQUEST_TIMEOU
 # Invite code
 INVITE_CODE = os.getenv('INVITE_CODE')
 
-# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+# Access-token lifetime in seconds.
 JWT_EXPIRY_SECONDS = int(os.getenv('JWT_EXPIRY', '7200') or 7200)
 _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIRY must be a positive number of seconds')
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
-# User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = os.getenv('MONITORING_PROVIDER', '')
@@ -390,7 +381,7 @@ MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv('MONITORING_EXCLUDED_EL
 MONITORING_EXCLUDED_SPAN_NAMES = os.getenv('MONITORING_EXCLUDED_SPAN_NAMES', 'knowledge.process.submit,knowledge.upload.batch')
 MONITORING_PROJECT_NAME = os.getenv('MONITORING_PROJECT_NAME', '')
 MONITORING_DASHBOARD_URL = os.getenv('MONITORING_DASHBOARD_URL', '')
-MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU,SPEED')
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU')
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
@@ -459,7 +450,6 @@ MEMORY_PROVIDER_PLUGINS_DIR = os.getenv('MEMORY_PROVIDER_PLUGINS_DIR', '')
 NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm_models.json')
 
 # Exact, operator-verified endpoint/model reasoning transport overrides.
-MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv('MODEL_REASONING_WIRE_PROFILES_PATH', str(_CONFIG_DIRECTORY / 'model_reasoning_wire_profiles.json'))
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv

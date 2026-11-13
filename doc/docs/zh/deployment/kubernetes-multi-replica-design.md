@@ -13,7 +13,7 @@
 
 第一阶段明确不改 `nexent-mcp`、`nexent-data-process` 的多副本能力；这些组件继续按单副本运行，后续阶段再单独设计。
 
-第一阶段不要求内置 Postgres、Redis、Elasticsearch、MinIO、Supabase DB 做集群高可用。这些组件仍保持单实例，或由生产环境替换为外部托管服务。
+第一阶段不要求内置 Postgres、Redis、Elasticsearch、MinIO 做集群高可用。这些组件仍保持单实例，或由生产环境替换为外部托管服务。
 
 第一阶段的“扩缩容”仅指通过 Helm `replicaCount` 手工调整副本数，不启用 autoscaling/HPA。
 
@@ -132,12 +132,11 @@
 - `nexent-redis`
 - `nexent-elasticsearch`
 - `nexent-minio`
-- `nexent-supabase-db`
 
 问题：
 
 - Elasticsearch 使用 `discovery.type=single-node`，不能通过 `replicaCount` 变成集群。
-- Postgres、Redis、MinIO、Supabase DB 没有 StatefulSet、主从、Sentinel、Operator 或分布式部署配置。
+- Postgres、Redis、MinIO 没有 StatefulSet、主从、Sentinel、Operator 或分布式部署配置。
 - 这些组件第一阶段必须明确为单实例状态依赖，不参与横向扩容。
 
 ## 3. 目标架构
@@ -177,7 +176,6 @@
 - `nexent-redis`
 - `nexent-elasticsearch`
 - `nexent-minio`
-- `nexent-supabase-db`
 - `nexent-openssh`
 
 `nexent-web` 和 `nexent-config` 纳入第一阶段，但只做无状态化确认、启动/迁移并发保护、代理超时和 Helm 手工多副本配置。`nexent-mcp` 的动态工具一致性、`nexent-data-process` 的 scheduler/worker 拆分均放到后续阶段。
@@ -252,7 +250,6 @@ strategy:
 - `nexent-redis`
 - `nexent-elasticsearch`
 - `nexent-minio`
-- `nexent-supabase-db`
 
 要求：
 
@@ -759,7 +756,7 @@ Northbound 主要影响：
 | MCP 一致性 | 启动加载、Pub/Sub 广播、版本检查、管理接口兼容 | 4-6 人日 |
 | Auto Summary Scheduler | scheduler 独立部署、分布式锁或 leader election | 2-4 人日 |
 | Data Process 横向扩展 | API/worker/Flower/scheduler 拆分 | 15-30 人日 |
-| 内置状态组件 HA | Postgres、Redis、ES、MinIO、Supabase DB 集群化 | 20-40 人日 |
+| 内置状态组件 HA | Postgres、Redis、ES、MinIO 集群化 | 20-40 人日 |
 | 生产观测与容量模型 | 指标、告警、压测模型、容量建议 | 5-10 人日 |
 
 ## 7. 测试计划

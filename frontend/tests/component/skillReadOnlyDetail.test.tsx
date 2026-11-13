@@ -84,7 +84,9 @@ test("downloads the selected readable file using its basename", async () => {
     );
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(click).toHaveBeenCalledTimes(1);
-    expect(click.mock.instances[0].download).toBe("SKILL.md");
+    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe(
+      "SKILL.md"
+    );
     await waitFor(() =>
       expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:skill-test")
     );

@@ -472,7 +472,7 @@ class TestPlatformEndpoints:
         resp = client.get("/api/platform/quota/overview")
         assert resp.status_code == 403
 
-    def test_get_overview_allows_speed_role(self, client, mock_platform_static):
+    def test_get_overview_rejects_retired_role(self, client, mock_platform_static):
         mock_platform_static["get_platform_overview"].return_value = {
             "platform_capacity_bytes": None,
             "tenants": [],
@@ -483,7 +483,7 @@ class TestPlatformEndpoints:
         ), patch("management.api.knowledge_base.quota._get_user_role", return_value="SPEED"):
             resp = client.get("/api/platform/quota/overview")
 
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_put_capacity_requires_su(self, client, mock_auth_su, mock_platform_static):
         mock_platform_static["set_platform_capacity"].return_value = {
@@ -594,7 +594,7 @@ class TestQuotaRoleHelpers:
             "management.api.knowledge_base.quota.get_user_tenant_by_user_id",
             return_value={"user_role": "admin"},
         ):
-            assert quota_app._get_user_role("Bearer token") == "ADMIN"
+            assert quota_app._get_user_role("Bearer token") == ("ADMIN",)
 
     def test_role_requirements_accept_and_reject_expected_roles(self):
         with patch("management.api.knowledge_base.quota._get_user_role", return_value="ADMIN"):
@@ -607,7 +607,9 @@ class TestQuotaRoleHelpers:
             assert quota_app._require_platform_quota_manager("token") == "SU"
 
         with patch("management.api.knowledge_base.quota._get_user_role", return_value="SPEED"):
-            assert quota_app._require_platform_quota_manager("token") == "SPEED"
+            with pytest.raises(HTTPException) as raised:
+                quota_app._require_platform_quota_manager("token")
+            assert raised.value.status_code == 403
 
     def test_manageable_indices_only_include_edit_permissions(self):
         with patch(
@@ -908,8 +910,8 @@ class TestPersonalCapacityAPI:
         assert resp.status_code == 403
         assert "another tenant" in resp.json()["message"]
 
-    @pytest.mark.parametrize("role", ["SU", "SPEED"])
-    def test_su_and_speed_can_view_other_tenant(
+    @pytest.mark.parametrize("role", ["SU"])
+    def test_su_can_view_other_tenant(
         self, client, mock_personal_auth, mock_quota_service, role
     ):
         mock_personal_auth(
@@ -1028,8 +1030,8 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 403
 
-    @pytest.mark.parametrize("role", ["SU", "SPEED"])
-    def test_get_summary_su_and_speed_can_view_other_tenant(
+    @pytest.mark.parametrize("role", ["SU"])
+    def test_get_summary_su_can_view_other_tenant(
         self, client, mock_personal_auth, mock_quota_service, role
     ):
         mock_personal_auth(

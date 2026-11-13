@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { Table } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardTable } from "@/components/common/StandardTable";
 import type { Group } from "@/services/groupService";
 
 interface McpGroupSelectionTableProps {
@@ -22,7 +22,7 @@ export default function McpGroupSelectionTable({
   const { t } = useTranslation("common");
 
   return (
-    <StandardTable<Group>
+    <Table<Group>
       rowKey="group_id"
       dataSource={groups}
       loading={loading}

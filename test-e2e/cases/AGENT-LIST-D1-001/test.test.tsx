@@ -70,7 +70,6 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
         agents={[firstAgent, secondAgent]}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />,
     );
@@ -107,23 +106,20 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
   it("keeps row detail, configure, and publish actions connected", () => {
     const onOpen = vi.fn();
     const onConfigure = vi.fn();
-    const onPublish = vi.fn();
     render(
       <AgentListTable
         agents={[firstAgent, secondAgent]}
         onOpen={onOpen}
         onConfigure={onConfigure}
-        onPublish={onPublish}
         onManageVersions={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     fireEvent.click(screen.getAllByRole("button", { name: "配置" })[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: "发布" })[0]);
     expect(onOpen).toHaveBeenCalledWith(firstAgent);
     expect(onConfigure).toHaveBeenCalledWith(1);
-    expect(onPublish).toHaveBeenCalledWith(2);
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
   });
 
   it("resizes real header cells while preserving row actions", () => {
@@ -133,7 +129,6 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
         agents={[firstAgent]}
         onOpen={vi.fn()}
         onConfigure={onConfigure}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />,
     );
@@ -148,6 +143,7 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
     expect(handles[0]).toHaveAttribute("aria-valuenow", "180");
     fireEvent.click(screen.getByRole("button", { name: "\u914d\u7f6e" }));
     expect(onConfigure).toHaveBeenCalledWith(1);
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
   });
 
   it("formats only valid update timestamps", () => {

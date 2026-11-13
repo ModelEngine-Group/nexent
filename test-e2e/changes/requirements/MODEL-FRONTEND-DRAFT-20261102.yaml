@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-FRONTEND-DRAFT-20261102
+  requirement_id: MODEL-FRONTEND-DRAFT-20261102
+  change_type: requirement
+  title: Save frontend draft connectivity results without signed receipts
+  description: Replace signed connectivity receipts with optional completed connect_status metadata; frontend owns draft invalidation and persistence occurs only on save.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-PW-MODEL-01]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [MODEL-PROBE-D3-001, MODEL-OUTLET-PERSISTENCE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Draft probing never persists state or returns a receipt; saving transfers a completed result without another inference.
+    - Optional status validates available/unavailable only; CAS and credential merge remain unchanged.
+    reason: Existing persistence tests cover change/reset semantics; replace retired receipt assertions and retain real cancellation integration coverage.
+    test_selectors:
+    - test/backend/services/test_model_outlet_validation_service.py
+    - test/backend/services/test_model_outlet_update_service.py
+    - test/backend/database/test_model_outlet_connectivity_db.py
+  notes: This requirement supersedes the signing-specific assertions in MODEL-LEGACY-PROBE-20261102; its recovery and task cleanup obligations remain. No duplicate D1 is added. The self-contained D3 owns and closes its server, child task and lease; no shared assets or persistent anchors. API and browser evidence is retained in workspace acceptance documents.

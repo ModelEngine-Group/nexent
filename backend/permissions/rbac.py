@@ -6,8 +6,8 @@ import logging
 import threading
 from typing import Dict, Optional, Set
 
+from contracts.roles import normalize_roles, roles_from_record
 from management.db.identity.role_permission import get_all_role_permissions
-
 
 logger = logging.getLogger(__name__)
 
@@ -54,20 +54,26 @@ def _ensure_loaded() -> None:
         init_rbac()
 
 
-def has_permission(role: Optional[str], permission: str) -> bool:
+def has_permission(role, permission: str) -> bool:
     """Return whether the normalized role has the lower-case permission string."""
-    normalized_role = (role or "").upper()
+    try:
+        roles = normalize_roles(role, allow_empty=True)
+    except ValueError:
+        return False
     normalized_permission = (permission or "").lower()
-    if not normalized_role or not normalized_permission:
+    if not roles or not normalized_permission:
         return False
     _ensure_loaded()
     with _PERMISSION_LOCK:
-        return normalized_permission in _ROLE_PERMISSIONS.get(normalized_role, set())
+        return any(normalized_permission in _ROLE_PERMISSIONS.get(item, set()) for item in roles)
 
 
-def get_role_permissions(role: Optional[str]) -> Set[str]:
+def get_role_permissions(role) -> Set[str]:
     """Return the cached permission set for a role."""
-    normalized_role = (role or "").upper()
+    try:
+        roles = normalize_roles(role, allow_empty=True)
+    except ValueError:
+        return set()
     _ensure_loaded()
     with _PERMISSION_LOCK:
-        return set(_ROLE_PERMISSIONS.get(normalized_role, set()))
+        return set().union(*(_ROLE_PERMISSIONS.get(item, set()) for item in roles))

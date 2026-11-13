@@ -29,43 +29,23 @@ async def test_workbench_bootstrap_returns_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workbench_bootstrap_lazily_initializes_missing_agent(monkeypatch):
-    profile = {"display_name": "Workbench", "default_skill_resources": []}
-    load = MagicMock(side_effect=[RuntimeError("missing"), profile])
+@pytest.mark.parametrize("reason", ["missing", "unavailable"])
+async def test_workbench_bootstrap_fails_without_provisioning(monkeypatch, reason):
+    load = MagicMock(side_effect=RuntimeError(reason))
     initialize = AsyncMock()
     monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(agent_app, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
     monkeypatch.setattr(agent_app, "build_workbench_main_profile", load)
     monkeypatch.setattr(agent_app, "run_blocking", initialize)
 
-    response = await agent_app.get_workbench_bootstrap_api("Bearer token")
+    with pytest.raises(HTTPException) as caught:
+        await agent_app.get_workbench_bootstrap_api("Bearer token")
 
-    initialize.assert_awaited_once_with(
-        "workbench-bootstrap",
-        agent_app.ensure_workbench_main_agent,
-        "tenant-a",
-        "system",
-    )
-    assert response["data"]["generic_agent"] == profile
-
-
-@pytest.mark.asyncio
-async def test_workbench_bootstrap_uses_safe_fallback_after_initialization_failure(monkeypatch):
-    monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(agent_app, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
-    monkeypatch.setattr(
-        agent_app,
-        "build_workbench_main_profile",
-        MagicMock(side_effect=RuntimeError("missing")),
-    )
-    monkeypatch.setattr(agent_app, "run_blocking", AsyncMock(side_effect=RuntimeError("failed")))
-
-    response = await agent_app.get_workbench_bootstrap_api("Bearer token")
-
-    assert response["data"]["generic_agent"] == {
-        "display_name": "Nexent Workbench",
-        "default_skill_resources": [],
-    }
+    assert caught.value.status_code == 503
+    assert caught.value.detail == {"code": "WORKBENCH_SYSTEM_AGENT_UNAVAILABLE"}
+    load.assert_called_once()
+    initialize.assert_not_awaited()
+    assert not hasattr(agent_app, "ensure_workbench_main_agent")
 
 
 @pytest.mark.asyncio
@@ -143,7 +123,7 @@ async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detai
 async def test_nl2agent_history_is_hidden_when_workbench_disabled(monkeypatch):
     monkeypatch.setattr(runtime_agent, "ENABLE_AGENT_WORKBENCH", False)
     request = runtime_agent.NL2AgentRunRequest(
-        query="Create an agent", agent_id=7, persist_history=True
+        query="Create an agent", agent_id=7, persist_history=True, workbench_config={"mode": "agent_create"}
     )
 
     with pytest.raises(HTTPException) as caught:

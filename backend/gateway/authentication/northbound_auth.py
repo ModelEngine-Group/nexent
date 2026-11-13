@@ -8,6 +8,8 @@ import uuid
 from http import HTTPStatus
 from typing import Dict, Optional, Tuple
 
+from fastapi import HTTPException, Request
+
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
@@ -16,11 +18,15 @@ from contracts.authentication import (
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.errors.exceptions import (
     LimitExceededError,
+    SignatureValidationError,
     TokenExpiredError,
     UnauthorizedError,
 )
-from fastapi import HTTPException, Request
-from gateway.authentication.auth import extract_bearer_token
+from contracts.roles import roles_from_record
+from gateway.authentication.credentials import (
+    extract_bearer_token,
+    require_active_account,
+)
 from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
@@ -84,7 +90,6 @@ def validate_aksk_authentication(
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from contracts.errors.exceptions import SignatureValidationError
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)
@@ -144,6 +149,7 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
     try:
         token_info = get_token_by_access_key(token)
         if token_info and token_info.get("delete_flag") != "Y":
+            require_active_account(token_info.get("user_id"))
             logger.debug(
                 f"Token validated successfully for user {token_info.get('user_id')}"
             )
@@ -182,9 +188,13 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         raise TokenExpiredError("No user associated with this access key")
 
     # Query tenant from user_tenant_t
+    require_active_account(user_id)
     user_tenant_record = get_user_tenant_by_user_id(user_id)
     if not user_tenant_record or not user_tenant_record.get("tenant_id"):
         raise TokenExpiredError("No active tenant relationship for this access key")
+    roles = roles_from_record(user_tenant_record)
+    if not roles:
+        raise TokenExpiredError("No active roles for this account")
     tenant_id = user_tenant_record["tenant_id"]
 
     return {
@@ -192,7 +202,6 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         "tenant_id": tenant_id,
         "token_id": token_info.get("token_id"),
     }
-
 
 
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:

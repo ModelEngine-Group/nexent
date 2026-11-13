@@ -2,10 +2,11 @@
 
 "use client";
 
+import { Table } from "antd";
+
 import { useState } from "react";
 import { Alert, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardTable } from "@/components/common/StandardTable";
 import type { Group } from "@/services/groupService";
 
 interface SkillGroupSelectionProps {
@@ -51,7 +52,7 @@ export default function SkillGroupSelection({
   }
   return (
     <div id={id} role="group" aria-label={t("skillCreation.selectGroups")}>
-      <StandardTable<Group>
+      <Table<Group>
         rowKey="group_id"
         size="small"
         loading={loading}

@@ -24,7 +24,6 @@ change:
     - test/backend/data_process/test_tasks.py
     - test/sdk/data_process/test_core.py
     - test/backend/test_data_process_service_entrypoint.py
-    - test/backend/deploy/test_k8s_env_injection.py
     - test/backend/services/test_clarification_response.py
     - test/sdk/container/test_docker_client.py
     - test/sdk/monitor/test_monitoring.py
@@ -41,4 +40,6 @@ change:
   notes: 'SPEC: ../nexent-doc/docs/Developing/management-cpu-default-uv-installation. Approved by user 2026-10-26; no new install script, recurring
     CI dependency guard, deployment or application functional verification. The second self-hosted runner exposed missing Helm, old SQLite, and
     an uncontrolled container-detection premise in one existing UT; provision CI prerequisites with uv/Helm actions and strengthen that test precondition
-    without changing runner selection or product behavior.'
+    without changing runner selection or product behavior. The removed pytest-based Kubernetes env-injection rendering suite is no longer an active
+    selector here, following the removal decision retained in K8S-ENV-INJECTION. Its historical results remain in Git/design evidence; no unrelated
+    UT is substituted and no current deployment proof is claimed from this reference cleanup.'

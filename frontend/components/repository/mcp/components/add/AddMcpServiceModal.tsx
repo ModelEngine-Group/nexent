@@ -3,7 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import { Drawer } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
+import { Button } from "antd";
+import { X } from "lucide-react";
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 
@@ -44,8 +45,10 @@ export default function AddMcpServiceModal({
             {t("mcpTools.addModal.title")}
           </span>
           {!submitting && (
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <Button
+              type="text"
+              icon={<X size={16} />}
+              aria-label={t("common.close")}
               onClick={handleClose}
             />
           )}

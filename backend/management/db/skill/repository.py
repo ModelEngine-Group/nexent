@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_, update as sa_update
 
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.client import get_db_session
 from management.utils.orm import filter_property, as_dict
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
@@ -207,7 +208,7 @@ def search_skills_for_agent(agent_id: int, tenant_id: str, version_no: int = 0):
     with get_db_session() as session:
         query = session.query(SkillInstance).filter(
             SkillInstance.agent_id == agent_id,
-            SkillInstance.tenant_id == tenant_id,
+            SkillInstance.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
             SkillInstance.version_no == version_no,
             SkillInstance.delete_flag != "Y",
             SkillInstance.enabled,

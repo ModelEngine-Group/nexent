@@ -500,7 +500,7 @@ export default function AgentConfigActions({
         <>
           <button
             type="button"
-            className="text-[#0067d1] hover:text-[#0052a8] disabled:cursor-not-allowed disabled:opacity-50"
+            className="text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled || isReadOnly}
             onClick={handleDeleteAction}
           >

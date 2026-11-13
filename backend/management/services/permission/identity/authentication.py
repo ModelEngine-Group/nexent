@@ -1,45 +1,89 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import logging
-from typing import Optional, Any, Tuple, Dict, List
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import EmailStr
+from sqlalchemy import select
+
+from contracts.constants.constants import (
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
+    ASSET_OWNER_TENANT_ID,
+)
+from contracts.constants.environment import INVITE_CODE, JWT_SECRET
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import (
+    AppException,
+    IncorrectInviteCodeException,
+    NoInviteCodeException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    UserRegistrationException,
+    ValidationError,
+)
+from contracts.roles import (
+    has_any_role,
+    invitation_roles,
+    primary_role,
+    roles_from_record,
+)
+from gateway.authentication.auth import (
+    calculate_expires_at,
+    ensure_cas_session_active_from_authorization,
+    generate_session_jwt,
+    get_current_user_id,
+    get_jwt_expiry_seconds,
+    require_active_account,
+    resolve_tenant_id_from_user_tenant_record,
+)
+from infrastructure.security.passwords import hash_password, verify_password
+from management.db.client import get_db_session
+from management.db.identity.account import (
+    change_password,
+    create_account,
+    get_account_by_email,
+)
+from management.db.identity.group import query_group_ids_by_user
+from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
 from management.db.identity.token import (
     create_token as create_token_record,
-    generate_access_key,
-    list_tokens_by_user as list_tokens_by_user_record,
-    mask_access_key,
+)
+from management.db.identity.token import (
     delete_token as delete_token_record,
 )
-
-import aiohttp
-from supabase import Client
-from pydantic import EmailStr
-
-from management.services.permission.identity.provider import get_supabase_client, get_supabase_admin_client, delete_supabase_user
-from gateway.authentication.auth import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
-from contracts.constants.environment import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
-
+from management.db.identity.token import (
+    generate_access_key,
+    mask_access_key,
+    soft_delete_tokens_by_user,
+)
+from management.db.identity.token import (
+    list_tokens_by_user as list_tokens_by_user_record,
+)
+from management.db.identity.user_tenant import (
+    get_user_tenant_by_user_id,
+    insert_user_tenant,
+)
+from management.db.model.repository import create_model_record
+from management.db.models import RolePermission, UserAccount
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
-from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, TenantResourceLimitError, ValidationError
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
-
-from management.db.model.repository import create_model_record
-from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
-from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
-from management.db.identity.group import query_group_ids_by_user
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
-from management.db.models import RolePermission
-from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
-from management.services.tool.configuration import init_tool_list_for_tenant
+from management.services.permission.identity.invitations import (
+    check_invitation_available,
+    get_invitation_by_code,
+    use_invitation_code,
+)
+from management.services.permission.identity.registration import (
+    register_invited_account,
+)
 from management.services.skill.transfer import init_skill_list_for_tenant
-
+from management.services.tool.configuration import init_tool_list_for_tenant
+from management.utils.orm import as_dict
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 
@@ -63,209 +107,45 @@ def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     return None
 
 
-
-
-
-
-
-
-
-
-def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
-    """Try to extend session validity, return new session information or None"""
-    try:
-        response = client.auth.refresh_session(refresh_token)
-        if response and response.session:
-            return {
-                "access_token": response.session.access_token,
-                "refresh_token": response.session.refresh_token,
-                "expires_at": calculate_expires_at(response.session.access_token),
-                "expires_in_seconds": get_jwt_expiry_seconds(response.session.access_token)
-            }
-        return None
-    except Exception as e:
-        logging.error(f"Extend session failed: {str(e)}")
-        return None
+def build_token_response(user_id: str) -> dict:
+    """Keep the existing response object without a server-side session store."""
+    token = generate_session_jwt(user_id)
+    return {"access_token": token, "refresh_token": "", "expires_at": calculate_expires_at(token),
+            "expires_in_seconds": get_jwt_expiry_seconds(token)}
 
 
 async def check_auth_service_health():
-    """
-    Check the health status of the authentication service
-    Return (is available, status message)
-    """
-    health_url = f'{SUPABASE_URL}/auth/v1/health'
-    headers = {'apikey': SUPABASE_KEY}
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(health_url, headers=headers) as response:
-            if not response.ok:
-                raise ConnectionError("Auth service is unavailable")
-
-            data = await response.json()
-            # Check if the service is available by verifying the name field equals "GoTrue"
-            if not data or data.get("name", "") != "GoTrue":
-                logging.error("Auth service is unavailable")
-                raise ConnectionError("Auth service is unavailable")
+    if not JWT_SECRET:
+        raise ConnectionError("JWT signing is not configured")
+    try:
+        with get_db_session() as session:
+            session.execute(select(UserAccount.account_id).limit(1))
+    except Exception as exc:
+        raise ConnectionError("Local account store is unavailable") from exc
 
 
-async def signup_user_with_invitation(email: EmailStr,
-                                      password: str,
+async def signup_user_with_invitation(email: EmailStr, password: str,
                                       invite_code: Optional[str] = None,
                                       auto_login: Optional[bool] = True):
-    """User registration with invitation code support"""
+    """Create local account, tenant roles, groups and invitation usage atomically."""
     if not isinstance(invite_code, str) or not invite_code.strip():
         raise ValidationError("INVITE_CODE_REQUIRED")
-    invite_code = invite_code.strip().upper()
-
-    # Validate password strength before registration
     if not validate_password_strength(password):
-        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK,
-                           "Password must be at least 8 characters with uppercase, lowercase, and digit.")
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK, "Password is too weak")
+    invitation = get_invitation_by_code(invite_code.strip().upper())
+    if not invitation:
+        raise IncorrectInviteCodeException("Invitation is unavailable")
+    if "ASSET_OWNER" in invitation_roles(invitation):
+        require_asset_owner_enabled()
+        raise ValidationError(ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL)
+    account, member = register_invited_account(email, hash_password(password), invite_code)
+    user_id, tenant_id = account["user_id"], member["tenant_id"]
+    await init_tool_list_for_tenant(tenant_id, user_id)
+    await init_skill_list_for_tenant(tenant_id, user_id)
+    roles = roles_from_record(member)
+    return {"user": {"id": user_id, "email": account["email"], "role": primary_role(roles), "roles": list(roles)},
+            "session": build_token_response(user_id) if auto_login else None, "registration_type": "user"}
 
-    client = get_supabase_client()
-
-    logging.info(
-        f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
-
-    # Default user role is USER
-    user_role = "USER"
-    invitation_info = None
-
-    # Validate invitation code if provided (without using it yet)
-    if invite_code:
-        try:
-            # Check if invitation is available
-            if not check_invitation_available(invite_code):
-                raise IncorrectInviteCodeException(
-                    f"Invitation code {invite_code} is not available")
-
-            # Get invitation code details
-            invitation_info = get_invitation_by_code(invite_code)
-            if not invitation_info:
-                raise IncorrectInviteCodeException(
-                    f"Invitation code {invite_code} not found")
-
-            # Determine user role based on invitation code type
-            code_type = invitation_info["code_type"]
-            if code_type == "ADMIN_INVITE":
-                user_role = "ADMIN"
-            elif code_type == "DEV_INVITE":
-                user_role = "DEV"
-            elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
-                require_asset_owner_enabled()
-                raise ValidationError(ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL)
-
-            logging.info(
-                f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
-
-        except IncorrectInviteCodeException:
-            raise
-        except ValidationError:
-            raise
-        except Exception as e:
-            logging.error(
-                f"Invitation code {invite_code} validation failed: {str(e)}")
-            raise IncorrectInviteCodeException(
-                f"Invalid invitation code: {str(e)}")
-
-    # Set user metadata, including role information
-    response = client.auth.sign_up({
-        "email": email,
-        "password": password
-    })
-
-    if response.user:
-        user_id = response.user.id
-
-        # Determine tenant_id from the validated invitation code.
-        tenant_id = invitation_info["tenant_id"]
-        if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
-            tenant_id = ASSET_OWNER_TENANT_ID
-
-        is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
-
-        # Create user tenant relationship
-        try:
-            insert_user_tenant(
-                user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        except TenantResourceLimitError:
-            # Supabase auth creation happens before the local tenant-limit check.
-            # Remove the auth identity so a rejected registration is fully rolled back.
-            delete_supabase_user(user_id)
-            raise
-
-        # Use invitation code now that we have the real user_id
-        if invitation_info:
-            try:
-                invitation_result = use_invitation_code(invite_code, user_id)
-                logging.debug(
-                    f"Invitation code {invite_code} used successfully for user {user_id}")
-
-                # Add user to groups specified in invitation code
-                group_ids = invitation_result.get("group_ids", [])
-                if group_ids and not is_asset_owner_registration:
-                    try:
-                        # Convert group_ids from string to list if needed
-                        if isinstance(group_ids, str):
-                            from management.utils.serialization import convert_string_to_list
-                            group_ids = convert_string_to_list(group_ids)
-
-                        if group_ids:
-                            group_results = add_user_to_groups(
-                                user_id, group_ids, user_id)
-                            successful_adds = [
-                                r for r in group_results if not r.get("error")]
-                            logging.info(
-                                f"User {user_id} added to {len(successful_adds)} groups from invitation code")
-
-                    except Exception as e:
-                        logging.error(
-                            f"Failed to add user {user_id} to invitation groups: {str(e)}")
-
-            except Exception as e:
-                # If using invitation code fails after registration, log error but don't fail registration
-                logging.error(
-                    f"Failed to use invitation code {invite_code} for user {user_id}: {str(e)}")
-
-        logging.info(
-            f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}, auto_login={auto_login}")
-
-
-        # Initialize tool list for the new tenant (only once per tenant)
-        if not is_asset_owner_registration:
-            await init_tool_list_for_tenant(tenant_id, user_id)
-            await init_skill_list_for_tenant(tenant_id, user_id)
-
-        return await parse_supabase_response(False, response, user_role, auto_login)
-    else:
-        logging.error(
-            "Supabase registration request returned no user object")
-        raise UserRegistrationException(
-            "Registration service is temporarily unavailable, please try again later")
-
-
-async def parse_supabase_response(is_admin, response, user_role, auto_login: bool = True):
-    """Parse Supabase response and build standardized user registration response"""
-    user_data = {
-        "id": response.user.id,
-        "email": response.user.email,
-        "role": user_role
-    }
-
-    session_data = None
-    if response.session and auto_login:
-        session_data = {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token,
-            "expires_at": calculate_expires_at(response.session.access_token),
-            "expires_in_seconds": get_jwt_expiry_seconds(response.session.access_token)
-        }
-
-    return {
-        "user": user_data,
-        "session": session_data,
-        "registration_type": "admin" if is_admin else "user"
-    }
 
 async def verify_invite_code(invite_code):
     logging.info(
@@ -287,70 +167,30 @@ async def verify_invite_code(invite_code):
     logging.info("Admin invite code verification successful")
 
 
-async def signin_user(email: EmailStr,
-                      password: str):
-    """User login"""
-    client = get_supabase_client()
-
-    response = client.auth.sign_in_with_password({
-        "email": email,
-        "password": password
-    })
-
-    user_tenant = get_user_tenant_by_user_id(response.user.id)
-    if user_tenant and user_tenant.get("user_role") == ASSET_OWNER_ROLE:
-        try:
-            require_asset_owner_enabled()
-        except ValidationError:
-            client.auth.sign_out()
-            raise
-
-    # Get actual expiration time from access_token
-    expiry_seconds = get_jwt_expiry_seconds(response.session.access_token)
-    expires_at = calculate_expires_at(response.session.access_token)
-
-    # Prefer user_tenant_t role; fall back to Supabase metadata for legacy users
-    user_role = "user"
-    if user_tenant and user_tenant.get("user_role"):
-        user_role = user_tenant["user_role"]
-    elif "role" in response.user.user_metadata:
-        user_role = response.user.user_metadata["role"]
-
-    logging.info(
-        f"User {email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
-
-    return {
-        "message": f"Login successful, session validity is {expiry_seconds} seconds",
-        "data": {
-            "user": {
-                "id": response.user.id,
-                "email": response.user.email,
-                "role": user_role
-            },
-            "session": {
-                "access_token": response.session.access_token,
-                "refresh_token": response.session.refresh_token,
-                "expires_at": expires_at,
-                "expires_in_seconds": expiry_seconds
-            }
-        }
-    }
+async def signin_user(email: EmailStr, password: str):
+    account = get_account_by_email(email)
+    # Do password work even for unknown accounts to reduce user enumeration.
+    encoded = account.get("password_hash") if account else None
+    if not encoded:
+        encoded = hash_password("invalid-account-placeholder")
+    valid = verify_password(password, encoded)
+    if not account or not valid or not account["password_login_enabled"] or not account["email_confirmed_at"]:
+        raise UnauthorizedError("Email or password error")
+    require_active_account(account["user_id"])
+    membership = get_user_tenant_by_user_id(account["user_id"])
+    if not membership:
+        raise UnauthorizedError("No active tenant relationship")
+    if has_any_role(roles_from_record(membership), {ASSET_OWNER_ROLE}):
+        require_asset_owner_enabled()
+    return {"message": "Login successful", "data": {
+        "user": {"id": account["user_id"], "email": account["email"], "role": membership["user_role"], "roles": list(roles_from_record(membership))},
+        "session": build_token_response(account["user_id"]),
+    }}
 
 
 async def refresh_user_token(authorization, refresh_token: str):
-    client = get_supabase_client()
-    if authorization:
-        client.auth.access_token = authorization
-    session_info = extend_session(client, refresh_token)
-    if not session_info:
-        logging.error("Refresh token failed, the token may have expired")
-        raise ValueError("Refresh token failed, the token may have expired")
-
-    logging.info(
-        f"Token refresh successful: session validity is {session_info['expires_in_seconds']} seconds")
-    return session_info
-
-
+    # Preserve the route, but never exchange legacy refresh tokens for local JWTs.
+    raise UnauthorizedError("Token refresh is unavailable; please log in again")
 
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
@@ -370,24 +210,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         # Get user tenant relationship
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant:
-            # User exists in Supabase but not in local database - this is an inconsistent state.
-            # Delete the orphaned Supabase account and return None to trigger 401.
-            logging.warning(
-                f"User {user_id} not found in local database, cleaning up orphaned Supabase account"
-            )
-            try:
-                admin_client = get_supabase_admin_client()
-                if admin_client and hasattr(admin_client.auth, "admin"):
-                    admin_client.auth.admin.delete_user(user_id)
-                    logging.info(f"Deleted orphaned Supabase user {user_id}")
-                else:
-                    logging.warning(
-                        f"Could not get Supabase admin client to delete user {user_id}"
-                    )
-            except Exception as delete_err:
-                logging.error(
-                    f"Failed to delete orphaned Supabase user {user_id}: {str(delete_err)}"
-                )
+            logging.warning("User has no active tenant membership")
             return None
 
         tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant)
@@ -400,7 +223,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         # Get user permissions directly from database
         with get_db_session() as session:
             permission_records = session.query(RolePermission).filter(
-                RolePermission.user_role == user_role
+                RolePermission.user_role.in_(roles_from_record(user_tenant))
             ).all()
             permissions = [as_dict(record) for record in permission_records]
 
@@ -413,6 +236,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "tenant_id": tenant_id,
                 "user_email": user_email,
                 "user_role": user_role,
+                "roles": list(roles_from_record(user_tenant)),
                 "permissions": permissions_data["permissions"],
                 "accessibleRoutes": permissions_data["accessibleRoutes"],
             }
@@ -459,8 +283,8 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
     )
 
     return {
-        "permissions": formatted_permissions,
-        "accessibleRoutes": accessible_routes,
+        "permissions": list(dict.fromkeys(formatted_permissions)),
+        "accessibleRoutes": list(dict.fromkeys(accessible_routes)),
     }
 
 
@@ -477,8 +301,6 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
-    from management.db.client import get_db_session
-    from management.db.identity.token import soft_delete_tokens_by_user
 
     access_key = generate_access_key()
     with get_db_session() as session:
@@ -507,7 +329,7 @@ def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
         ``can_copy`` is True. Copying therefore yields the complete key while
         other roles keep seeing a masked, non-copyable value.
     """
-    can_copy = (actor_role or "").upper() in {"ADMIN", "SU"}
+    can_copy = has_any_role(actor_role, {'ADMIN','SU'})
     # The persistence layer masks access keys by default, so the stored value is
     # requested here and role-based exposure below stays the single decision
     # point. Requesting the mask instead made can_copy True while the value was
@@ -555,7 +377,7 @@ def validate_password_strength(password: str) -> bool:
     Returns:
         True if password meets requirements, False otherwise.
     """
-    if len(password) < 8:
+    if len(password) < 8 or len(password.encode("utf-8")) > 1024:
         return False
     has_upper = any(c.isupper() for c in password)
     has_lower = any(c.islower() for c in password)
@@ -588,37 +410,9 @@ async def update_password(user_id: str, old_password: str, new_password: str) ->
     if old_password == new_password:
         raise AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
 
-    admin_client = get_supabase_admin_client()
-
-    try:
-        user_tenant = get_user_tenant_by_user_id(user_id)
-        if not user_tenant or not user_tenant.get("user_email"):
-            raise UnauthorizedError("Unable to retrieve user email")
-
-        user_email = user_tenant["user_email"]
-
-        # Re-authenticate with old password to verify identity using admin client
-        try:
-            admin_client.auth.sign_in_with_password({
-                "email": user_email,
-                "password": old_password
-            })
-        except Exception as auth_err:
-            logging.warning(
-                f"Password verification failed for user {user_id}: {str(auth_err)}")
-            raise UnauthorizedError("Invalid old password")
-
-        # Update to new password using admin client
-        admin_client.auth.update_user({"password": new_password})
-
-        logging.info(f"Password updated successfully for user {user_id}")
-        return True
-
-    except UnauthorizedError:
-        raise
-    except AppException:
-        raise
-    except Exception as exc:
-        logging.error(
-            f"Failed to update password for user {user_id}: {str(exc)}")
-        raise
+    account = require_active_account(user_id)
+    if not account["password_login_enabled"] or not verify_password(old_password, account.get("password_hash") or ""):
+        raise UnauthorizedError("Invalid old password")
+    if not change_password(user_id, account["password_hash"], hash_password(new_password)):
+        raise UnauthorizedError("Credentials changed concurrently; please log in again")
+    return True

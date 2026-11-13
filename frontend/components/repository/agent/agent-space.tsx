@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import RepositoryDisplayControls, {
   AgentRepositorySort,
 } from "@/components/repository/RepositoryDisplayControls";
-import { StandardButton } from "@/components/common/StandardButton";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useRepositoryTagPredicates } from "@/hooks/useRepositoryTagPredicates";
 
@@ -40,7 +39,7 @@ import {
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
@@ -77,7 +76,7 @@ export function AgentSpace({
   const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const showAdminMenu = user?.role === USER_ROLES.ADMIN;
+  const showAdminMenu = hasRole(user, "ADMIN");
   const [searchQuery, setSearchQuery] = useRepositoryQueryState("search", "");
   const composingSearch = useRef(false);
   const [searchDraft, setSearchDraft] = useState<string | null>(null);
@@ -612,7 +611,7 @@ export function AgentSpace({
           presentation && detailListing ? (
             <>
               {showAdminMenu && !detailListing.is_official ? (
-                <StandardButton
+                <Button
                   className="min-w-[88px] max-w-[200px]"
                   onClick={() => confirmTakeDown(detailListing)}
                   loading={
@@ -621,10 +620,10 @@ export function AgentSpace({
                   disabled={isDetailLoading || isDetailError}
                 >
                   {t("repository.listingStatus.takeDown")}
-                </StandardButton>
+                </Button>
               ) : null}
-              <StandardButton
-                variant="primary"
+              <Button
+                type="primary"
                 className="min-w-[88px] max-w-[200px]"
                 disabled={isDetailLoading || isDetailError}
                 onClick={() => {
@@ -633,7 +632,7 @@ export function AgentSpace({
                 }}
               >
                 {t("resourceCenter.createFromTemplate")}
-              </StandardButton>
+              </Button>
             </>
           ) : undefined
         }

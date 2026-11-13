@@ -5,19 +5,14 @@
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "antd";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
-import {
-  Blocks,
-  ChevronRight,
-  Settings,
-  Trash2,
-  X,
-  AlertTriangle,
-} from "lucide-react";
+import { ChevronRight, Settings, Trash2, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
@@ -26,6 +21,8 @@ import {
   SelectedResourceTag,
 } from "@/components/common/SelectedResourceRow";
 import ToolConfigModal from "../../../components/capability/tool/ToolConfigModal";
+import { SelectedMcpToolGroup } from "./tool/SelectedMcpToolGroup";
+import { SelectedToolIcon } from "./tool/SelectedToolIcon";
 import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
   TOOLS_REQUIRING_EMBEDDING,
@@ -38,6 +35,12 @@ import {
 } from "../../../components/capability/tool/utils";
 
 // --- Local tool helpers (not in utils) ---
+
+const EMPTY_TOOLS: Tool[] = [];
+
+function getMcpService(tool: Tool) {
+  return tool.source === TOOL_SOURCE_TYPES.MCP ? tool.usage?.trim() : undefined;
+}
 
 function isToolDisabledDueToVlm(
   name: string,
@@ -96,6 +99,7 @@ export default function ToolManagement({
   addEntry,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const { user } = useAuthorizationContext();
   const isReadOnly = useAgentReadOnly();
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const {
@@ -106,7 +110,7 @@ export default function ToolManagement({
   } = useConfig();
 
   const selectedTools = useAgentStore(
-    (state) => state.editedAgent?.tools ?? []
+    (state) => state.editedAgent?.tools ?? EMPTY_TOOLS
   );
   const updateTools = useAgentStore((state) => state.updateTools);
 
@@ -120,7 +124,7 @@ export default function ToolManagement({
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
-  const { availableTools } = useToolList({
+  const { availableTools, selectableTools } = useToolList({
     enabled: true,
   });
 
@@ -140,13 +144,64 @@ export default function ToolManagement({
     });
   }, [availableTools, selectedTools]);
 
+  const selectedRows = useMemo(
+    () =>
+      visibleSelectedTools.map((tool) => {
+        const canonical = mergeCanonicalTool(tool, availableTools);
+        return {
+          ...canonical,
+          source: canonical.source ?? tool.source,
+          usage: canonical.usage?.trim() ? canonical.usage : tool.usage,
+        };
+      }),
+    [availableTools, visibleSelectedTools]
+  );
+  const selectedServices = useMemo(() => {
+    const services = new Map<string, Tool[]>();
+    for (const tool of selectedRows) {
+      const service = getMcpService(tool);
+      if (!service) continue;
+      const tools = services.get(service) ?? [];
+      tools.push(tool);
+      services.set(service, tools);
+    }
+    return services;
+  }, [selectedRows]);
+  const { serverList } = useMcpServerList({
+    enabled: highFidelity && selectedServices.size > 0,
+    tenantId: user?.tenantId || null,
+  });
+  const serviceCatalog = useMemo(() => {
+    const catalog = new Map<string, Tool[]>();
+    const restricted = new Set(
+      serverList
+        .filter(
+          (server) =>
+            server.permission &&
+            server.permission !== "EDIT" &&
+            server.permission !== "READ_ONLY" &&
+            !server.group_ids
+        )
+        .map((server) => server.service_name)
+    );
+    for (const tool of selectableTools as Tool[]) {
+      const service = getMcpService(tool);
+      if (!service || !selectedServices.has(service) || restricted.has(service))
+        continue;
+      const tools = catalog.get(service) ?? [];
+      tools.push(tool);
+      catalog.set(service, tools);
+    }
+    return catalog;
+  }, [selectableTools, selectedServices, serverList]);
+
   // --- Group by source → category ---
   const grouped = groupToolsBySource(visibleSelectedTools);
 
   const mergeParams = useMergedToolParams(currentAgentId);
 
   const openConfig = useCallback(
-    async (tool: Tool) => {
+    async (tool: Tool, preparedParams?: ToolParam[]) => {
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
       const current = useAgentStore.getState().editedAgent?.tools ?? [];
@@ -157,13 +212,17 @@ export default function ToolManagement({
         ? { ...tool, ...configured, initParams: configured.initParams }
         : tool;
       const toolToUse = mergeCanonicalTool(configuredTool, availableTools);
-      const merged = await mergeParams(toolToUse);
-      if (!merged) return;
+      const merged = preparedParams ?? (await mergeParams(toolToUse));
+      if (
+        !merged ||
+        useAgentStore.getState().agentId !== (currentAgentId ?? null)
+      )
+        return;
       setConfigTool(toolToUse);
       setConfigParams(merged);
       setModalOpen(true);
     },
-    [mergeParams, prefetchKnowledgeBases, availableTools]
+    [mergeParams, prefetchKnowledgeBases, availableTools, currentAgentId]
   );
 
   const removeTool = useCallback(
@@ -193,14 +252,80 @@ export default function ToolManagement({
   ) : null;
 
   if (highFidelity) {
+    const renderedServices = new Set<string>();
+    const getUnavailableReason = (tool: Tool) => {
+      if (tool.unavailable_reasons?.includes("mcp_model_unavailable")) {
+        return "toolPool.mcpModelUnavailableTooltip";
+      }
+      if (
+        isToolDisabledDueToVlm(
+          tool.name,
+          isImageUnderstandingAvailable,
+          true,
+          true
+        )
+      ) {
+        return "toolPool.imageUnderstandingDisabledTooltip";
+      }
+      if (
+        isToolDisabledDueToVlm(
+          tool.name,
+          true,
+          isVideoUnderstandingAvailable,
+          true
+        )
+      ) {
+        return "toolPool.videoUnderstandingDisabledTooltip";
+      }
+      if (
+        isToolDisabledDueToVlm(
+          tool.name,
+          true,
+          true,
+          isAudioUnderstandingAvailable
+        )
+      ) {
+        return "toolPool.audioUnderstandingDisabledTooltip";
+      }
+      if (isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable)) {
+        return "toolPool.embeddingDisabledTooltip";
+      }
+    };
+
     return (
       <>
         <div
           data-testid="agent-selected-tool-grid"
           className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2"
         >
-          {visibleSelectedTools.map((selectedTool) => {
-            const tool = mergeCanonicalTool(selectedTool, availableTools);
+          {selectedRows.map((tool) => {
+            const service = getMcpService(tool);
+            if (service) {
+              if (renderedServices.has(service)) return null;
+              renderedServices.add(service);
+              const catalog = serviceCatalog.get(service) ?? [];
+              const tools = new Map(
+                catalog.map((item) => [String(item.id), item])
+              );
+              for (const selected of selectedServices.get(service) ?? []) {
+                tools.set(String(selected.id), selected);
+              }
+              return (
+                <SelectedMcpToolGroup
+                  key={`mcp-${currentAgentId}-${service}`}
+                  name={service}
+                  tools={Array.from(tools.values()).sort((a, b) =>
+                    a.name.localeCompare(b.name)
+                  )}
+                  catalogIds={new Set(catalog.map((item) => String(item.id)))}
+                  selectedTools={selectedTools}
+                  agentId={currentAgentId}
+                  isReadOnly={isReadOnly}
+                  getUnavailableReason={getUnavailableReason}
+                  onConfigure={openConfig}
+                />
+              );
+            }
             const labels = getToolLabels(tool);
             const isModelUnavailable = tool.unavailable_reasons?.includes(
               "mcp_model_unavailable"
@@ -220,14 +345,7 @@ export default function ToolManagement({
                 data-testid={`agent-selected-tool-${tool.id}`}
                 name={tool.name}
                 className="shadow-none"
-                icon={
-                  <span
-                    aria-hidden="true"
-                    className="grid size-6 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#b9dcff] via-[#78a7f8] to-[#3978da] shadow-[0_2px_6px_rgba(57,120,218,0.24)]"
-                  >
-                    <Blocks size={16} strokeWidth={2} className="text-white" />
-                  </span>
-                }
+                icon={<SelectedToolIcon />}
                 metadata={
                   <>
                     {labels.slice(0, 2).map((label) => (

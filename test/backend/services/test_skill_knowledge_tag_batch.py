@@ -66,7 +66,6 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
     groups = MagicMock(return_value=[9])
     monkeypatch.setattr(permission, "get_user_tenant_by_user_id", role)
     monkeypatch.setattr(permission, "query_group_ids_by_user", groups)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", False)
     assignments = MagicMock(return_value={"owned": [], "group": []})
     monkeypatch.setattr(TagManagementDB, "list_resource_assignments_batch", assignments)
     result = TagManagementService.get_knowledge_assignments_batch(
@@ -81,24 +80,24 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
     assert permission.resolve_knowledge_base_permission("owned", "reader", "tenant-a") == "CREATOR"
 
 
-@pytest.mark.parametrize("speed,user_id,tenant,user_tenant", [
-    (True, "reader", None, None),
-    (False, "tenant-a", "tenant-a", {"tenant_id": "tenant-a", "user_role": "USER"}),
-    (False, "reader", "tenant-a", {"tenant_id": "tenant-a", "user_role": "ADMIN"}),
+@pytest.mark.parametrize("user_id,roles,expected", [
+    ("tenant-a", ["USER"], None),
+    ("reader", ["ADMIN", "OPS"], "EDIT"),
 ])
-def test_knowledge_batch_preserves_speed_and_legacy_admin_roles(monkeypatch, speed, user_id, tenant, user_tenant):
-    monkeypatch.setattr(permission, "get_user_tenant_by_user_id", lambda _: user_tenant)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", speed)
+def test_knowledge_batch_uses_account_roles_for_admin_access(monkeypatch, user_id, roles, expected):
+    monkeypatch.setattr(
+        permission, "get_user_tenant_by_user_id",
+        lambda _: {"tenant_id": "tenant-a", "user_roles": roles},
+    )
     monkeypatch.setattr(permission, "query_group_ids_by_user", lambda _: [])
     result = permission.resolve_knowledge_base_permissions(
-        [{"index_name": "kb", "tenant_id": "tenant-a", "created_by": "other"}], user_id, tenant
+        [{"index_name": "kb", "tenant_id": "tenant-a", "created_by": "other"}], user_id, "tenant-a"
     )
-    assert result["kb"] in {"EDIT", "READ_ONLY"}
+    assert result["kb"] == expected
 
 
 def test_knowledge_without_user_membership_denies_without_group_lookup(monkeypatch):
     monkeypatch.setattr(permission, "get_user_tenant_by_user_id", lambda _: None)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", False)
     group_read = MagicMock()
     monkeypatch.setattr(permission, "query_group_ids_by_user", group_read)
     assert permission.resolve_knowledge_base_permissions([{"index_name": "kb"}], "reader", "t") == {"kb": None}

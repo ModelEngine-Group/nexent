@@ -67,6 +67,10 @@ function render(ui: ReactElement) {
   });
 }
 
+beforeEachI18n(async () => {
+  await initializeTestI18n();
+});
+
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
   threads: { mainThreadId: "fixture-thread" },
@@ -157,38 +161,19 @@ vi.mock("@/app/newchat/ui/model-selector", () => ({
   },
 }));
 
-it("forwards every known effort through Composer without fabricating a default", () => {
-  const changed = vi.fn();
+it("SU-AC-07 delegates parameters to the shared selector without a second effort controller", () => {
   render(
     <Composer
       models={[{ id: "1", name: "model" }]}
       selectedModelId="1"
       chatMode="execution"
       onChatModeChange={vi.fn()}
-      onThinkingEffortChange={changed}
     />
   );
-  const props = selectorProps.mock.lastCall?.[0] as {
-    effort?: string;
-    onEffortChange: (value: string) => void;
-  };
-  expect(props.effort).toBeUndefined();
-  for (const level of [
-    "auto",
-    "none",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-  ]) {
-    props.onEffortChange(level);
-    expect(changed).toHaveBeenLastCalledWith(level);
-  }
-  const count = changed.mock.calls.length;
-  props.onEffortChange("provider-invalid");
-  expect(changed).toHaveBeenCalledTimes(count);
+  const props = selectorProps.mock.lastCall?.[0];
+  expect(props).not.toHaveProperty("onEffortChange");
+  expect(props).not.toHaveProperty("parameterSettings");
+  expect(props).toHaveProperty("parameterSettingsScopeKey");
 });
 
 it("caps the workbench model selector width so long names truncate on one row", () => {
@@ -964,7 +949,6 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
     schema_version: 1 as const,
     local: { mode: "override" as const, knowledge_ids: ["1"] },
     aidp: { mode: "disabled" as const, kds_ids: [] },
-    retrieval_config: { top_k: 6 },
   };
   const save = vi
     .fn()
@@ -976,7 +960,7 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
   await userEvent.click(
     screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
   );
-  const next = { ...scope, retrieval_config: { top_k: 8 } },
+  const next = { ...scope },
     preview = { local: { knowledge_ids: ["1"], display_names: ["Alpha"] } };
   await act(async () => {
     await expect(
@@ -986,7 +970,6 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
   expect(
     screen.getByRole("dialog", { name: "knowledge drawer" })
   ).toBeInTheDocument();
-  expect(scope.retrieval_config).toEqual({ top_k: 6 });
   await act(async () => {
     await drawerProps.knowledge.mock.lastCall?.[0].onConfirm(next, preview);
   });
@@ -1015,6 +998,20 @@ it("ordinary chat scopes shared parameters to the active thread and locks them w
   runtime.threads.mainThreadId = "fixture-thread";
 });
 
-beforeEachI18n(async () => {
-  await initializeTestI18n();
+it("UI-SESSION-15 delegates profile preferences to the selector without a second parameter button", () => {
+  render(
+    <Composer
+      {...base}
+      conversationId={11}
+      selectedModelId="42"
+      models={[{ id: "42", name: "Profile model", profileSchemaVersion: 1 }]}
+    />
+  );
+  expect(selectorProps.mock.lastCall?.[0]).toMatchObject({
+    conversationId: 11,
+    value: "42",
+  });
+  expect(
+    screen.queryByRole("button", { name: "modelProfile.parameters" })
+  ).not.toBeInTheDocument();
 });

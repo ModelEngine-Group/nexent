@@ -67,7 +67,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from starlette.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
@@ -91,6 +91,10 @@ app.add_middleware(
 # =============================================================================
 EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
+
+# Retrieval channels accepted in ``search_method``; three channels are always
+# expressed as the canonical ``hybrid_search`` value.
+_RETRIEVAL_CHANNELS = ("vector_search", "full_text_search", "graph_search")
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 
@@ -1004,18 +1008,89 @@ class MetadataCondition(BaseModel):
     conditions: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class HybridSearchConfig(BaseModel):
+    """Per-channel knobs for the vector/full-text part of a FusionSearch call."""
+
+    vector_candidates: int = Field(default=10, ge=1, le=500)
+    full_text_candidates: int = Field(default=10, ge=1, le=500)
+    hybrid_top_k: int = Field(0, ge=0, le=100)
+    vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+    full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class GraphSearchConfig(BaseModel):
+    """Per-channel knobs for the graph part of a FusionSearch call."""
+
+    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+    graph_reranking_enable: bool = True
+
+
 class FusionSearchRequest(BaseModel):
+    """FusionSearch request mirroring the current AIDP wire contract.
+
+    ``topk``/``multi_modal_enable`` are the outbound names; the retired
+    ``top_k``/``multi_modal`` aliases are accepted only so historical clients
+    keep working in tests, and are never mixed with the new names in a single
+    payload.
+    """
+
     query: str = Field(min_length=1)
     kds_list: List[str] = Field(min_length=1, max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] = "hybrid_search"
+    search_method: str = "vector_search|full_text_search|graph_search"
     reranking_enable: bool = False
     reranking_mode: Optional[Literal["performance", "high_accuracy", "jargon_coverage"]] = None
     rewrite_enable: bool = False
+    query_expansion_enable: bool = False
     related_search_enable: bool = False
     score_threshold: float = Field(0.0, ge=0.0, le=1.0)
-    top_k: int = Field(10, ge=1, le=100)
-    multi_modal: bool = False
+    topk: int = Field(10, ge=1, le=100)
+    multi_modal_enable: bool = False
+    hybrid_search_config: Optional[HybridSearchConfig] = None
+    graph_search_config: Optional[GraphSearchConfig] = None
     metadata_condition: Optional[MetadataCondition] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_aliases(cls, data: Any) -> Any:
+        """Translate the pre-upgrade names once, rejecting mixed payloads."""
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        for legacy, current in (("top_k", "topk"), ("multi_modal", "multi_modal_enable")):
+            if legacy in payload:
+                if current in payload and payload[current] != payload[legacy]:
+                    raise ValueError(f"{current} and legacy {legacy} disagree")
+                payload.setdefault(current, payload.pop(legacy))
+        return payload
+
+    @model_validator(mode="after")
+    def _validate_method_and_quota(self) -> "FusionSearchRequest":
+        """Validate the method set and the cross-channel quota relations."""
+        channels = set(_RETRIEVAL_CHANNELS if self.search_method == "hybrid_search"
+                       else self.search_method.split("|"))
+        unknown = channels - set(_RETRIEVAL_CHANNELS)
+        if not channels or unknown:
+            raise ValueError(f"search_method must combine {sorted(_RETRIEVAL_CHANNELS)}")
+        hybrid = bool(channels & {"vector_search", "full_text_search"})
+        graph = "graph_search" in channels
+        if hybrid and self.hybrid_search_config is None:
+            raise ValueError("hybrid_search_config is required for vector/full-text retrieval")
+        if graph and self.graph_search_config is None:
+            raise ValueError("graph_search_config is required for graph retrieval")
+        if not hybrid and self.hybrid_search_config is not None:
+            raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
+        if not graph and self.graph_search_config is not None:
+            raise ValueError("graph_search_config must not be sent without graph retrieval")
+        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else 0
+        g = self.graph_search_config.graph_top_k if self.graph_search_config else 0
+        if hybrid and h > self.topk:
+            raise ValueError("hybrid_top_k must not exceed topk")
+        if graph and g > self.topk:
+            raise ValueError("graph_top_k must not exceed topk")
+        if hybrid and graph and h > 0 and g > 0 and h + g > self.topk:
+            raise ValueError("hybrid_top_k + graph_top_k must not exceed topk")
+        return self
 
 
 class RemoveFilesBody(BaseModel):
@@ -1958,6 +2033,9 @@ _MOCK_IMAGE_URLS = [
 ]
 
 _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
+    # ``retrieval_sources`` marks which channels can actually reach a chunk.
+    # ``aidp-kb-product`` has no graph, so graph-only retrieval legitimately
+    # returns nothing for it instead of silently falling back to vector.
     "aidp-kb-product": [
         {
             "id": 10001,
@@ -1973,12 +2051,14 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "chunk_type": "text",
             "file_url": "",
             "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search"],
         },
         {
             "id": 10002, "score": 0.94, "title": "AIDP产品介绍.pdf",
             "text": "AIDP Search keeps each retrieval chunk independent so citations can identify their own metadata snapshot.",
             "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "citations", "count": 1, "enabled": True},
             "chunk_type": "text", "file_url": "", "pages": [2],
+            "retrieval_sources": ["vector_search"],
         },
     ],
     "aidp-kb-faq": [
@@ -1991,6 +2071,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "chunk_type": "text",
             "file_url": "",
             "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search", "graph_search"],
         },
         {
             "id": 30002,
@@ -2001,6 +2082,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "chunk_type": "image",
             "file_url": _MOCK_IMAGE_URLS[0],
             "pages": [6],
+            "retrieval_sources": ["vector_search", "graph_search"],
         },
     ],
 }
@@ -2036,49 +2118,129 @@ def fusion_search(
     request: FusionSearchRequest,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """Handle FusionSearch requests (same as reference mock)."""
+    """Handle FusionSearch requests with the current per-channel contract.
+
+    Channel behaviour mirrors what the real service does for a mixed corpus:
+
+    * A channel only contributes chunks when it is selected. Chunks are tagged
+      with the ``retrieval_sources`` they can be reached through (default
+      ``vector_search``); graph retrieval only returns chunks whose knowledge
+      base actually has a graph, and skips silently otherwise - never falling
+      back to another channel.
+    * Candidates cap each channel's pre-rerank pool, the per-channel thresholds
+      filter that pool, ``score_threshold`` filters the merged result and
+      ``topk`` truncates the final answer. A ``0`` cap means "no separate cap"
+      and is not a zero quota.
+    * ``retrieval_source.methods`` reports the channels that actually produced
+      the hit, which may be fewer than the requested set.
+    """
     _check_auth(authorization)
 
+    channels = set(_RETRIEVAL_CHANNELS if request.search_method == "hybrid_search"
+                   else request.search_method.split("|"))
+    hybrid = request.hybrid_search_config
+    graph = request.graph_search_config
     query_terms = [t.strip().lower() for t in request.query.split() if t.strip()]
-    results: List[Dict[str, Any]] = []
+    hits: List[Dict[str, Any]] = []
 
     for kb_id in request.kds_list:
+        kb = _KNOWLEDGE_BASES.get(kb_id, {})
+        graph_available = bool(kb.get("is_exist_graph"))
         for chunk in _CHUNKS_BY_KB.get(kb_id, []):
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
-            if not request.multi_modal and chunk.get("chunk_type") == "image":
+            if not request.multi_modal_enable and chunk.get("chunk_type") == "image":
                 continue
 
             haystack = f"{chunk.get('title', '')} {chunk.get('text', '')}".lower()
             boost = min(0.05 * sum(1 for t in query_terms if t in haystack), 0.15)
-            score = round(float(chunk.get("score", 0.5)) + boost, 4)
-            if score < request.score_threshold:
+            base_score = round(float(chunk.get("score", 0.5)) + boost, 4)
+            reachable = [source for source in chunk.get("retrieval_sources", ["vector_search"])
+                         if source in channels and (source != "graph_search" or graph_available)]
+            if not reachable:
                 continue
 
-            item = {
-                "id": chunk["id"],
-                "score": score,
-                "title": chunk["title"],
-                "text": chunk["text"],
-                "metadata": {
-                    **chunk.get("metadata", {}),
-                    "_search_config": {
-                        "search_method": request.search_method,
-                        "reranking_enable": request.reranking_enable,
-                    },
+            per_source: List[tuple[str, float]] = []
+            for source in reachable:
+                if source == "vector_search":
+                    threshold = hybrid.vector_score_threshold if hybrid else 0.0
+                elif source == "full_text_search":
+                    threshold = hybrid.full_text_score_threshold if hybrid else 0.0
+                else:
+                    threshold = graph.graph_score_threshold if graph else 0.0
+                if base_score >= threshold:
+                    per_source.append((source, base_score))
+            if not per_source:
+                continue
+            if base_score < request.score_threshold:
+                continue
+
+            hits.append({
+                "chunk": chunk,
+                "score": base_score,
+                "sources": sorted({source for source, _ in per_source}),
+            })
+
+    # Per-channel candidate caps: keep the strongest N per channel, then merge.
+    capped: List[Dict[str, Any]] = []
+    for source in _RETRIEVAL_CHANNELS:
+        limit = None
+        if source == "vector_search" and hybrid:
+            limit = hybrid.vector_candidates
+        elif source == "full_text_search" and hybrid:
+            limit = hybrid.full_text_candidates
+        elif source == "graph_search" and graph:
+            limit = graph.graph_top_k
+        if limit is None:
+            limit = request.topk
+        selected = [hit for hit in hits if source in hit["sources"]]
+        selected.sort(key=lambda hit: hit["score"], reverse=True)
+        capped.extend(selected[:limit])
+
+    merged: Dict[Any, Dict[str, Any]] = {}
+    for hit in capped:
+        key = hit["chunk"]["id"]
+        if key in merged:
+            merged[key]["sources"] = sorted(set(merged[key]["sources"]) | set(hit["sources"]))
+        else:
+            merged[key] = dict(hit)
+    results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
+
+    # Hybrid caps the combined vector+full-text part; graph is capped above.
+    if hybrid and hybrid.hybrid_top_k > 0:
+        hybrid_hits = [hit for hit in results
+                       if {"vector_search", "full_text_search"} & set(hit["sources"])]
+        overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
+        results = [hit for hit in results if hit["chunk"]["id"] not in overflow]
+
+    final = results[: request.topk]
+    payload = []
+    for hit in final:
+        chunk = hit["chunk"]
+        item = {
+            "id": chunk["id"],
+            "score": hit["score"],
+            "title": chunk["title"],
+            "text": chunk["text"],
+            "metadata": {
+                **chunk.get("metadata", {}),
+                "_search_config": {
+                    "search_method": request.search_method,
+                    "reranking_enable": request.reranking_enable,
+                    "reranking_mode": request.reranking_mode if request.reranking_enable else None,
                 },
-            }
-            if request.multi_modal:
-                item["chunk_type"] = chunk.get("chunk_type", "text")
-                item["file_url"] = chunk.get("file_url", "")
-                item["pages"] = chunk.get("pages", [])
-            results.append(item)
+            },
+            "retrieval_source": {"methods": hit["sources"]},
+        }
+        if request.multi_modal_enable:
+            item["chunk_type"] = chunk.get("chunk_type", "text")
+            item["file_url"] = chunk.get("file_url", "")
+            item["pages"] = chunk.get("pages", [])
+        payload.append(item)
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-    final = results[: request.top_k]
-
-    logger.info("SEARCH  query=%r kds=%r returned=%d", request.query, request.kds_list, len(final))
-    return JSONResponse(content={"result": final, "total_return_count": len(final)})
+    logger.info("SEARCH  query=%r kds=%r method=%s returned=%d",
+                request.query, request.kds_list, request.search_method, len(payload))
+    return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
 
 
 # =============================================================================

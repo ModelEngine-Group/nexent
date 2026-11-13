@@ -3,8 +3,6 @@
 Database operations for group management
 """
 
-from management.utils.orm import as_dict
-from contracts.errors.exceptions import TenantResourceLimitError
 from typing import Any, Dict, List, Optional, Union
 
 from management.utils.orm import as_dict
@@ -215,7 +213,7 @@ def remove_group(group_id: int, updated_by: Optional[str] = None) -> bool:
         return result > 0
 
 
-def add_user_to_group(group_id: int, user_id: str, created_by: Optional[str] = None) -> int:
+def add_user_to_group(group_id: int, user_id: str, created_by: Optional[str] = None, db_session=None) -> int:
     """
     Add user to group
 
@@ -223,11 +221,12 @@ def add_user_to_group(group_id: int, user_id: str, created_by: Optional[str] = N
         group_id (int): Group ID
         user_id (str): User ID
         created_by (Optional[str]): Created by user
+        db_session: Optional caller-owned transaction, such as API-only batch creation
 
     Returns:
         int: Created group user ID
     """
-    with get_db_session() as session:
+    with get_db_session(db_session) if db_session is not None else get_db_session() as session:
         group_user = TenantGroupUser(group_id=group_id, user_id=user_id, created_by=created_by, updated_by=created_by)
         session.add(group_user)
         session.flush()  # To get the ID

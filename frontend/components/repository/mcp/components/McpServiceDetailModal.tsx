@@ -26,7 +26,7 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { Can } from "@/components/permission/Can";
-import { StandardDrawer } from "@/components/common/StandardDrawer";
+import { Drawer } from "antd";
 import ContainerPortField from "./shared/ContainerPortField";
 import McpGroupSelectionTable from "./shared/McpGroupSelectionTable";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
@@ -239,13 +239,13 @@ export default function McpServiceDetailModal({
           },
         }}
       >
-        <StandardDrawer
+        <Drawer
           open
           title={t("common.edit")}
-          closeLabel={t("common.close")}
-          closeText={t("common.close")}
           width={`min(${MCP_EDIT_SERVICE_DRAWER_WIDTH}px, 100vw)`}
-          bodyClassName="repository-detail-body mcp-edit-drawer-body !mb-4"
+          classNames={{
+            body: "repository-detail-body mcp-edit-drawer-body !mb-4",
+          }}
           onClose={onClose}
           footer={
             <div className="flex justify-end gap-4">
@@ -909,7 +909,7 @@ export default function McpServiceDetailModal({
               />
             </div>
           </div>
-        </StandardDrawer>
+        </Drawer>
       </ConfigProvider>
 
       <ResourceTagAssignmentModal

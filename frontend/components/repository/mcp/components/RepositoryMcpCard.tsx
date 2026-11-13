@@ -11,7 +11,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { AgentCardTags } from "@/components/repository/agent/components/AgentCardTags";
-import { StandardButton } from "@/components/common/StandardButton";
 import { McpDeploymentType } from "@/const/mcpTools";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
@@ -72,13 +71,13 @@ export default function RepositoryMcpCard({
     installed ? "mcpTools.repository.installed" : "mcpTools.repository.install"
   );
   const installButton = (
-    <StandardButton
+    <Button
       className={`min-w-[88px] disabled:!text-[#AEAEAE] ${actionItems.length ? "!rounded-r-none" : ""}`}
       disabled={installed}
       onClick={() => onInstall(service)}
     >
       {installLabel}
-    </StandardButton>
+    </Button>
   );
   const iconTone =
     deploymentType === McpDeploymentType.REMOTE_LINK
@@ -251,7 +250,7 @@ export default function RepositoryMcpCard({
                 trigger={["click"]}
                 placement="bottomRight"
               >
-                <StandardButton
+                <Button
                   className="!w-8 !rounded-l-none !px-0"
                   aria-label={t("mcpTools.mine.moreActions")}
                   icon={<ChevronDown size={14} aria-hidden />}

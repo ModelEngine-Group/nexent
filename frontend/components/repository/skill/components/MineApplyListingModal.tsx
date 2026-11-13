@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Input } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "antd";
 
 import type {
   MyEditableSkillItem,
@@ -73,17 +73,16 @@ export function MineApplyListingModal({
   };
 
   return (
-    <StandardModal
+    <Modal
+      centered
       open={open}
+      closable={{ "aria-label": t("common.close") }}
       width={760}
       title={t("skillRepository.mine.applyTitle", { name: title })}
-      closeLabel={t("common.close")}
-      onClose={() => !isBusy}
-      onCancel={() => !isBusy}
-      onOpenChange={(next) => {
-        if (!next && !isBusy) onClose();
+      onCancel={() => {
+        if (!isBusy) onClose();
       }}
-      confirmText={t("common.confirm")}
+      okText={t("common.confirm")}
       cancelText={t("common.cancel")}
       footer={
         <div className="flex justify-end gap-2">
@@ -135,6 +134,6 @@ export function MineApplyListingModal({
           />
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from contracts.errors.exceptions import ReviewConflictError, UnauthorizedError
 from contracts.review import ReviewListItem, ReviewListResponse, ReviewPagination
+from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.models import AgentInfo
 from management.db.client import get_db_session
 from management.db.identity.models import UserTenant
@@ -42,7 +43,7 @@ def require_repository_access(role):
 
 
 def can_decide(resource_type, role):
-    return role == "ADMIN" or (resource_type == "mcp" and role in {"SU", "SUPER_ADMIN"})
+    return has_any_role(role, {"ADMIN"}) or (resource_type == "mcp" and has_any_role(role, {"SU", "SUPER_ADMIN"}))
 
 
 def public_item(record, role, names=None):
@@ -610,7 +611,7 @@ def attach_latest_reviews(items, resource_type, source_key, user_id, tenant_id):
     ]
     if not source_ids:
         return
-    role = (get_user_tenant_by_user_id(user_id) or {}).get("user_role", "USER")
+    role = roles_from_record(get_user_tenant_by_user_id(user_id) or {})
     with get_db_session() as session:
         rows = session.scalars(
             select(ResourceReview)

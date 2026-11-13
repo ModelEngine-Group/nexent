@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -13,6 +15,7 @@ import signal
 import subprocess
 
 from report_ownership import git_label, responsibility_label
+from suite_terminal import beijing_time, terminal_context
 
 
 def now():
@@ -54,6 +57,28 @@ class BatchLock:
     def __exit__(self, *args):
         if self.handle:
             self.handle.close()
+
+
+_DEPLOYMENT_LEASE = ContextVar("suite_deployment_lease", default=None)
+
+
+def deployment_lock_owned(repo):
+    return _DEPLOYMENT_LEASE.get() == (str((repo / ".git/nexent-e2e-deployment.lock").resolve()), os.getpid())
+
+
+@contextmanager
+def deployment_lock(repo):
+    """Hold one checkout lease across synchronization and nested campaign execution."""
+    if deployment_lock_owned(repo):
+        yield
+        return
+    path = repo / ".git/nexent-e2e-deployment.lock"
+    with BatchLock(path):
+        token = _DEPLOYMENT_LEASE.set((str(path.resolve()), os.getpid()))
+        try:
+            yield
+        finally:
+            _DEPLOYMENT_LEASE.reset(token)
 
 
 def terminate_tree(process, group=True):
@@ -166,13 +191,20 @@ def finalize(directory, plan, rows, error=None):
                 row.setdefault(key, record[key])
     incomplete = any(row["result"] in {"NOT_EXECUTED", "INTERRUPTED"} for row in rows)
     failures = any(row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"} for row in rows)
+    validation_path = directory / "asset-validation.json"
+    validation = json.loads(validation_path.read_text(encoding="utf-8")) if validation_path.is_file() else None
+    asset_incomplete = validation is not None and validation.get("status") != "VALID"
     summary = {"schema_version": 1, "finished_at": now(), "planned": len(plan),
                "recorded": len(rows), "counts": summary_counts,
                "execution_complete": not (incomplete or error or duplicates or unexpected),
-               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures else "PASSED",
+               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures or asset_incomplete else "PASSED",
                "error": error, "duplicate_case_ids": duplicates, "unexpected_case_ids": unexpected,
                "d6_complete": True,
                "acceptance_counts": dict(Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows))}
+    if validation is not None:
+        summary["asset_validation"] = {"status": validation["status"], "issue_count": len(validation["issues"]),
+                                       "blocked_cases": validation["blocked_cases"]}
+        summary["coverage_integrity"] = "INCOMPLETE" if asset_incomplete else "VALID"
     save(directory / "summary.json", summary)
     (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "checkpoints/results.jsonl").write_text(
@@ -212,15 +244,6 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
         except (OSError, ValueError):
             return {}
 
-    def beijing(value):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                return "未记录（原时间缺少时区）"
-            return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S +08:00")
-        except (AttributeError, TypeError, ValueError):
-            return "未记录"
-
     state = snapshot("status.json")
     provenance = snapshot("provenance.json")
     root = str(evidence_root).replace("\\", "/").rstrip("/") if evidence_root is not None else directory.resolve().as_posix()
@@ -228,14 +251,15 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
     lines = ["## 批次与本地证据", "",
             f"- 当前批次：`{batch_id}`",
             f"- 测试代码 HEAD：`{provenance.get('head') or '未记录'}`",
-            f"- 开始时间（北京时间）：{beijing(state.get('started_at'))}",
-            f"- 结束时间（北京时间）：{beijing(summary.get('finished_at') or state.get('finished_at'))}",
+            f"- 开始时间（北京时间）：{beijing_time(state.get('started_at'))}",
+            f"- 结束时间（北京时间）：{beijing_time(summary.get('finished_at') or state.get('finished_at'))}",
             f"- 证据根目录（执行机器本地）：`{root}`",
             f"- 完整报告：`{root}/report.md`",
             f"- 完整结果：`{root}/checkpoints/results.jsonl`",
             f"- 用例日志：`{root}/logs/<Case-ID>.log`",
             f"- 用例证据目录：`{root}/cases/<Case-ID>/`（截图、Trace 等仅在实际生成时存在）",
             "- 下表 Local evidence 中的相对路径均以此证据根目录为基准；文件保留在执行机器，不上传 GitHub。", ""]
+    lines += terminal_context(directory, summary, metadata_directory=metadata_directory)
     if sharing is not None:
         published = sharing.get("status") == "PUBLISHED"
         lines += ["## Syncthing 共享副本", "",
@@ -282,6 +306,12 @@ def render_report(directory, plan, rows, summary, *, metadata_directory=None, ev
               "", "| Mapping / execution state | Count |", "| --- | ---: |"]
     acceptance_counts = Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows)
     lines += [f"| {key} | {value} |" for key, value in sorted(acceptance_counts.items())]
+    if summary.get("asset_validation"):
+        validation = summary["asset_validation"]
+        lines += ["", "## Asset validation / coverage integrity", "",
+                  f"Asset validation: {validation['status']}; issues: {validation['issue_count']}.",
+                  "Details: asset-validation.json. Missing traditional UT is not a formal Case failure or a UT pass.",
+                  "Every planned Case remains accounted for; asset warnings prevent an all-green batch."]
     lines += ["", "## Stage summary", "",
               "| Stage | Planned | PASS | Not passed | Retired / policy skipped | Overall pass rate |",
               "| --- | ---: | ---: | ---: | ---: | ---: |"]

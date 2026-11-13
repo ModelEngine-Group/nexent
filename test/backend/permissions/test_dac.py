@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for the resource access control decision engine."""
 
 import pytest
@@ -29,7 +30,7 @@ def _check(resource, user_id="u-1", role="USER", groups=None, user_tenant_id="te
 
 
 class TestCreatorFirst:
-    @pytest.mark.parametrize("role", ["USER", "DEV", "ADMIN", "SU", "SPEED"])
+    @pytest.mark.parametrize("role", ["USER", "DEV", "ADMIN", "SU"])
     def test_creator_always_gets_full_access(self, role):
         access = _check(
             _resource(ingroup_permission="PRIVATE", group_ids=None),
@@ -53,14 +54,14 @@ class TestCreatorFirst:
 
 
 class TestManagementRoles:
-    @pytest.mark.parametrize("role", ["ADMIN", "SU", "SPEED", "ASSET_OWNER"])
+    @pytest.mark.parametrize("role", ["ADMIN", "SU", "ASSET_OWNER"])
     def test_management_roles_can_edit_shared_kb(self, role):
         access = _check(_resource(ingroup_permission="EDIT", group_ids=[10]), role=role)
         assert access.permission_label == "EDIT"
         assert access.can_read
         assert access.can_edit
 
-    @pytest.mark.parametrize("role", ["ADMIN", "SU", "SPEED", "ASSET_OWNER"])
+    @pytest.mark.parametrize("role", ["ADMIN", "SU", "ASSET_OWNER"])
     def test_management_roles_denied_on_private_kb(self, role):
         access = _check(
             _resource(ingroup_permission="PRIVATE", group_ids=None),
@@ -73,7 +74,7 @@ class TestManagementRoles:
 
     def test_asset_owner_record_read_only_for_admin_dev_speed(self):
         resource = _resource(tenant_id="asset_owner_tenant_id")
-        for role in ["ADMIN", "SU", "SPEED", "DEV"]:
+        for role in ["ADMIN", "SU", "DEV"]:
             access = _check(resource, role=role)
             assert access.permission_label == "READ_ONLY"
 
@@ -218,3 +219,21 @@ class TestNormalizeGroupIds:
 
     def test_list_with_none_filtered(self):
         assert _normalize_group_ids([1, None, 2]) == [1, 2]
+
+
+@pytest.mark.parametrize("role", ["SPEED", "OPS", ["OPS"]])
+def test_operations_and_retired_roles_do_not_grant_business_content(role):
+    access = _check(_resource(), role=role, user_id="creator-1")
+    assert not access.can_read
+    assert not access.can_edit
+
+
+@pytest.mark.parametrize("roles", [["USER", "DEV"], ["DEV", "OPS"], ["USER", "DEV", "OPS"]])
+def test_union_preserves_developer_group_edit(roles):
+    access = _check(_resource(ingroup_permission="EDIT"), role=roles, groups=[10])
+    assert access.can_edit
+
+
+def test_union_still_protects_other_tenant_private_content():
+    access = _check(_resource(tenant_id="tenant-2", ingroup_permission="PRIVATE"), role=["ADMIN", "OPS"])
+    assert not access.can_read

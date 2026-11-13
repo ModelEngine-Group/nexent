@@ -80,8 +80,7 @@ export function AgentUsageGuideModal({
     return buildAgentShareUrl(window.location.origin, locale, agentId);
   }, [agentId, canOpen, locale, open]);
   const northboundUrl = buildNorthboundRunUrl(
-    frontendConfigQuery.data?.northboundBaseUrl,
-    typeof window === "undefined" ? undefined : window.location.origin
+    frontendConfigQuery.data?.northboundBaseUrl
   );
   const northboundCurl = buildNorthboundCurl(
     publishedAgent?.name?.trim() || agentName,
@@ -177,6 +176,8 @@ export function AgentUsageGuideModal({
                         <a
                           className="text-primary hover:underline"
                           href={buildUserApiKeyPath(locale)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
                           {t("agentUsageGuide.northbound.stepKey")}
                         </a>
