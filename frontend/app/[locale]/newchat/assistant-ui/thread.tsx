@@ -62,6 +62,38 @@ import {
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
 import {
+  ConversationArtifactsToolbarEntry,
+  ConversationArtifactsPanel,
+} from "../ui/artifacts-panel";
+import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
+import { QuestionDirectoryRail } from "../ui/question-directory-rail";
+import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
+import { ArtifactDocumentPanel } from "../components/artifact-document-panel";
+import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
+import {
+  fetchArtifactFile,
+  useConversationArtifacts,
+  type ArtifactAttachmentLike,
+  type ConversationArtifact,
+} from "../utils/conversation-artifacts";
+import { MessageAnnotationBubble } from "./message-annotation-bubble";
+import { MessageAnnotationCards } from "./message-annotation-cards";
+import { ViewportScrollRescue } from "./viewport-scroll-rescue";
+import {
+  createMessageAnnotation,
+  MESSAGE_ANNOTATION_COMMENT_MAX,
+  MESSAGE_ANNOTATION_MAX_COUNT,
+  type MessageAnnotation,
+  type MessageAnnotationDraft,
+  type MessageAnnotationsControl,
+} from "../utils/message-annotations";
+import {
+  scrollThreadToMessage,
+  useActiveQuestionId,
+  useQuestionDirectory,
+  type QuestionDirectoryEntry,
+} from "../utils/question-directory";
+import {
   SourcesPanelProvider,
   useSourcesPanel,
   useSourcesPanelState,
@@ -85,6 +117,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { message } from "antd";
+import log from "@/lib/logger";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
@@ -181,6 +214,10 @@ import { useConversationShare } from "./use-conversation-share";
 import { ConversationShareContext } from "./conversation-share-context";
 import { ConversationShareFooter } from "./conversation-share-footer";
 import { ConversationShareMenuItem } from "./conversation-share-menu-item";
+import { ConversationBranchContext } from "./conversation-branch-context";
+import { ConversationBranchMenuItem } from "./conversation-branch-menu-item";
+import { computeBranchTurnIndex } from "../utils/conversation-branch";
+import { conversationService } from "@/services/conversationService";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -328,6 +365,15 @@ export const Thread: FC<ThreadProps> = ({
   };
 
   const messages = useAuiState((s) => s.thread.messages);
+  // Conversation-wide agent-generated files feed the trailing "view all
+  // artifacts" entry on each assistant message and the side panel it opens.
+  // Computed here so the entry and the panel share one aggregation pass over
+  // the thread messages.
+  const conversationArtifacts = useConversationArtifacts(messages);
+  // Conversation-wide user questions feed the question directory entry at the
+  // top of the thread. Same single-pass pattern as the artifacts aggregation.
+  const questionDirectory = useQuestionDirectory(messages);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
       (item) => item.id === s.threads.mainThreadId
@@ -365,6 +411,145 @@ export const Thread: FC<ThreadProps> = ({
     readOnly,
   });
 
+  const artifactPreview = useAutoArtifactPreview({
+    scopeKey: threadId,
+    artifacts: conversationArtifacts,
+    isRunning,
+    isLoading,
+    enabled: !readOnly && !isShareMode && !configurationLayout && !debugLayout,
+  });
+  const openArtifactsPanel = useCallback(() => {
+    artifactPreview.close();
+    setArtifactsOpen(true);
+  }, [artifactPreview.close]);
+
+  const aui = useAui();
+  const [isBranching, setIsBranching] = useState(false);
+  const branchDisabled =
+    !conversationId || readOnly || isRunning || isLoading || isBranching;
+
+  // Branch the conversation into a new chat that keeps every turn up to and
+  // including the one the selected assistant message answers, then switch to
+  // the branched thread. The original conversation stays untouched.
+  const branchFromMessage = useCallback(
+    (assistantMessageId: string, answerIndex: number) => {
+      if (!conversationId || branchDisabled) return;
+      const turnIndex = computeBranchTurnIndex(messages, assistantMessageId);
+      if (turnIndex === null) {
+        message.error(t("chat.thread.branchConversationFailed"));
+        return;
+      }
+      setIsBranching(true);
+      conversationService
+        .branch(conversationId, turnIndex, assistantMessageId, answerIndex)
+        .then(async (data) => {
+          const newConversationId = Number(data?.conversation_id);
+          if (!Number.isInteger(newConversationId) || newConversationId <= 0) {
+            throw new Error("Invalid branch response");
+          }
+          await aui.threads.switchToThread(String(newConversationId));
+          await aui.threads.reload();
+          message.success(t("chat.thread.branchConversationSuccess"));
+        })
+        .catch((error) => {
+          log.error("[Thread] Failed to branch conversation:", error);
+          message.error(t("chat.thread.branchConversationFailed"));
+        })
+        .finally(() => setIsBranching(false));
+    },
+    [aui, branchDisabled, conversationId, messages, t]
+  );
+
+  const branchContextValue = useMemo(
+    () => ({ disabled: branchDisabled, branchFromMessage }),
+    [branchDisabled, branchFromMessage]
+  );
+
+  // Reply annotations ("add to chat") attach to the next outgoing message.
+  // State lives at the Thread level so the selection bubble, the composer
+  // chip and the send flow share one source of truth. The source excerpt is
+  // captured when the annotation is created so it keeps referencing the reply
+  // content the user saw when selecting.
+  const [messageAnnotations, setMessageAnnotations] = useState<
+    MessageAnnotation[]
+  >([]);
+  // Pending annotations belong to the active thread: switching threads resets
+  // them during render (the same keyed-state pattern the composer uses for
+  // the knowledge modal) so they never leak across conversations.
+  const [annotationThreadId, setAnnotationThreadId] = useState(threadId);
+  if (annotationThreadId !== threadId) {
+    setAnnotationThreadId(threadId);
+    setMessageAnnotations([]);
+  }
+
+  const addMessageAnnotation = useCallback(
+    (draft: MessageAnnotationDraft) => {
+      setMessageAnnotations((current) => {
+        // Cap matches the backend limit; the excess annotation would be
+        // silently dropped by the request-time normalization anyway.
+        if (current.length >= MESSAGE_ANNOTATION_MAX_COUNT) {
+          message.warning(
+            t("chat.annotation.maxCountReached", {
+              maxCount: MESSAGE_ANNOTATION_MAX_COUNT,
+            })
+          );
+          return current;
+        }
+        return [
+          ...current,
+          createMessageAnnotation(draft, messages, crypto.randomUUID()),
+        ];
+      });
+    },
+    // `message` is a module-level antd import, not a reactive value.
+    [messages, t]
+  );
+  const updateMessageAnnotationComment = useCallback(
+    (id: string, comment: string) => {
+      setMessageAnnotations((current) =>
+        current.map((annotation) =>
+          annotation.id === id
+            ? {
+                ...annotation,
+                comment:
+                  comment.trim().slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ||
+                  undefined,
+              }
+            : annotation
+        )
+      );
+    },
+    []
+  );
+  const removeMessageAnnotation = useCallback((id: string) => {
+    setMessageAnnotations((current) =>
+      current.filter((annotation) => annotation.id !== id)
+    );
+  }, []);
+  const clearMessageAnnotations = useCallback(() => {
+    setMessageAnnotations([]);
+  }, []);
+
+  const messageAnnotationsControl = useMemo<MessageAnnotationsControl>(
+    () => ({
+      annotations: messageAnnotations,
+      addAnnotation: addMessageAnnotation,
+      updateAnnotationComment: updateMessageAnnotationComment,
+      removeAnnotation: removeMessageAnnotation,
+      clearAnnotations: clearMessageAnnotations,
+      // Consumed annotations attach to exactly one outgoing message; the
+      // composer invokes this once the run has accepted them.
+      consumeAnnotations: clearMessageAnnotations,
+    }),
+    [
+      messageAnnotations,
+      addMessageAnnotation,
+      updateMessageAnnotationComment,
+      removeMessageAnnotation,
+      clearMessageAnnotations,
+    ]
+  );
+
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
@@ -379,120 +564,134 @@ export const Thread: FC<ThreadProps> = ({
     <ConversationShareContext.Provider
       value={{ disabled: shareDisabled, shareTurn: enterShareMode }}
     >
-      <SourcesPanelProvider value={panelContextValue}>
-        <ThreadView
-          agent={agent}
-          welcomeTitle={welcomeTitle}
-          welcomeSuggestions={welcomeSuggestions}
-          welcomeContent={welcomeContent}
-          onBack={onBack}
-          models={models}
-          selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
-          onModelChange={handleModelChange}
-          chatMode={chatMode}
-          onChatModeChange={onChatModeChange}
-          showModelSelector={showModelSelector}
-          showConversationTitle={showConversationTitle}
-          showAgentCreationResult={showAgentCreationResult}
-          composerTools={composerTools}
-          knowledgeScope={knowledgeScope}
-          knowledgePreview={knowledgePreview}
-          knowledgeCapabilities={knowledgeCapabilities}
-          onKnowledgeScopeChange={onKnowledgeScopeChange}
-          variant={variant}
-          skillFiles={skillFiles}
-          onSkillFileSelect={onSkillFileSelect}
-          runtimeMetadata={runtimeMetadata}
-          onRuntimeMetadataChange={onRuntimeMetadataChange}
-          readOnly={readOnly || (showModelSelector && !modelIsValid)}
-          modelSelectionDisabled={readOnly}
-          readOnlyReason={
-            readOnlyReason ?? (showModelSelector ? controls.error : undefined)
-          }
-          showComposer={showComposer}
-          configurationLayout={configurationLayout}
-          debugLayout={debugLayout}
-          emptyFooterContent={emptyFooterContent}
-          footerContent={footerContent}
-          interactionContent={interactionContent}
-          workbenchPresentation={workbenchPresentation}
-          workbenchResources={workbenchResources}
-          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-          onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-          hasMessages={hasMessages}
-          displayName={displayName}
-          conversationTitle={conversationTitle}
-          conversationId={conversationId}
-          newChatDesign={newChatDesign}
-          isRunning={isRunning}
-          isShareMode={isShareMode}
-          selectedShareMessageIds={selectedShareMessageIds}
-          backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-          isCreatingShare={isCreatingShare}
-          onEnterShareMode={() => void enterShareMode()}
-          onLeaveShareMode={leaveShareMode}
-          onToggleShareAll={toggleShareAll}
-          onToggleShareMessage={toggleShareMessage}
-          onCreateShare={createShare}
-          selection={selection}
-          onPanelClose={close}
-        />
-        <Dialog
-          open={Boolean(manualShareUrl)}
-          onOpenChange={(open) => !open && setManualShareUrl(null)}
-        >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>
-                {t("chatInterface.shareLinkReady", "分享链接已生成")}
-              </DialogTitle>
-              <DialogDescription>
-                {t(
-                  "chatInterface.shareCreatedCopyFailed",
-                  "分享链接已创建，但当前环境无法自动复制"
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <input
-              value={manualShareUrl ?? ""}
-              readOnly
-              onFocus={(event) => event.currentTarget.select()}
-              className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
+      <ConversationBranchContext.Provider value={branchContextValue}>
+        <SourcesPanelProvider value={panelContextValue}>
+          <ConversationArtifactsEntryProvider
+            count={conversationArtifacts.length}
+            open={openArtifactsPanel}
+          >
+            <ThreadView
+              agent={agent}
+              welcomeTitle={welcomeTitle}
+              welcomeSuggestions={welcomeSuggestions}
+              welcomeContent={welcomeContent}
+              onBack={onBack}
+              models={models}
+              selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
+              onModelChange={handleModelChange}
+              chatMode={chatMode}
+              onChatModeChange={onChatModeChange}
+              showModelSelector={showModelSelector}
+              showConversationTitle={showConversationTitle}
+              showAgentCreationResult={showAgentCreationResult}
+              composerTools={composerTools}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={onKnowledgeScopeChange}
+              variant={variant}
+              skillFiles={skillFiles}
+              onSkillFileSelect={onSkillFileSelect}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={onRuntimeMetadataChange}
+              readOnly={readOnly || (showModelSelector && !modelIsValid)}
+              modelSelectionDisabled={readOnly}
+              readOnlyReason={
+                readOnlyReason ??
+                (showModelSelector ? controls.error : undefined)
+              }
+              showComposer={showComposer}
+              configurationLayout={configurationLayout}
+              debugLayout={debugLayout}
+              emptyFooterContent={emptyFooterContent}
+              footerContent={footerContent}
+              interactionContent={interactionContent}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+              hasMessages={hasMessages}
+              displayName={displayName}
+              conversationTitle={conversationTitle}
+              conversationId={conversationId}
+              newChatDesign={newChatDesign}
+              isRunning={isRunning}
+              isShareMode={isShareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              isCreatingShare={isCreatingShare}
+              onEnterShareMode={() => void enterShareMode()}
+              onLeaveShareMode={leaveShareMode}
+              onToggleShareAll={toggleShareAll}
+              onToggleShareMessage={toggleShareMessage}
+              onCreateShare={createShare}
+              selection={selection}
+              onPanelClose={close}
+              conversationArtifacts={conversationArtifacts}
+              artifactPreview={artifactPreview}
+              artifactsOpen={artifactsOpen}
+              onArtifactsOpenChange={setArtifactsOpen}
+              questionDirectory={questionDirectory}
+              messageAnnotations={messageAnnotationsControl}
             />
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setManualShareUrl(null)}
-              >
-                {t("common.close", "关闭")}
-              </Button>
-              <Button
-                type="button"
-                onClick={async () => {
-                  if (!manualShareUrl) return;
-                  try {
-                    await copyToClipboard(manualShareUrl);
-                    message.success(
-                      t("chatInterface.shareLinkCopied", "分享链接已复制")
-                    );
-                    setManualShareUrl(null);
-                  } catch {
-                    message.warning(
-                      t(
-                        "chatInterface.shareManualCopyRequired",
-                        "请手动复制链接"
-                      )
-                    );
-                  }
-                }}
-              >
-                {t("chatInterface.copyShareLink", "复制链接")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </SourcesPanelProvider>
+          </ConversationArtifactsEntryProvider>
+          <Dialog
+            open={Boolean(manualShareUrl)}
+            onOpenChange={(open) => !open && setManualShareUrl(null)}
+          >
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>
+                  {t("chatInterface.shareLinkReady", "分享链接已生成")}
+                </DialogTitle>
+                <DialogDescription>
+                  {t(
+                    "chatInterface.shareCreatedCopyFailed",
+                    "分享链接已创建，但当前环境无法自动复制"
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <input
+                value={manualShareUrl ?? ""}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+                className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setManualShareUrl(null)}
+                >
+                  {t("common.close", "关闭")}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    if (!manualShareUrl) return;
+                    try {
+                      await copyToClipboard(manualShareUrl);
+                      message.success(
+                        t("chatInterface.shareLinkCopied", "分享链接已复制")
+                      );
+                      setManualShareUrl(null);
+                    } catch {
+                      message.warning(
+                        t(
+                          "chatInterface.shareManualCopyRequired",
+                          "请手动复制链接"
+                        )
+                      );
+                    }
+                  }}
+                >
+                  {t("chatInterface.copyShareLink", "复制链接")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </SourcesPanelProvider>
+      </ConversationBranchContext.Provider>
     </ConversationShareContext.Provider>
   );
 };
@@ -536,6 +735,12 @@ interface ThreadViewProps {
   onCreateShare: () => void;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
+  conversationArtifacts: ConversationArtifact[];
+  artifactPreview: ReturnType<typeof useAutoArtifactPreview>;
+  artifactsOpen: boolean;
+  onArtifactsOpenChange: (open: boolean) => void;
+  questionDirectory: QuestionDirectoryEntry[];
+  messageAnnotations: MessageAnnotationsControl;
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -592,6 +797,12 @@ const ThreadView: FC<ThreadViewProps> = ({
   onCreateShare,
   selection,
   onPanelClose,
+  conversationArtifacts,
+  artifactPreview,
+  artifactsOpen,
+  onArtifactsOpenChange,
+  questionDirectory,
+  messageAnnotations,
   variant,
   skillFiles,
   onSkillFileSelect,
@@ -615,11 +826,79 @@ const ThreadView: FC<ThreadViewProps> = ({
   const workbenchLanding = Boolean(
     workbenchPresentation && !hasMessages && !isShareMode
   );
+  // Reply annotations only make sense where the composer is live. They stay
+  // disabled for read-only threads, share mode, skill-file chats and the
+  // preview layouts, which either block sending or render no real replies.
+  const annotationsEnabled = Boolean(
+    showComposer &&
+    !isShareMode &&
+    !readOnly &&
+    !skillFiles &&
+    !configurationLayout &&
+    !debugLayout
+  );
   const aui = useAui();
   const suggestions = deriveWelcomeSuggestions(
     welcomeSuggestions,
     agent.example_questions
   );
+
+  // "Add to chat": re-attach an agent-generated artifact into the composer so
+  // the next outgoing message references the already-stored object instead of
+  // uploading its bytes a second time.
+  const handleArtifactToComposer = useCallback(
+    async (attachment: ArtifactAttachmentLike) => {
+      const name = attachment.name || "Generated file";
+      try {
+        const file = await fetchArtifactFile(attachment);
+        const objectName = attachment.object_name ?? "";
+        // Artifacts with a known MinIO object carry their storage metadata so
+        // the attachment adapter skips the redundant upload; the rest fall
+        // back to the regular upload path.
+        const enriched = objectName
+          ? markFileWithExistingUpload(file, {
+              object_name: objectName,
+              url:
+                attachment.preview_url ??
+                attachment.presigned_url ??
+                attachment.url ??
+                "",
+              presigned_url: attachment.presigned_url,
+              type: attachment.contentType ?? file.type,
+              size: attachment.size ?? file.size,
+            })
+          : file;
+        const runtime = aui.threads().__internal_getAssistantRuntime?.();
+        const threadId = runtime?.threads.getState().mainThreadId;
+        const thread = threadId
+          ? runtime?.threads.getById(threadId)
+          : undefined;
+        if (!thread) {
+          log.error("[Artifacts] Composer runtime unavailable");
+          message.error(t("chat.artifacts.addToChatFailed"));
+          return;
+        }
+        await thread.composer.addAttachment(enriched);
+        message.success(t("chat.artifacts.addedToChat", { name }));
+      } catch (error) {
+        log.error("Failed to add conversation artifact to composer:", error);
+        message.error(t("chat.artifacts.addToChatFailed"));
+      }
+    },
+    [aui, t]
+  );
+
+  // "Question directory": jump the viewport to the message with the clicked
+  // question. Navigation is safe in read-only and while a run is streaming.
+  const handleJumpToQuestion = useCallback((messageId: string) => {
+    if (!scrollThreadToMessage(messageId)) {
+      log.warn("[QuestionDirectory] Jump target not found:", messageId);
+    }
+  }, []);
+
+  // Question the viewport is currently scrolled to; highlights the matching
+  // directory row so long conversations show "where am I" at a glance.
+  const activeQuestionId = useActiveQuestionId(questionDirectory);
 
   return (
     <ThreadPrimitive.Root
@@ -635,7 +914,8 @@ const ThreadView: FC<ThreadViewProps> = ({
     >
       <div
         className={cn(
-          "flex h-full min-w-0 flex-1 flex-col",
+          "relative flex h-full min-w-0 flex-1 flex-col",
+          questionDirectory.length > 0 && "pl-8",
           newChatDesign && "relative [container-type:size]",
           workbenchLanding && "overflow-y-auto pb-[10vh] [container-type:size]"
         )}
@@ -704,6 +984,13 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
+        <ConversationArtifactsToolbarEntry />
+        <QuestionDirectoryRail
+          questions={questionDirectory}
+          onJump={handleJumpToQuestion}
+          activeMessageId={activeQuestionId}
+        />
+
         <ThreadPrimitive.Viewport
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
@@ -723,6 +1010,9 @@ const ThreadView: FC<ThreadViewProps> = ({
               "relative mt-[max(24px,calc(50cqh-220px))] flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
+          {/* Re-implements the auto-scroll triggers that the legacy runtime
+              fails to deliver (run start / history load / streaming follow). */}
+          <ViewportScrollRescue />
           {workbenchLanding && (
             <div
               aria-hidden
@@ -826,6 +1116,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               disabled={readOnly}
               modelSelectionDisabled={modelSelectionDisabled}
               disabledReason={readOnlyReason}
+              annotations={annotationsEnabled ? messageAnnotations : undefined}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
@@ -842,12 +1133,46 @@ const ThreadView: FC<ThreadViewProps> = ({
         messageId={selection?.messageId}
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
-        open={selection !== null}
+        open={selection !== null && !artifactPreview.selected}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
         selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
+
+      <ConversationArtifactsPanel
+        open={artifactsOpen && !artifactPreview.selected}
+        artifacts={conversationArtifacts}
+        onPreview={artifactPreview.open}
+        onClose={() => onArtifactsOpenChange(false)}
+        onAddToComposer={
+          showComposer && !isShareMode && !readOnly
+            ? handleArtifactToComposer
+            : undefined
+        }
+      />
+
+      {/* The document surface occupies a sibling column without covering desktop chat. */}
+      {artifactPreview.selected && (
+        <ArtifactDocumentPanel
+          artifact={artifactPreview.selected}
+          onClose={artifactPreview.close}
+          onShowArtifacts={() => {
+            artifactPreview.close();
+            onArtifactsOpenChange(true);
+          }}
+        />
+      )}
+
+      {/* Mounted only while quotable so the bubble state resets whenever the
+          thread turns read-only, enters share mode, or switches to a preview
+          layout. */}
+      {annotationsEnabled ? (
+        <MessageAnnotationBubble
+          enabled
+          onAdd={messageAnnotations.addAnnotation}
+        />
+      ) : null}
     </ThreadPrimitive.Root>
   );
 };
@@ -860,6 +1185,16 @@ export const ReadOnlyConversation: FC<{
   const [selection, setSelection] = useState<SourcesPanelSelection | null>(
     null
   );
+  const messages = useAuiState((s) => s.thread.messages);
+  const questionDirectory = useQuestionDirectory(messages);
+  // "Where am I" tracking for the read-only share view as well; the scroll
+  // listener is cheap and keeps the directory consistent across surfaces.
+  const activeQuestionId = useActiveQuestionId(questionDirectory);
+  const handleJumpToQuestion = useCallback((messageId: string) => {
+    if (!scrollThreadToMessage(messageId)) {
+      log.warn("[QuestionDirectory] Jump target not found:", messageId);
+    }
+  }, []);
   const open = useCallback(
     (payload: SourcesPanelSelection) => setSelection(payload),
     []
@@ -887,13 +1222,25 @@ export const ReadOnlyConversation: FC<{
           newChatStyles.font
         )}
       >
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="mx-auto w-full max-w-[922px] border-b px-4 py-4">
-            <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
-            </p>
+        <main
+          className={cn(
+            "relative flex min-w-0 flex-1 flex-col",
+            questionDirectory.length > 0 && "pl-8"
+          )}
+        >
+          <header className="mx-auto flex w-full max-w-[922px] items-start justify-between gap-2 border-b px-4 py-4">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
+              </p>
+            </div>
           </header>
+          <QuestionDirectoryRail
+            questions={questionDirectory}
+            onJump={handleJumpToQuestion}
+            activeMessageId={activeQuestionId}
+          />
           <ThreadPrimitive.Viewport className="mx-auto flex min-h-0 w-full max-w-[922px] flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6">
             <ThreadMessages agent={agent} readOnly />
           </ThreadPrimitive.Viewport>
@@ -1677,6 +2024,7 @@ const AssistantActionBar: FC = () => {
             className="aui-action-bar-more-content bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5 shadow-lg backdrop-blur-sm"
           >
             <ConversationShareMenuItem />
+            <ConversationBranchMenuItem />
             <ActionBarPrimitive.ExportMarkdown asChild>
               <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
                 <DownloadIcon className="size-4" />
@@ -1709,6 +2057,9 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
+          {/* Reply annotations ("add to chat") render as a compact badge
+              above the message text; data rides the structured metadata. */}
+          <MessageAnnotationCards className="mb-1.5" />
           <UserMessageBubble>
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}

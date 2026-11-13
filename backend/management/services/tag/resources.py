@@ -10,60 +10,63 @@ different tenant.
 
 from __future__ import annotations
 
-import base64
 import inspect
-import json
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Protocol, TypeVar
 
 from contracts.constants.constants import PERMISSION_EDIT, PERMISSION_READ
-from management.db.agent.repository import search_agent_info_by_agent_id
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
+from contracts.roles import has_any_role
+from contracts.tag import (
+    AuthenticatedCaller,
+    CanonicalResourceIdentity,
+    ResolvedTagResource,
+    ResourceCapabilities,
+    ResourceDisplayMetadata,
+    ResourceOrigin,
+    ResourceReference,
+    ResourceType,
+    TagAssignmentCleanupCallback,
+    TagAssignmentCleanupDescriptor,
+)
+from ext_components.aidp.consts.aidp_exceptions import (
+    AidpKbNotFoundError,
+    AidpKbPermissionDeniedError,
+)
+from ext_components.aidp.database.aidp_permission_db import (
+    get_permission_by_kb_id,
+)
+from ext_components.aidp.services.aidp_permission_service import (
+    REQUIRE_EDIT,
+    REQUIRE_READ,
+    require_permission,
+)
+from ext_components.aidp.services.aidp_service import list_aidp_docs_impl
 from management.db.agent.catalog import get_agent_repository_by_id
+from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.mcp.market import get_mcp_market_record_by_id
 from management.db.mcp.remote import get_mcp_record_by_id_and_tenant
 from management.db.skill.repository import get_skill_by_id
 from management.db.tool.repository import query_all_tools
-from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.knowledge_base.service import (
+    ElasticSearchService as service,
+)
+from management.services.knowledge_base.service import get_vector_db_core
 from management.services.mcp.service import get_remote_mcp_server_list
+from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.tag.identity import (
+    KNOWLEDGE_CONTENT_LIBRARY_CODE,
+    LOCAL_DOCUMENT_PROVIDER,
+    _encode_document_resource_id,
+)
 
-# Imported only when a knowledge-base or document adapter is used.  Keeping the
-# slot patchable preserves the existing isolated adapter test seam.
+# Keep the optional override patchable for isolated provider-adapter tests.
 ElasticSearchService: Any | None = None
 
 DEFAULT_RESOURCE_LIBRARY_CODE = "default_resource"
-KNOWLEDGE_CONTENT_LIBRARY_CODE = "knowledge_content"
-LOCAL_DOCUMENT_PROVIDER = "local"
 AIDP_DOCUMENT_PROVIDER = "aidp"
-
-
-from contracts.tag import ResourceType
-
-
-from contracts.tag import ResourceOrigin
-
-
-from contracts.tag import AuthenticatedCaller
-
-
-from contracts.tag import ResourceReference
-
-
-from contracts.tag import ResourceCapabilities
-
-
-from contracts.tag import ResourceDisplayMetadata
-
-
-from contracts.tag import CanonicalResourceIdentity
-
-
-from contracts.tag import TagAssignmentCleanupDescriptor
-
-
-from contracts.tag import TagAssignmentCleanupCallback
 
 
 async def run_tag_assignment_cleanup(
@@ -75,9 +78,6 @@ async def run_tag_assignment_cleanup(
     result = callback(descriptor)
     if inspect.isawaitable(result):
         await result
-
-
-from contracts.tag import ResolvedTagResource
 
 
 @dataclass(slots=True)
@@ -150,7 +150,6 @@ def _get_elasticsearch_service() -> Any:
     if ElasticSearchService is not None:
         return ElasticSearchService
 
-    from management.services.knowledge_base.service import ElasticSearchService as service
 
     return service
 
@@ -166,7 +165,6 @@ async def _resolve_provider_document(
 
     normalized_provider = provider.strip().lower()
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
-        from management.services.knowledge_base.service import get_vector_db_core
 
         files = await _get_elasticsearch_service().list_files(
             knowledge_base_id,
@@ -185,8 +183,6 @@ async def _resolve_provider_document(
         return None
 
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
-        from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
-        from ext_components.aidp.services.aidp_service import list_aidp_docs_impl
 
         page = 1
         while True:
@@ -225,9 +221,6 @@ def _get_provider_knowledge_base(
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
         return get_knowledge_record({"index_name": knowledge_base_id, "tenant_id": tenant_id})
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
-        from ext_components.aidp.database.aidp_permission_db import (
-            get_permission_by_kb_id,
-        )
 
         return get_permission_by_kb_id(kb_id=knowledge_base_id, tenant_id=tenant_id)
     return None
@@ -242,14 +235,6 @@ def _resolve_provider_document_permission(
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
         return _resolve_local_knowledge_permission(knowledge_base_id, user_id, tenant_id)
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
-        from ext_components.aidp.consts.aidp_exceptions import (
-            AidpKbNotFoundError,
-            AidpKbPermissionDeniedError,
-        )
-        from ext_components.aidp.services.aidp_permission_service import (
-            REQUIRE_READ,
-            require_permission,
-        )
 
         try:
             return require_permission(knowledge_base_id, user_id, tenant_id, REQUIRE_READ).permission
@@ -268,14 +253,6 @@ def _require_provider_document_edit_permission(
         _require_local_knowledge_edit_permission(knowledge_base_id, user_id, tenant_id)
         return
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
-        from ext_components.aidp.consts.aidp_exceptions import (
-            AidpKbNotFoundError,
-            AidpKbPermissionDeniedError,
-        )
-        from ext_components.aidp.services.aidp_permission_service import (
-            REQUIRE_EDIT,
-            require_permission,
-        )
 
         try:
             require_permission(knowledge_base_id, user_id, tenant_id, REQUIRE_EDIT)
@@ -292,21 +269,6 @@ def _as_int(value: int | str) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _encode_document_resource_id(
-    provider: str,
-    knowledge_base_id: str,
-    provider_document_id: str,
-) -> str:
-    """Encode the provider document tuple as a stable, reversible resource ID."""
-
-    payload = json.dumps(
-        [provider, knowledge_base_id, provider_document_id],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return base64.urlsafe_b64encode(payload).decode("ascii")
 
 
 def _tenant_matches(record: Mapping[str, Any] | None, tenant_id: str, field: str = "tenant_id") -> bool:
@@ -483,7 +445,7 @@ class ToolTagResourceAdapter(_BaseAdapter):
         # The legacy local ToolInfo policy is admin-or-creator after the tenant
         # ownership check. An injected resolver remains the authoritative seam.
         created_by = tool.get("created_by")
-        can_edit = caller.role == "ADMIN" or (
+        can_edit = has_any_role(caller.role, {"ADMIN"}) or (
             bool(created_by) and str(created_by) == str(caller.user_id)
         )
         if self._dependencies.resolve_tool_edit_permission is not None:

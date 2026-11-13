@@ -39,7 +39,7 @@ export default async function RootLayout({
   const { locale } = await params;
 
   return (
-    <html lang="zh" suppressHydrationWarning>
+    <html lang={locale === "en" ? "en" : "zh"} suppressHydrationWarning>
       <body className="font-sans">
         <NextThemesProvider
           attribute="class"

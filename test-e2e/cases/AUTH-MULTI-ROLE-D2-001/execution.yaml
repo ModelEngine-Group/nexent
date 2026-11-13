@@ -1,0 +1,27 @@
+schema_version: '1.0'
+case_id: AUTH-MULTI-ROLE-D2-001
+timeout_seconds: 240
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_roles_union_compatibility_and_operations_boundary
+acceptance_bindings:
+  AC-01:
+  - test_roles_union_compatibility_and_operations_boundary
+  AC-02:
+  - test_roles_union_compatibility_and_operations_boundary
+  AC-03:
+  - test_roles_union_compatibility_and_operations_boundary
+  AC-04:
+  - test_roles_union_compatibility_and_operations_boundary
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained through ops_roles_http.role_runtime and the existing local-auth
+  disposable_database factory. Requires NEXENT_AUTH_TEST_DSN to an isolated test PostgreSQL.
+  Each test creates and finally drops its UUID database. Actual routers, session authentication,
+  SQL repositories and transaction locks run unchanged; unrelated catalog installation/audit
+  transport are controlled external boundaries. No deployed tenant or shared factory
+  asset is changed.

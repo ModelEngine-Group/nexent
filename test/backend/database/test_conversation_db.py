@@ -197,6 +197,7 @@ db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
+db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
 sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
@@ -224,6 +225,9 @@ utils_mod.add_update_tracking = _add_update_tracking
 sys.modules["management.utils.audit_fields"] = utils_mod
 sys.modules["management.utils.audit_fields"] = utils_mod
 
+
+# Isolate the explicit membership lookup from unrelated account persistence.
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
 
 # Import module under test after stubbing
 
@@ -3643,8 +3647,12 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None, status="completed"),
     ]
+    # Reply-annotation units for the historical user messages (none here).
+    annotations_result = MagicMock()
+    annotations_result.all.return_value = []
     session.execute.side_effect = [
-        current_result, candidates_result, boundary_result, messages_result]
+        current_result, candidates_result, boundary_result, messages_result,
+        annotations_result]
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")

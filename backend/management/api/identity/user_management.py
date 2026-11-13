@@ -1,31 +1,61 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
-from contracts.errors.codes import ErrorCode
-from gateway.authentication.auth import extract_bearer_token
-import logging
 
-from dotenv import load_dotenv
-from fastapi import APIRouter, Header, Query, Request, HTTPException
-from fastapi.responses import JSONResponse
+import logging
 from http import HTTPStatus
 from typing import Optional
 
-from contracts.errors.exceptions import AccountConflictError
+from dotenv import load_dotenv
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from contracts.constants.constants import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
-from contracts.identity import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
-from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
 from contracts.errors.codes import ErrorCode
-from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
-from gateway.authentication.auth import validate_token, get_session_by_authorization
-from management.services.permission.identity.authentication import \
-    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_user_info, create_token, list_tokens_by_user, delete_token, \
-    update_password, get_provider_username
-from management.services.permission.identity.users import delete_user_and_cleanup
+from contracts.errors.exceptions import (
+    AccountConflictError,
+    AppException,
+    IncorrectInviteCodeException,
+    NoInviteCodeException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    UserRegistrationException,
+    ValidationError,
+    tenant_resource_limit_error_payload,
+)
+from contracts.identity import (
+    UpdatePasswordRequest,
+    UserSignInRequest,
+    UserSignUpRequest,
+)
+from contracts.roles import has_any_role
+from gateway.authentication.auth import (
+    extract_bearer_token,
+    extract_session_id_from_authorization,
+    get_current_user_context,
+    get_current_user_id,
+    get_session_by_authorization,
+    validate_token,
+)
+from management.db.identity.cas_session import (
+    revoke_cas_session_by_session_id,
+)
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
-
+from management.services.permission.identity.authentication import (
+    check_auth_service_health,
+    create_token,
+    delete_token,
+    get_provider_username,
+    get_user_info,
+    list_tokens_by_user,
+    refresh_user_token,
+    signin_user,
+    signup_user_with_invitation,
+    update_password,
+)
+from management.services.permission.identity.cas import (
+    CasAuthenticationError,
+    build_logout_url,
+)
+from management.services.permission.identity.users import delete_user_and_cleanup
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -168,7 +198,6 @@ async def logout(request: Request):
         if authorization:
             session_id = extract_session_id_from_authorization(authorization) if logout_user_id else None
             if session_id:
-                from management.db.identity.cas_session import revoke_cas_session_by_session_id
 
                 revoke_cas_session_by_session_id(session_id, actor="user")
                 try:
@@ -293,13 +322,11 @@ async def revoke_user_account(request: Request):
         if not is_valid or not user:
             raise UnauthorizedError("User not logged in or session invalid")
 
-        # Extract role from user metadata
-        user_role = "user"
-        if getattr(user, "user_metadata", None) and "role" in user.user_metadata:
-            user_role = user.user_metadata["role"]
+        # Resolve authoritative roles, including a non-primary ADMIN grant.
+        _, _, user_role = get_current_user_context(authorization)
 
         # Disallow admin revocation by this endpoint
-        if user_role.upper() in {"ADMIN", "SU"}:
+        if has_any_role(user_role, {'ADMIN','SU'}):
             raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
                                 detail="Admin account cannot be deleted via this endpoint")
 

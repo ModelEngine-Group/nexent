@@ -1,10 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
 
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { authService } from "@/services/authService";
 import { casService } from "@/services/casService";
@@ -32,7 +32,6 @@ import log from "@/lib/logger";
 export function useAuthenticationState(): AuthenticationStateReturn {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { isSpeedMode } = useDeployment();
   const queryClient = useQueryClient();
 
   // Authentication state
@@ -43,25 +42,12 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
 
-  // Speed mode: skip authentication checks, consider user as authenticated
   useEffect(() => {
-    if (isSpeedMode) {
-      // In speed mode, user is considered authenticated without session
-      setIsAuthenticated(true);
-    } else {
-      if (checkSessionValid()) {
-        const storedSession = getSessionFromStorage();
-        if (storedSession) {
-          setSession(storedSession);
-        }
-        setIsAuthenticated(true);
-      } else {
-        setSession(null);
-        setIsAuthenticated(false);
-      }
-    }
+    const storedSession = checkSessionValid() ? getSessionFromStorage() : null;
+    setSession(storedSession);
+    setIsAuthenticated(!!storedSession);
     setIsAuthChecking(false);
-  }, [isSpeedMode]);
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -70,7 +56,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (isSpeedMode || isAuthChecking || isAuthenticated) return;
+    if (isAuthChecking || isAuthenticated) return;
     if (typeof window === "undefined") return;
 
     const pathname = window.location.pathname;
@@ -81,10 +67,10 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     forcedLoginService.redirectIfNeeded(
       buildAuthenticationReturnPath(pathname, window.location.search)
     );
-  }, [isSpeedMode, isAuthChecking, isAuthenticated]);
+  }, [isAuthChecking, isAuthenticated]);
 
   useEffect(() => {
-    if (isSpeedMode || !isAuthenticated) return;
+    if (!isAuthenticated) return;
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
@@ -113,7 +99,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [isAuthenticated, session?.expires_at, isSpeedMode]);
+  }, [isAuthenticated, session?.expires_at]);
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();

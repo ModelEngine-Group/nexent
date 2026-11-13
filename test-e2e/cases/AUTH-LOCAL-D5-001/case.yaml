@@ -47,11 +47,11 @@ case:
     action: Execute the real infrastructure init.sql before running the deployment entry against fresh, legacy and completed databases; fail after schema creation and retry, then execute the normal SQL runner with unchanged and forced account migration checksums.
     expected: Infrastructure initialization never creates the account completion marker. Complete per-user account data skips source access; empty/partial account tables with active members stop deployment without automatic repair even when version history is absent. Legacy import commits schema and credentials together; failures restore legacy profile columns and remove only tables created by that attempt, preserving preexisting accounts and leaving no private retry files. New schemas never create account_status; ordinary and forced replay remove existing legacy status columns before committing.
   - order: 8
-    action: Execute the actual historical SPEED seed statement, migrate through consolidated 001, and replay 001 against an operator-modified account.
+    action: Execute the actual historical SPEED seed statement, run historical 001 followed by the account-array migration, and replay both against an operator-modified account.
     expected: The fixed demo identity retains its original ID/tenant and remains disabled for normal login, has system provenance without pending credentials, and replay preserves operator changes. Mixed-user deployment still imports human credentials.
   - order: 9
     action: Reuse an email after historical account deletion, vary source presence/order, exclude all-inactive and banned identities, and submit genuinely conflicting active accounts.
-    expected: Only eligible ordinary accounts enter user_account_t; original source/membership rows remain, SPEED is retained, inactive historical associations do not block SU preflight, and actual conflicts report account IDs while rolling back all target changes.
+    expected: Only eligible ordinary accounts enter user_account_t; original source/membership rows remain, the unavailable SPEED system record is retained with no role grants, inactive historical associations do not block SU preflight, and actual conflicts report account IDs while rolling back all target changes.
   - order: 10
     action: Execute Docker Shell orchestration without any host Python before application SQL. Include completed/fresh targets, stopped source, removed source with original storage, an empty recovery directory, failed import and preview.
     expected: The host invokes only Shell and platform CLIs. Docker recovers a removed DB from its original storage and rejects an empty directory. The worker owns one atomic schema/credential transaction. Failed import preserves the recovered source, committed success removes its container and preserves storage, and credentials are never printed or stored as snapshots.
@@ -63,7 +63,7 @@ case:
   - Negative paths reject access or writes deterministically.
   - No authentication audit history is read or imported; CLI output contains only
     safe account counters, stage outcomes and affected account/resource IDs.
-  - Canonical user_email/user_role exist only on accounts; old membership columns
+  - Canonical user_email/user_roles exist only on accounts, with no physical scalar user_role; old membership columns
     are removed atomically with credential import; no pending rows survive commit.
   - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
   - Source containers are reclaimed only after a successful local apply and all persistent data is retained.

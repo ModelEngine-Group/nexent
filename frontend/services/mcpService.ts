@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n from 'i18next';
 
 import { ErrorCode } from '@/const/errorCode';
@@ -405,10 +407,11 @@ export const updateToolList = async () => {
 /**
  * checkMcpServerHealth
  */
-export const checkMcpServerHealth = async (mcpId: number) => {
+export const checkMcpServerHealth = async (mcpId: number, tenantId?: string | null) => {
   try {
     const query = new URLSearchParams();
     query.set('mcp_id', mcpId.toString());
+    if (tenantId) query.set('tenant_id', tenantId);
     const response = await fetch(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
       method: 'GET',
       headers: getAuthHeaders(),

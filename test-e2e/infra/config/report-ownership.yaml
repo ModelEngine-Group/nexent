@@ -83,6 +83,7 @@ feature_overrides:
   SDK-MODEL-PROFILE-NORMALIZATION: model
   SDK-MODEL-PROFILE-PARAMETERS: model
   SDK-MODEL-TRANSPORT: model
+  AUTH-MULTI-ROLE: system
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config

@@ -7,26 +7,65 @@ import secrets
 import ssl
 import urllib.parse
 import urllib.request
-from xml.etree.ElementTree import Element
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
-from contracts.constants.environment import CAS_CA_BUNDLE, CAS_CALLBACK_BASE_URL, CAS_DEFAULT_ROLE, CAS_DEFAULT_TENANT_ID, CAS_EMAIL_ATTRIBUTE, CAS_ENABLED, CAS_HEARTBEAT_COOKIE_NAME, CAS_HEARTBEAT_INTERVAL_SECONDS, CAS_HEARTBEAT_URL, CAS_INTERNAL_SERVER_URL, CAS_LOGIN_MODE, CAS_LOGOUT_URL, CAS_RENEW_BEFORE_SECONDS, CAS_RENEW_TIMEOUT_SECONDS, CAS_ROLE_ATTRIBUTE, CAS_ROLE_MAP_JSON, CAS_SERVER_URL, CAS_SESSION_MAX_AGE_SECONDS, CAS_SSL_VERIFY, CAS_SYNTHETIC_EMAIL_DOMAIN, CAS_TENANT_ATTRIBUTE, CAS_USER_ATTRIBUTE, CAS_VALIDATE_PATH, LOCAL_SESSION_MAX_AGE_SECONDS
 from contracts.constants.constants import DEFAULT_TENANT_ID
-from management.db.identity.cas_session import create_cas_session, revoke_cas_session_by_index, revoke_cas_sessions_by_user_id
+from contracts.constants.environment import (
+    CAS_CA_BUNDLE,
+    CAS_CALLBACK_BASE_URL,
+    CAS_DEFAULT_ROLE,
+    CAS_DEFAULT_TENANT_ID,
+    CAS_EMAIL_ATTRIBUTE,
+    CAS_ENABLED,
+    CAS_HEARTBEAT_COOKIE_NAME,
+    CAS_HEARTBEAT_INTERVAL_SECONDS,
+    CAS_HEARTBEAT_URL,
+    CAS_INTERNAL_SERVER_URL,
+    CAS_LOGIN_MODE,
+    CAS_LOGOUT_URL,
+    CAS_RENEW_BEFORE_SECONDS,
+    CAS_RENEW_TIMEOUT_SECONDS,
+    CAS_ROLE_ATTRIBUTE,
+    CAS_ROLE_MAP_JSON,
+    CAS_SERVER_URL,
+    CAS_SESSION_MAX_AGE_SECONDS,
+    CAS_SSL_VERIFY,
+    CAS_SYNTHETIC_EMAIL_DOMAIN,
+    CAS_TENANT_ATTRIBUTE,
+    CAS_USER_ATTRIBUTE,
+    CAS_VALIDATE_PATH,
+    LOCAL_SESSION_MAX_AGE_SECONDS,
+)
+from contracts.errors.exceptions import AccountConflictError
+from contracts.roles import roles_from_record
+from gateway.authentication.auth import (
+    calculate_expires_at,
+    generate_session_jwt,
+    require_active_account,
+)
+from management.db.identity.account import create_account
+from management.db.identity.cas_session import (
+    create_cas_session,
+    revoke_cas_session_by_index,
+    revoke_cas_sessions_by_user_id,
+)
 from management.db.identity.oauth_account import get_oauth_account_by_provider
-from management.db.identity.user_tenant import get_user_tenant_by_user_id, upsert_user_tenant
+from management.db.identity.user_tenant import (
+    get_user_tenant_by_user_id,
+    upsert_user_tenant,
+)
 from management.services.permission.identity.oauth import (
     create_or_update_oauth_account,
     find_account_user_id_by_email,
 )
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from gateway.authentication.auth import calculate_expires_at, generate_session_jwt, require_active_account
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +283,7 @@ async def _create_project_session(principal: CasPrincipal, redirect: str = "/", 
             "id": str(user_id),
             "email": principal.email,
             "role": user_tenant.get("user_role", principal.role),
+            "roles": list(roles_from_record(user_tenant)),
         },
         "session": {
             "access_token": jwt_token,
@@ -270,8 +310,6 @@ def _resolve_project_user(principal: CasPrincipal) -> str:
         )
         return existing["user_id"]
 
-    from management.db.identity.account import create_account
-    from contracts.errors.exceptions import AccountConflictError
 
     user_id = find_account_user_id_by_email(principal.email)
     if not user_id:
@@ -373,7 +411,7 @@ def _map_role(raw_role: str) -> str:
     if not normalized_role:
         return default_role
 
-    role = normalized_role.upper()
+    role = normalized_role
     try:
         role_map = json.loads(CAS_ROLE_MAP_JSON) if CAS_ROLE_MAP_JSON else {}
         role = str(role_map.get(normalized_role, role_map.get(role, role))).strip().upper()

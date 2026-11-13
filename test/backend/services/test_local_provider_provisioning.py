@@ -3,16 +3,14 @@
 
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
 
 from contracts.errors.exceptions import AccountConflictError, OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
-from gateway.authentication import auth as gateway
 from infrastructure.security.passwords import verify_password
-from management.db.identity import account as accounts
-from management.services.permission.identity import cas, oauth
+from management.services.permission.identity import cas, oauth, registration
 
 
 @pytest.fixture
@@ -27,7 +25,7 @@ def test_cas_resolves_original_or_concurrently_created_identity(mocker, principa
     lookup.side_effect = {
         "email": ["original"], "new": [None], "race": [None, "original"], "unresolved": [None, None], "bound": [],
     }[mode]
-    create = mocker.patch.object(accounts, "create_account", return_value={"user_id": "original"})
+    create = mocker.patch.object(cas, "create_account", return_value={"user_id": "original"})
     if mode in {"race", "unresolved"}:
         create.side_effect = AccountConflictError("Concurrent creation")
     active = mocker.patch.object(cas, "require_active_account")
@@ -59,7 +57,7 @@ def test_cas_cannot_rebind_disabled_local_identity(mocker, principal):
 
 @pytest.mark.parametrize("email,stored,expected", [(None, None, None), ("user@example.com", None, None), ("user@example.com", {"user_id": "original"}, "original")])
 def test_oauth_email_lookup_uses_local_identity(mocker, email, stored, expected):
-    lookup = mocker.patch.object(accounts, "get_account_by_email", return_value=stored)
+    lookup = mocker.patch.object(oauth, "get_account_by_email", return_value=stored)
     assert oauth.find_account_user_id_by_email(email) == expected
     if email:
         lookup.assert_called_once_with(email)
@@ -80,11 +78,8 @@ def test_pending_oauth_token_uses_local_signing_key(mocker):
 
 @pytest.fixture
 def completion(mocker):
-    from management.services.permission.identity import invitations, groups
-    from management.services.tool import configuration
-    from management.db import client
-
-    session = object()
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = SimpleNamespace(group_id=1)
     transaction = []
 
     @contextmanager
@@ -98,19 +93,26 @@ def completion(mocker):
         else:
             transaction.append("commit")
 
-    mocker.patch.object(client, "get_db_session", db_session)
+    mocker.patch.object(registration, "get_db_session", db_session)
     mocker.patch.object(oauth, "get_oauth_account_by_provider", return_value=None)
     lookup = mocker.patch.object(oauth, "find_account_user_id_by_email", return_value=None)
-    mocker.patch.object(invitations, "check_invitation_available", return_value=True)
-    invitation = mocker.patch.object(invitations, "get_invitation_by_code", return_value={"tenant_id": "tenant", "code_type": "DEV_INVITE"})
-    use = mocker.patch.object(invitations, "use_invitation_code", return_value={"group_ids": "1"})
-    create = mocker.patch.object(accounts, "create_account", return_value={"user_id": "local-id"})
-    member = mocker.patch.object(oauth, "insert_user_tenant")
-    add = mocker.patch.object(groups, "add_user_to_groups")
-    tools = mocker.patch.object(configuration, "init_tool_list_for_tenant", new_callable=AsyncMock)
+    mocker.patch.object(oauth, "check_invitation_available", return_value=True)
+    invitation = {"tenant_id": "tenant", "roles": ["DEV", "OPS"]}
+    locked = SimpleNamespace(invitation_id=42, capacity=2, status="IN_USE", group_ids=[1], **invitation)
+    mocker.patch.object(oauth, "get_invitation_by_code", return_value=invitation)
+    mocker.patch.object(registration, "query_invitation_by_code", return_value=invitation)
+    mocker.patch.object(registration, "locked_invitation", return_value=locked)
+    mocker.patch.object(registration, "invitation_usage", return_value=0)
+    mocker.patch.object(registration, "as_dict", side_effect=vars)
+    create = mocker.patch.object(
+        registration, "create_account", return_value={"user_id": "local-id", "email": "user@example.com"}
+    )
+    member = mocker.patch.object(registration, "insert_user_tenant")
+    add = mocker.patch.object(registration, "add_user_to_group")
+    tools = mocker.patch.object(oauth, "init_tool_list_for_tenant", new_callable=AsyncMock)
     bind = mocker.patch.object(oauth, "create_or_update_oauth_account")
-    token = mocker.patch.object(gateway, "generate_session_jwt", return_value="local-token")
-    mocker.patch.object(gateway, "calculate_expires_at", return_value=12345)
+    token = mocker.patch.object(oauth, "generate_session_jwt", return_value="local-token")
+    mocker.patch.object(oauth, "calculate_expires_at", return_value=12345)
     mocker.patch.object(oauth, "require_asset_owner_enabled")
     identity = {"provider": "github", "provider_user_id": "remote-id", "provider_email": "User@Example.com", "provider_username": "Remote User"}
     return SimpleNamespace(**locals())
@@ -121,7 +123,13 @@ def completion(mocker):
 async def test_oauth_completion_creates_native_credentials_and_membership_together(completion, asset_owner):
     c = completion
     if asset_owner:
-        c.invitation.return_value["code_type"] = oauth.ASSET_OWNER_INVITE_CODE_TYPE
+        c.invitation.update(
+            code_type=oauth.ASSET_OWNER_INVITE_CODE_TYPE, roles=[oauth.ASSET_OWNER_ROLE],
+            tenant_id=oauth.ASSET_OWNER_TENANT_ID,
+        )
+        c.locked.tenant_id = oauth.ASSET_OWNER_TENANT_ID
+        c.locked.roles = [oauth.ASSET_OWNER_ROLE]
+        c.locked.group_ids = []
     result = await oauth.complete_pending_oauth_account(c.identity, "Password123", "invite")
     assert c.transaction == ["begin", "commit"]
     email, encoded = c.create.call_args.args
@@ -130,15 +138,18 @@ async def test_oauth_completion_creates_native_credentials_and_membership_togeth
     assert c.create.call_args.kwargs["db_session"] is c.session
     tenant = oauth.ASSET_OWNER_TENANT_ID if asset_owner else "tenant"
     role = oauth.ASSET_OWNER_ROLE if asset_owner else "DEV"
-    c.member.assert_called_once_with(user_id="local-id", tenant_id=tenant, user_role=role, user_email=email, db_session=c.session)
-    c.use.assert_called_once_with("INVITE", "local-id")
+    roles = (role,) if asset_owner else ("DEV", "OPS")
+    c.member.assert_called_once_with("local-id", tenant, role, email, db_session=c.session, roles=roles)
+    c.session.add.assert_called_once()
+    usage = c.session.add.call_args.args[0]
+    assert (usage.invitation_id, usage.user_id) == (42, "local-id")
     if asset_owner:
         c.add.assert_not_called()
         c.tools.assert_not_awaited()
     else:
-        c.add.assert_called_once_with("local-id", [1], "local-id")
+        c.add.assert_called_once_with(1, "local-id", "local-id", db_session=c.session)
         c.tools.assert_awaited_once_with(tenant, "local-id")
-    assert result["user"] == {"id": "local-id", "email": email, "role": role}
+    assert result["user"] == {"id": "local-id", "email": email, "role": role, "roles": list(roles)}
     assert result["session"]["access_token"] == "local-token"
     assert result["session"]["refresh_token"] == ""
     c.bind.assert_called_once_with(user_id="local-id", provider="github", provider_user_id="remote-id", email=email, username="Remote User", tenant_id=tenant)
@@ -163,6 +174,6 @@ async def test_oauth_membership_limit_rolls_back_before_invitation_or_binding(co
     with pytest.raises(TenantResourceLimitError):
         await oauth.complete_pending_oauth_account(c.identity, "Password123", "invite")
     assert c.transaction == ["begin", "rollback"]
-    c.use.assert_not_called()
+    c.session.add.assert_not_called()
     c.bind.assert_not_called()
     c.token.assert_not_called()

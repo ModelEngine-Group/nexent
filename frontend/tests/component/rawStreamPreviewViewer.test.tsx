@@ -115,8 +115,10 @@ describe("RawStreamPreviewViewer", () => {
     // never passes the sanitizer, so the option has to stay off.
     const options = vi.mocked(renderAsync).mock.calls[0]?.[3] as {
       renderAltChunks?: boolean;
+      inWrapper?: boolean;
     };
     expect(options?.renderAltChunks).toBe(false);
+    expect(options?.inWrapper).toBe(true);
     // The link pass still runs over whatever docx-preview produced.
     expect(document.querySelector("a")?.hasAttribute("href")).toBe(false);
   });
@@ -135,6 +137,27 @@ describe("RawStreamPreviewViewer", () => {
     expect(
       document.querySelector('img[src="data:image/png;base64,AAAA"]')
     ).not.toBeNull();
+  });
+
+  it("applies paper defaults to a DOCX preview with no section layout", async () => {
+    vi.mocked(fetchPreviewBlobWithMeta).mockResolvedValue(
+      servedDocument("simple_document.docx") as never
+    );
+    vi.mocked(renderAsync).mockImplementationOnce(async (_data, body) => {
+      body.innerHTML =
+        '<div class="docx-wrapper"><section class="docx"><article><p>Short generated document</p></article></section></div>';
+      return {} as never;
+    });
+    render(
+      <RawStreamPreviewViewer
+        url="/api/preview"
+        fileName="simple_document.docx"
+      />
+    );
+    expect(await screen.findByText("Short generated document")).toBeVisible();
+    const page = document.querySelector<HTMLElement>("section.docx")!;
+    expect(page.style.minHeight).toBe("297mm");
+    expect(page.style.paddingTop).toBe("25.4mm");
   });
 
   it("anchors a rotated pptx group around its own centre", () => {

@@ -11,26 +11,41 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
-from nexent.core.agents.agent_model import AgentConfig
 
-from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.agent import WorkbenchSessionConfig
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_PRIVATE,
+)
+from contracts.errors.exceptions import (
+    ValidationError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.roles import has_any_role
+from infrastructure.serialization.containers import clone_runtime_config
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.identity.group import query_group_ids_by_user
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
-from management.db.agent.repository import search_agent_info_by_agent_id
 from management.services.agent.system import (
     system_agent_provider,
 )
-from management.services.skill.service import SkillService
-from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
-from management.db.identity.group import query_group_ids_by_user
-from infrastructure.serialization.containers import clone_runtime_config
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     get_agent_knowledge_capabilities,
+    resolve_executable_knowledge_scope,
     resolve_root_version,
 )
+from management.services.skill.permission import (
+    _get_user_role,
+    _to_group_id_set,
+    can_view_skill,
+)
+from management.services.skill.service import SkillService
+from nexent.core.agents.agent_model import AgentConfig
 
 
 @dataclass(frozen=True)
@@ -299,8 +314,6 @@ class RuntimeMountService:
         Callers consume the returned tree and scope summary before starting a
         model. Resource checks are separate from the pure root compilation.
         """
-        from contracts.knowledge import ConversationKnowledgeScopeRequest
-        from management.services.knowledge_base.scope import resolve_executable_knowledge_scope
 
         scope = ConversationKnowledgeScopeRequest.model_validate(dict(tree.overlay.knowledge_scope or {}))
         compiled, resolution = resolve_executable_knowledge_scope(
@@ -479,7 +492,7 @@ def resolve_workbench_config(
 def authorize_workbench_agent(snapshot: Mapping[str, Any], user_id: str) -> None:
     """Apply the Agent list's creator/group visibility rules before resolving resources."""
     role = _get_user_role(user_id)
-    if role in CAN_EDIT_ALL_USER_ROLES or str(snapshot.get("created_by")) == str(user_id):
+    if has_any_role(role, CAN_EDIT_ALL_USER_ROLES) or str(snapshot.get("created_by")) == str(user_id):
         return
     groups = set(query_group_ids_by_user(user_id) or [])
     if snapshot.get("ingroup_permission") == PERMISSION_PRIVATE or not groups.intersection(_to_group_id_set(snapshot.get("group_ids"))):
