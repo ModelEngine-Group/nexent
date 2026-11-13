@@ -3,14 +3,18 @@
 "use client";
 
 import ResourceReviewLink from "@/components/repository/ResourceReviewLink";
+import SkillTypeIcon from "./SkillTypeIcon";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import RepositoryDisplayControls from "@/components/repository/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { App, Button, Dropdown, Input, Popover, Select } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
+  ChevronDown,
   ClipboardCheck,
   Clock,
   Eye,
@@ -96,6 +100,7 @@ export function MineSkillsView({
   onPageSizeChange,
   onRetry,
   onCreateSkill,
+  onCreateSkillWithChat,
   onEditSkill,
   onViewSkill,
   onDeleteSkill,
@@ -126,6 +131,7 @@ export function MineSkillsView({
   onPageSizeChange: (size: number) => void;
   onRetry: () => void;
   onCreateSkill: () => void;
+  onCreateSkillWithChat: () => void;
   onEditSkill: (skill: MyEditableSkillItem) => void;
   onViewSkill: (skill: MyEditableSkillItem) => void;
   onDeleteSkill: (skill: MyEditableSkillItem) => Promise<void>;
@@ -142,12 +148,9 @@ export function MineSkillsView({
 }) {
   const { t } = useTranslation("common");
   const presentation = useRepositoryPresentation();
-  const showCreateCard =
-    Boolean(presentation) &&
-    page === 1 &&
-    ownership === "all" &&
-    !searchQuery.trim() &&
-    tagPredicates.length === 0;
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchActionsTarget, setBatchActionsTarget] =
+    useState<HTMLDivElement | null>(null);
   const { message, modal } = App.useApp();
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalSkill, setReviewModalSkill] =
@@ -330,40 +333,50 @@ export function MineSkillsView({
               allowClear
             />
           </div>
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="w-72">
-                <TagFilterControls
-                  definitions={tagDefinitions}
-                  value={tagPredicates}
-                  onChange={onTagPredicatesChange}
-                />
-                {tagPredicates.length > 0 ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-xs text-blue-600 hover:underline"
-                    onClick={() => onTagPredicatesChange([])}
-                  >
-                    {t("repository.tagFilter.clear")}
-                  </button>
-                ) : null}
-              </div>
-            }
-          >
-            <Button
-              className={
-                presentation
-                  ? "!h-8 !w-[296px] max-w-full !justify-start !rounded !px-3"
-                  : undefined
+          {presentation ? (
+            <TagFilterPopover
+              appearance="select"
+              definitions={tagDefinitions}
+              value={tagPredicates}
+              onChange={onTagPredicatesChange}
+              buttonClassName="!h-8 !w-[296px] max-w-full !justify-start !rounded !border-[#C9C9C9] !px-3 !text-sm"
+            />
+          ) : (
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div className="w-72">
+                  <TagFilterControls
+                    definitions={tagDefinitions}
+                    value={tagPredicates}
+                    onChange={onTagPredicatesChange}
+                  />
+                  {tagPredicates.length > 0 ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs text-blue-600 hover:underline"
+                      onClick={() => onTagPredicatesChange([])}
+                    >
+                      {t("repository.tagFilter.clear")}
+                    </button>
+                  ) : null}
+                </div>
               }
-              type={tagPredicates.length > 0 ? "primary" : "default"}
-              icon={<Tag className="size-3.5" aria-hidden />}
             >
-              {t("repository.tagFilter.button")}
-            </Button>
-          </Popover>
+              <Button
+                className={
+                  presentation
+                    ? "!h-8 !w-[296px] max-w-full !justify-start !rounded !px-3"
+                    : undefined
+                }
+                type={tagPredicates.length > 0 ? "primary" : "default"}
+                icon={<Tag className="size-3.5" aria-hidden />}
+              >
+                {t("repository.tagFilter.button")}
+              </Button>
+            </Popover>
+          )}
           {presentation && (
             <Select<MineOwnershipFilter>
               className="h-8 w-[296px] max-w-full"
@@ -372,12 +385,66 @@ export function MineSkillsView({
               onChange={onOwnershipChange}
               options={MINE_OWNERSHIP_FILTERS.map((value) => ({
                 value,
-                label: `${t(ownershipLabelKey[value])} (${counts[value]})`,
+                label:
+                  value === "all"
+                    ? t("skillRepository.mine.allCreators")
+                    : t(ownershipLabelKey[value]),
               }))}
             />
           )}
         </div>
-        <RepositoryDisplayControls />
+        {presentation ? (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {batchMode ? (
+              <>
+                <div
+                  ref={setBatchActionsTarget}
+                  className="flex items-center gap-2"
+                />
+                {isLoading || isError ? (
+                  <Button onClick={() => setBatchMode(false)}>
+                    {t("skillRepository.mine.exitManagement")}
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setBatchMode((value) => !value)}>
+                  {t(
+                    batchMode
+                      ? "common.done"
+                      : "skillRepository.mine.batchManage"
+                  )}
+                </Button>
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "form",
+                        label: t("skillRepository.mine.createForm"),
+                        onClick: onCreateSkill,
+                      },
+                      {
+                        key: "workbench",
+                        label: t("skillRepository.mine.createChat"),
+                        onClick: onCreateSkillWithChat,
+                      },
+                    ],
+                  }}
+                >
+                  <Button type="primary">
+                    {t("skillRepository.mine.createSkill")}
+                    <ChevronDown size={14} aria-hidden />
+                  </Button>
+                </Dropdown>
+                <RepositoryDisplayControls showSort={false} />
+              </>
+            )}
+          </div>
+        ) : (
+          <RepositoryDisplayControls />
+        )}
       </div>
 
       {!presentation && (
@@ -405,30 +472,31 @@ export function MineSkillsView({
           isError={isError}
           isFetching={isFetching}
           onRetry={onRetry}
-          isEmpty={skills.length === 0 && !showCreateCard}
+          isEmpty={skills.length === 0 && !batchMode}
           emptyDescription={t("skillRepository.mine.empty")}
         >
           <>
             <ResourceCardGrid
-              createCard={
-                showCreateCard ? (
-                  <CreateNewSkillCard onClick={onCreateSkill} />
-                ) : undefined
-              }
               isCreateItem={isNewSkillPaddingItem}
               onListSelect={(skill) => {
-                if (!isNewSkillPaddingItem(skill)) onViewSkill(skill);
+                if (!batchMode && !isNewSkillPaddingItem(skill))
+                  onViewSkill(skill);
               }}
               batchDelete={async (skill) => {
                 if (!isNewSkillPaddingItem(skill)) await onDeleteSkill(skill);
               }}
-              canBatchDelete={(skill) =>
-                !isNewSkillPaddingItem(skill) && skill.permission === "EDIT"
+              canBatchDelete={
+                !presentation || batchMode
+                  ? (skill) =>
+                      !isNewSkillPaddingItem(skill) &&
+                      skill.permission === "EDIT"
+                  : undefined
               }
               selectionKey={JSON.stringify([
                 searchQuery,
                 ownership,
                 tagPredicates,
+                batchMode,
               ])}
               items={skills}
               page={page}
@@ -438,7 +506,63 @@ export function MineSkillsView({
               onPageSizeChange={presentation ? onPageSizeChange : undefined}
               paginateItems={false}
               showToolbar={false}
-              renderItem={(skill) =>
+              cardSelectionInHeader={Boolean(presentation) && batchMode}
+              renderBatchToolbar={(controls, state) =>
+                presentation && batchMode ? (
+                  <>
+                    {batchActionsTarget &&
+                      createPortal(
+                        <>
+                          <Button
+                            danger
+                            disabled={!state.selectedCount}
+                            loading={state.deleting}
+                            onClick={state.deleteSelected}
+                          >
+                            {t("common.delete")}
+                          </Button>
+                          <Button
+                            disabled={state.deleting || isFetching}
+                            onClick={() => {
+                              state.clearSelection();
+                              onRetry();
+                            }}
+                          >
+                            {t("common.refresh")}
+                          </Button>
+                          <Button
+                            disabled={state.deleting}
+                            onClick={() => setBatchMode(false)}
+                          >
+                            {t("skillRepository.mine.exitManagement")}
+                          </Button>
+                        </>,
+                        batchActionsTarget
+                      )}
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span>
+                        {t("resourceCenter.selectedCount", {
+                          count: state.selectedCount,
+                        })}
+                      </span>
+                      <div className="flex items-center gap-4">
+                        <Button
+                          type="link"
+                          disabled={!state.selectedCount || state.deleting}
+                          onClick={state.clearSelection}
+                          icon={<Trash2 size={14} aria-hidden />}
+                        >
+                          {t("skillRepository.mine.clearSelection")}
+                        </Button>
+                        {state.selectPageControl}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  controls
+                )
+              }
+              renderItem={(skill, _index, selection) =>
                 isNewSkillPaddingItem(skill) ? (
                   <CreateNewSkillCard
                     key="new-skill-padding"
@@ -448,6 +572,8 @@ export function MineSkillsView({
                   <MineSkillCard
                     key={skill.skill_id}
                     skill={skill}
+                    selection={selection}
+                    managing={Boolean(presentation) && batchMode}
                     onEdit={() => onEditSkill(skill)}
                     onView={() => onViewSkill(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
@@ -501,6 +627,7 @@ function getMineSkillMenuItems({
   t,
   onApplyListing,
   onViewReview,
+  onEdit,
   onDelete,
 }: {
   canApplyListing: boolean;
@@ -510,9 +637,18 @@ function getMineSkillMenuItems({
   t: (key: string) => string;
   onApplyListing: () => void;
   onViewReview: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }): MenuProps["items"] {
   const items: MenuProps["items"] = [];
+  if (canEdit) {
+    items.push({
+      key: "edit",
+      label: t("common.edit"),
+      icon: <Pencil className="size-3.5" aria-hidden />,
+      onClick: onEdit,
+    });
+  }
   if (canApplyListing) {
     items.push({
       key: "apply-listing",
@@ -543,6 +679,8 @@ function getMineSkillMenuItems({
 
 function MineSkillCard({
   skill,
+  selection,
+  managing = false,
   onEdit,
   onView,
   onDelete,
@@ -550,6 +688,8 @@ function MineSkillCard({
   onViewReview,
 }: {
   skill: MyEditableSkillItem;
+  selection?: ReactNode;
+  managing?: boolean;
   onEdit: () => void;
   onView: () => void;
   onDelete: () => void;
@@ -578,6 +718,7 @@ function MineSkillCard({
     t,
     onApplyListing,
     onViewReview,
+    onEdit,
     onDelete,
   });
 
@@ -585,24 +726,33 @@ function MineSkillCard({
     <ResourceCard
       actionsOnly={presentation?.layout === "list"}
       title={skill.name || t("skillRepository.common.untitled")}
-      className="h-full min-h-[200px] p-4"
-      onClick={onView}
+      className={presentation ? "h-full" : "h-full min-h-[200px] p-4"}
+      onClick={managing ? undefined : onView}
       icon={
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Bot className="size-5" aria-hidden />
-        </div>
+        presentation ? (
+          <SkillTypeIcon name={skill.name || ""} tags={skill.tags} />
+        ) : (
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Bot className="size-5" aria-hidden />
+          </div>
+        )
       }
-      fixedHeaderLayout
+      fixedHeaderLayout={!presentation}
       description={
         skill.description || t("skillRepository.common.noDescription")
       }
+      tagsPlacement={presentation ? "header" : "body"}
       tags={
         tags.length > 0 ? (
           <>
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                className={
+                  presentation
+                    ? "h-5 rounded bg-[rgba(25,25,25,0.05)] px-2 text-xs leading-5 text-[#393939]"
+                    : "rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                }
               >
                 {tag}
               </span>
@@ -611,7 +761,21 @@ function MineSkillCard({
         ) : undefined
       }
       meta={
-        updatedAt ? (
+        presentation ? (
+          <>
+            <span
+              className="min-w-0 truncate"
+              title={skill.created_by || undefined}
+            >
+              {t("skillRepository.detail.author")}: {skill.created_by || "—"}
+            </span>
+            <span className="shrink-0">
+              {t("resourceCenter.skillInstalls", {
+                count: skill.downloads ?? 0,
+              })}
+            </span>
+          </>
+        ) : updatedAt ? (
           <span className="inline-flex min-w-0 items-center gap-1 truncate">
             <Clock className="size-3.5" aria-hidden />
             {updatedAt}
@@ -620,8 +784,16 @@ function MineSkillCard({
       }
       footerLayout="inline"
       headerActions={
-        canEdit || canApplyListing || hasRepositoryInfo ? (
-          <div className="grid h-[60px] max-w-[120px] grid-rows-2">
+        managing ? (
+          selection
+        ) : canEdit || canApplyListing || hasRepositoryInfo ? (
+          <div
+            className={
+              presentation
+                ? "flex min-h-12 max-w-[120px] flex-col justify-between"
+                : "grid h-[60px] max-w-[120px] grid-rows-2"
+            }
+          >
             <div className="flex items-center justify-end">
               {canEdit || canApplyListing ? (
                 <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
@@ -649,29 +821,31 @@ function MineSkillCard({
         ) : undefined
       }
       footer={
-        <div className="flex items-center gap-2">
-          {canEdit ? (
-            <Button
-              type="text"
-              size="small"
-              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-              icon={<Pencil className="size-3.5" aria-hidden />}
-              onClick={onEdit}
-            >
-              {t("common.edit")}
-            </Button>
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-              icon={<Eye className="size-3.5" aria-hidden />}
-              onClick={onView}
-            >
-              {t("skillRepository.common.view")}
-            </Button>
-          )}
-        </div>
+        presentation ? undefined : (
+          <div className="flex items-center gap-2">
+            {canEdit ? (
+              <Button
+                type="text"
+                size="small"
+                className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                icon={<Pencil className="size-3.5" aria-hidden />}
+                onClick={onEdit}
+              >
+                {t("common.edit")}
+              </Button>
+            ) : (
+              <Button
+                type="text"
+                size="small"
+                className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                icon={<Eye className="size-3.5" aria-hidden />}
+                onClick={onView}
+              >
+                {t("skillRepository.common.view")}
+              </Button>
+            )}
+          </div>
+        )
       }
     />
   );

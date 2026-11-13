@@ -110,7 +110,9 @@ export function RepositoryView({
               : undefined
           }
         />
-        <RepositoryDisplayControls />
+        {!presentation || presentation.layout === "list" ? (
+          <RepositoryDisplayControls />
+        ) : null}
       </div>
 
       <div className="min-h-0">

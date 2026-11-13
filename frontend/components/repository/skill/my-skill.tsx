@@ -44,6 +44,14 @@ const SkillBuildModal = dynamic(
   () => import("@/app/agents/components/capability/SkillBuildModal"),
   { ssr: false }
 );
+const SkillCreateModal = dynamic(
+  () => import("@/components/skill/SkillCreateModal"),
+  { ssr: false }
+);
+const SkillChatCreateModal = dynamic(
+  () => import("@/components/skill/SkillChatCreateModal"),
+  { ssr: false }
+);
 const SkillDetailModal = dynamic(
   () => import("@/app/agents/components/capability/SkillDetailModal"),
   { ssr: false }
@@ -72,6 +80,7 @@ export function MySkill({ active }: { active: boolean }) {
     useRepositoryTagPredicates();
   const [debouncedMineSearch, setDebouncedMineSearch] = useState("");
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
+  const [skillChatOpen, setSkillChatOpen] = useState(false);
   const [skillBuildLoaded, setSkillBuildLoaded] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
@@ -245,7 +254,6 @@ export function MySkill({ active }: { active: boolean }) {
 
   const handleSkillBuildSuccess = async () => {
     await refreshSkillCaches().catch(() => {});
-    setEditingSkill(null);
   };
   return (
     <>
@@ -283,6 +291,7 @@ export function MySkill({ active }: { active: boolean }) {
             setSkillBuildLoaded(true);
             setSkillBuildOpen(true);
           }}
+          onCreateSkillWithChat={() => setSkillChatOpen(true)}
           onEditSkill={(skill) => {
             setEditingSkill(skill);
             setSkillBuildLoaded(true);
@@ -321,13 +330,14 @@ export function MySkill({ active }: { active: boolean }) {
             } catch (error) {
               if (error instanceof ApiError && Number(error.code) === 403) {
                 message.error(t("skillRepository.mine.applyForbidden"));
-                return;
+                throw error;
               }
               message.error(
                 error instanceof Error
                   ? error.message
                   : t("repository.mine.applyError")
               );
+              throw error;
             }
           }}
           isUpdatingStatus={updateStatusMutation.isPending}
@@ -338,7 +348,25 @@ export function MySkill({ active }: { active: boolean }) {
           onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
         />
       ) : null}
-      {skillBuildLoaded ? (
+      {skillChatOpen && (
+        <SkillChatCreateModal
+          open
+          onClose={() => setSkillChatOpen(false)}
+          onSuccess={handleSkillBuildSuccess}
+          onOpenSkill={(name) => {
+            setMineSearch(name);
+            setMinePage(1);
+            setSkillChatOpen(false);
+          }}
+        />
+      )}
+      {skillBuildLoaded && presentation && !editingSkill ? (
+        <SkillCreateModal
+          open={skillBuildOpen}
+          onClose={() => setSkillBuildOpen(false)}
+          onSuccess={handleSkillBuildSuccess}
+        />
+      ) : skillBuildLoaded ? (
         <SkillBuildModal
           isOpen={skillBuildOpen}
           editingSkill={editingSkill}

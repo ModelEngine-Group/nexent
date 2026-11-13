@@ -7,17 +7,12 @@ import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
 import { Button, Dropdown, Tag } from "antd";
-import {
-  Bot,
-  Download,
-  FileText,
-  MoreHorizontal,
-  PackageX,
-} from "lucide-react";
+import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
+import SkillTypeIcon from "./SkillTypeIcon";
 import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
@@ -86,19 +81,17 @@ export function SkillRepositoryCard({
       title={listing.name}
       footerLayout="inline"
       icon={
-        <div
-          className={
-            presentation
-              ? "flex size-12 items-center justify-center rounded-lg bg-[#DFF4CC] text-[#316614]"
-              : "flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary"
-          }
-        >
-          {presentation ? (
-            <FileText className="size-6" aria-hidden />
-          ) : (
+        presentation ? (
+          <SkillTypeIcon
+            name={listing.name}
+            tags={listing.tags}
+            icon={listing.icon}
+          />
+        ) : (
+          <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <Bot className="size-5" aria-hidden />
-          )}
-        </div>
+          </div>
+        )
       }
       description={
         listing.description || t("skillRepository.common.noDescription")
@@ -120,9 +113,7 @@ export function SkillRepositoryCard({
               </span>
             ))}
           </>
-        ) : (
-          <span aria-hidden className="block min-h-7" />
-        )
+        ) : null
       }
       headerActions={
         presentation ? undefined : (
@@ -156,7 +147,9 @@ export function SkillRepositoryCard({
           {" "}
           {author ? (
             <span className="block truncate" title={author}>
-              {author}
+              {presentation
+                ? `${t("skillRepository.detail.author")}: ${author}`
+                : author}
             </span>
           ) : undefined}{" "}
           {presentation && (
@@ -166,7 +159,9 @@ export function SkillRepositoryCard({
               })}
             </span>
           )}
-          <ResourcePublishedAt value={listing.published_at} />
+          {!presentation && (
+            <ResourcePublishedAt value={listing.published_at} />
+          )}
         </>
       }
       footer={action}

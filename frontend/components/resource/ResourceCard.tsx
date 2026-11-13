@@ -84,8 +84,9 @@ export default function ResourceCard({
   const measuredMineMcp =
     presentation?.resourceType === "mcp" && !repositoryView;
   const footerInHeader = compact && !measuredMineMcp;
-  const measuredSkill =
-    repositoryView && presentation?.resourceType === "skill";
+  const measuredSkill = presentation?.resourceType === "skill";
+  const actionsInFooter =
+    measuredSkill && repositoryView && footerLayout === "inline";
   const titleId = `resource-card-title-${useId()}`;
   const isInteractive = onClick !== undefined;
   const actionClassName = isInteractive
@@ -153,7 +154,8 @@ export default function ResourceCard({
                 "flex shrink-0 gap-3",
                 fixedHeaderLayout ? "min-h-[60px] items-center" : "items-start",
                 (measuredMcp || measuredMineMcp) && "min-h-12 items-center",
-                measuredAgent && "min-h-14"
+                measuredAgent && "min-h-14",
+                measuredSkill && "min-h-12 items-center"
               )}
             >
               {icon ? <span className="shrink-0">{icon}</span> : null}
@@ -198,14 +200,17 @@ export default function ResourceCard({
                     className={cn(
                       "mt-1 flex flex-wrap gap-1 text-xs",
                       (measuredMcp || measuredMineMcp) && "mt-0",
-                      measuredSkill && "gap-2"
+                      measuredSkill &&
+                        "max-h-5 flex-nowrap gap-2 overflow-hidden [&>*]:shrink-0"
                     )}
                   >
                     {tags}
                   </div>
                 ) : null}
               </div>
-              {headerActions || actions || (footerInHeader && footer) ? (
+              {headerActions ||
+              (!actionsInFooter && actions) ||
+              (footerInHeader && footer) ? (
                 <div
                   data-resource-card-action
                   className={cn(
@@ -218,7 +223,7 @@ export default function ResourceCard({
                   onDoubleClick={(event) => event.stopPropagation()}
                 >
                   {headerActions}
-                  {actions}
+                  {!actionsInFooter ? actions : null}
                   {footerInHeader ? footer : null}
                 </div>
               ) : null}
@@ -257,7 +262,7 @@ export default function ResourceCard({
                       (measuredAgent || measuredMcp || measuredMineMcp) &&
                         "font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]",
                       measuredSkill &&
-                        "font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
+                        "min-h-9 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
                     )}
                     style={{
                       display: "-webkit-box",
@@ -306,11 +311,13 @@ export default function ResourceCard({
                       </div>
                     ) : null}
                   </>
-                ) : meta || footer ? (
+                ) : meta || footer || (actionsInFooter && actions) ? (
                   <div
                     className={cn(
                       "flex min-h-7 items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400",
                       compact && "min-h-0 border-0 pt-2.5",
+                      measuredSkill &&
+                        "justify-start gap-4 [&>div]:justify-start [&>div]:gap-4",
                       (measuredMcp || measuredMineMcp) &&
                         "leading-5 text-[#777777]",
                       measuredAgent && "pt-0"
@@ -332,6 +339,15 @@ export default function ResourceCard({
                         onDoubleClick={(event) => event.stopPropagation()}
                       >
                         {footer}
+                      </div>
+                    ) : null}
+                    {actionsInFooter && actions ? (
+                      <div
+                        data-resource-card-action
+                        className={cn("ml-auto shrink-0", actionClassName)}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                      >
+                        {actions}
                       </div>
                     ) : null}
                   </div>

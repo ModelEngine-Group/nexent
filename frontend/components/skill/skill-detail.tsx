@@ -14,6 +14,7 @@ import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import RepositorySkillDetail from "./RepositorySkillDetail";
 import { mapSkillRepositoryDetail } from "@/lib/skillRepositoryDetail";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 
@@ -59,6 +60,20 @@ export function SkillDetail({
     useRepositoryPresentation()?.resourceType === "skill";
   const displayName = useUserDisplayName();
   const view = detail ? mapSkillRepositoryDetail(detail) : null;
+
+  if (repositoryLayout) {
+    return (
+      <RepositorySkillDetail
+        open={open}
+        detail={detail}
+        isLoading={isLoading}
+        isError={isError}
+        isFetching={isFetching}
+        onClose={onClose}
+        onRetry={onRetry}
+      />
+    );
+  }
 
   return (
     <ResourceDetail

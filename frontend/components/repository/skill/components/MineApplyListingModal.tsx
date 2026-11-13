@@ -3,8 +3,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Input, Modal } from "antd";
+import { Alert, Button, Input } from "antd";
 import { useTranslation } from "react-i18next";
+import { StandardModal } from "@/components/common/StandardModal";
 
 import type {
   MyEditableSkillItem,
@@ -29,12 +30,14 @@ export function MineApplyListingModal({
   const { t } = useTranslation("common");
   const [listingContent, setListingContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
   const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve the existing modal reset when its external open state changes.
       setListingContent("");
+      setSubmitError(false);
       setSubmitting(false);
       submittingRef.current = false;
     }
@@ -48,11 +51,12 @@ export function MineApplyListingModal({
   const isBusy = loading || submitting;
 
   const handleOk = async () => {
-    if (submittingRef.current || loading) {
+    if (submittingRef.current || loading || listingContent.length > 1000) {
       return;
     }
     submittingRef.current = true;
     setSubmitting(true);
+    setSubmitError(false);
     try {
       await onConfirm({
         icon: "skill",
@@ -60,6 +64,8 @@ export function MineApplyListingModal({
         content: listingContent.trim() || undefined,
       });
       onClose();
+    } catch {
+      setSubmitError(true);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -67,38 +73,68 @@ export function MineApplyListingModal({
   };
 
   return (
-    <Modal
+    <StandardModal
       open={open}
-      title={t("repository.mine.confirmApplyTitle", { name: title })}
-      onCancel={onClose}
-      onOk={handleOk}
-      okText={t("repository.mine.submitApply")}
+      width={760}
+      title={t("skillRepository.mine.applyTitle", { name: title })}
+      closeLabel={t("common.close")}
+      onClose={() => !isBusy}
+      onCancel={() => !isBusy}
+      onOpenChange={(next) => {
+        if (!next && !isBusy) onClose();
+      }}
+      confirmText={t("common.confirm")}
       cancelText={t("common.cancel")}
-      confirmLoading={isBusy}
-      centered
-      destroyOnHidden
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button disabled={isBusy} onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            type="primary"
+            loading={isBusy}
+            disabled={isBusy || listingContent.length > 1000}
+            onClick={handleOk}
+          >
+            {t("common.confirm")}
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-600 dark:text-slate-300">
+        <p className="text-sm leading-[22px] text-[#191919]">
           {t("skillRepository.mine.confirmApplyContent")}
         </p>
         <div className="space-y-2">
           <label
             htmlFor="skill-repository-listing-note"
-            className="block text-sm font-medium text-slate-700 dark:text-slate-200"
+            className="block text-sm font-normal leading-[22px] text-[#191919]"
           >
             {t("repository.mine.applyModal.content")}
           </label>
           <Input.TextArea
             id="skill-repository-listing-note"
             value={listingContent}
-            onChange={(event) => setListingContent(event.target.value)}
-            placeholder={t("repository.mine.applyModal.contentPlaceholder")}
+            onChange={(event) => {
+              setListingContent(event.target.value);
+              setSubmitError(false);
+            }}
+            placeholder={t("skillRepository.mine.applyNotePlaceholder")}
             rows={4}
+            maxLength={1000}
+            showCount
+            className="!rounded !border-[#C9C9C9] text-sm"
             disabled={isBusy}
           />
         </div>
+        {submitError && (
+          <Alert
+            type="error"
+            showIcon
+            title={t("repository.mine.applyError")}
+          />
+        )}
       </div>
-    </Modal>
+    </StandardModal>
   );
 }

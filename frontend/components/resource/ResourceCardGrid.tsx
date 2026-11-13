@@ -31,6 +31,14 @@ export interface ResourceFilterOption {
   count?: number;
 }
 
+interface ResourceBatchState {
+  selectedCount: number;
+  deleting: boolean;
+  selectPageControl: ReactNode;
+  clearSelection: () => void;
+  deleteSelected: () => void;
+}
+
 export interface ResourceCardGridProps<T> {
   items: T[];
   page?: number;
@@ -61,7 +69,10 @@ export interface ResourceCardGridProps<T> {
   /** Set to false when items already contain only the current server page. */
   paginateItems?: boolean;
   renderItem: (item: T, index: number, selection?: ReactNode) => ReactNode;
-  renderBatchToolbar?: (controls: ReactNode) => ReactNode;
+  renderBatchToolbar?: (
+    controls: ReactNode,
+    state: ResourceBatchState
+  ) => ReactNode;
   cardSelectionInHeader?: boolean;
   onListSelect?: (item: T) => void;
   renderListStatus?: (item: T) => ReactNode;
@@ -251,23 +262,24 @@ export default function ResourceCardGrid<T>({
     if (page !== undefined && page > totalPages) onPageChange?.(totalPages);
   }, [onPageChange, page, totalPages]);
 
+  const selectPageControl = (
+    <Checkbox
+      disabled={deleting || !selectable.length}
+      checked={
+        selectable.length > 0 &&
+        selectable.every((item) => selected.includes(keyOf(item)))
+      }
+      indeterminate={selected.length > 0 && selected.length < selectable.length}
+      onChange={(event) =>
+        setSelected(event.target.checked ? selectable.map(keyOf) : [])
+      }
+    >
+      {t("resourceCenter.selectPage")}
+    </Checkbox>
+  );
   const batchControls = batching ? (
     <div className="flex shrink-0 items-center gap-3">
-      <Checkbox
-        disabled={deleting || !selectable.length}
-        checked={
-          selectable.length > 0 &&
-          selectable.every((item) => selected.includes(keyOf(item)))
-        }
-        indeterminate={
-          selected.length > 0 && selected.length < selectable.length
-        }
-        onChange={(event) =>
-          setSelected(event.target.checked ? selectable.map(keyOf) : [])
-        }
-      >
-        {t("resourceCenter.selectPage")}
-      </Checkbox>
+      {selectPageControl}
       <Button
         danger
         disabled={!selected.length}
@@ -282,7 +294,15 @@ export default function ResourceCardGrid<T>({
   return (
     <>
       {renderBatchToolbar
-        ? renderBatchToolbar(batchControls)
+        ? renderBatchToolbar(batchControls, {
+            selectedCount: selected.length,
+            deleting,
+            selectPageControl,
+            clearSelection: () => setSelected([]),
+            deleteSelected: () => {
+              if (selected.length && !deleting) removeSelected();
+            },
+          })
         : batchControls && <div className="mb-3">{batchControls}</div>}
       {batchErrors.length > 0 && (
         <Alert
@@ -522,9 +542,11 @@ export default function ResourceCardGrid<T>({
             } ${
               columns === undefined
                 ? presentation
-                  ? useResponsiveCards
-                    ? "grid-cols-[repeat(auto-fill,minmax(min(100%,max(440px,calc((100%_-_48px)/4))),1fr))]"
-                    : "grid-cols-1 @min-[1200px]:grid-cols-[repeat(auto-fill,592px)]"
+                  ? presentation.resourceType === "skill"
+                    ? "grid-cols-1 @min-[720px]:grid-cols-2 @min-[1200px]:grid-cols-3"
+                    : useResponsiveCards
+                      ? "grid-cols-[repeat(auto-fill,minmax(min(100%,max(440px,calc((100%_-_48px)/4))),1fr))]"
+                      : "grid-cols-1 @min-[1200px]:grid-cols-[repeat(auto-fill,592px)]"
                   : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                 : "grid-cols-1 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))]"
             } ${
