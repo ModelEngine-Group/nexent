@@ -17,6 +17,8 @@ preparation:
 acceptance_bindings:
   AC-01:
   - test_tpc_d3_001_skill_executes_once_and_history_matches
+  AC-03:
+  - test_tpc_d3_001_mixed_answer_streams_and_action_continues
   AC-02:
   - test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes
 timeout_seconds: 600

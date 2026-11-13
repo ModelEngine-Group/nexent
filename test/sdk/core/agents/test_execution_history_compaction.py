@@ -27,7 +27,9 @@ def summary_model(**kwargs):
 
 def item(fields, **kwargs):
     return ContextItem.from_input(ContextItemInput(id='action', type='current_action', content={
-        'assistant_output': '<code>print(result)</code>', 'execution_fields': fields, **kwargs,
+        'assistant_output': '<code>print(result)</code>',
+        'tool_calls': [{'name': 'python_interpreter', 'arguments': 'print(result)'}],
+        'execution_fields': fields, **kwargs,
     }))
 
 
@@ -38,17 +40,17 @@ def text(messages):
 @pytest.mark.parametrize('value', ['0', 'False', '[]', ''])
 def test_ac002_values_are_not_dropped_or_given_guessed_types(value):
     rendered = text(ContextItemRenderer().render([item({'RETURN_VALUE': value})]))
-    assert f'<RETURN_VALUE>{value}</RETURN_VALUE>' in rendered
+    assert f'recorded_result:\n{value}' in rendered
     assert 'type=' not in rendered
     assert rendered.count('print(result)') == 1
-    assert 'completed_action_history' not in rendered
+    assert rendered.count('<completed_action_history ') == 1
     assert 'index:' not in rendered
 
 
 def test_ac003_partial_output_and_error_are_escaped_and_preserved():
     rendered = text(ContextItemRenderer().render([item({'STDOUT':'partial <data>', 'ERROR':'timeout & retry'})]))
-    assert '<STDOUT>partial &lt;data&gt;</STDOUT>' in rendered
-    assert '<ERROR>timeout &amp; retry</ERROR>' in rendered
+    assert 'outcome:\npartial &lt;data&gt;' in rendered
+    assert 'recorded_error:\ntimeout &amp; retry' in rendered
 
 
 def test_ac001_compact_replaces_output_not_appends():
@@ -295,7 +297,7 @@ def test_ac003_runtime_result_contract_requires_actual_execution_before_final_an
     assert 'Only the runtime emits CODE_EXEC_RESULT, SUMMARIED_RESULT and OUTPUT_REF tags' in contract
     assert 'do not generate these records yourself' in contract
     assert 'wait for the actual execution result' in contract
-    assert 'final answer in a separate response' in contract
+    assert 'the next response must confirm or revise' in contract
 
 
 def test_ac003_ac015_finalize_registers_partial_error_once_and_not_final_answers():

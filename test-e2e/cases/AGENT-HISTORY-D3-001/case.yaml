@@ -23,8 +23,9 @@ case:
   - order: 1
     action: Run short and multi-code-block tasks and inspect subsequent real model
       input.
-    expected: Code appears once, one CODE_EXEC_RESULT follows, false values and partial
-      errors remain.
+    expected: One assistant read-only completed_action_history contains completed_action,
+      actual tool/input and outcome/recorded_result/recorded_error fields. Code and identical
+      result text appear once, including Docker OUTPUT versus its Python string representation in RETURN_VALUE; false values, distinct returns and partial errors remain.
   - order: 2
     action: Run a long result across the configured context threshold; inspect summary
       call and repeated assembly.

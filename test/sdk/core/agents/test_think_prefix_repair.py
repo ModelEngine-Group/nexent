@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit regressions for the actual repair loop, with execution substituted."""
 
 from types import SimpleNamespace
@@ -11,9 +12,9 @@ REJECTED = [
     '</think><code>read_skill_md(',
     '<think>Read the guide.<code>read_skill_md(</code>',
     '<code></code>',
-    '<code>print(1)</code>explanation<code>print(2)</code>',
-    '<code>print(1)</code>suffix',
-    '<analysis>reason</analysis><code>print(1)</code>',
+    '<code>print(1)</code>explanation<code>print(2</code>',
+    '<code>print(1)</code><final_answer>done</final_answer>suffix',
+    '<analysis>reason</analysis><code>print(1)</code><code>',
     '<|channel|>analysis<code>print(1)</code>',
     '<final_answer>partial',
     '<final_answer>one</final_answer><final_answer>two</final_answer>',

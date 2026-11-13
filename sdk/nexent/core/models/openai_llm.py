@@ -501,10 +501,9 @@ class OpenAIModel(OpenAIServerModel):
         # Bound completion length unless the caller passed their own override
         # via kwargs (which already landed in completion_kwargs above).
         # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
-        # When a W2 snapshot is active, its requested_output_tokens is the sole
-        # authority per CM-030 — skip the pre-W2 auto-fill so the dispatch
-        # boundary does not see max_output_tokens masquerading as a caller
-        # override and reject it via CallerMaxTokensOverrideForbidden.
+        # W2 decides whether a configured output cap should be dispatched.
+        # Skip pre-W2 auto-fill so a capacity ceiling cannot masquerade as an
+        # explicit caller cap or override an internal-only planning reserve.
         if (
             self.max_output_tokens is not None
             and "max_tokens" not in completion_kwargs
@@ -789,11 +788,11 @@ class OpenAIModel(OpenAIServerModel):
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
                         "requested_output_tokens": (
-                            self._coerce_context_budget_snapshot(
-                                trusted_budget_snapshot
-                            ).requested_output_tokens
-                            if trusted_budget_snapshot is not None
-                            else dispatch_kwargs.get("max_tokens")
+                            self._provider_output_tokens(
+                                self._coerce_context_budget_snapshot(trusted_budget_snapshot),
+                                self.capacity_snapshot,
+                                dispatch_kwargs.get("max_tokens"),
+                            )
                         ),
                         "reasoning_only_budget_exhausted": (
                             finish_reason == "length"
@@ -1113,9 +1112,9 @@ class OpenAIModel(OpenAIServerModel):
     ) -> Any:
         """Dispatch the OpenAI chat completion request.
 
-        When W2 supplied a trusted safe-input-budget snapshot, this method is
-        the provider dispatch boundary: caller `max_tokens` overrides must
-        match the snapshot, and absent values are filled from the snapshot.
+        When W2 supplies a trusted context budget, explicit output caps must
+        match it. An implicit planning reserve remains internal when W1 has
+        no resolved default output reserve and the caller supplied no cap.
 
         When the active W1 capacity snapshot is also threaded through, the
         boundary additionally verifies W1->W2 fingerprint and provider/model
@@ -1145,7 +1144,13 @@ class OpenAIModel(OpenAIServerModel):
                     snapshot_value=trusted_max_tokens,
                     caller_value=caller_max_tokens,
                 )
-            completion_kwargs["max_tokens"] = trusted_max_tokens
+            provider_max_tokens = self._provider_output_tokens(
+                snapshot, capacity_snapshot, caller_max_tokens
+            )
+            if provider_max_tokens is None:
+                completion_kwargs.pop("max_tokens", None)
+            else:
+                completion_kwargs["max_tokens"] = provider_max_tokens
         logger.info(
             "event=chat_completion_create model_id=%s kwargs=%s",
             self.model_id,
@@ -1446,6 +1451,26 @@ class OpenAIModel(OpenAIServerModel):
             for k, v in completion_kwargs.items()
             if k not in ("temperature", "top_p")
         }
+
+    @staticmethod
+    def _provider_output_tokens(
+        snapshot: Optional[ContextBudgetSnapshot],
+        capacity_snapshot: Optional[Dict[str, Any]],
+        caller_max_tokens: Optional[int],
+    ) -> Optional[int]:
+        """Keep an unconfigured planning reserve out of provider output caps."""
+        if snapshot is None:
+            return caller_max_tokens
+        if (
+            caller_max_tokens is None
+            and snapshot.output_reserve_source == "model_default"
+            and capacity_snapshot is not None
+            and "default_output_reserve_tokens" in capacity_snapshot
+            and capacity_snapshot["default_output_reserve_tokens"] is None
+        ):
+            return None
+        # Legacy snapshots without reserve metadata retain their cap semantics.
+        return snapshot.requested_output_tokens
 
     @staticmethod
     def _verify_w1_w2_consistency(

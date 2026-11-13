@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TPC controlled provider: exact malformed/valid content, real deployed executor.
 
 Run: python test-e2e/infra/automation/d3/think_prefix_mock_server.py --port 19091
@@ -16,6 +17,12 @@ from test.common.openai_compatible_mock_server import MockState, OpenAICompatibl
 
 
 class Handler(OpenAICompatibleMockHandler):
+    def do_GET(self):
+        if urlsplit(self.path).path == '/__stats' and getattr(self.server, 'observation_marker', None):
+            self._send_json(200, {**self.state.snapshot(), 'observation_counts': self.server.observation_counts})
+        else:
+            super().do_GET()
+
     def do_POST(self):
         payload = self._read_json()
         path = urlsplit(self.path).path
@@ -24,6 +31,12 @@ class Handler(OpenAICompatibleMockHandler):
             if not responses or not all(isinstance(item, str) for item in responses):
                 self._send_error(400, 'invalid_request_error', 'responses must be nonempty strings')
                 return
+            marker = payload.get('observation_marker')
+            if marker is not None and (not isinstance(marker, str) or not 1 <= len(marker) <= 256):
+                self._send_error(400, 'invalid_request_error', 'Invalid observation marker')
+                return
+            self.server.observation_marker = marker
+            self.server.observation_counts = []
             self.state.configure({})
             self.server.responses = responses
             self.server.finish_reason = payload.get('finish_reason', 'stop')
@@ -40,6 +53,8 @@ class Handler(OpenAICompatibleMockHandler):
             finish = 'stop'
         else:
             number, _ = self.state.record(payload, bool(self.headers.get('Authorization')))
+            if getattr(self.server, 'observation_marker', None):
+                self.server.observation_counts.append(json.dumps(payload.get('messages', []), ensure_ascii=False).count(self.server.observation_marker))
             text = self.server.responses[min(number - 1, len(self.server.responses) - 1)]
             finish = self.server.finish_reason
         if payload.get('stream'):

@@ -15,6 +15,7 @@ from consts.exceptions import (
 from consts.model import AgentRequest
 from management.services.permission.identity.authentication_helpers import generate_internal_runtime_jwt
 from infrastructure.http.client import create_httpx_client
+from nexent.monitor.monitoring import get_monitoring_manager
 
 
 _HOP_BY_HOP_HEADERS = {
@@ -53,7 +54,7 @@ def _authorization_headers(user_id: str, tenant_id: str) -> dict[str, str]:
         raise RuntimeServiceUnavailableError(
             "Internal runtime authentication is not configured"
         ) from exc
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token}", **get_monitoring_manager().get_trace_headers()}
 
 
 def dispatch_agent_evaluation_run(
