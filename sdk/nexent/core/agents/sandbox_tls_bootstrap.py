@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Standalone Linux container bootstrap, sent as source to existing sandbox images."""
 
 import ipaddress
@@ -69,7 +71,9 @@ def write_identity_file(directory_fd, name, contents):
 
 def generate_identity(hostname):
     key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
+    # Service DNS names can exceed the X.509 Common Name limit; SAN carries the
+    # complete verified identity and remains authoritative for HTTPS and WSS.
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname[:64])])
     now = datetime.now(timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())

@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "RUNTIME-SANDBOX",
+  "case": {
+    "case_id": "KSM-FILES-D3-001",
+    "feature_id": "KSM-SYSTEM",
+    "business_rule_ids": [
+      "KSM-SYSTEM-R2",
+      "KSM-SYSTEM-R3"
+    ],
+    "title": "Owner workspace delivers original outputs on the same node and cleans only its run",
+    "type": "INTEGRATION",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Owner workspace delivers original outputs on the same node and cleans only its run",
+    "preconditions": [
+      "Two Runtime replicas and their sandbox Pods run on the same Docker Desktop node with a verified shared claim.",
+      "Disposable Minio and persisted message records are available."
+    ],
+    "test_data": {
+      "resource_prefix": "ksm-disposable",
+      "profile": "controlled model; real Kubernetes/Redis/storage"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Prepare input and immutable Skill files, then execute in the owner sandbox on the same node as UID 1000.",
+        "expected": "Inputs are readable; Skill originals are not writable; outputs/tmp are writable; only the owner subtree is mounted."
+      },
+      {
+        "order": 2,
+        "action": "Create success and failure outputs, synchronize through existing file tools and download.",
+        "expected": "Paths and SHA256 match; public URL/message metadata contracts are unchanged; upload failures use the existing warning/cleanup policy."
+      },
+      {
+        "order": 3,
+        "action": "Clean owner A's completed run with B active, then corrupt or remove a control marker.",
+        "expected": "B's files survive; unknown ownership is preserved; no global UUID sweep occurs."
+      }
+    ],
+    "expected_results": [
+      "Single-node shared-volume permissions and downloaded bytes are verified.",
+      "Protected markers contain exact nullable business IDs and are never writable or mounted into the business Pod."
+    ],
+    "forbidden_side_effects": [
+      "No traversal, symlink escape, shared PVC deletion or other-owner cleanup.",
+      "No requirement for failed-upload retention, retry delivery or new database schema."
+    ],
+    "integration_boundary": [
+      "Runtime input and Skill preparation",
+      "Single-node shared filesystem",
+      "Sandbox file tools",
+      "Minio and persisted message download"
+    ],
+    "observations": [
+      "Node names, UID/GID and file modes",
+      "SHA256 input/output/download",
+      "Exact cleanup inventory"
+    ],
+    "cleanup": [
+      "Delete only test-created run directories, object keys and exact business records.",
+      "Preserve unknown markers for explicit owner reconciliation."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ],
+      "timeout_seconds": 900
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Complete the declared boundary and enforce all forbidden effects.",
+        "steps": [
+          1,
+          2,
+          3
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

@@ -43,6 +43,7 @@ from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
 from runtime.adapters.nexent.factory import build_run_info
+from runtime.identity import resolve_execution_run_id
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -113,6 +114,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    execution_run_id: Optional[str] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -120,8 +122,32 @@ async def create_agent_run_info(
         validate_selected_record(
             get_model_by_model_id(override_model_id, tenant_id=tenant_id)
         )
-    workspace_run_id = uuid.uuid4().hex
-    workspace_path = _build_run_workspace(user_id, workspace_run_id)
+    from runtime.adapters.nexent.sandbox import get_runtime_sandbox_options
+
+    workspace_run_id = resolve_execution_run_id(execution_run_id)
+    runtime_sandbox_options = get_runtime_sandbox_options()
+    from runtime.identity import uses_distributed_runtime
+
+    if uses_distributed_runtime():
+        from runtime.sandbox_workspace import KubernetesWorkspace
+        from runtime.sandbox_runtime import get_coordinator
+        from contracts.constants.environment import NEXENT_SANDBOX_EXECUTION_GID
+        from nexent.core.concurrency import run_blocking
+
+        coordinator = get_coordinator()
+        workspace = KubernetesWorkspace(
+            AGENT_WORKSPACE_ROOT, coordinator.owner, execution_gid=NEXENT_SANDBOX_EXECUTION_GID,
+        )
+
+        def prepare_workspace():
+            path = workspace.prepare_run(str(tenant_id), str(user_id), workspace_run_id)
+            coordinator.record_workspace(workspace_run_id, path)
+            return str(path)
+
+        workspace_path = await run_blocking('prepare-kubernetes-workspace', prepare_workspace,
+                                            lane='sandbox', owner='runtime')
+    else:
+        workspace_path = _build_run_workspace(user_id, workspace_run_id)
     if runtime_skill_snapshot is not None:
         runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
             runtime_skill_snapshot,
@@ -383,6 +409,7 @@ async def create_agent_run_info(
         workspace_mode=NEXENT_SANDBOX_WORKSPACE_MODE,
         container_workspace_root=NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
         failure_policy=NEXENT_SANDBOX_FAILURE_POLICY,
+        **runtime_sandbox_options,
     )
     sandbox_minio_client = (
         get_sandbox_minio_client()
@@ -396,6 +423,10 @@ async def create_agent_run_info(
             "workspace_root": str(Path(AGENT_WORKSPACE_ROOT).resolve()),
             "workspace_path": workspace_path,
         }
+        if getattr(sandbox_config.level, 'value', None) == 'kubernetes':
+            from runtime.sandbox_services import bind_runtime_sandbox
+
+            bind_runtime_sandbox(sandbox_config, execution_run_id=workspace_run_id)
         if (
             getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
             and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
@@ -438,6 +469,8 @@ async def create_agent_run_info(
         redis_client=get_redis_client(),
         user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
+    if uses_distributed_runtime():
+        agent_run_info.__dict__['_runtime_run_lifecycle'] = coordinator.lifecycle(workspace_run_id)
     return agent_run_info
 
 

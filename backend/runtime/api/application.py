@@ -17,6 +17,7 @@ from management.api.conversation.workbench_pins import router as workbench_pins_
 from management.api.conversation.conversation_share import router as conversation_share_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
+from runtime.api.sandbox import router as sandbox_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
@@ -60,31 +61,45 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
-    await start_agent_automation_scheduler()
     try:
+        from management.services.agent.lifecycle import agent_run_manager
+        from runtime.sandbox_runtime import configure_runtime_coordination
+
+        await runtime_thread_manager.run(
+            'control-io', ManagedTaskSpec(task_name='initialize-runtime-ownership', owner='runtime'),
+            configure_runtime_coordination, runtime_thread_manager, agent_run_manager, runtime_state_service,
+        )
+        await start_agent_automation_scheduler()
         yield
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-        await stop_agent_automation_scheduler()
-        from management.services.agent.execution import (
-            shutdown_agent_stream_tasks,
-        )
-
-        pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
-        if pending_stream_tasks:
-            logger.warning(
-                "Agent stream tasks exceeded shutdown grace pending=%s",
-                pending_stream_tasks,
-            )
-        from nexent.core.agents.sandbox import SandboxPoolManager
-
-        sandbox_pool = SandboxPoolManager._instance
-        if sandbox_pool is not None:
-            sandbox_pool.shutdown(logger)
         try:
-            await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+            from runtime.identity import uses_distributed_runtime
+
+            distributed = uses_distributed_runtime()
+            await stop_agent_automation_scheduler()
+            from management.services.agent.execution import shutdown_agent_stream_tasks
+
+            pending = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
+            if pending:
+                logger.warning('Agent stream tasks exceeded shutdown grace pending=%s', pending)
+            from nexent.core.agents.sandbox import SandboxPoolManager
+
+            sandbox_pool = SandboxPoolManager._instance
+            if sandbox_pool is not None:
+                if distributed:
+                    await runtime_thread_manager.run('control-io',
+                        ManagedTaskSpec(task_name='sandbox-pool-shutdown', owner='runtime'),
+                        sandbox_pool.shutdown, logger)
+                else:
+                    sandbox_pool.shutdown(logger)
+        except Exception:
+            logger.warning('Runtime resource cleanup was not fully confirmed', exc_info=True)
         finally:
-            clear_default_thread_manager(runtime_thread_manager)
+            try:
+                await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+            finally:
+                clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(
@@ -114,3 +129,4 @@ app.include_router(conversation_share_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
+app.include_router(sandbox_router)

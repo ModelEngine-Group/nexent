@@ -53,6 +53,9 @@ async def trial_run_evaluation_api(
         ) from exc
 
     trial_run_evaluator_impl = _load_trial_executor()
+    from runtime.sandbox_runtime import require_business_admission
+
+    require_business_admission()
     return await trial_run_evaluator_impl(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -102,6 +105,27 @@ async def dispatch_evaluation_run_api(
         )
 
     status = run.get("status")
+    from runtime.sandbox_runtime import require_business_admission
+
+    if status == EvalRunStatus.PENDING:
+        require_business_admission()
+    from runtime.identity import uses_distributed_runtime
+
+    if status == EvalRunStatus.PENDING and uses_distributed_runtime():
+        from management.db.runtime_recovery import claim_owned_evaluation_run, restore_unstarted_evaluation_run
+        from runtime.sandbox_evaluation import dispatch_owned_evaluation
+        from runtime.sandbox_runtime import get_coordinator
+
+        claimed = await dispatch_owned_evaluation(tenant_id, user_id, payload.agent_evaluation_id,
+            run.get('judge_model_id'), _load_evaluation_executor(), manager=runtime_thread_manager,
+            coordinator=get_coordinator(), claim=claim_owned_evaluation_run,
+            restore=restore_unstarted_evaluation_run, admission=require_business_admission)
+        if claimed:
+            return {'accepted': True, 'agent_evaluation_id': payload.agent_evaluation_id}
+        latest = get_agent_evaluation(agent_evaluation_id=payload.agent_evaluation_id, tenant_id=tenant_id)
+        if latest and latest.get('status') == EvalRunStatus.RUNNING:
+            return {'accepted': True, 'already_running': True, 'agent_evaluation_id': payload.agent_evaluation_id}
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail='Agent evaluation run is no longer pending')
     if status in (EvalRunStatus.COMPLETED, EvalRunStatus.FAILED):
         return {
             "accepted": False,

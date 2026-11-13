@@ -840,13 +840,25 @@ class AgentAutomationFacade:
 
     def _request_conversation_stop(self, conversation_id: int, user_id: str, run_id=None) -> None:
         try:
+            from runtime.identity import uses_distributed_runtime
+
+            if uses_distributed_runtime():
+                from management.db.identity.user_tenant import get_user_tenant_by_user_id
+                from runtime.sandbox_cancel import request_distributed_cancel
+
+                identity = get_user_tenant_by_user_id(user_id)
+                if not identity or not identity.get('tenant_id'):
+                    raise ValueError('Conversation cancellation has no trusted tenant identity')
+                request_distributed_cancel(identity['tenant_id'], user_id, conversation_id, run_id)
+                return
             from management.services.automation.runner import agent_automation_runner
             if run_id is None:
                 agent_automation_runner.cancel_for_conversation(conversation_id, user_id)
             else:
                 agent_automation_runner.cancel_for_conversation(conversation_id, user_id, run_id)
         except Exception:
-            pass
+            logger.warning('Conversation stop could not be confirmed conversation_id=%s', conversation_id,
+                           exc_info=True)
 
 
 agent_automation_facade = AgentAutomationFacade()

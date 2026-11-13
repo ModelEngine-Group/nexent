@@ -14,6 +14,7 @@ from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
 
 from contracts.constants.environment import RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES
 from management.services.agent.run_state import runtime_state_service
+from runtime.identity import reference_options
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,12 @@ class StreamingChannel:
         self,
         conversation_id: str,
         user_id: str,
-        history_size: int = DEFAULT_HISTORY_SIZE
+        history_size: int = DEFAULT_HISTORY_SIZE,
+        *, run_ref=None,
     ):
         self.conversation_id = conversation_id
         self.user_id = user_id
+        self._runtime_run_reference = run_ref
         self._history_size = max(1, history_size)
         self._history_max_bytes = max(1, RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES)
         self._history_buffer: Deque[Tuple[int, str, int]] = deque()
@@ -123,6 +126,7 @@ class StreamingChannel:
             user_id=self.user_id,
             conversation_id=self.conversation_id,
             chunk=chunk,
+            **reference_options(self),
         )
 
         # Wake up waiting subscribers immediately
@@ -292,7 +296,8 @@ class StreamingChannelManager:
         self,
         conversation_id: int,
         user_id: str,
-        history_size: int = DEFAULT_HISTORY_SIZE
+        history_size: int = DEFAULT_HISTORY_SIZE,
+        *, run_ref=None,
     ) -> StreamingChannel:
         """
         Get an existing channel or create a new one.
@@ -300,11 +305,15 @@ class StreamingChannelManager:
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
             existing = self._channels.get(key)
-            if existing is None or existing.is_completed:
+            previous = existing.__dict__.get('_runtime_run_reference') if existing is not None else None
+            different_run = (run_ref is not None and (previous is None or previous.run_id != run_ref.run_id
+                                                     or previous.business_key != run_ref.business_key))
+            if existing is None or existing.is_completed or different_run:
                 self._channels[key] = StreamingChannel(
                     conversation_id=conversation_id,
                     user_id=user_id,
-                    history_size=history_size
+                    history_size=history_size,
+                    **({'run_ref': run_ref} if run_ref is not None else {}),
                 )
                 logger.debug(f"Created new channel: {key}")
             return self._channels[key]
@@ -322,16 +331,18 @@ class StreamingChannelManager:
         self,
         conversation_id: int,
         user_id: str,
-        status: str = 'completed'
+        status: str = 'completed',
+        *, expected_channel=None,
     ):
         """Mark a channel as completed."""
-        channel = self.get_channel(conversation_id, user_id)
+        channel = expected_channel if expected_channel is not None else self.get_channel(conversation_id, user_id)
         if channel:
             channel.complete(status)
         await runtime_state_service.mark_stream_completed_async(
             user_id=user_id,
-            conversation_id=conversation_id,
+            conversation_id=channel.conversation_id if reference_options(channel) else conversation_id,
             status=status,
+            **reference_options(channel),
         )
 
     async def remove_channel(

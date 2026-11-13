@@ -255,7 +255,8 @@ class NexentAgent:
                  cancellation_scope=None,
                  user_context=None,
                  tool_fastpath_enabled=True,
-                 tool_fastpath_allowed_tools=None):
+                 tool_fastpath_allowed_tools=None,
+                 runtime_lifecycle=None):
         """
         Initialize the NexentAgent factory.
 
@@ -292,6 +293,7 @@ class NexentAgent:
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
+        self.runtime_lifecycle = runtime_lifecycle or getattr(sandbox_config, 'run_lifecycle', None)
         self.tool_fastpath_enabled = tool_fastpath_enabled
         self.tool_fastpath_allowed_tools = tool_fastpath_allowed_tools
         self.minio_client = minio_client
@@ -303,7 +305,7 @@ class NexentAgent:
         if sandbox_config is not None and sandbox_config.workspace_mode == "bind" and workspace_path:
             from .sandbox import SandboxLevel
 
-            if sandbox_config.level == SandboxLevel.DOCKER:
+            if sandbox_config.level in (SandboxLevel.DOCKER, SandboxLevel.KUBERNETES):
                 self.workspace_mapping = sandbox_config.bind_workspace().for_run(workspace_path)
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
@@ -804,7 +806,10 @@ class NexentAgent:
         parent_token = None
         runtime = None
         drained = False
+        lifetime_holder = None
         try:
+            if self.runtime_lifecycle is not None:
+                lifetime_holder = self.runtime_lifecycle.begin('invocation')
             if self.cancellation_scope is not None:
                 parent_token = self.cancellation_scope.register_closer(scope.cancel)
             if scope.cancelled or self.stop_event.is_set():
@@ -826,6 +831,7 @@ class NexentAgent:
                 user_context=self.user_context,
                 tool_fastpath_enabled=self.tool_fastpath_enabled,
                 tool_fastpath_allowed_tools=self.tool_fastpath_allowed_tools,
+                **({'runtime_lifecycle': self.runtime_lifecycle} if self.runtime_lifecycle is not None else {}),
             )
             runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
             from .agent_model import copy_invocation_config
@@ -858,6 +864,10 @@ class NexentAgent:
                     with self._subagent_invocations_lock:
                         self._subagent_invocations.pop(done, None)
                     done.set()
+                    if lifetime_holder is not None:
+                        self.runtime_lifecycle.finish(lifetime_holder)
+                elif lifetime_holder is not None:
+                    self.runtime_lifecycle.unknown(lifetime_holder)
 
     def _close_subagent_invocations(self, timeout: float = 5.0) -> None:
         """Cancel and drain owned calls before shared workspace teardown."""
@@ -1067,7 +1077,9 @@ class NexentAgent:
             if self.sandbox_config is not None:
                 from .sandbox import SandboxLevel
 
-                deferred = self.tool_fastpath_enabled and self.sandbox_config.level == SandboxLevel.DOCKER
+                deferred = self.tool_fastpath_enabled and self.sandbox_config.level in {
+                    SandboxLevel.DOCKER, SandboxLevel.KUBERNETES,
+                }
                 self._sandbox_scope = self.sandbox_config.scope.value
 
                 def release_executor(executor):
@@ -1135,12 +1147,20 @@ class NexentAgent:
                                     and not isinstance(configured_timeout, bool)
                                     else 300
                                 )
-                                script_runner = SandboxSkillScriptRunner(
+                                runner_type = SandboxSkillScriptRunner
+                                runner_options = {}
+                                if self.sandbox_config.level == SandboxLevel.KUBERNETES:
+                                    from .sandbox_kubernetes_runner import KubernetesSkillScriptRunner
+
+                                    runner_type = KubernetesSkillScriptRunner
+                                    runner_options['workspace_access'] = self.sandbox_config.workspace_access
+                                script_runner = runner_type(
                                     python_executor,
                                     timeout_seconds=skill_timeout,
                                     workspace_path=self.workspace_path,
                                     network_enabled=not self.sandbox_config.network_disabled,
                                     workspace_mapping=getattr(self, "workspace_mapping", None),
+                                    **runner_options,
                                 )
                                 for tool in tool_list:
                                     bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -1721,6 +1741,12 @@ class NexentAgent:
 
     def _push_file_workspace_to_sandbox(self, containers: Optional[List[Any]] = None) -> None:
         """Copy the prepared host workspace into every Docker sandbox."""
+        if getattr(getattr(self.sandbox_config, 'level', None), 'value', None) == 'kubernetes':
+            access = self.sandbox_config.workspace_access
+            if access is None or not self.workspace_path:
+                raise RuntimeError('Kubernetes sandbox requires trusted workspace preparation')
+            access.seal_materials(Path(self.workspace_path))
+            return
         if containers is None:
             containers = self._sandbox_containers()
         if not containers or not self.workspace_path:
@@ -1787,7 +1813,7 @@ class NexentAgent:
             backend = getattr(executor, "_nexent_backend", None)
             if backend == "local":
                 continue
-            if backend != "docker" and getattr(executor, "container", None) is None:
+            if backend not in ("docker", "kubernetes") and getattr(executor, "container", None) is None:
                 continue
             register_bootstrap = None
             if (
@@ -1805,9 +1831,9 @@ class NexentAgent:
                 execute_bootstrap(bootstrap_code)
                 self._check_sandbox_cancelled()
                 logger.info(
-                    "Sandbox READY run_id=%s actual_backend=docker scope=%s container_id=%s kernel_id=%s "
+                    "Sandbox READY run_id=%s actual_backend=%s scope=%s container_id=%s kernel_id=%s "
                     "host_workspace=%s container_workspace=%s",
-                    self.workspace_run_id, getattr(getattr(self.sandbox_config, "scope", None), "value", None),
+                    self.workspace_run_id, backend, getattr(getattr(self.sandbox_config, "scope", None), "value", None),
                     getattr(getattr(executor, "container", None), "id", None),
                     getattr(executor, "kernel_id", None), self.workspace_path, workspace,
                 )

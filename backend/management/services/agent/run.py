@@ -10,6 +10,11 @@ from typing import (
     Dict,
     Optional,
 )
+from runtime.identity import (
+    associate_run_request, bind_run_reservation, current_reference_options, distributed_run_options,
+    execution_conversation_id, reference_options, uses_distributed_runtime,
+    reserve_runtime_run, runtime_coordination_call,
+)
 
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
@@ -151,6 +156,9 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
+    execution_run_id = agent_request.__dict__.get('_runtime_execution_run_id')
+    if execution_run_id is not None:
+        create_run_kwargs['execution_run_id'] = execution_run_id
     runtime_knowledge_context = getattr(
         agent_request, "_runtime_knowledge_context", None
     )
@@ -240,6 +248,8 @@ async def prepare_agent_run(
             else None
         )
     agent_run_info.__dict__["_automation_runtime_generation"] = agent_request.__dict__.get("_runtime_automation_generation")
+    if agent_request.__dict__.get('_runtime_execution_future') is not None:
+        agent_run_info.thread_future = agent_request.__dict__['_runtime_execution_future']
     register_kwargs = {}
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
@@ -260,6 +270,10 @@ def save_messages(
             raise ValueError("Messages should be None when saving for user.")
         # Historical checkpoint lookup for this run needs the current message boundary.
         save_conversation_user(agent_request, user_id, tenant_id)
+        if uses_distributed_runtime():
+            message_id = get_current_run_user_message_id(agent_request.conversation_id, user_id)
+            if message_id is not None:
+                associate_run_request(agent_request, user_message_id=message_id)
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:
@@ -304,7 +318,7 @@ async def generate_stream(
     cancel_poll_task = (
         asyncio.create_task(
             _cancel_task_on_runtime_signal(
-                agent_request.conversation_id, user_id, _outer_task
+                execution_conversation_id(agent_request), user_id, _outer_task, **reference_options(agent_request),
             )
         )
         if _outer_task
@@ -315,8 +329,9 @@ async def generate_stream(
     # reuse the same channel so subscribers stay connected.
     if channel is None and enable_memory:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=execution_conversation_id(agent_request),
             user_id=user_id,
+            **reference_options(agent_request),
         )
 
     memory_enabled_runtime = False
@@ -372,7 +387,13 @@ async def generate_stream(
     except (asyncio.CancelledError, GeneratorExit):
         if agent_run_info is not None:
             run_identifier = _agent_run_identifier(agent_request)
-            agent_run_manager.stop_agent_run(run_identifier, user_id)
+            if uses_distributed_runtime():
+                reference = agent_request.__dict__.get('_runtime_run_reference')
+                if reference is not None:
+                    agent_run_manager.stop_agent_run(run_identifier, user_id,
+                        expected_generation=reference.run_id, run_ref=reference)
+            else:
+                agent_run_manager.stop_agent_run(run_identifier, user_id)
             _unregister_agent_run_after_execution(
                 run_identifier,
                 user_id,
@@ -452,7 +473,7 @@ async def generate_stream(
         if cancel_poll_task is not None:
             await asyncio.gather(cancel_poll_task, return_exceptions=True)
         if (
-            agent_run_info is None
+            (agent_run_info is None or (uses_distributed_runtime() and not getattr(deferred_run, 'is_bound', True)))
             and deferred_run is not None
             and execution is not None
             and not execution.future.done()
@@ -479,6 +500,7 @@ async def run_agent_background(
     language: str = LANGUAGE["ZH"],
     skip_user_save: bool = False,
     execution_state: Optional[BackgroundExecutionState] = None,
+    runtime_admission=None,
 ) -> Dict[str, Any]:
     """
     Run an agent without returning an SSE response.
@@ -491,11 +513,30 @@ async def run_agent_background(
         raise ValueError("conversation_id is required for background agent runs")
 
     execution_state = execution_state or BackgroundExecutionState()
-    reservation = agent_run_manager.reserve_agent_run(agent_request.conversation_id, user_id)
+    from runtime.identity import ensure_request_run_id
+
+    if runtime_admission is None:
+        ensure_request_run_id(agent_request, new=True)
+        reservation = await reserve_runtime_run(agent_run_manager,
+            agent_request.conversation_id, user_id, **distributed_run_options(agent_request, tenant_id, kind='AUTOMATION'),
+        )
+    else:
+        from runtime.sandbox_runtime import PreparedRuntimeRun
+
+        if (not isinstance(runtime_admission, PreparedRuntimeRun) or runtime_admission.tenant_id != tenant_id
+                or runtime_admission.user_id != user_id or runtime_admission.conversation_id != agent_request.conversation_id):
+            raise ValueError('Invalid pre-admitted automation identity')
+        agent_request.__dict__['_runtime_execution_run_id'] = runtime_admission.run_id
+        agent_request.__dict__['_runtime_execution_future'] = runtime_admission.execution.future
+        reservation = runtime_admission.reservation_token
     try:
+        await runtime_coordination_call('bind-background-run', bind_run_reservation, agent_request, user_id)
+        if uses_distributed_runtime() and execution_state.runtime_generation is not None:
+            associate_run_request(agent_request, automation_run_id=execution_state.runtime_generation)
         agent_request.__dict__["_runtime_automation_generation"] = execution_state.runtime_generation
         await runtime_state_service.reset_stream_async(
             user_id, agent_request.conversation_id, generation=execution_state.runtime_generation,
+            **reference_options(agent_request),
         )
         # A user cancellation may have committed before reset or during preparation.
         if execution_state.is_active is not None and not execution_state.is_active():
@@ -527,6 +568,8 @@ async def run_agent_background(
             enable_memory=run_context.enable_memory,
             execution_state=execution_state,
             reservation_token=reservation,
+            **({'deferred_run': runtime_admission.deferred_run, 'execution': runtime_admission.execution}
+               if runtime_admission is not None else {}),
         )
 
         chunks = 0
@@ -543,16 +586,18 @@ async def run_agent_background(
         agent_run_manager.release_agent_run_reservation(agent_request.conversation_id, user_id, reservation)
 
 
-def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generation: Optional[str] = None):
+def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generation: Optional[str] = None, *, tenant_id=None):
     """
     Stop an agent run by its conversation ID or ephemeral debug run ID.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
+    ref_options = current_reference_options(tenant_id, user_id, conversation_id)
     if expected_generation is None:
-        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, **ref_options)
     else:
-        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, expected_generation=expected_generation)
+        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, expected_generation=expected_generation,
+                                                        **ref_options)
 
     # Preprocess tasks are associated only with persisted conversations.
     preprocess_stopped = (
@@ -577,5 +622,9 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generati
         return {"status": "success", "message": message, "already_stopped": True}
 
 
-def is_agent_running(conversation_id: int, user_id: str) -> bool:
+def is_agent_running(conversation_id: int, user_id: str, *, tenant_id=None) -> bool:
+    options = current_reference_options(tenant_id, user_id, conversation_id)
+    if options:
+        reference = options['run_ref']
+        return reference is not None and reference.phase != 'TERMINAL'
     return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None

@@ -47,6 +47,8 @@ def bootstrap_test_env() -> Dict[str, Any]:
     _ensure_path(backend_dir)
 
     mock_const = MagicMock()
+    mock_const.NEXENT_SANDBOX_PROVIDER = "docker"
+    mock_const.NEXENT_SANDBOX_ENABLED = True
     consts_module = _create_module("consts", const=mock_const)
     sys.modules["contracts.constants.environment"] = mock_const
     install_business_constant_stubs(mock_const)

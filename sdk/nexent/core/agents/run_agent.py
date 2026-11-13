@@ -166,6 +166,11 @@ class DeferredAgentRun:
         if cancelled:
             agent_run_info.cancellation_scope.cancel()
 
+    @property
+    def is_bound(self) -> bool:
+        with self._lock:
+            return self._agent_run_info is not None
+
     def cancel(self) -> None:
         with self._lock:
             self._cancelled = True
@@ -439,6 +444,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                 minio_files=getattr(agent_run_info, "minio_files", None),
                 cancellation_scope=agent_run_info.cancellation_scope,
+                **({'runtime_lifecycle': agent_run_info.__dict__['_runtime_run_lifecycle']}
+                   if agent_run_info.__dict__.get('_runtime_run_lifecycle') is not None else {}),
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -488,6 +495,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                     workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                     minio_files=getattr(agent_run_info, "minio_files", None),
                     cancellation_scope=agent_run_info.cancellation_scope,
+                    **({'runtime_lifecycle': agent_run_info.__dict__['_runtime_run_lifecycle']}
+                       if agent_run_info.__dict__.get('_runtime_run_lifecycle') is not None else {}),
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,

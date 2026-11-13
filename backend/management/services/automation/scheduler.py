@@ -65,6 +65,17 @@ class AgentAutomationLeaseStore:
         self._recovery_time: datetime | None = None
 
     async def recover(self) -> None:
+        from runtime.identity import uses_distributed_runtime
+
+        if uses_distributed_runtime():
+            from runtime.sandbox_runtime import get_runtime_recovery
+
+            await run_blocking('automation-scoped-recovery', get_runtime_recovery().recover,
+                               lane='control-io', owner='runtime')
+            # Starting a new replica is not a restart of every recurring job.
+            # Existing atomic due-task claiming and fire-count policy remain.
+            self._recovery_time = None
+            return
         recovery_time = _utcnow()
         await run_blocking(
             "automation-recover-runs",

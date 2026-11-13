@@ -105,6 +105,7 @@ from management.services.configuration.tenant.settings import (
 )
 
 logger = logging.getLogger(__name__)
+from runtime.identity import associate_run_request, execution_conversation_id, reference_options
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
@@ -243,12 +244,12 @@ async def _consume_agent_stream_producer(
                 run_info = agent_run_manager.get_agent_run_info(
                     conversation_id, user_id
                 )
-                _unregister_agent_run_after_execution(
-                    conversation_id,
-                    user_id,
-                    status="failed",
-                    agent_run_info=run_info,
-                )
+                channel_ref = channel.__dict__.get('_runtime_run_reference')
+                info_ref = run_info.__dict__.get('_runtime_run_reference') if run_info is not None else None
+                if channel_ref is None or (info_ref is not None and info_ref.run_id == channel_ref.run_id):
+                    _unregister_agent_run_after_execution(
+                        conversation_id, user_id, status='failed', agent_run_info=run_info,
+                    )
             except Exception:
                 logger.exception(
                     "Failed to unregister incomplete producer conversation=%s",
@@ -259,6 +260,7 @@ async def _consume_agent_stream_producer(
                     conversation_id=conversation_id,
                     user_id=user_id,
                     status="failed",
+                    **({'expected_channel': channel} if reference_options(channel) else {}),
                 )
             except Exception:
                 logger.exception(
@@ -287,12 +289,13 @@ async def _consume_agent_stream_producer(
 
 
 async def _poll_runtime_cancel_signal(
-    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None, *, run_ref=None,
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
         if await runtime_state_service.is_cancelled_async(
-            user_id=user_id, conversation_id=conversation_id
+            user_id=user_id, conversation_id=conversation_id,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
         ):
             stop_event.set()
             if cancellation_scope is not None:
@@ -307,12 +310,13 @@ async def _poll_runtime_cancel_signal(
 
 
 async def _cancel_task_on_runtime_signal(
-    conversation_id: int, user_id: str, task: asyncio.Task
+    conversation_id: int, user_id: str, task: asyncio.Task, *, run_ref=None,
 ) -> None:
     """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
     while not task.done():
         if await runtime_state_service.is_cancelled_async(
-            user_id=user_id, conversation_id=conversation_id
+            user_id=user_id, conversation_id=conversation_id,
+            **({'run_ref': run_ref} if run_ref is not None else {}),
         ):
             task.cancel()
             logger.info(
@@ -392,7 +396,8 @@ async def _stream_agent_chunks(
     # channel failure here must not leave an assistant outside finalization.
     if channel is None:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id, user_id=user_id
+            conversation_id=execution_conversation_id(agent_request), user_id=user_id,
+            **reference_options(agent_request),
         )
 
     # Persist the parent ConversationMessage row up front with status='streaming'
@@ -424,12 +429,16 @@ async def _stream_agent_chunks(
                 )
             if execution_state is not None:
                 execution_state.assistant_message_id = streaming_message_id
+            if reference_options(agent_request) and streaming_message_id is not None:
+                associate_run_request(agent_request, assistant_message_id=streaming_message_id)
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )
             if execution_state is not None:
                 execution_state.fail("AUTOMATION_MESSAGE_CREATE_FAILED", "Assistant message could not be created.")
+                raise
+            if reference_options(agent_request):
                 raise
 
     # Tracks the unit currently being accumulated in memory. Assistant output
@@ -449,10 +458,11 @@ async def _stream_agent_chunks(
         )
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=execution_conversation_id(agent_request),
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
             cancellation_scope=agent_run_info.cancellation_scope,
+            **reference_options(agent_request),
         )
     )
 
@@ -1064,9 +1074,10 @@ async def _stream_agent_chunks(
 
         if channel is not None:
             await streaming_channel_manager.complete_channel(
-                conversation_id=agent_request.conversation_id,
+                conversation_id=execution_conversation_id(agent_request),
                 user_id=user_id,
                 status=terminal_status,
+                **({'expected_channel': channel} if reference_options(channel) else {}),
             )
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(

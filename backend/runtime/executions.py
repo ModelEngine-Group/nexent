@@ -1,6 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import threading
 import uuid
@@ -38,13 +36,25 @@ class LocalExecutionRegistry:
             self._reservations: Dict[str, str] = {}
             self._agent_capacity_counts: dict[str, int] = {}
             self._agent_capacity_tokens: dict[str, str] = {}
+            self._coordinator = None
+            self._distributed_leases = {}
             self._initialized = True
 
     def _get_run_key(self, conversation_id: Union[int, str], user_id: str) -> str:
         """Generate unique key for agent run using user_id and conversation_id"""
         return f"{user_id}:{conversation_id}"
 
-    def reserve_agent_run(self, conversation_id: Union[int, str], user_id: str) -> str:
+    def configure_coordinator(self, coordinator):
+        """Install deployment-owned coordination before admitting any business work."""
+        with self._lock:
+            if self.agent_runs or self._reservations:
+                raise RuntimeError('Cannot change coordination with admitted Runtime work')
+            if self._coordinator is not None and self._coordinator is not coordinator:
+                raise RuntimeError('Runtime coordination is immutable after configuration')
+            self._coordinator = coordinator
+
+    def reserve_agent_run(self, conversation_id: Union[int, str], user_id: str, *,
+                          tenant_id=None, execution_run_id=None, kind='CHAT', cancel=lambda: None) -> str:
         """Atomically reserve a conversation before asynchronous run preparation."""
         with self._lock:
             run_key = self._get_run_key(conversation_id, user_id)
@@ -53,6 +63,18 @@ class LocalExecutionRegistry:
                     f"An agent run is already active for conversation {conversation_id}"
                 )
             token = uuid.uuid4().hex
+            if self._coordinator is not None:
+                from runtime.sandbox_coordination import SandboxRunBusy
+
+                if not tenant_id or not execution_run_id:
+                    raise RuntimeError('Distributed admission requires trusted tenant and execution identities')
+                try:
+                    lease = self._coordinator.reserve(tenant_id, user_id, conversation_id, execution_run_id,
+                                                      kind=kind, cancel=cancel)
+                except SandboxRunBusy as exc:
+                    raise AgentRunAlreadyActiveError(str(exc)) from exc
+                token = lease.token
+                self._distributed_leases[run_key] = lease
             self._reservations[run_key] = token
             return token
 
@@ -105,6 +127,10 @@ class LocalExecutionRegistry:
             run_key = self._get_run_key(conversation_id, user_id)
             if self._reservations.get(run_key) != reservation_token:
                 return False
+            lease = self._distributed_leases.get(run_key)
+            if lease is not None:
+                self._coordinator.finish(lease)
+                del self._distributed_leases[run_key]
             del self._reservations[run_key]
             return True
 
@@ -127,11 +153,27 @@ class LocalExecutionRegistry:
                     raise AgentRunAlreadyActiveError(
                         f"Agent run reservation is no longer valid for conversation {conversation_id}"
                     )
-                del self._reservations[run_key]
             elif run_key in self._reservations:
                 raise AgentRunAlreadyActiveError(
                     f"An agent run is already being prepared for conversation {conversation_id}"
                 )
+            if self._coordinator is not None:
+                lease = self._distributed_leases.get(run_key)
+                if lease is None:
+                    raise AgentRunAlreadyActiveError('Distributed execution requires an admitted run lease')
+                self._coordinator.activate(lease)
+                agent_run_info.__dict__['_runtime_distributed_lease'] = lease
+                agent_run_info.__dict__['_runtime_run_reference'] = self._coordinator.reference(lease)
+
+                def cancel_registered():
+                    agent_run_info.stop_event.set()
+                    scope = getattr(agent_run_info, 'cancellation_scope', None)
+                    if scope is not None:
+                        scope.cancel()
+
+                self._coordinator.bind_cancellation(lease, cancel_registered)
+            if reservation_token is not None:
+                del self._reservations[run_key]
             self.agent_runs[run_key] = agent_run_info
             logger.info(
                 f"register agent run instance, user_id: {user_id}, conversation_id: {conversation_id}"
@@ -145,30 +187,35 @@ class LocalExecutionRegistry:
         agent_run_info=None,
     ) -> bool:
         """unregister agent run instance"""
-        removed = False
+        pending = None
         with self._lock:
             run_key = self._get_run_key(conversation_id, user_id)
-            if run_key in self.agent_runs:
-                if (
-                    agent_run_info is not None
-                    and self.agent_runs[run_key] is not agent_run_info
-                ):
-                    logger.warning(
-                        "ignored stale agent run unregister, user_id: %s, conversation_id: %s",
-                        user_id,
-                        conversation_id,
-                    )
-                    return False
+            if run_key not in self.agent_runs:
+                return False
+            live = self.agent_runs[run_key]
+            if agent_run_info is not None and live is not agent_run_info:
+                return False
+            future = getattr(live, 'thread_future', None) if self._coordinator is not None else None
+            if future is not None and not future.done():
+                pending = (future, live)
+            else:
+                lease = self._distributed_leases.get(run_key)
+                if lease is not None:
+                    self._coordinator.finish(lease)
+                    del self._distributed_leases[run_key]
                 del self.agent_runs[run_key]
-                removed = True
                 logger.info(
                     f"unregister agent run instance, user_id: {user_id}, conversation_id: {conversation_id}"
                 )
-            else:
-                logger.info(
-                    f"no agent run instance found for user_id: {user_id}, conversation_id: {conversation_id}"
-                )
-        return removed
+        if pending is not None:
+            future, live = pending
+            # Future callbacks can run inline. Never attach one while holding
+            # the registry lock or completion between done()/add would deadlock.
+            future.add_done_callback(lambda _future: self.unregister_agent_run(
+                conversation_id, user_id, status, live,
+            ))
+            return False
+        return True
 
     def get_agent_run_info(self, conversation_id: Union[int, str], user_id: str):
         """get agent run instance"""
@@ -179,6 +226,14 @@ class LocalExecutionRegistry:
         """Return the number of registered live runs."""
         with self._lock:
             return len(self.agent_runs)
+
+    def get_distributed_lease(self, conversation_id, user_id):
+        with self._lock:
+            return self._distributed_leases.get(self._get_run_key(conversation_id, user_id))
+
+    def get_reserved_run_count(self):
+        with self._lock:
+            return len(self._reservations)
 
     def stop_agent_run(self, conversation_id: Union[int, str], user_id: str, expected_run_info=None) -> bool:
         """stop agent run for specified conversation_id and user_id"""

@@ -162,6 +162,25 @@ def test_deferred_strict_warmup_failure_releases_executor(construction, mocker, 
     release.assert_called_once()
 
 
+def test_kubernetes_cold_path_and_cleanup_never_initialize_unavailable_backend(construction):
+    c = construction
+    c.factory.sandbox_config.level = sandbox.SandboxLevel.KUBERNETES
+    c.factory.sandbox_config.scope = sandbox.SandboxScope.SYSTEM
+    c.factory.tool_fastpath_enabled = True
+    c.factory.workspace_mapping = None
+    c.build.side_effect = sandbox.SandboxBackendUnavailableError('T02 backend unavailable')
+    c.factory.create_single_agent(c.config)
+    wrapper = c.core.call_args.kwargs['executor']
+    wrapper.send_tools({})
+    wrapper('print("cold")')
+    c.build.assert_not_called()
+    with pytest.raises(sandbox.SandboxBackendUnavailableError, match='T02'):
+        wrapper('import math')
+    assert wrapper.remote is None
+    wrapper.cleanup()
+    c.build.assert_called_once()
+
+
 def test_deferred_strict_mode_rejects_local_executor(construction, mocker):
     c = construction
     c.factory.tool_fastpath_enabled = True
