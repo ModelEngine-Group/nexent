@@ -1174,21 +1174,6 @@ class RemoveChunksBody(BaseModel):
     chunk_ids: List[int] = Field(..., min_length=1, max_length=2000)
 
 
-# =============================================================================
-# Auth helper
-# =============================================================================
-def _check_auth(authorization: Optional[str]) -> None:
-    """Validate Bearer token against the expected API key."""
-    expected = f"Bearer {EXPECTED_API_KEY}"
-    if authorization != expected:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as StarletteRequest
-from starlette.responses import Response as StarletteResponse
-
-
 class FailNextMiddleware(BaseHTTPMiddleware):
     """Intercepts real AIDP calls (under /KnowledgeBase/) and returns a
     configured error status for the next N requests, then lets them through.
