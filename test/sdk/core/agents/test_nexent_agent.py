@@ -114,8 +114,19 @@ mock_botocore_crt.CRT_SUPPORTED_AUTH_TYPES = []
 
 
 class _MockMessageObserver:
+    def __init__(self):
+        self.messages = []
+        self._citation_indexes = {}
+
     def add_message(self, *args, **kwargs):
+        self.messages.append({"args": args, "kwargs": kwargs})
         return None
+
+    def reserve_citations(self, tool_sign, count):
+        """Mirror the real observer's per-tool-sign citation counter."""
+        start = self._citation_indexes.get(tool_sign, 1)
+        self._citation_indexes[tool_sign] = start + count
+        return start
 
 
 class _MockProcessType:
@@ -125,6 +136,8 @@ class _MockProcessType:
     WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
+    SEARCH_CONTENT = "search_content"
+    PICTURE_WEB = "picture_web"
 
 
 @dataclass

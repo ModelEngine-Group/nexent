@@ -38,6 +38,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from .mcp_citation import wrap_mcp_tool_with_citation
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .prompt.user_context import render_user_context
 from .sandbox_workspace import SandboxWorkspace, probe_workspace
@@ -713,6 +714,16 @@ class NexentAgent:
         elif source == "mcp":
             tool_obj = self.create_mcp_tool(class_name)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+            # Same metadata-driven builder wiring as built-in AIDP search
+            # tools: the backend may inject an image URL builder so image
+            # chunks are rebuilt instead of merely stripped.
+            tool_obj = wrap_mcp_tool_with_citation(
+                tool_obj,
+                self.observer,
+                tool_config.metadata.get("image_url_builder")
+                if tool_config.metadata
+                else None,
+            )
         elif source == "langchain":
             tool_obj = self.create_langchain_tool(tool_config)
         elif source == "builtin":
