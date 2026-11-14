@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ext_components.aidp.services.aidp_service.fusion_search_impl.
 
 The evaluation case-generation flow calls this helper server-side; these
