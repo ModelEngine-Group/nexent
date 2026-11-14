@@ -55,7 +55,7 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpUpdateKbModal from "@/ext_components/aidp/pages/knowledge-files/AidpUpdateKbModal";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+import AidpFileDetailView from "@/ext_components/aidp/pages/knowledge-files/AidpFileDetailView";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
@@ -115,7 +115,9 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     "metadata" | "permissions" | null
   >(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
+  // The file detail replaces the table while open: it shows the preview and
+  // the semantic chunk panel for one file.
+  const [detailFile, setDetailFile] = useState<AidpDocumentItem | null>(null);
   const [fileKeyword, setFileKeyword] = useState("");
   const [fileParams, setFileParams] = useState({
     page: 1,
@@ -128,7 +130,11 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     filePage,
     filePageSize,
     fileParams.keyword,
-    pollingPaused || importOpen || deleteConfirmOpen || editingKbMode !== null
+    pollingPaused ||
+      importOpen ||
+      deleteConfirmOpen ||
+      editingKbMode !== null ||
+      detailFile !== null
   );
   // Memoized so callbacks depending on `files` keep a stable reference when
   // the query has not produced a new page.
@@ -400,11 +406,11 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       // file clicks its name, while the action column keeps the operations
       // that change the file.
       render: (value: string, record) => (
-        <Tooltip title={t("common.preview")}>
+        <Tooltip title={t("aidpKnowledge.fileDetailTitle")}>
           <button
             type="button"
             className="max-w-full truncate text-left text-blue-600 hover:text-blue-700 hover:underline"
-            onClick={() => setPreviewFile(record)}
+            onClick={() => setDetailFile(record)}
           >
             {value || UNKNOWN}
           </button>
@@ -513,6 +519,23 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   );
 
   const privateScope = detail.ingroup_permission === "PRIVATE";
+
+  if (detailFile) {
+    return (
+      <AidpFileDetailView
+        kdsId={knowledgeBase.kds_id}
+        file={detailFile}
+        canEdit={canEdit}
+
+        onBack={() => {
+          setDetailFile(null);
+          // The list paused polling while the detail was open; refresh once on
+          // return so ingestion changes are reflected.
+          void refreshFiles();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto pb-4">
@@ -807,29 +830,6 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           void refreshFiles();
         }}
       />
-
-      {/* Preview opens AIDP's own stream as a full-screen page with a back
-          arrow. `rawStream` tells the preview that AIDP decides the served
-          format (it converts anything it cannot render to PDF), so the renderer
-          comes from the `X-File-Name` response header. */}
-      {previewFile && (
-        <FilePreviewDrawer
-          open
-          source="remote"
-          objectName={previewFile.file_uuid}
-          fileName={previewFile.file_name}
-          fileType={previewFile.file_type}
-          fileSize={previewFile.file_size}
-          previewUrl={aidpKnowledgeService.getPreviewUrl(
-            knowledgeBase.kds_id,
-            previewFile.file_uuid
-          )}
-          rawStream
-          presentation="fullscreen"
-          previewContext="knowledgeBase"
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
     </div>
   );
 };

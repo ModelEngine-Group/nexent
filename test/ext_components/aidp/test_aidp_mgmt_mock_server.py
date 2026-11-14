@@ -484,3 +484,122 @@ def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
         assert "error_code" not in doc
         parsed = json.loads(doc["extraction_failure_reason"])
         assert parsed["error_code"] and parsed["msg"]
+
+_CHUNK_KB = "kb-chunks"
+_CHUNK_FILE = "3f8dbd1f-d5f9-43f7-89b9-b70809531647"
+
+
+def _chunk_client(server):
+    server._KNOWLEDGE_BASES[_CHUNK_KB] = {"kds_name": "切片知识库"}
+    server._DOCUMENTS_BY_KB[_CHUNK_KB] = [
+        {
+            "file_uuid": _CHUNK_FILE,
+            "file_name": "切片样例.pdf",
+            "status": 1,
+            "first_upload_time": time.time(),
+        }
+    ]
+    return TestClient(server.app)
+
+
+def test_chunk_list_uses_query_and_null_next_link_on_last_page(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    first = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 2},
+        headers=auth,
+    )
+    assert first.status_code == 200
+    body = first.json()
+    assert body["total_count"] == 5
+    assert body["next_link"] is not None
+    assert [item["chunk_type"] for item in body["value"]] == ["TEXT", "TEXT"]
+    assert all(isinstance(item["chunk_id"], int) for item in body["value"])
+    assert body["value"][0]["page_ids"] == [1]
+
+    last = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 3, "page_size": 2},
+        headers=auth,
+    )
+    assert last.status_code == 200
+    assert last.json()["next_link"] is None
+    assert [item["chunk_type"] for item in last.json()["value"]] == ["IMAGE"]
+
+
+def test_chunk_create_returns_string_id_and_appends_to_the_end(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    # Generate the file's five seed chunks first so the new id is deterministic.
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+    created = client.put(
+        path,
+        headers=auth,
+        json={"file_uuid": _CHUNK_FILE, "chunk_text": "新增切片"},
+    )
+    assert created.status_code == 200
+    assert created.json() == {"chunk_id": "6"}
+
+    page = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 100},
+        headers=auth,
+    ).json()
+    assert page["total_count"] == 6
+    assert page["value"][-1]["chunk_id"] == 6
+    assert page["value"][-1]["chunk_text"] == "新增切片"
+    assert page["value"][-1]["chunk_type"] == "TEXT"
+
+
+def test_chunk_update_returns_the_full_chunk_object(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    # Generate the seed chunks, then edit chunk 1 (TEXT).
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+    updated = client.patch(f"{path}/1", headers=auth, json={"chunk_text": "改后文本"})
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["chunk_id"] == 1
+    assert body["chunk_text"] == "改后文本"
+    assert body["chunk_type"] == "TEXT"
+    assert body["page_ids"] == [1]
+    assert body["metadata"]["section"] == "part-1"
+
+
+def test_chunk_delete_requires_json_body_and_answers_204(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+
+    removed = client.request(
+        "DELETE",
+        path,
+        headers=auth,
+        json={"chunk_ids": [1, 2]},
+    )
+    assert removed.status_code == 204
+    assert removed.content == b""
+
+    page = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 100},
+        headers=auth,
+    ).json()
+    assert page["total_count"] == 3
+    assert [item["chunk_id"] for item in page["value"]] == [3, 4, 5]
+
+    # The old upstream path is gone from this contract.
+    legacy = client.post(
+        f"{path}/Remove",
+        headers=auth,
+        json={"chunk_ids": [3]},
+    )
+    assert legacy.status_code in (404, 405)

@@ -481,6 +481,14 @@ export const API_ENDPOINTS = {
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+    /** Semantic chunks of one ingested file: list, add, read, edit, remove. */
+    kbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** FusionSearch-backed chunk content search scoped to one file. */
+    kbChunkSearch: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/search`,
+    kbChunkDetail: (id: string, chunkId: number | string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/${encodeURIComponent(String(chunkId))}`,
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,

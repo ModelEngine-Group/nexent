@@ -4060,3 +4060,195 @@ class TestStreamAidpDocImplSendError:
             )
 
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+
+class TestChunkImpls:
+    """The chunk adapter forwards exactly the fields the AIDP contract declares."""
+
+    @staticmethod
+    def _install_client(aidp_service_module, client):
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = client
+        aidp_service_module.http_client_manager = mock_manager
+        return mock_manager
+
+    @staticmethod
+    def _json_response(payload, status_code=200, content=None):
+        response = MagicMock(status_code=status_code)
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+        response.content = content if content is not None else b"{}"
+        return response
+
+    def test_list_forwards_file_scoped_query_and_normalizes_ids(
+        self, aidp_service_module
+    ):
+        response = self._json_response({
+            "value": [
+                {
+                    "chunk_id": "7",
+                    "chunk_text": "正文",
+                    "chunk_type": "text",
+                    "page_ids": ["1", "2", 3],
+                    "metadata": {"section": "a"},
+                },
+                {"chunk_id": 8, "metadata": "unexpected", "page_ids": "1"},
+            ],
+            "total_count": 42,
+            "next_link": "/next",
+        })
+        mock_client = MagicMock()
+        mock_client.get.return_value = response
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.list_aidp_chunks_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1",
+            "fdde6c86-39b2-4ed5-9490-45a22d3931bc", 2, 20,
+        )
+
+        mock_client.get.assert_called_once()
+        url = mock_client.get.call_args.args[0]
+        assert url == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/Chunks"
+        )
+        assert mock_client.get.call_args.kwargs["params"] == {
+            "file_uuid": "fdde6c86-39b2-4ed5-9490-45a22d3931bc",
+            "page": 2,
+            "page_size": 20,
+        }
+        assert result["total_count"] == 42
+        assert result["value"][0]["chunk_id"] == 7
+        assert result["value"][0]["page_ids"] == [1, 2, 3]
+        assert result["value"][1]["chunk_id"] == 8
+        assert result["value"][1]["page_ids"] == []
+        assert result["value"][1]["metadata"] == {}
+
+    def test_list_rejects_payload_without_chunk_list(self, aidp_service_module):
+        mock_client = MagicMock()
+        mock_client.get.return_value = self._json_response(
+            {"unexpected": True}, content=b'{"unexpected": true}'
+        )
+        self._install_client(aidp_service_module, mock_client)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_chunks_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_detail_reads_chunk_scoped_path(self, aidp_service_module):
+        mock_client = MagicMock()
+        mock_client.get.return_value = self._json_response({
+            "chunk_id": "9",
+            "chunk_text": "完整文本",
+            "file_name": "西游记.pdf",
+        })
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.get_aidp_chunk_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", 9
+        )
+
+        assert mock_client.get.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/Chunks/9"
+        )
+        assert result["chunk_id"] == 9
+        assert result["chunk_text"] == "完整文本"
+
+    def test_create_sends_only_file_uuid_and_text(self, aidp_service_module):
+        mock_client = MagicMock()
+        mock_client.put.return_value = self._json_response({"chunk_id": "12"})
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.create_aidp_chunk_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1", "新文本"
+        )
+
+        assert mock_client.put.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/Chunks"
+        )
+        assert mock_client.put.call_args.kwargs["json"] == {
+            "file_uuid": "uuid-1",
+            "chunk_text": "新文本",
+        }
+        assert result == {"chunk_id": 12}
+
+    def test_update_sends_only_chunk_text_and_returns_full_chunk(
+        self, aidp_service_module
+    ):
+        mock_client = MagicMock()
+        mock_client.patch.return_value = self._json_response({
+            "chunk_id": "5",
+            "chunk_text": "改后文本",
+            "chunk_type": "TEXT",
+            "page_ids": ["1", "2"],
+            "metadata": {"section": "a"},
+        })
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.update_aidp_chunk_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "改后文本"
+        )
+
+        assert mock_client.patch.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/Chunks/5"
+        )
+        assert mock_client.patch.call_args.kwargs["json"] == {"chunk_text": "改后文本"}
+        assert result["chunk_id"] == 5
+        assert result["chunk_text"] == "改后文本"
+        assert result["page_ids"] == [1, 2]
+
+    def test_update_tolerates_empty_success_body(self, aidp_service_module):
+        mock_client = MagicMock()
+        mock_client.patch.return_value = self._json_response({}, content=b"")
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.update_aidp_chunk_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "改后文本"
+        )
+
+        assert result == {}
+
+    def test_remove_uses_delete_with_json_body_and_204(self, aidp_service_module):
+        mock_client = MagicMock()
+        mock_client.request.return_value = self._json_response(
+            {}, status_code=204, content=b""
+        )
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.remove_aidp_chunks_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", [1, 2, 3]
+        )
+
+        assert mock_client.request.call_args.args == (
+            "DELETE",
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/Chunks",
+        )
+        assert mock_client.request.call_args.kwargs["json"] == {"chunk_ids": [1, 2, 3]}
+        assert result == {}
+        mock_client.post.assert_not_called()
+
+    def test_upstream_failure_is_not_reported_as_success(self, aidp_service_module):
+        response = MagicMock(status_code=500)
+        response.json.return_value = {"message": "inkernel error"}
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "boom", request=MagicMock(), response=response
+        )
+        mock_client = MagicMock()
+        mock_client.patch.return_value = response
+        self._install_client(aidp_service_module, mock_client)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.update_aidp_chunk_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "文本"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        mock_client.patch.assert_called_once()
+        assert exc_info.value.details["upstream_status"] == 500

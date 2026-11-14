@@ -1,0 +1,571 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+/*
+ * Semantic chunk panel.
+ *
+ * Verified UCD values used here:
+ * - selected/active blue #0067D1, unselected grey #777777,
+ * - hairline border #DFDFDF, body text #191919, secondary #595959,
+ * - body text token Body/font-body-2 (14px / 22px, weight 400),
+ * - edit drawer width 960px with 24px inner padding and 20px / 28px Medium
+ *   headline, field label 14px / 22px, required marker #E02128,
+ * - multiline input 1px border, 4px radius, blue focus border,
+ * - delete dialog width 608px, 8px radius, 20px / 24px padding, 20px / 28px
+ *   Medium title, 14px / 22px body text, 32px high buttons with 4px radius
+ *   and 8px gap.
+ * Card geometry and the counter typography were not individually verified in
+ * the UCD record; they use the same tokens as the verified surfaces.
+ */
+.panel {
+  --chunk-primary: #0067d1;
+  --chunk-text: #191919;
+  --chunk-secondary: #595959;
+  --chunk-muted: #777777;
+  --chunk-border: #dfdfdf;
+  --chunk-error: #e02128;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.toolbarLeft {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.searchInput {
+  flex: 1 1 280px;
+  width: auto;
+  min-width: 220px;
+}
+
+.list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 2px 1px 8px;
+}
+
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--chunk-border);
+  border-radius: 8px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.card:hover {
+  border-color: var(--chunk-primary);
+}
+
+.cardSelected {
+  border-color: var(--chunk-primary);
+}
+
+.cardBody {
+  min-width: 0;
+  flex: 1;
+}
+
+/* The card body is the button that opens the detail; the checkbox and the
+   inline actions stay outside it so no interactive control is nested. */
+.cardOpenButton {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cardOpenButton:focus-visible {
+  outline: 2px solid var(--chunk-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.cardMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.cardIndex {
+  color: var(--chunk-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.cardMeta {
+  color: var(--chunk-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+.cardTypeBadge {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #f0f0f0;
+  color: #777777;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.cardText {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 6px 0 0;
+  color: var(--chunk-text);
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.cardTextExpanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+.cardExpandButton {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chunk-primary);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.cardExpandButton:hover {
+  text-decoration: underline;
+}
+.cardTooltipContent {
+  max-width: 480px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.whiteTooltip :global(.ant-tooltip-inner) {
+  color: #191919;
+  border: 1px solid #dfdfdf;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+.whiteTooltip :global(.ant-tooltip-arrow)::before {
+  background: #ffffff;
+}
+
+.cardActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.emptyState {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.pagination {
+  flex: 0 0 auto;
+  border-top: 1px solid #f3f3f3;
+  padding: 12px 0;
+}
+
+/* Edit / create drawer ---------------------------------------------------- */
+
+.drawerTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 20px 24px 0;
+}
+
+.drawerTitle {
+  margin: 0;
+  color: var(--chunk-text);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+}
+
+.drawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 24px 24px;
+}
+
+.fieldLabelRow {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.fieldLabel {
+  color: var(--chunk-text);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.requiredMark {
+  color: var(--chunk-error);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+/* The input border is applied inline: Ant Design's outlined variant draws its
+   border with a box-shadow that a same-specificity rule cannot override. */
+.textArea {
+  box-sizing: border-box;
+  width: 100%;
+  background: #ffffff;
+  color: var(--chunk-text);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.counterRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.counter {
+  flex: 0 0 auto;
+  color: var(--chunk-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.errorText {
+  margin: 4px 0 0;
+  color: var(--chunk-error);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.drawerFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 24px 20px;
+  border-top: 1px solid #f3f3f3;
+}
+
+/* Delete confirmation ----------------------------------------------------- */
+
+.deleteDialog {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 608px;
+  padding: 20px 24px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.deleteTitle {
+  margin: 0;
+  color: var(--chunk-text);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+}
+
+.deleteBody {
+  margin: 16px 0 0;
+  color: var(--chunk-text);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.deleteImpact {
+  margin: 4px 0 0;
+  color: var(--chunk-secondary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.deleteActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Chunk detail ------------------------------------------------------------ */
+
+.detailMetaLabel {
+  display: block;
+  color: var(--chunk-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.detailMetaValue {
+  color: var(--chunk-text);
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-all;
+}
+
+.metadataList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metadataTag {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f3f3f3;
+  color: var(--chunk-text);
+  font-size: 12px;
+  line-height: 20px;
+  word-break: break-all;
+}
+
+.panel {
+  padding: 0 12px;
+}
+.toolbar {
+  min-height: 72px;
+}
+.card {
+  position: relative;
+  flex-shrink: 0;
+  padding: 16px;
+  gap: 10px;
+  border-radius: 6px;
+  transition:
+    border-color 150ms,
+    background 150ms;
+}
+.cardSelected {
+  background: #f5f8ff;
+  border-color: #99bde7;
+}
+.cardMetaRow {
+  padding-right: 52px;
+  gap: 4px 12px;
+}
+.cardActions {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  color: #777;
+}
+.cardText {
+  margin-top: 12px;
+}
+.cardMetadataRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.cardMetadataLabel {
+  color: #777;
+  font-size: 12px;
+  line-height: 20px;
+}
+.cardMetadataTag {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f5f5f5;
+  color: #595959;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawerContent {
+  padding-top: 24px;
+  gap: 24px;
+}
+.readonlyInput {
+  padding: 5px 12px;
+  border: 1px solid #dfdfdf;
+  border-radius: 4px;
+  background: #f5f5f5;
+  color: #777;
+}
+.formHint {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: #999999;
+  font-size: 12px;
+  line-height: 20px;
+}
+.chunkDrawer {
+  --chunk-text: #191919;
+  --chunk-muted: #777;
+  --chunk-error: #e02128;
+}
+
+/* Read-only chunk drawer -------------------------------------------------- */
+
+.detailDrawerBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+}
+
+.detailMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detailMetaItem {
+  min-width: 0;
+}
+
+.detailTextBlock {
+  margin-top: 16px;
+  color: var(--chunk-text);
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chunkTableWrap {
+  margin-top: 16px;
+}
+.chunkTableCaption {
+  margin-bottom: 8px;
+  color: var(--chunk-text);
+  font-size: 14px;
+  line-height: 22px;
+}
+.chunkTableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.chunkTable {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--chunk-text);
+  font-size: 13px;
+  line-height: 20px;
+}
+.chunkTable th,
+.chunkTable td {
+  padding: 8px 12px;
+  border: 1px solid #e5e5e5;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.chunkTable th {
+  background: #fafafa;
+  color: #595959;
+  font-weight: 500;
+}
+
+.detailSection {
+  margin-top: 20px;
+}
+
+.detailSectionTitle {
+  margin: 0 0 8px;
+  color: #777777;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.detailDrawerFooter {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-top: 1px solid #f3f3f3;
+}
+
+.detailNavButton {
+  width: 32px;
+  height: 32px;
+}
+@media (max-width: 767px) {
+  .chunkDrawer :global(.ant-drawer-content-wrapper) {
+    width: 100vw;
+    max-width: 100vw;
+    width: 100vw !important;
+  }
+  .toolbarLeft {
+    gap: 6px;
+  }
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 6px;
+}
+.moreLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.moreLabel :global(.anticon) {
+  font-size: 10px;
+}
