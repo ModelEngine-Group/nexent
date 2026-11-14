@@ -87,6 +87,27 @@ def _extract_final_answer_body(output: Any) -> str | None:
     return re.sub(r"</?final_answer>", "", text[opening.end():], flags=re.IGNORECASE) if opening else None
 
 
+def _strip_reserved_metadata_keys(node: Any) -> Any:
+    """Recursively remove every top-level and nested dict entry whose key
+    starts with an underscore.  This keeps Phase-1 reserved fields like
+    ``_mcp_headers`` / ``_mcp_headers_by_server`` out of the LLM prompt
+    while leaving the rest of the metadata intact.
+
+    The filter runs on a shallow copy of every dict so the caller-owned
+    runtime metadata is never mutated in place.
+    """
+    if isinstance(node, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, value in node.items():
+            if isinstance(key, str) and key.startswith("_"):
+                continue
+            cleaned[key] = _strip_reserved_metadata_keys(value)
+        return cleaned
+    if isinstance(node, list):
+        return [_strip_reserved_metadata_keys(item) for item in node]
+    return node
+
+
 class NonterminalThoughtTurn(Exception):
     """A model turn produced visible text without an executable action."""
 
@@ -565,6 +586,7 @@ class CoreAgent(CodeAgent):
         if self.output_protocol not in ("code_action", "final_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
         if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
@@ -1532,11 +1554,23 @@ Additional Args:
                 except ModelOutputProtocolError as protocol_error:
                     if not legacy_code_action:
                         raise
+                    if self.stop_event.is_set():
+                        raise RunTerminated()
+                    self._consecutive_clarification_errors = getattr(self, "_consecutive_clarification_errors", 0) + 1
+                    if self._consecutive_clarification_errors >= 3:
+                        hint = (
+                            "确认选项暂时无法生成，请重试当前请求。已保留本轮需求。"
+                            if str(getattr(self, "lang", "en")).lower().startswith("zh") else
+                            "The confirmation options could not be generated. Please retry this request; "
+                            "your requirements remain in the conversation."
+                        )
+                        raise RuntimeFinalAnswer(hint, source="clarification_protocol_failure") from protocol_error
                     raise AgentExecutionError(
                         "Legacy code action could not be parsed for optional clarification: "
-                        f"{protocol_error.reason.value}",
+                        f"{protocol_error.reason.value}. {protocol_error.repair_instruction}",
                         self.logger,
                     ) from protocol_error
+            self._consecutive_clarification_errors = 0
             if form is not None:
                 form = self._screen_clarification(form)
                 if self.stop_event.is_set():
@@ -1551,7 +1585,7 @@ Additional Args:
                 self._pending_thought_continuation = False
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
-                    {"schema_version": 1, **form.model_dump(mode="json")},
+                    {"schema_version": 1, **form.model_dump(mode="json", exclude_none=True)},
                 )
                 raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
             code_action = _remove_parallel_executor_import(code_action)
@@ -1861,8 +1895,9 @@ Additional Args:
             if other_args:
                 self.task += render_user_context(getattr(self, "lang", "en"), "additional_arguments", {"arguments": str(other_args)})
             if runtime_metadata is not None:
+                runtime_metadata_for_prompt = _strip_reserved_metadata_keys(runtime_metadata)
                 serialized_metadata = json.dumps(
-                    runtime_metadata,
+                    runtime_metadata_for_prompt,
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
@@ -2008,6 +2043,7 @@ Additional Args:
         self._emitted_step_count = None
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
         self._pending_thought_continuation = False
         final_verification_round = 0

@@ -6,6 +6,8 @@ import sys
 import types
 from unittest.mock import patch
 
+import pytest
+
 # Mock storage client factory and MinIO config before any imports that would initialize MinIO
 from unittest.mock import MagicMock
 storage_client_mock = MagicMock()
@@ -218,6 +220,7 @@ from management.services.conversation.service import (
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
+        branch_conversation_service,
         get_conversation_service,
         rename_conversation_service,
         delete_conversation_service,
@@ -2059,6 +2062,64 @@ def test_message_database_failure_preserves_unexpected_error():
         with pytest.raises(RuntimeError) as error:
             update_message_opinion_service(123, "Y")
     assert error.value is failure
+
+
+def test_branch_conversation_service_returns_repository_data():
+    import pytest
+
+    repository_result = {
+        "conversation_id": 42,
+        "conversation_title": "Original（分支）",
+        "branched_message_count": 4,
+    }
+    with patch(
+        'management.services.conversation.service.branch_conversation',
+        return_value=repository_result,
+    ) as mock_branch:
+        result = branch_conversation_service(7, 2, "user-1")
+
+    assert result == repository_result
+    mock_branch.assert_called_once_with(7, 2, user_id="user-1")
+
+
+def test_branch_conversation_service_rejects_non_positive_turn_index():
+    import pytest
+
+    with pytest.raises(ValueError, match="1-based turn number"):
+        branch_conversation_service(7, 0, "user-1")
+
+
+def test_branch_conversation_service_raises_not_found_for_missing_conversation():
+    import pytest
+    from contracts.errors.exceptions import ConversationNotFoundError
+
+    with patch('management.services.conversation.service.branch_conversation', return_value=None):
+        with pytest.raises(ConversationNotFoundError):
+            branch_conversation_service(7, 2, "user-1")
+
+
+def test_branch_conversation_service_wraps_repository_failure():
+    import pytest
+
+    with patch(
+        'management.services.conversation.service.branch_conversation',
+        side_effect=RuntimeError("database unavailable"),
+    ):
+        with pytest.raises(Exception, match="database unavailable"):
+            branch_conversation_service(7, 2, "user-1")
+
+
+@pytest.mark.parametrize("target", [
+    {"source_message_id": 123},
+    {"answer_index": 2},
+    {"source_message_id": 123, "answer_index": 2},
+])
+def test_branch_conversation_service_forwards_selected_answer(target):
+    with patch(
+        "management.services.conversation.service.branch_conversation", return_value={"conversation_id": 42}
+    ) as repo:
+        assert branch_conversation_service(7, 2, "user-1", **target) == {"conversation_id": 42}
+    repo.assert_called_once_with(7, 2, user_id="user-1", **target)
 
 
 if __name__ == '__main__':

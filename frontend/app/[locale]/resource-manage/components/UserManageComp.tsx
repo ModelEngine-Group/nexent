@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { effectiveRoles, hasRole, roleLabelKey } from "@/lib/roles";
 
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useEffectEvent, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -70,7 +70,7 @@ import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { Can } from "@/components/permission/Can";
 import {
   getPasswordChecks,
@@ -154,6 +154,10 @@ function TenantList({
     message: string;
   }>({ target: "", message: "" });
 
+  const showSkillLoadError = useEffectEvent(() => {
+    message.error(t("tenantResources.skills.loadFailed"));
+  });
+
   // Fetch official skills when install switch is toggled on
   useEffect(() => {
     if (!installOfficialSkills) return;
@@ -175,7 +179,7 @@ function TenantList({
       })
       .catch(() => {
         if (!cancelled) {
-          message.error("Failed to load official skills");
+          showSkillLoadError();
         }
       })
       .finally(() => {
@@ -248,12 +252,9 @@ function TenantList({
           onSelect("");
         }
       }
-    } catch (error: any) {
-      const errorMessage =
-        error?.response?.data?.detail || error?.message || "";
+    } catch (error) {
       message.error(
         getTenantResourceLimitMessage(error, t) ||
-          errorMessage ||
           t("tenantResources.tenantDeleteFailed")
       );
     } finally {
@@ -454,6 +455,7 @@ function TenantList({
       }
       setModalVisible(false);
     } catch (err: any) {
+      if (err?.errorFields) return;
       const errorMessage = err?.response?.data?.message || err?.message || "";
       const limitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch = errorMessage.match(
@@ -472,9 +474,7 @@ function TenantList({
         message.error(t("tenantResources.tenants.nameRequired"));
       } else {
         message.error(
-          limitMessage ||
-            errorMessage ||
-            t("tenantResources.tenantOperationFailed")
+          limitMessage || t("tenantResources.tenantOperationFailed")
         );
       }
     }
@@ -1041,7 +1041,9 @@ function TenantList({
                         />
                       </td>
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
-                        {t(`user.role.${user.role?.toLowerCase()}`) || "-"}
+                        {effectiveRoles(user)
+                          .map((role) => t(roleLabelKey(role)))
+                          .join(" / ") || "-"}
                       </td>
                     </tr>
                   ))}
@@ -1083,7 +1085,8 @@ export default function UserManageComp() {
   };
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
+  const isSuperAdmin = isSpeedMode || hasRole(user, "SU");
+  const readOnly = hasRole(user, "OPS") && !hasRole(user, "ADMIN", "SU");
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -1204,10 +1207,9 @@ export default function UserManageComp() {
       }
       message.success(t("tenantResources.tenants.updated"));
       setIsEditingTenantName(false);
-    } catch (error: any) {
+    } catch (error) {
       message.error(
         getTenantResourceLimitMessage(error, t) ||
-          error?.message ||
           t("tenantResources.tenantOperationFailed")
       );
     }
@@ -1265,6 +1267,7 @@ export default function UserManageComp() {
           </div>
         )}
       </div>
+      {readOnly && <Alert type="info" title={t("ops.readOnly")} showIcon />}
       <div className="flex-1 min-h-0 h-full">
         <div className="flex h-full gap-6">
           {isSuperAdmin && (
@@ -1309,7 +1312,11 @@ export default function UserManageComp() {
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-sm h-full flex flex-col gap-4 overflow-hidden p-4 px-8">
               {hasSelectedTenant && (
                 <div className="flex items-center justify-between gap-4">
-                  {isEditingTenantName ? (
+                  {readOnly ? (
+                    <h2 className="text-lg font-semibold">
+                      {currentTenantName}
+                    </h2>
+                  ) : isEditingTenantName ? (
                     <Input
                       ref={tenantNameInputRef}
                       value={editingTenantName}
@@ -1349,30 +1356,20 @@ export default function UserManageComp() {
                           children: (
                             <UserList
                               tenantId={tenantId}
+                              readOnly={readOnly}
                               refreshKey={userListRefreshKey}
                             />
                           ),
                         },
-                        ...(user?.role === USER_ROLES.ADMIN
-                          ? [
-                              {
-                                key: "apiKeys",
-                                label:
-                                  t("tenantResources.tabs.apiKeys") ||
-                                  "API Key",
-                                children: <ApiKeyList tenantId={tenantId} />,
-                              },
-                            ]
-                          : []),
                         {
                           key: "groups",
                           label: t("tenantResources.tabs.groups") || "Groups",
-                          children: <GroupList tenantId={tenantId} />,
+                          children: <GroupList tenantId={tenantId} readOnly={readOnly} />,
                         },
                         {
                           key: "models",
                           label: t("tenantResources.tabs.models") || "Models",
-                          children: <ModelList tenantId={tenantId} />,
+                          children: <ModelList tenantId={tenantId} readOnly={readOnly} />,
                         },
                         // When AIDP knowledge is enabled, the knowledge tab is managed
                         // via the unified `/knowledges` entry and must not appear here.
@@ -1383,24 +1380,24 @@ export default function UserManageComp() {
                                 label:
                                   t("tenantResources.tabs.knowledge") ||
                                   "Knowledge Base",
-                                children: <KnowledgeList tenantId={tenantId} />,
+                                children: <KnowledgeList tenantId={tenantId} readOnly={readOnly} />,
                               },
                             ]
                           : []),
                         {
                           key: "agents",
                           label: t("tenantResources.tabs.agents") || "Agents",
-                          children: <AgentList tenantId={tenantId} />,
+                          children: <AgentList tenantId={tenantId} readOnly={readOnly} />,
                         },
                         {
                           key: "mcp",
                           label: t("tenantResources.tabs.mcp") || "MCP",
-                          children: <McpList tenantId={tenantId} />,
+                          children: <McpList tenantId={tenantId} readOnly={readOnly} />,
                         },
                         {
                           key: "skills",
                           label: "Skills",
-                          children: <SkillList tenantId={tenantId} />,
+                          children: <SkillList tenantId={tenantId} readOnly={readOnly} />,
                         },
                         {
                           key: "tags",
@@ -1415,10 +1412,30 @@ export default function UserManageComp() {
                           children: (
                             <InvitationList
                               tenantId={tenantId}
+                              readOnly={readOnly}
                               refreshKey={invitationListRefreshKey}
                             />
                           ),
                         },
+                        ...(hasRole(user, "ADMIN", "SU") || readOnly
+                          ? [
+                              {
+                                key: "apiKeys",
+                                label:
+                                  t("tenantResources.tabs.apiKeys") ||
+                                  "API Key",
+                                children: (
+                                  <ApiKeyList
+                                    key={tenantId}
+                                    tenantId={tenantId}
+                                    readOnly={
+                                      readOnly || tenantId !== user?.tenantId
+                                    }
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
                       ]}
                     />
                   ) : (

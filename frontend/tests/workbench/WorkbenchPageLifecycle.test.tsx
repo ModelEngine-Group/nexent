@@ -31,6 +31,9 @@ const view = vi.hoisted(() => ({
     { id: "b", remoteId: "202" },
   ],
   props: null as ComponentProps<typeof Chat> | null,
+  sidebarProps: null as { onNewConversation: () => Promise<void> } | null,
+  newThreadId: undefined as string | undefined,
+  drafts: {} as Record<string, string>,
   setRunConfig: vi.fn(),
   restoreAgent: vi.fn(),
   markGenerationCompleted: vi.fn(),
@@ -44,21 +47,35 @@ const view = vi.hoisted(() => ({
   threadLoading: false,
   running: false,
   initialConfigVersion: 7,
+  defaultModelId: undefined as number | undefined,
 }));
 const runtime = {
   thread: {
     getState: () => ({ isRunning: false }),
     composer: {
       setRunConfig: view.setRunConfig,
-      getState: () => ({ text: "", attachments: [] }),
+      getState: () => ({
+        text: view.drafts[view.threadId ?? ""] ?? "",
+        attachments: [],
+      }),
       setText: vi.fn(),
     },
   },
   threads: {
-    getState: () => ({ mainThreadId: view.threadId }),
-    switchToNewThread: vi.fn(async () => {
-      view.threadId = `creation-${++view.nextThread}`;
+    getState: () => ({
+      mainThreadId: view.threadId,
+      newThreadId: view.newThreadId,
     }),
+    getItemById: (id: string) => ({
+      initialize: async () => {
+        if (view.newThreadId === id) view.newThreadId = undefined;
+      },
+    }),
+    switchToNewThread: vi.fn(async () => {
+      view.newThreadId ??= `creation-${++view.nextThread}`;
+      view.threadId = view.newThreadId;
+    }),
+    reload: vi.fn(async () => {}),
     switchToThread: vi.fn(async (id: string) => {
       view.threadId = id;
     }),
@@ -66,15 +83,7 @@ const runtime = {
 };
 const config = {
   ...initialWorkbenchState.config,
-  model_id: 11,
-  generation_config: {
-    deep_thinking: true,
-    thinking_effort: "xhigh" as const,
-    reasoning_budget_tokens: 4096,
-    requested_output_tokens: 1234,
-    temperature: 0.7,
-    top_p: 0.8,
-  },
+  requested_output_tokens: 1234,
 };
 const translate = (_key: string, fallback?: unknown) =>
   typeof fallback === "string" ? fallback : _key;
@@ -112,6 +121,10 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
         dispatch({ type: "select-mode", mode }),
       []
     );
+    const back = useCallback(() => {
+      view.back();
+      dispatch({ type: "select-mode", mode: "generic_chat" });
+    }, []);
     return {
       conversationDetails,
       runtime,
@@ -119,7 +132,7 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
       isLoadingAgents: false,
       agents: [],
       onRestoreAgent: view.restoreAgent,
-      onBack: view.back,
+      onBack: back,
       isDictationConfigured: false,
       workbenchState: state,
       workbenchBootstrap: view.bootstrap,
@@ -139,7 +152,10 @@ vi.mock("@/app/newchat/assistant-ui/composer-tools", () => ({
   ComposerDictation: () => null,
 }));
 vi.mock("@/app/newchat/assistant-ui/threadlist-sidebar", () => ({
-  ThreadListSidebar: () => null,
+  ThreadListSidebar: (props: NonNullable<typeof view.sidebarProps>) => {
+    view.sidebarProps = props;
+    return null;
+  },
 }));
 vi.mock("@/app/newchat/adapter/conversation-thread-list-adapter", () => ({
   cacheHistoricalChatMode: vi.fn(),
@@ -156,10 +172,20 @@ vi.mock("@/components/ui/sidebar", () => ({
   SidebarProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ availableLlmModels: [], isLoading: false }),
+  useModelList: () => ({
+    llmModels: [],
+    availableLlmModels: [],
+    isLoading: false,
+  }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
-  useConfig: () => ({ modelConfig: undefined }),
+  useConfig: () => ({
+    modelConfig: undefined,
+    defaultLlmModelConfig:
+      view.defaultModelId === undefined
+        ? undefined
+        : { id: view.defaultModelId },
+  }),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
@@ -279,11 +305,101 @@ beforeEach(() => {
   view.threadLoading = false;
   view.running = false;
   view.initialConfigVersion = 7;
+  view.defaultModelId = undefined;
   view.nextThread = 0;
+  view.newThreadId = undefined;
+  view.drafts = {};
+  runtime.thread.composer.setText.mockImplementation((text: string) => {
+    view.drafts[view.threadId ?? ""] = text;
+  });
   vi.mocked(conversationService.getById).mockImplementation(async (id) =>
     detail(Number(id))
   );
 });
+
+it.each(["agent_create", "skill_create"] as const)(
+  "new conversations cannot reuse an unsent %s handoff draft",
+  async (mode) => {
+    view.threadId = "ordinary-local";
+    view.items = [];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect(mode);
+    });
+    page.rerender(<WorkbenchPage />);
+    const creationId = view.threadId!;
+    runtime.thread.composer.setText(
+      "AI requirements and original user request"
+    );
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(creationId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().runtimeMode).toBeUndefined();
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+    expect(view.drafts[creationId]).toBe(
+      "AI requirements and original user request"
+    );
+    const firstNewId = view.threadId;
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(firstNewId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().runtimeMode).toBeUndefined();
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+    view.threadId = creationId;
+    page.rerender(<WorkbenchPage />);
+    await waitFor(() =>
+      expect(runConfig().runtimeMode).toBe(
+        mode === "agent_create" ? "nl2agent" : "nl2skill"
+      )
+    );
+    expect(runtime.thread.composer.getState().text).toBe(
+      "AI requirements and original user request"
+    );
+  }
+);
+
+it.each(["agent_create", "skill_create"] as const)(
+  "failed new conversation preserves the %s draft and allows retry",
+  async (mode) => {
+    view.threadId = "ordinary-local";
+    view.items = [];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect(mode);
+    });
+    page.rerender(<WorkbenchPage />);
+    const sourceId = view.threadId;
+    runtime.thread.composer.setText("Keep this creation request");
+    runtime.threads.switchToNewThread.mockRejectedValueOnce(
+      new Error("Switch failed")
+    );
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).toBe(sourceId);
+    expect(runtime.thread.composer.getState().text).toBe(
+      "Keep this creation request"
+    );
+    expect(runConfig().runtimeMode).toBe(
+      mode === "agent_create" ? "nl2agent" : "nl2skill"
+    );
+    expect(view.back).not.toHaveBeenCalled();
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(sourceId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+  }
+);
 
 it.each([true, false])(
   "preserves the mounted chat during metadata reload while running=%s",
@@ -454,13 +570,13 @@ it("ignores delayed loads and saves from an inactive conversation", async () => 
   );
   await act(async () => {
     saveB.resolve({
-      workbench_config: { ...config, model_id: 99 },
+      workbench_config: { ...config, requested_output_tokens: 999 },
       workbench_config_version: 999,
     });
     await saving;
   });
   expect(runConfig().threadId).toBe("101");
-  expect(runConfig().workbenchConfig.model_id).toBe(11);
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(1234);
   expect(runConfig().workbenchConfigVersion).toBe(101);
 });
 
@@ -477,8 +593,8 @@ it("a version conflict bypasses shared history and preserves input and model par
   );
   expect(conversationService.getById).toHaveBeenCalledTimes(2);
   expect(runConfig().workbenchConfigVersion).toBe(999);
-  expect(runConfig().workbenchConfig.generation_config).toEqual(
-    config.generation_config
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(
+    config.requested_output_tokens
   );
   expect(runtime.thread.composer.setText).toHaveBeenCalledWith(
     "Keep this question"
@@ -492,14 +608,12 @@ it("uses the server-issued ID first and preserves exact model config and version
   expect(runConfig().threadId).toBeUndefined();
   await act(async () => runConfig().onServerConversationId("303"));
   await waitFor(() => expect(runConfig().threadId).toBe("303"));
-  expect(runConfig().workbenchConfig.generation_config).toEqual(
-    config.generation_config
-  );
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(1234);
   expect(runConfig().workbenchConfigVersion).toBe(7);
   act(() => runConfig().onWorkbenchConfigVersion(8));
   expect(runConfig().workbenchConfigVersion).toBe(8);
   expect(view.props?.conversationId).toBe(303);
-  expect(view.props?.thinkingEffort).toBe("xhigh");
+  expect(runConfig().workbenchConfig).not.toHaveProperty("generation_config");
 });
 
 it("restores a local chat snapshot after entering and leaving creation", async () => {
@@ -565,8 +679,11 @@ it("restores generated local Skill files after visiting another creation thread"
   expect(runConfig().getDraftSnapshot().files).toEqual([
     { path: "SKILL.md", content: "saved skill file" },
   ]);
-  expect(runConfig().creationWorkbenchConfig.generation_config).toEqual(
-    config.generation_config
+  expect(runConfig().creationWorkbenchConfig.requested_output_tokens).toBe(
+    1234
+  );
+  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+    "generation_config"
   );
 });
 
@@ -608,6 +725,10 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
   );
   view.bootstrap = { generic_agent: { agent_id: 5, version_no: 2 } };
   const page = render(<WorkbenchPage />);
+  expect(conversationService.getKnowledgeCapabilities).not.toHaveBeenCalled();
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeOpenChange?.(true)
+  );
   expect(
     conversationService.getKnowledgeCapabilities
   ).toHaveBeenCalledExactlyOnceWith(5, 2);
@@ -649,6 +770,16 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
     )
   );
   expect(view.props?.knowledgeCapabilities).toBeNull();
+  const attempts = vi.mocked(conversationService.getKnowledgeCapabilities).mock
+    .calls.length;
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeRetry?.()
+  );
+  await waitFor(() =>
+    expect(conversationService.getKnowledgeCapabilities).toHaveBeenCalledTimes(
+      attempts + 1
+    )
+  );
 });
 
 it.each([true, false])(
@@ -785,11 +916,21 @@ it("restores standalone Skill history and keeps changed controls out of workbenc
   render(<WorkbenchPage />);
   await waitFor(() => expect(runConfig().runtimeMode).toBe("nl2skill"));
   expect(runConfig().creationTarget).toEqual({ type: "skill", id: 201 });
-  await act(async () => {
-    view.props!.onDeepThinkingChange!(true);
-  });
   expect(conversationService.updateWorkbenchConfig).not.toHaveBeenCalled();
-  expect(
-    runConfig().creationWorkbenchConfig.generation_config.deep_thinking
-  ).toBe(true);
+  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+    "generation_config"
+  );
+  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty("model_id");
+});
+
+it("AC-D1 forwards the tenant default as an uncontrolled Chat fallback, including delayed loading", async () => {
+  view.threadId = "new-default";
+  view.items = [];
+  const page = render(<WorkbenchPage />);
+  await screen.findByRole("textbox", { name: "workbench draft" });
+  expect(view.props?.selectedModelId).toBeUndefined();
+  view.defaultModelId = 2;
+  page.rerender(<WorkbenchPage />);
+  expect(view.props?.selectedModelId).toBe("2");
+  expect(view.props?.onModelChange).toBeUndefined();
 });

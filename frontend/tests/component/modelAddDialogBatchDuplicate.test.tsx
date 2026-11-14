@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { App } from "antd";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -56,26 +57,36 @@ vi.mock("@/services/modelService", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/modelProfileService", () => ({
+  listModelProfiles: vi.fn().mockResolvedValue({ items: [] }),
+}));
+
 // The exact detail the backend returns (HTTP 409) when a create collides
 // with an existing display_name — see create_model_for_tenant.
 const CONFLICT_DETAIL =
   "Name BAAI/bge-m3 is already in use, please choose another display name";
 
 const DUP_MODEL = "BAAI/bge-m3";
-const OK_MODEL = "Qwen/Qwen3-8B";
+const OK_MODEL = "BAAI/bge-large-en";
 
 function renderBatchDialog() {
   const onSuccess = vi.fn();
   const onClose = vi.fn();
   render(
-    <App>
-      <ModelAddDialog
-        isOpen
-        onClose={onClose}
-        onSuccess={onSuccess}
-        initialTab="batch"
-      />
-    </App>
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <App>
+        <ModelAddDialog
+          isOpen
+          onClose={onClose}
+          onSuccess={onSuccess}
+          initialTab="batch"
+        />
+      </App>
+    </QueryClientProvider>
   );
   return { onSuccess, onClose };
 }
@@ -87,7 +98,7 @@ async function prepareSelection(models: string[]) {
     models.map((name) => ({
       id: name,
       model_name: name,
-      model_type: "llm",
+      model_type: "embedding",
     }))
   );
   const user = userEvent.setup();

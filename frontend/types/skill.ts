@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Skill-related type definitions and constants
  */
@@ -140,3 +142,5 @@ export interface SkillContentParseResult {
   summaryStarted: boolean;
   done: boolean;
 }
+
+export type SkillListView = "full" | "mount";

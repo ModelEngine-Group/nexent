@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { effectiveRoles } from "@/lib/roles";
 /**
  * Authentication utilities
  *
@@ -26,7 +28,7 @@ const ROLE_COLORS: Record<string, string> = {
   [USER_ROLES.ADMIN]: "purple",
   [USER_ROLES.DEV]: "cyan",
   [USER_ROLES.USER]: "geekblue",
-  [USER_ROLES.SPEED]: "green",
+  [USER_ROLES.OPS]: "green",
   [USER_ROLES.ASSET_OWNER]: "gold",
 };
 
@@ -114,18 +116,16 @@ const MODEL_MANAGEMENT_ROLES: ReadonlySet<string> = new Set([
   USER_ROLES.SU,
   USER_ROLES.ADMIN,
   USER_ROLES.DEV,
-  USER_ROLES.SPEED,
 ]);
 
 /**
  * Return true when the given role can act on the W11 repair affordances.
- * Speed-mode deployments bypass role gating (single-user dev experience).
  */
 export function canManageModels(
-  role: string | undefined | null,
-  isSpeedMode = false
+  role: string | readonly string[] | undefined | null,
+  _retiredMode = false
 ): boolean {
-  if (isSpeedMode) return true;
+  void _retiredMode;
   if (!role) return false;
-  return MODEL_MANAGEMENT_ROLES.has(role);
+  return effectiveRoles(role).some((item) => MODEL_MANAGEMENT_ROLES.has(item));
 }

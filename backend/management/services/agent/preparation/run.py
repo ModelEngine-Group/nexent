@@ -18,7 +18,7 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
+    NEXENT_MCP_INTERNAL_TOKEN,
 )
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
@@ -37,13 +37,12 @@ from management.services.agent.preparation.inputs import (
     join_minio_file_description_to_query,
 )
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
+from management.services.agent.mcp_passthrough import apply_mcp_header_passthrough
 from management.services.agent.tool_identity import resolve_tool_user_context
 from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
-from management.services.model.run_budget import _OPERATOR_OVERRIDE_FIELDS
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from runtime.adapters.nexent.factory import build_run_info
 
 logger = logging.getLogger("create_agent_info")
@@ -72,6 +71,7 @@ def _ensure_agent_reasoning_snapshot(
             requested_overrides=current_overrides,
             existing_overrides=current_overrides,
             tenant_id=agent_info.get("tenant_id") or tenant_id,
+            normalize_profiles=False,
         )
         if updated_overrides == current_overrides:
             return
@@ -89,27 +89,135 @@ def _ensure_agent_reasoning_snapshot(
         )
 
 
-def apply_root_generation_overlay(
-    model_list: List[ModelConfig],
-    agent_config: AgentConfig,
-    generation_config: Optional[Dict[str, Any]],
-) -> None:
-    """Add a root-only model alias without changing child Agent aliases."""
-    if not generation_config:
-        return
-    from management.services.model.run_controls import overlay_root_model
 
-    for model_config in model_list:
-        if model_config.cite_name != agent_config.model_name:
-            continue
-        root_model = overlay_root_model(
-            model_config,
-            generation_config,
-            "workbench_root_model",
-        )
-        model_list.append(root_model)
-        agent_config.model_name = root_model.cite_name
+
+# ---------------------------------------------------------------------------
+# Phase 1 northbound MCP header passthrough preflight
+# ---------------------------------------------------------------------------
+
+
+async def preflight_mcp_header_passthrough(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str = "",
+    version_no: int = 0,
+    metadata: Optional[Dict[str, Any]],
+    agent_record: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Validate Phase-1 passthrough headers **before** an SSE stream opens.
+
+    This is the northbound 400 vs SSE-error fix for Phase 1.  When
+    :func:`apply_mcp_header_passthrough` runs *inside* the
+    :class:`generate_stream` async generator body, the northbound endpoint has
+    already committed to HTTP 200 via :class:`StreamingResponse`, so callers
+    only see an SSE error event, never the HTTP 400 + business code
+    ``CHAT_MCP_HEADER_ROUTE_NOT_FOUND`` (010111) that the Phase-1 spec
+    promises.
+
+    Callers must **invoke this function BEFORE** the northbound route returns
+    its :class:`StreamingResponse`.  It reuses exactly the same AgentConfig +
+    MCP lookup machinery that :func:`create_agent_run_info` uses, so the
+    ``mcp_host`` shape passed to
+    :func:`management.services.agent.mcp_passthrough.validate_mcp_header_passthrough`
+    is a faithful preimage of what the full pipeline will eventually build.
+
+    Raises
+    ------
+    AppException
+        010111 (unmatched ``by_server`` URL) when the caller-supplied metadata
+        cannot be applied.  Surface this as HTTP 400 — never swallow it into
+        an SSE error.
+    """
+    from management.services.agent.mcp_passthrough import (
+        validate_mcp_header_passthrough,
+        extract_passthrough_headers,
+    )
+    from management.services.agent.preparation.compiler import create_agent_config
+    from management.services.agent.preparation.tools import (
+        filter_mcp_servers_and_tools,
+    )
+    from nexent.core.concurrency import run_blocking
+
+    version_no_int = int(version_no or 0)
+
+    # Reuse the agent_record if the caller already fetched it (subscription.py
+    # does so early in run_agent_stream).  Otherwise do a single blocking
+    # lookup — cheap enough because this is the only DB hit we need here.
+    if agent_record is None or int(agent_record.get("version_no", -1)) != version_no_int:
+        agent_record = await run_blocking(
+            "preflight-agent-lookup",
+            search_agent_info_by_agent_id,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no_int,
+        ) or {}
+
+    # Skip the whole preflight when the caller did not supply any reserved
+    # fields — no need to build AgentConfig / MCP list for nothing.
+    mode, passthrough_headers = extract_passthrough_headers(metadata)
+    if mode is None or not passthrough_headers:
         return
+
+    # Agent has no switch — no preflight needed (apply_mcp_header_passthrough
+    # itself handles switch=OFF via silent no-op).
+    if not agent_record:
+        return
+
+    # Build a lightweight AgentConfig (no workspace prep, no model snapshots)
+    # solely to enumerate which MCP servers the agent actually uses.  The
+    # regular create_agent_config call below does a full agent lookup + tool
+    # join inside compiler.py, which is exactly what we want here.
+    agent_config = await create_agent_config(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id or "preflight",
+        version_no=version_no_int,
+    )
+
+    # Fetch remote MCP server list and resolve the used URLs the same way
+    # create_agent_run_info does.
+    remote_mcp_list = await get_remote_mcp_server_list(
+        tenant_id=tenant_id, is_need_auth=True
+    )
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
+    remote_mcp_list.append(
+        {
+            "remote_mcp_server_name": "outer-apis",
+            "remote_mcp_server": default_mcp_url,
+            "status": True,
+        }
+    )
+    remote_mcp_dict = {
+        record["remote_mcp_server_name"]: record
+        for record in remote_mcp_list
+        if record.get("status")
+    }
+    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+
+    # Build a minimal mcp_host-shaped list.  We only need URL + static headers
+    # (Authorization token + per-server custom_headers) for the validate call.
+    mcp_host: List[Dict[str, Any]] = []
+    for url in used_mcp_urls:
+        mcp_record = None
+        for record in remote_mcp_list:
+            if record.get("remote_mcp_server") == url and record.get("status"):
+                mcp_record = record
+                break
+        static_headers: Dict[str, Any] = {}
+        if mcp_record:
+            auth_token = mcp_record.get("authorization_token")
+            if auth_token:
+                static_headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                static_headers.update(custom_headers)
+        entry: Dict[str, Any] = {"url": url}
+        if static_headers:
+            entry["headers"] = static_headers
+        mcp_host.append(entry)
+
+    validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
 
 
 async def create_agent_run_info(
@@ -124,8 +232,6 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
-    reasoning_effort: str | None = None,
-    reasoning_budget_tokens: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
@@ -135,8 +241,9 @@ async def create_agent_run_info(
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
-    runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -231,9 +338,21 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
-    agent_config = await create_agent_config(
-        **create_config_kwargs, tool_params=tool_params
-    )
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    captured_records = {}
+    outlet_profiles = {}
+    for configured in model_list:
+        if isinstance(getattr(configured, "resolved_profile", None), ResolvedModelProfile):
+            from nexent.core.model_service.registry import model_service_references
+
+            outlet_profiles[configured.resolved_profile.outlet_id] = configured.resolved_profile
+            captured = encode_resolved_model_profile(configured.resolved_profile, registered_references=model_service_references())
+            if captured.get("model_id") is not None:
+                captured_records[captured["model_id"]] = captured
+    if captured_records:
+        create_config_kwargs["runtime_model_records"] = captured_records
+    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # v2.6.0: Apply per-agent model params override to model_config_list.
     # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
@@ -241,11 +360,13 @@ async def create_agent_run_info(
     # by display_name (the cite_name used in model_config_list) and merge the
     # override values on top of the model-level defaults.
     _agent_info_for_override = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
-    )
-    model_params_override = (_agent_info_for_override or {}).get(
-        "model_params_override"
-    ) or {}
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    from management.services.agent.model_parameters import bind_agent_model_profiles
+
+    bind_agent_model_profiles(model_list, agent_config, _agent_info_for_override or {},
+        lambda selected_agent_id, selected_version: search_agent_info_by_agent_id(
+            agent_id=selected_agent_id, tenant_id=tenant_id, version_no=selected_version))
     if model_params_override:
         for model_id_str, override_entry in model_params_override.items():
             if not isinstance(override_entry, dict):
@@ -263,18 +384,13 @@ async def create_agent_run_info(
             if not display_name:
                 continue
             for mc in model_list:
+                if isinstance(getattr(mc, "resolved_profile", None), ResolvedModelProfile):
+                    continue  # Saved outlets were bound independently for each Agent above.
                 if mc.cite_name == display_name:
                     if override_entry.get("temperature") is not None:
                         mc.temperature = override_entry["temperature"]
                     if override_entry.get("top_p") is not None:
                         mc.top_p = override_entry["top_p"]
-                    # v2.6.0: capacity fields are overridable per-agent. The
-                    # authoritative consumer for request shaping is the W1/W2
-                    # resolution (agent-selected model), this keeps each
-                    # ModelConfig consistent with its override entry.
-                    for field in _OPERATOR_OVERRIDE_FIELDS:
-                        if override_entry.get(field) is not None:
-                            setattr(mc, field, override_entry[field])
                     override_extra = override_entry.get("extra_params")
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
@@ -299,7 +415,9 @@ async def create_agent_run_info(
                                     mc.reasoning_budget_tokens = v
                                 continue
                             if k == "__custom__" and isinstance(v, dict):
-                                for custom_key, custom_value in v.items():
+                                from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+
+                                for custom_key, custom_value in without_outlet_token_limits(v).items():
                                     # A null custom value is an explicit
                                     # removal marker: the agent opts out of a
                                     # model-level custom param instead of
@@ -322,38 +440,7 @@ async def create_agent_run_info(
                         ):
                             mc.reasoning_budget_tokens = budget
                     break
-    # Request-scoped Workbench settings apply only to the root model. Static
-    # children retain the model aliases from their published versions.
-    # Static children keep their published aliases and never inherit this overlay.
-    apply_root_generation_overlay(
-        model_list,
-        agent_config,
-        runtime_generation_config,
-    )
-
-    # Legacy top-level fields use the same capability policy as generation overlays.
-    if reasoning_effort is not None or reasoning_budget_tokens is not None:
-        from management.services.model.run_controls import overlay_root_model
-
-        selected_config = next(
-            (m for m in model_list if m.cite_name == agent_config.model_name), None
-        )
-        if selected_config is None:
-            from contracts.errors.exceptions import RunModelControlsError
-
-            raise RunModelControlsError("model_not_available")
-        legacy = {}
-        if reasoning_effort is not None:
-            legacy["thinking_effort"] = reasoning_effort
-        if reasoning_budget_tokens is not None:
-            legacy["reasoning_budget_tokens"] = reasoning_budget_tokens
-        overlay = overlay_root_model(selected_config, legacy, selected_config.cite_name)
-        index = model_list.index(selected_config)
-        model_list[index] = overlay
-
-    remote_mcp_list = await get_remote_mcp_server_list(
-        tenant_id=tenant_id, is_need_auth=True
-    )
+    remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append(
         {
@@ -391,7 +478,7 @@ async def create_agent_run_info(
                 mcp_config["httpx_client_factory"] = create_httpx_client
                 mcp_config["headers"] = {
                     "X-Tenant-ID": str(tenant_id),
-                    "X-Nexent-Internal-Token": TOKEN,
+                    "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
                 }
             headers = {}
             auth_token = mcp_record.get("authorization_token")
@@ -406,6 +493,17 @@ async def create_agent_run_info(
         else:
             # Fallback to string format if record not found
             mcp_host.append(url)
+
+    # Phase 1: northbound MCP header passthrough — placeholder resolution
+    # + dynamic header injection, both gated by the per-agent switch.
+    apply_mcp_header_passthrough(
+        mcp_host,
+        metadata,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        run_id=workspace_run_id,
+    )
 
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)
@@ -452,12 +550,18 @@ async def create_agent_run_info(
                 }
             )
 
+    apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
+        outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
+
     agent_run_info = build_run_info(
         query=final_query,
         model_config_list=model_list,
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
+        # Only surface the kwarg when the caller actually sent metadata, so
+        # agents without metadata keep the exact pre-existing payload shape.
+        **({"runtime_metadata": metadata} if metadata is not None else {}),
         mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=converted_history,
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
@@ -480,3 +584,32 @@ async def create_agent_run_info(
         user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
     return agent_run_info
+
+
+def apply_root_model_preferences(model_list, agent_config, preferences, *, outlet_profiles=None, agent_overrides=None):
+    """Give the root a private alias; never change a child Agent's model defaults."""
+    if not preferences:
+        return
+    from management.services.conversation.model_preferences import merge_model_preferences
+
+    for configured in model_list:
+        profile = getattr(configured, "resolved_profile", None)
+        if configured.cite_name != agent_config.model_name or profile is None:
+            continue
+        values = preferences.get(str(profile.outlet_id))
+        if values is None:
+            return
+        original = (outlet_profiles or {}).get(profile.outlet_id)
+        if original is not None:
+            from management.services.agent.model_parameters import merge_runtime_model_parameters
+
+            resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
+        else:
+            resolved = merge_model_preferences(profile, values)
+        root = configured.model_copy(deep=True, update={"cite_name": "conversation_root_model_" + uuid.uuid4().hex,
+            "resolved_profile": resolved,
+            "default_output_reserve_tokens": resolved.parameter_values.get("max_output_tokens",
+                configured.default_output_reserve_tokens)})
+        model_list.append(root)
+        agent_config.model_name = root.cite_name
+        return

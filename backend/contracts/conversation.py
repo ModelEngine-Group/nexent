@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Internal message provenance and opaque activity pagination cursors."""
+"""Conversation messages, reply annotations and opaque activity pagination cursors."""
 
 import base64
 import hashlib
@@ -12,6 +12,126 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from contracts.clarification import ClarificationResponse
+
+
+# Unit type used for the per-message annotation payload persisted on user
+# messages through conversation_message_unit_t.
+MESSAGE_ANNOTATIONS_UNIT_TYPE = "message_annotations"
+
+# Defensive caps mirroring the client-side limits; the backend truncates
+# rather than rejects so oversized payloads never break a send.
+ANNOTATION_QUOTED_TEXT_MAX_CHARS = 1500
+ANNOTATION_COMMENT_MAX_CHARS = 500
+ANNOTATION_SOURCE_EXCERPT_MAX_CHARS = 120
+ANNOTATION_MAX_COUNT = 10
+
+
+class MessageAnnotationItem(BaseModel):
+    """One quoted excerpt attached to an outgoing user message.
+
+    Length caps are enforced by ``normalize_message_annotations`` (truncating
+    rather than rejecting) so oversized client payloads degrade gracefully
+    instead of failing the whole send. Legacy neighboring-context fields are
+    ignored when reading requests and persisted units.
+    """
+
+    quoted_text: str
+    comment: Optional[str] = None
+    source_excerpt: Optional[str] = None
+
+
+def normalize_message_annotations(
+    raw: Any,
+) -> Optional[List[MessageAnnotationItem]]:
+    """Validate raw annotation payloads, applying defensive caps.
+
+    Accepts a list of annotation dicts (or models) as delivered by the
+    request body or read back from a persisted unit. Entries without usable
+    quoted text are dropped, over-length fields are truncated, and the list
+    is capped to ``ANNOTATION_MAX_COUNT``. Returns ``None`` when nothing
+    usable remains so callers can skip persistence and merging entirely.
+    """
+    if not isinstance(raw, list):
+        return None
+
+    annotations: List[MessageAnnotationItem] = []
+    for item in raw:
+        try:
+            annotation = (
+                item
+                if isinstance(item, MessageAnnotationItem)
+                else MessageAnnotationItem.model_validate(item)
+            )
+        except (ValueError, TypeError):
+            continue
+        quoted = annotation.quoted_text.strip()
+        if not quoted:
+            continue
+        comment = (annotation.comment or "").strip() or None
+        excerpt = (annotation.source_excerpt or "").strip() or None
+        annotations.append(
+            MessageAnnotationItem(
+                quoted_text=quoted[:ANNOTATION_QUOTED_TEXT_MAX_CHARS],
+                comment=comment[:ANNOTATION_COMMENT_MAX_CHARS] if comment else None,
+                source_excerpt=(
+                    excerpt[:ANNOTATION_SOURCE_EXCERPT_MAX_CHARS]
+                    if excerpt
+                    else None
+                ),
+            )
+        )
+        if len(annotations) >= ANNOTATION_MAX_COUNT:
+            break
+
+    return annotations or None
+
+
+def parse_message_annotation_unit(unit_content: Optional[str]) -> Optional[List[MessageAnnotationItem]]:
+    """Parse a persisted ``message_annotations`` unit payload.
+
+    Returns the normalized annotations, or ``None`` for missing/invalid
+    payloads so history readers can skip the field entirely.
+    """
+    if not unit_content:
+        return None
+    try:
+        payload = json.loads(unit_content)
+    except (ValueError, TypeError):
+        return None
+    return normalize_message_annotations(payload)
+
+
+def _annotation_block(index: int, annotation: MessageAnnotationItem) -> str:
+    # The reply intro is a UI label, not reliable model-facing context.
+    lines = [f"{index}. Quote:"]
+    for line in annotation.quoted_text.split("\n"):
+        lines.append(f"> {line}" if line else ">")
+    if annotation.comment:
+        lines.append(f"Comment: {annotation.comment}")
+    return "\n".join(lines)
+
+
+def format_annotations_for_llm(
+    text: str, annotations: Optional[List[MessageAnnotationItem]]
+) -> str:
+    """Merge annotation blocks into the model-facing user text.
+
+    Each annotation becomes a numbered quote block (blockquote excerpt plus
+    an optional comment line); the blocks are joined with blank lines and
+    separated from the user's own text by a horizontal rule so the model
+    receives both the quoted reply excerpts and the follow-up question in
+    one message. With no annotations the text is returned unchanged.
+    """
+    if not annotations:
+        return text
+
+    blocks = [
+        _annotation_block(index, annotation)
+        for index, annotation in enumerate(annotations, start=1)
+    ]
+    quote_block = "\n\n".join(blocks)
+    body = text or ""
+    return f"{quote_block}\n\n---\n\n{body}" if body else quote_block
 
 
 class MessageSource(str, Enum):
@@ -72,6 +192,8 @@ class MessageRequest(BaseModel):
     role: str
     message: List[MessageUnit]
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this user message
+    annotations: Optional[List[MessageAnnotationItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 
@@ -98,6 +220,15 @@ class RenameRequest(BaseModel):
     conversation_id: int
     name: str
     only_if_default_title: bool = False
+
+
+class BranchConversationRequest(BaseModel):
+    conversation_id: int
+    # 1-based Q&A turn (inclusive) that marks the branch point
+    turn_index: int
+    # Persisted answer ID, or the runtime's 1-based answer version before reload.
+    source_message_id: Optional[StrictInt] = Field(default=None, gt=0)
+    answer_index: Optional[StrictInt] = Field(default=None, gt=0)
 
 
 class BatchDeleteConversationRequest(BaseModel):
@@ -175,6 +306,17 @@ class ConversationHistory(TypedDict):
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
     image_records: List[ImageRecord]
+
+
+class ConversationModelPreferencePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+
+
+class ConversationModelSelectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected_model_id: int = Field(gt=0, lt=2**31, strict=True)
 
 
 def _search_fingerprint(search: str) -> str:
@@ -264,3 +406,4 @@ def decode_agent_conversation_cursor(
         return activity.astimezone(timezone.utc), value[1]
     except (ValueError, TypeError, UnicodeError, OverflowError) as exc:
         raise ValueError("Invalid agent conversation cursor") from exc
+

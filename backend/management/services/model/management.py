@@ -99,6 +99,28 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     model_data["max_tokens"] = max_output
 
 
+def _create_model_configuration(model_data, user_id, tenant_id):
+    """All LLM configuration writers persist the same resolved format."""
+    if model_data.get("model_type") in {"llm", "chat"}:
+        from management.services.model.outlet_legacy import create_legacy_llm_outlet
+
+        return create_legacy_llm_outlet(model_data, user_id, tenant_id)
+    return create_model_record(model_data, user_id, tenant_id)
+
+
+def _update_model_configuration(record, changes, user_id, tenant_id, *, scope_update=False):
+    """Do not allow legacy configuration writes to replace resolved JSON."""
+    if record is None:
+        raise LookupError("MODEL_OUTLET_NOT_FOUND")
+    if record.get("model_type") in {"llm", "chat"}:
+        from management.services.model.outlet_legacy import update_legacy_llm_outlet
+
+        return update_legacy_llm_outlet(record, changes, user_id, tenant_id)
+    if scope_update:
+        return update_model_record(record["model_id"], changes, user_id, tenant_id)
+    return update_model_record(record["model_id"], changes, user_id)
+
+
 async def create_model_for_tenant(
     user_id: str,
     tenant_id: str,
@@ -215,7 +237,7 @@ async def create_model_for_tenant(
 
         if is_multimodal:
             # Create multi_embedding record
-            create_model_record(model_data, user_id, tenant_id)
+            _create_model_configuration(model_data, user_id, tenant_id)
             logging.debug(
                 f"Multimodal embedding model {model_data['display_name']} created successfully"
             )
@@ -223,14 +245,15 @@ async def create_model_for_tenant(
             # Create embedding record variant
             embedding_data = model_data.copy()
             embedding_data["model_type"] = "embedding"
-            create_model_record(embedding_data, user_id, tenant_id)
+            _create_model_configuration(embedding_data, user_id, tenant_id)
             logging.debug(
                 f"Embedding model {embedding_data['display_name']} created successfully"
             )
         else:
             # Non-multimodal
-            create_model_record(model_data, user_id, tenant_id)
-            logging.debug(f"Model {model_data['display_name']} created successfully")
+            _create_model_configuration(model_data, user_id, tenant_id)
+            logging.debug(
+                f"Model {model_data['display_name']} created successfully")
 
         # Auto-configure default-model slots that the tenant never set.
         # Only the models created by THIS call are eligible for empty slots.
@@ -449,6 +472,8 @@ def _backfill_default_model_slots(
                 continue
 
             candidates = get_model_records({"model_type": model_type}, tenant_id)
+            candidates = [model for model in candidates
+                          if model.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value]
 
             if row is None and new_model_ids is not None:
                 # Empty slot: only consider what this create call added.
@@ -617,9 +642,7 @@ async def batch_create_models_for_tenant(
                         if existing_model.get("capacity_source") != "operator":
                             update_data["capacity_source"] = "operator"
                     if update_data:
-                        update_model_record(
-                            existing_model["model_id"], update_data, user_id
-                        )
+                        _update_model_configuration(existing_model, update_data, user_id, tenant_id)
                     continue
 
             model_dict = await prepare_model_dict(
@@ -635,7 +658,7 @@ async def batch_create_models_for_tenant(
             # ============================================================
             apply_catalog_defaults(model_dict, provider)
             _apply_model_reasoning_default(model_dict, provider)
-            create_model_record(model_dict, user_id, tenant_id)
+            _create_model_configuration(model_dict, user_id, tenant_id)
             if model_dict.get("display_name"):
                 created_display_names.append(model_dict["display_name"])
             logging.debug(f"Model {model['id']} created successfully")
@@ -785,12 +808,8 @@ async def update_single_model_for_tenant(
             # Update both embedding and multi_embedding records
             for model in existing_models:
                 # Prepare update data, excluding model_type to preserve original type
-                update_data = {
-                    k: v
-                    for k, v in model_data.items()
-                    if k not in ["model_id", "model_type"]
-                }
-                update_model_record(model["model_id"], update_data, user_id)
+                update_data = {k: v for k, v in model_data.items() if k not in ["model_id", "model_type"]}
+                _update_model_configuration(model, update_data, user_id, tenant_id)
             logging.debug(
                 f"Model {current_display_name} (embedding + multi_embedding) updated successfully"
             )
@@ -799,7 +818,7 @@ async def update_single_model_for_tenant(
             current_model = existing_models[0]
             current_model_id = current_model["model_id"]
             update_data = {k: v for k, v in model_data.items() if k != "model_id"}
-            update_model_record(current_model_id, update_data, user_id)
+            _update_model_configuration(current_model, update_data, user_id, tenant_id)
             logging.debug(f"Model {current_display_name} updated successfully")
     except LookupError:
         raise
@@ -825,10 +844,8 @@ async def batch_update_models_for_tenant(
             model_id_or_name = model.get("model_id") or model.get("model_name")
 
             # Check if model_id is a numeric string (primary key)
-            if model_id_or_name and model_id_or_name.isdigit():
-                update_model_record(
-                    int(model_id_or_name), update_data, user_id, tenant_id
-                )
+            if model_id_or_name is not None and str(model_id_or_name).isdigit():
+                _update_model_configuration(get_model_by_model_id(int(model_id_or_name), tenant_id), update_data, user_id, tenant_id, scope_update=True)
             else:
                 # Parse "model_repo/model_name" format from frontend's model_id field
                 if "/" in model_id_or_name:
@@ -851,9 +868,7 @@ async def batch_update_models_for_tenant(
                     )
                     continue
 
-                update_model_record(
-                    model_record["model_id"], update_data, user_id, tenant_id
-                )
+                _update_model_configuration(model_record, update_data, user_id, tenant_id, scope_update=True)
 
         logging.info("[DEBUG] Batch update models successfully")
     except Exception as e:
@@ -950,29 +965,27 @@ async def list_llm_models_for_tenant(tenant_id: str):
         result: List[Dict[str, Any]] = []
         for record in records:
             _enrich_model_reasoning_capability(record)
-            result.append(
-                {
-                    "model_id": record["model_id"],
-                    "model_name": add_repo_to_name(
-                        model_repo=record["model_repo"],
-                        model_name=record["model_name"],
-                    ),
-                    "model_type": record.get("model_type", "llm"),
-                    "connect_status": ModelConnectStatusEnum.get_value(
-                        record.get("connect_status")
-                    ),
-                    "display_name": record["display_name"],
-                    "api_key": record.get("api_key", ""),
-                    "base_url": record.get("base_url", ""),
-                    "max_tokens": record.get("max_tokens", 4096),
-                    "extra_params": record.get("extra_params"),
-                    **(
-                        {"reasoning_capability": record["reasoning_capability"]}
-                        if record.get("reasoning_capability") is not None
-                        else {}
-                    ),
-                }
-            )
+            result.append({
+                "model_id": record["model_id"],
+                "model_name": add_repo_to_name(
+                    model_repo=record["model_repo"],
+                    model_name=record["model_name"],
+                ),
+                "model_type": record.get("model_type", "llm"),
+                "connect_status": ModelConnectStatusEnum.get_value(record.get("connect_status")),
+                "display_name": record["display_name"],
+                "api_key": record.get("api_key", ""),
+                "base_url": record.get("base_url", ""),
+                "max_tokens": record.get("max_tokens", 4096),
+                "extra_params": record.get("extra_params"),
+                **{key: record[key] for key in ("profile_schema_version", "config_revision", "migration_status",
+                    "migration_review_required", "migration_details", "migration_diagnostic") if key in record},
+                **(
+                    {"reasoning_capability": record["reasoning_capability"]}
+                    if record.get("reasoning_capability") is not None
+                    else {}
+                ),
+            })
 
         logging.debug("Successfully retrieved model list")
         return result

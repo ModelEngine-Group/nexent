@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Relative import: the component-suite vitest config maps "@" to the frontend
 // root but has no "@/app" -> "app/[locale]" rule, so the literal relative path
 // is the only form that resolves in both places.
-import { MineApplyListingModal } from "../../app/[locale]/agent-space/components/MineApplyListingModal";
+import { AgentApplyListingModal } from "../../components/agent/AgentApplyListingModal";
 import agentRepositoryService from "@/services/agentRepositoryService";
 import { tagManagementApi } from "@/services/tagManagementService";
 import zh from "@/public/locales/zh/common.json";
@@ -167,7 +167,7 @@ function renderModal() {
     </QueryClientProvider>
   );
   render(
-    <MineApplyListingModal
+    <AgentApplyListingModal
       open
       agent={AGENT}
       onClose={onClose}
@@ -206,7 +206,7 @@ beforeEach(() => {
   );
 });
 
-describe("MineApplyListingModal listing tags are optional", () => {
+describe("AgentApplyListingModal listing tags are optional", () => {
   it("submits an application when the agent has no tag at all", async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderModal();

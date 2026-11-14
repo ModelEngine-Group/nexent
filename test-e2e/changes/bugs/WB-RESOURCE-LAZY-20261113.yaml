@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: WB-RESOURCE-LAZY-20261113
+  change_type: bugfix
+  bug_id: WB-RESOURCE-LAZY-20261113
+  title: Load Workbench resource catalogs only when their drawers open
+  description: Separate conversation rendering and required execution readiness from candidate resource discovery.
+  observed_behavior: The published Agent catalog gates Chat, bootstrap and models gate the whole composer, and closed knowledge controls request capabilities and groups.
+  expected_behavior: Render the Workbench while required execution data loads; discover candidates only on explicit drawer or repository-tab opening, with local loading and retry.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing loading UT asserts the obsolete global gate; drawer UT does not prove the composed page makes no unopened-catalog requests.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [WB-RESOURCE-LAZY-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Conversation and composer retain their DOM and draft through pending resource and capability initialization.
+    - Agent candidates load on opening, retain selected mounts after delayed results, and expose retry after failure.
+    - Closed knowledge controls make no capability or group request; saved mount validation preserves versions and configuration.
+    reason: Frontend UT owns loading and restoration contracts. A new D4 proves request timing and visible draft continuity across the real composed page; no duplicated D1 or changed backend contract.
+    test_selectors:
+    - frontend/tests/workbench/WorkbenchLoadingBoundary.test.tsx
+    - frontend/tests/workbench/WorkbenchBootstrapLoading.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbench/AgentPicker.test.tsx
+    - frontend/tests/workbench/KnowledgePicker.test.tsx
+    - frontend/tests/workbench/ConversationRestore.test.ts
+    - frontend/tests/workbench/KnowledgeDisplay.test.ts
+  notes: Baseline is nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls. User explicitly replaces the previous unified-loading behavior. WB-CONTROLS maps to runtime ownership. The D4 case uses intercepted tenant APIs and a runner-owned browser context, no shared factories, real models, persistent writes or deployment change; context/routes and pending requests are released in finally/runner cleanup. Python UT is not applicable to frontend-only changes.

@@ -14,6 +14,7 @@ from contracts.constants.environment import ENABLE_UPLOAD_IMAGE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
 from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerMcpServiceRequest, UpdateMcpServiceRequest, EnableMcpServiceRequest, DisableMcpServiceRequest, HealthcheckMcpServiceRequest, TestMcpConnectionRequest, ListMcpServicesQuery
+from permissions.resource_access import resource_read_tenant
 from management.services.mcp.service import get_remote_mcp_server_list, check_mcp_health_and_update_db, delete_mcp_by_container_id, upload_and_start_mcp_image, update_remote_mcp_server_list, attach_mcp_container_permissions, get_mcp_record_by_id, list_mcp_service_tools_by_id, refresh_mcp_service_tool_count, add_container_mcp_service, update_mcp_service, update_mcp_service_enabled, delete_mcp_service, check_mcp_service_health, test_mcp_connection, check_container_port_conflict, suggest_container_port
 from management.services.mcp.registration import add_mcp_service
 from management.services.tool.discovery import get_tool_from_remote_mcp_server
@@ -513,9 +514,16 @@ async def get_mcp_list(
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
         effective_tenant_id = tenant_id or auth_tenant_id
 
-        remote_mcp_list = await get_remote_mcp_server_list(
-            tenant_id=effective_tenant_id, user_id=user_id, is_need_auth=True
-        )
+        if authorized_tenant := resource_read_tenant(http_request, shared=True):
+            remote_mcp_list = await get_remote_mcp_server_list(
+                tenant_id=authorized_tenant, is_need_auth=False,
+            )
+            for record in remote_mcp_list:
+                record.update(permission="READ_ONLY", registry_json=None, config_json=None, shared_fields=None)
+        else:
+            remote_mcp_list = await get_remote_mcp_server_list(
+                tenant_id=effective_tenant_id, user_id=user_id, is_need_auth=True,
+            )
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -575,7 +583,7 @@ async def list_mcp_containers(
     """List all MCP containers for the current tenant."""
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
-        effective_tenant_id = tenant_id or auth_tenant_id
+        effective_tenant_id = resource_read_tenant(http_request, shared=True) or tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -612,13 +620,20 @@ async def get_container_logs(
     """Get logs from MCP container via SSE stream."""
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
-        effective_tenant_id = tenant_id or auth_tenant_id
+        inventory_tenant = resource_read_tenant(http_request)
+        effective_tenant_id = inventory_tenant or tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
         except MCPContainerError as e:
             logger.error(f"Failed to initialize container manager: {e}")
             raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Docker service unavailable")
+
+        if inventory_tenant and not any(
+            container.get("container_id") == container_id
+            for container in container_manager.list_mcp_containers(tenant_id=effective_tenant_id)
+        ):
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="MCP container not found")
 
         async def generate_log_stream():
             """Generate SSE stream of container logs."""
@@ -662,23 +677,28 @@ async def check_mcp_health(
     """Check MCP service health by ID."""
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        read_only = bool(resource_read_tenant(http_request, shared=True))
 
         health_status = await check_mcp_service_health(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=mcp_id,
+            **({"persist_status": False} if read_only else {}),
         )
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"status": "success", "data": {"health_status": health_status}}
         )
+    except HTTPException:
+        raise
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except MCPConnectionError as e:
         logger.error(f"MCP connection failed: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e) or "MCP connection failed")
+        detail = "MCP connection failed" if read_only else (str(e) or "MCP connection failed")
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=detail)
     except Exception as e:
         logger.error(f"Failed to check MCP health: {e}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to check MCP health")

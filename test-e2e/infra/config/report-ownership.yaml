@@ -74,6 +74,16 @@ domains:
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
   BE-MODEL-OUTLET-SCHEMA: model
+  BE-MODEL-OUTLET-PERSISTENCE: model
+  SDK-MODEL-OUTLET-RESOLUTION: model
+  SDK-MODEL-OUTLET-STORAGE: model
+  SDK-MODEL-PROFILE-CATALOG: model
+  SDK-MODEL-PROFILE-COMPOSITION: model
+  SDK-MODEL-PROFILE-CONTRACTS: model
+  SDK-MODEL-PROFILE-NORMALIZATION: model
+  SDK-MODEL-PROFILE-PARAMETERS: model
+  SDK-MODEL-TRANSPORT: model
+  AUTH-MULTI-ROLE: system
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config

@@ -197,6 +197,7 @@ db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
+db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
 sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
@@ -224,6 +225,9 @@ utils_mod.add_update_tracking = _add_update_tracking
 sys.modules["management.utils.audit_fields"] = utils_mod
 sys.modules["management.utils.audit_fields"] = utils_mod
 
+
+# Isolate the explicit membership lookup from unrelated account persistence.
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
 
 # Import module under test after stubbing
 
@@ -314,7 +318,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
     from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, WorkbenchConfigVersionConflict
 
     session, ctx = mock_session_ctx
-    config = {"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
+    config = {"schema_version": 4, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
     record = SimpleNamespace(
         workbench_config=deepcopy(config), workbench_config_version=2,
         runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
@@ -352,7 +356,7 @@ def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypa
     from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
-        workbench_config={"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
+        workbench_config={"schema_version": 4, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
         workbench_config_version=2, runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
         agent_id=7, knowledge_scope=None,
     )
@@ -388,7 +392,7 @@ def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_sess
     before = deepcopy(vars(record))
     session.scalars.return_value.first.return_value = record
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
-    config = {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}
+    config = {"schema_version": 4, "mode": "generic_chat", "agent_mounts": []}
     with pytest.raises(WorkbenchError) as raised:
         if joint:
             replace_conversation_workbench_and_metadata(1, "user", config, 0, {}, 0)
@@ -405,7 +409,7 @@ def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_sess
 
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
-        workbench_config={"schema_version": 3, "mode": "skill_create", "agent_mounts": []},
+        workbench_config={"schema_version": 4, "mode": "skill_create", "agent_mounts": []},
         workbench_config_version=1, agent_id=None,
     )
     session.scalars.return_value.first.return_value = record
@@ -413,7 +417,7 @@ def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_sess
 
     with pytest.raises(WorkbenchError) as raised:
         replace_conversation_workbench_config(
-            1, "user", {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}, 1
+            1, "user", {"schema_version": 4, "mode": "generic_chat", "agent_mounts": []}, 1
         )
     assert raised.value.code == "WORKBENCH_TOPOLOGY_LOCKED"
     session.flush.assert_not_called()
@@ -3643,8 +3647,12 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None, status="completed"),
     ]
+    # Reply-annotation units for the historical user messages (none here).
+    annotations_result = MagicMock()
+    annotations_result.all.return_value = []
     session.execute.side_effect = [
-        current_result, candidates_result, boundary_result, messages_result]
+        current_result, candidates_result, boundary_result, messages_result,
+        annotations_result]
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")

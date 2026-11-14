@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -8,7 +8,7 @@ import { App, Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { FILTER_ALL, McpToolsServicesTab } from "@/const/mcpTools";
 import {
   filterByDeploymentType,
@@ -148,8 +148,8 @@ export function useMcpSpaceController() {
   const locale = params.locale || "en";
   const searchParams = useSearchParams();
   const isAdmin = useMemo(
-    () => user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU,
-    [user?.role]
+    () => hasRole(user, "ADMIN") || hasRole(user, "SU"),
+    [user?.role, user?.roles]
   );
 
   const [tab, setTab] = useState<McpToolsServicesTab>(

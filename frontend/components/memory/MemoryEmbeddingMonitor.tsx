@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -29,7 +30,7 @@ export function MemoryEmbeddingMonitor() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [revision, setRevision] = useState(0);
-  const canConfigure = canManageModels(user?.role, isSpeedMode);
+  const canConfigure = canManageModels(user?.roles ?? user?.role, isSpeedMode);
 
   useEffect(() => {
     const unsubscribe = subscribeMemorySwitch((enabled) => {

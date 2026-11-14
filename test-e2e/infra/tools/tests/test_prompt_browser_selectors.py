@@ -34,8 +34,16 @@ new Function('require','module','exports',compiled)(
       <button id="compare-mode" aria-pressed="false">切换对比模式</button>
       <div id="normal"><textarea aria-label="对话输入" placeholder=""></textarea></div>
       <div id="compare" hidden>
-        <div class="flex h-full w-full flex-col"><select aria-label="左模型"><option>A</option></select><div id="left"></div></div>
-        <div class="flex h-full w-full flex-col"><select aria-label="右模型"><option>B</option></select><div id="right"></div></div>
+        <div class="flex h-full w-full flex-col">
+          <div data-testid="compare-results">
+            <div data-testid="compare-result-left" id="left"></div>
+            <div data-testid="compare-result-right" id="right"></div>
+          </div>
+          <div data-testid="compare-model-selectors">
+            <select aria-label="左模型"><option>A</option></select>
+            <select aria-label="右模型"><option>B</option></select>
+          </div>
+        </div>
         <div role="textbox" contenteditable="true" aria-label="对话输入"></div>
       </div>
       <button id="send">发送</button>
@@ -53,7 +61,7 @@ new Function('require','module','exports',compiled)(
           const answer=document.createElement('div');
           answer.setAttribute('data-slot','aui_assistant-message-root');
           const content=document.createElement('div');content.setAttribute('data-citation-index-map','{}');
-          const md=document.createElement('div');md.className='aui-md';md.textContent=text;
+          const md=document.createElement('div');md.className='aui-md';md.textContent=text+'-'+id;
           content.append(md);answer.append(content);document.getElementById(id).append(answer);
         }
       };
@@ -61,8 +69,8 @@ new Function('require','module','exports',compiled)(
   assert.equal(await page.getByRole('textbox',{name:'智能体描述',exact:true}).inputValue(),'persisted description');
   const agent=new mod.exports.AgentPage(page);
   await agent.openDebugCompare();
-  assert.deepEqual(await agent.sendDebugCompare('old-marker','old-marker'),['old-marker','old-marker']);
-  assert.deepEqual(await agent.sendDebugCompare('new-marker','new-marker'),['new-marker','new-marker']);
+  assert.deepEqual(await agent.sendDebugCompare('old-marker','old-marker'),['old-marker-left','old-marker-right']);
+  assert.deepEqual(await agent.sendDebugCompare('new-marker','new-marker'),['new-marker-left','new-marker-right']);
   assert.equal(await page.locator('[data-slot="aui_assistant-message-root"]').count(),4);
   await agent.closeDebugCompare();
   await expect(page.getByRole('textbox',{name:'对话输入',exact:true})).toHaveCount(1);

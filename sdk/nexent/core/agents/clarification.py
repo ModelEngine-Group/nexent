@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Declarative clarification forms shared by the runtime and application boundary."""
 
 from typing import Annotated, Literal
@@ -28,6 +30,7 @@ class ClarificationQuestion(BaseModel):
     options: list[ClarificationOption] = Field(default_factory=list, max_length=12)
     allow_other: bool = False
     placeholder: str = Field(default="", max_length=300)
+    creation_request: str | None = Field(default=None, min_length=1, max_length=8000)
 
     @model_validator(mode="before")
     @classmethod
@@ -46,6 +49,15 @@ class ClarificationQuestion(BaseModel):
 
     @model_validator(mode="after")
     def validate_options(self):
+        if self.id == "workbench_creation_mode":
+            choices = {option.id for option in self.options}
+            if (self.type != "single_choice" or not self.required or self.allow_other
+                    or not self.creation_request or "continue_chat" not in choices
+                    or not choices <= {"agent_create", "skill_create", "continue_chat"}
+                    or not choices.intersection({"agent_create", "skill_create"})):
+                raise ValueError("Invalid Workbench creation confirmation")
+        elif self.creation_request is not None:
+            raise ValueError("Creation context requires a Workbench creation confirmation")
         if self.type == "text" and (self.options or self.allow_other):
             raise ValueError("Text questions cannot contain choices or an other-answer field")
         if self.type != "text" and len(self.options) < 2:
@@ -61,6 +73,8 @@ class ClarificationForm(BaseModel):
 
     @model_validator(mode="after")
     def validate_questions(self):
+        if len(self.questions) != 1 and any(q.id == "workbench_creation_mode" for q in self.questions):
+            raise ValueError("Ask the creation-mode confirmation separately")
         if len({question.id for question in self.questions}) != len(self.questions):
             raise ValueError("Question IDs must be unique")
         if len({question.title for question in self.questions}) != len(self.questions):

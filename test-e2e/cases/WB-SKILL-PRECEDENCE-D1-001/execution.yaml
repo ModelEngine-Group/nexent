@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: WB-SKILL-PRECEDENCE-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_effective_skill_identity_survives_component_chain
+acceptance_bindings:
+  AC-01: [test_effective_skill_identity_survives_component_chain]
+  AC-02: [test_effective_skill_identity_survives_component_chain]

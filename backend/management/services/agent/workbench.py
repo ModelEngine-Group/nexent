@@ -11,28 +11,41 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
-from nexent.core.agents.agent_model import AgentConfig
 
-from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.agent import WorkbenchSessionConfig
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_PRIVATE,
+)
+from contracts.errors.exceptions import (
+    ValidationError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.roles import has_any_role
+from infrastructure.serialization.containers import clone_runtime_config
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.identity.group import query_group_ids_by_user
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
-from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
     system_agent_provider,
 )
-from management.services.model.resolver import is_model_available
-from management.services.skill.service import SkillService
-from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
-from management.db.identity.group import query_group_ids_by_user
-from infrastructure.serialization.containers import clone_runtime_config
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     get_agent_knowledge_capabilities,
+    resolve_executable_knowledge_scope,
     resolve_root_version,
 )
+from management.services.skill.permission import (
+    _get_user_role,
+    _to_group_id_set,
+    can_view_skill,
+)
+from management.services.skill.service import SkillService
+from nexent.core.agents.agent_model import AgentConfig
 
 
 @dataclass(frozen=True)
@@ -162,6 +175,7 @@ def _resolve_skill_mounts(
     if not mounts and not published_instances:
         return ()
     runtime_mounts = {int(mount["skill_id"]): mount for mount in mounts}
+    explicit_skill_ids = set(runtime_mounts)
     effective_mounts: list[Mapping[str, Any]] = []
     seen_skill_ids: set[int] = set()
     for instance in published_instances:
@@ -177,7 +191,9 @@ def _resolve_skill_mounts(
         )
     effective_mounts.extend(runtime_mounts.values())
 
-    resolved = []
+    # Runtime prompts, configuration and files share the Skill name namespace.
+    # Select complete resources before capturing files or resolving dependencies.
+    selected_by_name: Dict[str, tuple[int, Mapping[str, Any], Dict[str, Any], str]] = {}
     role = _get_user_role(user_id) if user_id else None
     groups = set(query_group_ids_by_user(user_id) or []) if user_id else set()
     for mount in effective_mounts:
@@ -188,6 +204,19 @@ def _resolve_skill_mounts(
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
         if resource_owner != ASSET_OWNER_TENANT_ID and user_id and not can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
+        skill_name = str(skill.get("name") or skill_id)
+        previous = selected_by_name.get(skill_name)
+        if previous is not None and previous[0] != skill_id:
+            previous_is_explicit = previous[0] in explicit_skill_ids
+            current_is_explicit = skill_id in explicit_skill_ids
+            if previous_is_explicit == current_is_explicit:
+                raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
+            if previous_is_explicit:
+                continue
+        selected_by_name[skill_name] = (skill_id, mount, skill, resource_owner)
+
+    resolved = []
+    for skill_id, mount, skill, resource_owner in selected_by_name.values():
         instance = next((item for item in published_instances if item.get("skill_id") == skill_id), {})
         config_values = resolve_skill_config(
             skill.get("config_schemas") or [],
@@ -210,10 +239,16 @@ def _resolve_skill_mounts(
         )
     tool_ids = sorted({tool_id for skill in resolved for tool_id in skill.tool_ids})
     definitions = {int(tool["tool_id"]): deepcopy(tool) for tool in query_tools_by_ids(tool_ids)} if tool_ids else {}
+    tool_names: Dict[str, int] = {}
     for tool_id in tool_ids:
         tool = definitions.get(tool_id)
         if not tool or tool.get("is_available") is not True or str(tool.get("author")) not in (tenant_id, ASSET_OWNER_TENANT_ID):
             raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+        tool_name = str(tool.get("name") or tool.get("class_name") or "")
+        if tool_name and tool_name in tool_names and tool_names[tool_name] != tool_id:
+            raise WorkbenchError("RUNTIME_SKILL_TOOL_CONFLICT")
+        if tool_name:
+            tool_names[tool_name] = tool_id
         values: Dict[str, Any] = {}
         parameter_names = {param.get("name") for param in tool.get("params") or []}
         for skill in resolved:
@@ -301,8 +336,6 @@ class RuntimeMountService:
         Callers consume the returned tree and scope summary before starting a
         model. Resource checks are separate from the pure root compilation.
         """
-        from contracts.knowledge import ConversationKnowledgeScopeRequest
-        from management.services.knowledge_base.scope import resolve_executable_knowledge_scope
 
         scope = ConversationKnowledgeScopeRequest.model_validate(dict(tree.overlay.knowledge_scope or {}))
         compiled, resolution = resolve_executable_knowledge_scope(
@@ -445,25 +478,17 @@ def resolve_workbench_config(
         origin="SYSTEM",
     )
     child_mounts = tuple(child_identities)
-    if canonical.model_id is not None:
-        model_info = get_model_by_model_id(
-            canonical.model_id, tenant_id=tenant_id
-        )
-        if not is_model_available(model_info):
-            raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
-
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
         agent_id=int(root_identity.agent_id), tenant_id=system_ref.tenant_id,
         version_no=int(root_identity.version_no),
     )
-    generation = canonical.generation_config
     root = PublishedRootDescriptor(
         identity=root_identity,
         published_snapshot=deepcopy(snapshot),
     )
     overlay = RootRuntimeOverlay(
-        model_id=canonical.model_id,
-        requested_output_tokens=generation.requested_output_tokens,
+        model_id=None,
+        requested_output_tokens=canonical.requested_output_tokens,
         skill_mounts=tuple(
             value.model_dump(mode="json") for value in canonical.skill_mounts
         ),
@@ -489,7 +514,7 @@ def resolve_workbench_config(
 def authorize_workbench_agent(snapshot: Mapping[str, Any], user_id: str) -> None:
     """Apply the Agent list's creator/group visibility rules before resolving resources."""
     role = _get_user_role(user_id)
-    if role in CAN_EDIT_ALL_USER_ROLES or str(snapshot.get("created_by")) == str(user_id):
+    if has_any_role(role, CAN_EDIT_ALL_USER_ROLES) or str(snapshot.get("created_by")) == str(user_id):
         return
     groups = set(query_group_ids_by_user(user_id) or [])
     if snapshot.get("ingroup_permission") == PERMISSION_PRIVATE or not groups.intersection(_to_group_id_set(snapshot.get("group_ids"))):

@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SIDEBAR-REFRESH-20261104
+  change_type: bugfix
+  bug_id: CHAT-SIDEBAR-REFRESH-20261104
+  title: Preserve loaded Workbench history during background refresh
+  description: Show the list skeleton only when no persisted rows are available; retain loaded row DOM and the pagination footprint during a same-adapter reload, and prevent browser scroll anchoring from shifting the Workbench viewport during metadata reorder.
+  observed_behavior: Metadata refresh sets isLoading while retaining runtime records, but the sidebar hides all loaded rows and remounts them after the request, producing visible flicker and scroll/focus loss.
+  expected_behavior: Pending and failed background refresh keep existing rows, scroll, focus, selection and drafts. Successful responses update history normally, including confirmed empty lists. Initial empty loads and fresh owner scopes still show skeletons without retaining old history.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing activity tests check ordering and active composer preservation after refresh, but do not hold a reload pending and inspect row DOM or sidebar scroll.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-SIDEBAR-D4-001]
+    added: []
+    modified: [CHAT-ACTIVITY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Real remote-list runtime keeps row DOM, focus, scroll, active identity and composer text through delayed success and failure.
+      - First empty loading shows skeletons; confirmed deletion removes old rows; a fresh owner scope cannot retain another owner's rows.
+      - The existing load-more control retains its footprint but is disabled while the cursor reloads.
+    reason: Rendered runtime tests exercise the actual loading transition; existing polling and active-stream tests remain separate regression coverage.
+    test_selectors:
+      - frontend/tests/workbench/ThreadListRefresh.test.tsx
+      - frontend/tests/workbench/ConversationActivitySync.test.tsx
+      - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
+  notes: >-
+    Simple visual fix restoring CHAT-SIDEBAR-RULE-001/004; no business rule,
+    API, authorization, data handling or runtime transition changes. Baseline:
+    ../nexent-doc/nexent/chat-automation-activity-and-quota/design.md.
+    Strengthen existing CHAT-ACTIVITY-D4-001 AC-02 without adding a duplicate Case.
+    Its preparation remains self-contained, families=[], with controlled HTTP
+    routes and browser-context cleanup; release the delayed route even on failure.
+    Reuse CHAT-SIDEBAR-D4-001 for pin/search/rename isolation. Do not stop polling,
+    cache another user's rows, change Agent-chat paging, or touch production data.

@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-RESOURCE-LAZY-D4-001
+  feature_id: WB-CONTROLS
+  requirement_ids: [WB-RESOURCE-LAZY-20261113, WB-SKILL-SUMMARY-20261113]
+  business_rule_ids: [WB-CONTROLS-RULE-001, WB-CONTROLS-RULE-007]
+  title: Workbench renders before execution readiness and discovers resources on demand
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove page-level request timing, local catalog failures and unchanged composer draft.
+  preconditions:
+  - Running local frontend with intercepted authorized tenant APIs and no real generation or writes.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Reload Workbench with model and bootstrap responses deferred, then type a draft.
+    expected: Composer and resource entry points are visible, draft is editable, Send is disabled, and no candidate Agent, Skill, Knowledge or knowledge-capability request occurs.
+  - order: 2
+    action: Release execution readiness, open the Agent drawer with its first catalog request failing, then refresh and reopen it.
+    expected: Failure is confined to the drawer, refresh loads candidates, and the identical composer retains its draft; reopening reuses fresh cached candidates.
+  - order: 3
+    action: Close Agent, open Skill, close it and open Knowledge, then close without confirming.
+    expected: Each catalog is first queried on opening its own drawer; Skill requests use view=mount, entries render, and the original composer draft survives all drawers.
+  expected_results:
+  - Unopened resource catalogs never gate page rendering or execution readiness.
+  - Local failure and retry preserve composer identity and draft and reuse fresh Agent data.
+  - Each drawer loads its own resources on demand and cancellation leaves mounts unchanged.
+  forbidden_side_effects:
+  - No generation, persistent configuration mutation, mounting on cancellation or real external API traffic.
+  actor: Authorized mock tenant user
+  journey: [Open Workbench, Type draft, Open Agent, Retry catalog, Open Skill, Open Knowledge, Cancel]
+  final_business_result:
+  - Users can prepare a message without waiting for resource discovery and inspect resources independently.
+  failure_evidence: [Browser trace and assertion screenshot]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Pending execution metadata does not hide the composer or prefetch catalogs.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Local Agent failure, retry and cache preserve draft and DOM identity.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Skill and Knowledge load only on explicit opening and cancellation preserves mounts.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

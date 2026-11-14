@@ -58,6 +58,21 @@ class DailyLaunchTests(unittest.TestCase):
                 launcher.sync_checkout(Path("repo"), "develop")
             self.assertEqual(git.call_count, 1)
 
+    def test_explicit_validation_branch_is_plannable_without_outputs(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(launcher.main(["--test-home", root, "--branch", "djb/verify-daily-process"]), 0)
+            self.assertEqual(json.loads(output.getvalue())["branch"], "djb/verify-daily-process")
+            self.assertFalse((Path(root) / "runs").exists())
+
+    def test_invalid_ref_is_rejected_before_fetch(self):
+        with patch.object(launcher, "git", side_effect=["", "invalid..branch",
+                                                      subprocess.CalledProcessError(128, "check-ref-format")]) as git:
+            with self.assertRaises(subprocess.CalledProcessError):
+                launcher.sync_checkout(Path("repo"), "invalid..branch")
+            self.assertFalse(any("fetch" in call.args for call in git.call_args_list))
+
     def test_wrong_branch_never_fetches(self):
         with patch.object(launcher, "git", side_effect=["", "other"]) as git:
             with self.assertRaisesRegex(RuntimeError, "branch differs"):

@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 /**
  * Hook for quota warning notifications with role-based visibility.
  *
@@ -15,6 +16,7 @@
  * Aggregation: when multiple tenants/KBs trigger the same level,
  * shows "<count> tenants/knowledge bases" instead of individual names.
  */
+import { hasRole } from "@/lib/roles";
 import { useCallback, useRef } from "react";
 import { notification } from "antd";
 import { useParams, useRouter } from "next/navigation";
@@ -85,7 +87,7 @@ interface WarningItem {
   usagePct: number;
 }
 
-type UserRole = "SU" | "ADMIN" | string;
+type UserRole = string | readonly string[];
 
 export function useQuotaWarning(
   userRole?: UserRole,
@@ -100,7 +102,8 @@ export function useQuotaWarning(
   const notificationKeysByItemRef = useRef<Map<string, Set<string>>>(new Map());
   const activeLevelByItemRef = useRef<Map<string, WarningLevel>>(new Map());
   const programmaticCloseRef = useRef<Set<string>>(new Set());
-  const isPlatformAdmin = userRole === "SU" || userRole === "ASSET_OWNER";
+  const isPlatformAdmin =
+    hasRole(userRole, "SU") || hasRole(userRole, "ASSET_OWNER");
   const dismissOwner = userId || "anonymous";
 
   const unregisterNotificationKey = useCallback((notificationKey: string) => {
@@ -300,7 +303,7 @@ export function useQuotaWarning(
                 {t("quota.warning.manageTenant")}
               </button>
             )}
-            {scope === "kb" && userRole === "ADMIN" && (
+            {scope === "kb" && hasRole(userRole, "ADMIN") && (
               <button
                 type="button"
                 onClick={navigateToQuotaManagement}
@@ -329,7 +332,7 @@ export function useQuotaWarning(
                 count: activeItems.length,
               })}
             </p>
-            {(scope === "tenant" || userRole === "ADMIN") && (
+            {(scope === "tenant" || hasRole(userRole, "ADMIN")) && (
               <button
                 type="button"
                 onClick={navigateToQuotaManagement}
@@ -436,7 +439,7 @@ export function useQuotaWarning(
 
       // ── Tenant-level warnings ──────────────────────────────────────
       // Developer/USER should NOT see tenant warnings
-      if (tenant_level && (isPlatformAdmin || userRole === "ADMIN")) {
+      if (tenant_level && (isPlatformAdmin || hasRole(userRole, "ADMIN"))) {
         if (tenant_level.warning_level === "warning") {
           notifyAggregated("tenant", "warning", [
             {
@@ -494,10 +497,9 @@ export function useQuotaWarning(
 
       // ── Tenant-level ───────────────────────────────────────────────
       // Only SU and ADMIN see tenant warnings
-      if (isPlatformAdmin || userRole === "ADMIN") {
+      if (isPlatformAdmin || hasRole(userRole, "ADMIN")) {
         const level = usageData.tenant_warning_level as
-          | WarningLevel
-          | undefined;
+          WarningLevel | undefined;
         if (level && (level as string) !== "normal") {
           const desc =
             level === "blocked"

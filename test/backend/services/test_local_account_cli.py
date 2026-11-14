@@ -20,12 +20,12 @@ from infrastructure.security.passwords import verify_password
 def store(mocker):
     session = MagicMock()
     session.execute.return_value.first.return_value = None
-    session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU")]
-    mocker.patch("management.db.client.get_db_session", return_value=nullcontext(session))
-    lock = mocker.patch("management.db.identity.account.lock_account_keys")
-    lookup = mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
-    create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
-    member = mocker.patch("management.db.identity.user_tenant.insert_user_tenant")
+    session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU", roles=["SU"])]
+    mocker.patch("infrastructure.security.account_cli.get_db_session", return_value=nullcontext(session))
+    lock = mocker.patch("infrastructure.security.account_cli.lock_account_keys")
+    lookup = mocker.patch("infrastructure.security.account_cli.get_account_by_email", return_value=None)
+    create = mocker.patch("infrastructure.security.account_cli.create_account", return_value={"user_id": "new-su"})
+    member = mocker.patch("infrastructure.security.account_cli.insert_user_tenant")
     return SimpleNamespace(session=session, lock=lock, lookup=lookup, create=create, member=member)
 
 
@@ -41,16 +41,16 @@ def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
 
 @pytest.mark.parametrize("check_only", [True, False])
 def test_existing_su_is_idempotent_without_password_work(store, check_only):
-    store.lookup.return_value = {"user_id": "original", "account_status": "active"}
+    store.lookup.return_value = {"user_id": "original", "delete_flag": "N"}
     assert cli.bootstrap_super_admin("su@example.com", "", check_only=check_only) == {"exists": True}
     store.create.assert_not_called()
     store.member.assert_not_called()
 
 
-@pytest.mark.parametrize("status,roles", [("disabled", ["SU"]), ("active", []), ("active", ["SU", "USER"])])
-def test_unavailable_or_non_su_identity_cannot_be_promoted(store, status, roles):
-    store.lookup.return_value = {"user_id": "original", "account_status": status}
-    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r) for r in roles]
+@pytest.mark.parametrize("flag,roles", [("Y", ["SU"]), ("N", []), ("N", ["SU", "USER"])])
+def test_unavailable_or_non_su_identity_cannot_be_promoted(store, flag, roles):
+    store.lookup.return_value = {"user_id": "original", "delete_flag": flag}
+    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r, roles=[r]) for r in roles]
     with pytest.raises(AccountConflictError, match="unavailable or non-SU"):
         cli.bootstrap_super_admin("su@example.com", "Password123")
     store.create.assert_not_called()

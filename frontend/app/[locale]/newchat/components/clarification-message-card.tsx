@@ -16,6 +16,8 @@ import type {
 } from "@/types/clarification";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
+import { useCreationModeConfirmationContext } from "@/components/interaction/creation-mode-context";
+import { parseCreationModeForm, selectCreationMode } from "@/lib/creationMode";
 
 export function ClarificationMessageCard({
   data,
@@ -27,6 +29,7 @@ export function ClarificationMessageCard({
   const aui = useAui();
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const { t, i18n } = useTranslation();
+  const creationController = useCreationModeConfirmationContext();
   const messageId = useAuiState((state) => state.message.id);
   const threadId = useAuiState((state) => state.threads.mainThreadId);
   const isLast = useAuiState(
@@ -40,6 +43,7 @@ export function ClarificationMessageCard({
   const payload = data as ClarificationMessageData | undefined;
   const form = parseClarification(payload?.form);
   if (!form || !runtime) return null;
+  const creation = creationController && parseCreationModeForm(form);
   const submit = async (answers: ClarificationAnswer[]) => {
     const thread = runtime.threads.getById(threadId);
     if (
@@ -55,6 +59,31 @@ export function ClarificationMessageCard({
       throw new Error(t("chat.clarification.unavailable"));
     }
     const query = formatClarificationQuery(form, answers, i18n.language);
+    if (creation && selectCreationMode(form, answers)) {
+      const messages = thread.getState().messages;
+      const sourceIndex = messages.findIndex(
+        (message) => message.id === messageId
+      );
+      const source = messages
+        .slice(0, sourceIndex)
+        .findLast((message) => message.role === "user");
+      await creationController!.confirm({
+        threadId,
+        messageId,
+        originalRequest:
+          source?.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n") ?? "",
+        response: {
+          schema_version: 1,
+          form,
+          unit_index: payload?.unitIndex ?? null,
+          answers,
+        },
+      });
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
       const feedback = protectOrdinarySend(thread, {
         restoreDraft: false,
@@ -82,7 +111,16 @@ export function ClarificationMessageCard({
             },
           },
         },
-        runConfig: { ...config, custom: { ...config.custom, ...feedback } },
+        runConfig: {
+          ...config,
+          custom: {
+            ...config.custom,
+            ...feedback,
+            // Clarification answers are their own message: reply annotations
+            // stay pending on the composer and must not ride this run.
+            messageAnnotations: undefined,
+          },
+        },
       });
     });
   };
@@ -90,9 +128,29 @@ export function ClarificationMessageCard({
     <ClarificationCard
       key={`${messageId}:${payload?.unitIndex}:${payload?.submitted === true}`}
       dataSlot="clarification-message"
-      title={t("chat.clarification.title")}
-      description={t("chat.clarification.description")}
-      questions={toCardQuestions(form.questions)}
+      title={t(
+        creation
+          ? "workbench.creationConfirmation.title"
+          : "chat.clarification.title"
+      )}
+      description={t(
+        creation
+          ? "workbench.creationConfirmation.description"
+          : "chat.clarification.description"
+      )}
+      questions={toCardQuestions(form.questions).map((question) => ({
+        ...question,
+        options: question.options?.map((option) => ({
+          ...option,
+          disabled:
+            !!creation &&
+            (option.id === "agent_create"
+              ? !creationController!.canCreateAgent
+              : option.id === "skill_create"
+                ? !creationController!.canCreateSkill
+                : false),
+        })),
+      }))}
       initialAnswers={payload?.answers}
       submitted={payload?.submitted}
       readOnly={
@@ -111,7 +169,9 @@ export function ClarificationMessageCard({
           ? "chat.clarification.history"
           : isRunning
             ? "chat.clarification.saving"
-            : "chat.clarification.hint"
+            : creation
+              ? "workbench.creationConfirmation.hint"
+              : "chat.clarification.hint"
       )}
       onSubmit={submit}
     />

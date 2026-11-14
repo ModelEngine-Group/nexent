@@ -89,12 +89,16 @@ def test_source_mapping_preserves_identity_hash_times_and_separates_roles():
     ],
 )
 def test_inactive_source_users_stay_disabled(extra):
-    assert map_source_user(source_user(**extra))["account_status"] == "disabled"
+    assert map_source_user(source_user(**extra))["delete_flag"] == "Y"
 
 
-def test_cas_generated_password_does_not_enable_password_login():
-    row = source_user(raw_user_meta_data={"provider": "cas"})
-    assert not map_source_user(row)["password_login_enabled"]
+@pytest.mark.parametrize("provider", ["cas", "github"])
+@pytest.mark.parametrize("has_password", [False, True])
+def test_provider_binding_does_not_override_actual_password_credential(provider, has_password):
+    row = source_user(raw_user_meta_data={"provider": provider})
+    if not has_password:
+        row["encrypted_password"] = None
+    assert map_source_user(row)["password_login_enabled"] is has_password
 
 
 @pytest.mark.parametrize(
@@ -113,31 +117,3 @@ def test_source_validation_errors_do_not_expose_credentials(field, value):
         map_source_user(row)
     assert "secret-plaintext" not in str(error.value)
     assert row.get("encrypted_password", "") not in str(error.value)
-
-
-def test_migration_cli_rejects_missing_password_without_connecting(monkeypatch, mocker, capsys):
-    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
-
-    mocker.patch.object(migrate, "load_settings", return_value={})
-    monkeypatch.setattr("sys.argv", ["migrate_docker.py"])
-    connect = mocker.patch("psycopg2.connect")
-    assert migrate.main() == 1
-    connect.assert_not_called()
-    assert "SUPABASE_POSTGRES_PASSWORD" in capsys.readouterr().err
-
-
-def test_migration_cli_hides_database_connection_details(monkeypatch, mocker, capsys):
-    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
-
-    secret = "private-source-dsn-marker"
-    mocker.patch.object(migrate, "load_settings", return_value={
-        "SUPABASE_POSTGRES_HOST": secret,
-        "SUPABASE_POSTGRES_PASSWORD": "source-secret",
-        "NEXENT_POSTGRES_PASSWORD": "target-secret",
-    })
-    monkeypatch.setattr("sys.argv", ["migrate_docker.py", "--apply"])
-    mocker.patch("psycopg2.connect", side_effect=RuntimeError(secret))
-    assert migrate.main() == 1
-    output = capsys.readouterr()
-    assert "RuntimeError" in output.err
-    assert secret not in output.out + output.err

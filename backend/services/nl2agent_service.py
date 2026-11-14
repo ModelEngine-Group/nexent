@@ -12,7 +12,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agent_names import validate_agent_name
@@ -33,7 +33,7 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
@@ -1483,10 +1483,10 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
-    if request.model_id is not None or request.generation_config is not None:
+    if request.model_id is not None or request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}):
         default_model = resolve_creator_model(
             model_config_list, agent_config, tenant_id, request.model_id,
-            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            getattr(request, "_runtime_model_parameter_preferences", request.model_parameter_preferences),
             default_model,
         )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
@@ -1540,12 +1540,13 @@ async def build_nl2agent_run_info(
         "true" if _requires_policy_clarification(request.query) else "false"
     )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
-    mcp_headers["X-Nexent-Internal-Token"] = TOKEN
+    mcp_headers["X-Nexent-Internal-Token"] = NEXENT_MCP_INTERNAL_TOKEN
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 
     stop_event = threading.Event()
     run_info = AgentRunInfo(
+        tenant_id=tenant_id,
         query=final_query,
         model_config_list=model_config_list,
         observer=_Nl2AgentBoundaryObserver(

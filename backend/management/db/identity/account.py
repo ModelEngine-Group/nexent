@@ -7,9 +7,16 @@ from uuid import uuid4
 from sqlalchemy import select, text, update
 
 from contracts.errors.exceptions import AccountConflictError
-from management.utils.orm import as_dict
+from contracts.roles import normalize_roles, roles_from_record
+from infrastructure.security.passwords import password_scheme
 from management.db.client import get_db_session
-from management.db.models import UserAccount
+from management.db.identity.membership import (
+    check_admin_removal,
+    lock_tenants,
+    locked_members,
+)
+from management.db.models import UserAccount, UserTenant
+from management.utils.orm import as_dict
 
 
 def lock_account_keys(session, user_id: str, email: str | None) -> None:
@@ -21,9 +28,7 @@ def lock_account_keys(session, user_id: str, email: str | None) -> None:
     if email is not None:
         keys.add(f"account-email:{email}")
     for key in sorted(keys):
-        session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key}
-        )
+        session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
 
 
 def _one(statement, db_session=None):
@@ -36,9 +41,7 @@ def _one(statement, db_session=None):
 
 def get_account(user_id: str, db_session=None):
     return _one(
-        select(UserAccount).where(
-            UserAccount.user_id == user_id, UserAccount.delete_flag == "N"
-        ),
+        select(UserAccount).where(UserAccount.user_id == user_id, UserAccount.delete_flag == "N"),
         db_session,
     )
 
@@ -53,35 +56,29 @@ def get_account_by_email(email: str, db_session=None):
     )
 
 
-def create_account(email: str | None, password_hash=None, *, user_id=None, db_session=None,
-                   api_only=False, created_by=None):
+def create_account(
+    email: str | None, password_hash=None, *, user_id=None, db_session=None, api_only=False, created_by=None
+):
     """Create a login identity or an explicitly passwordless, email-free API identity."""
     user_id = user_id or str(uuid4())
     if api_only and (email is not None or password_hash is not None):
         raise ValueError("API-only accounts cannot have an email or password")
     email = None if api_only else str(email or "").strip().lower()
     if not api_only and (
-        not email
-        or len(email) > 255
-        or email.count("@") != 1
-        or any(character.isspace() for character in email)
+        not email or len(email) > 255 or email.count("@") != 1 or any(character.isspace() for character in email)
     ):
         raise ValueError("Invalid account email")
     with get_db_session(db_session) as session:
         lock_account_keys(session, user_id, email)
         if get_account(user_id, session) or (email is not None and get_account_by_email(email, session)):
             raise AccountConflictError("Email already exists")
-        from infrastructure.security.passwords import password_scheme
-
         account = UserAccount(
             user_id=user_id,
             user_email=email,
+            user_roles=[],
             password_hash=password_hash,
-            password_hash_scheme=password_scheme(password_hash)
-            if password_hash
-            else None,
+            password_hash_scheme=password_scheme(password_hash) if password_hash else None,
             password_login_enabled=bool(password_hash),
-            account_status="active",
             token_version=0,
             email_confirmed_at=None if api_only else datetime.utcnow(),
             created_by=created_by or user_id,
@@ -96,12 +93,18 @@ def create_account(email: str | None, password_hash=None, *, user_id=None, db_se
 
 def delete_account(user_id: str, db_session=None):
     with get_db_session(db_session) as session:
+        tenant_ids = session.scalars(
+            select(UserTenant.tenant_id).where(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+        ).all()
+        lock_tenants(session, tenant_ids)
+        member = locked_members(session, [user_id]).get(user_id)
+        if member:
+            check_admin_removal(session, member, roles_from_record(member), ())
         session.execute(
             update(UserAccount)
             .where(UserAccount.user_id == user_id, UserAccount.delete_flag == "N")
             .values(
                 delete_flag="Y",
-                account_status="disabled",
                 token_version=UserAccount.token_version + 1,
                 password_hash=None,
                 password_login_enabled=False,
@@ -113,15 +116,12 @@ def delete_account(user_id: str, db_session=None):
 
 def change_password(user_id: str, expected_hash: str, password_hash: str):
     """Compare-and-swap prevents overwriting a concurrent password change."""
-    from infrastructure.security.passwords import password_scheme
-
     with get_db_session() as session:
         result = session.execute(
             update(UserAccount)
             .where(
                 UserAccount.user_id == user_id,
                 UserAccount.password_hash == expected_hash,
-                UserAccount.account_status == "active",
                 UserAccount.delete_flag == "N",
             )
             .values(
@@ -138,16 +138,24 @@ def change_password(user_id: str, expected_hash: str, password_hash: str):
 
 def _account_dict(account):
     result = as_dict(account)
+    roles = normalize_roles(result.get("user_roles"), allow_empty=True)
+    result["roles"] = list(roles)
+    result["user_role"] = roles[0] if roles else None
     # Existing HTTP/service contracts still expose the established email key.
     result["email"] = result.get("user_email")
     return result
 
 
-def set_account_profile(user_id, role, email, actor, session):
+def set_account_profile(user_id, role, email, actor, session, *, roles=None):
     account = get_account(user_id, session)
     if not account:
         raise AccountConflictError("Account profile is missing; run the account schema migration first")
-    values = {"user_role": role, "updated_by": actor, "update_time": datetime.utcnow()}
+    assigned = normalize_roles(role if roles is None else roles)
+    values = {
+        "user_roles": list(assigned),
+        "updated_by": actor,
+        "update_time": datetime.utcnow(),
+    }
     if email is not None:
         email = str(email).strip().lower()
         lock_account_keys(session, user_id, email)
@@ -155,4 +163,6 @@ def set_account_profile(user_id, role, email, actor, session):
         if existing and existing["user_id"] != user_id:
             raise AccountConflictError("Email already exists")
         values["user_email"] = email
-    session.execute(update(UserAccount).where(UserAccount.user_id == user_id, UserAccount.delete_flag == "N").values(**values))
+    session.execute(
+        update(UserAccount).where(UserAccount.user_id == user_id, UserAccount.delete_flag == "N").values(**values)
+    )

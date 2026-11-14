@@ -1,150 +1,55 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Functional tests for root-only Workbench generation overrides."""
+"""SU-AC-06: all Agent modes share root-only profile preferences."""
+
+from copy import deepcopy
 
 import pytest
-from pydantic import ValidationError
-
+from contracts.errors.exceptions import ModelOutletValidationError
 from management.services.agent.preparation.inputs import _materialize_runtime_skill_snapshot
-from management.services.agent.preparation.run import apply_root_generation_overlay
-from contracts.agent import WorkbenchGenerationConfig
+from management.services.agent.preparation.run import apply_root_model_preferences
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
-
-EFFORT_CAPABILITY = {"status": "supported", "control": "effort", "levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]}
-
-
-def test_workbench_generation_schema_defaults_effort_to_low():
-    assert WorkbenchGenerationConfig().thinking_effort == "low"
+from management.services.model.profiles import build_outlet_draft
+from test.backend.services.test_model_profile_service import draft_request
 
 
-@pytest.mark.parametrize("effort", ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"])
-def test_complete_workbench_effort_schema_and_root_overlay(effort):
-    config = WorkbenchGenerationConfig(
-        deep_thinking=True, thinking_effort=effort, temperature=0.6, top_p=0.83,
-        requested_output_tokens=2000,
-    )
-    assert WorkbenchGenerationConfig.model_validate(config.model_dump()) == config
+@pytest.fixture
+def profile():
+    value, _ = build_outlet_draft(draft_request(parameter_values={"enable_thinking": True, "reasoning_budget_tokens": 64}), "tenant")
+    connection = value.connection.model_copy(update={"credential_ref": value.connection.credential_ref.model_copy(update={"model_id": 42})})
+    return value.model_copy(update={"outlet_id": 42, "connection": connection})
+
+
+@pytest.mark.parametrize("values", [{"temperature": 0, "top_p": 0.8}, {"enable_thinking": False}, {"reasoning_budget_tokens": 128}])
+def test_su_ac_06_only_root_changes_and_all_persisted_defaults_remain_intact(profile, values):
+    child = AgentConfig(name="child", description="", tools=[], model_name="shared")
+    root = AgentConfig(name="root", description="", tools=[], model_name="shared", managed_agents=[child])
+    shared = ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid", resolved_profile=profile)
+    models = [shared]
+    before = deepcopy(profile.model_dump())
+    apply_root_model_preferences(models, root, {"42": values}, outlet_profiles={42: profile}, agent_overrides={})
+    assert root.model_name.startswith("conversation_root_model_")
+    assert child.model_name == "shared"
+    assert shared.resolved_profile.model_dump() == before
+    for key, value in values.items():
+        assert models[-1].resolved_profile.parameter_values[key] == value
+    if values.get("enable_thinking") is False:
+        assert "reasoning_budget_tokens" not in models[-1].resolved_profile.parameter_values
+
+
+def test_su_ac_04_other_model_preferences_do_not_affect_selected_root(profile):
     root = AgentConfig(name="root", description="", tools=[], model_name="shared")
-    original = ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
-                           temperature=0.2, top_p=0.9, reasoning_effort="high")
-    models = [original]
-    apply_root_generation_overlay(models, root, config.model_dump())
-    assert models[-1].reasoning_effort == ("high" if effort == "auto" else effort)
-    assert models[-1].temperature == 0.6
-    assert models[-1].top_p == 0.83
-    assert original.reasoning_effort == "high"
-    assert original.temperature == 0.2
-    apply_root_generation_overlay(models, root, {"deep_thinking": False, "thinking_effort": effort})
-    assert models[-1].reasoning_effort is None
+    models = [ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid", resolved_profile=profile)]
+    apply_root_model_preferences(models, root, {"43": {"temperature": 0}})
+    assert len(models) == 1 and root.model_name == "shared"
 
 
-@pytest.mark.parametrize("effort", ["invalid", "", 1])
-def test_workbench_effort_schema_rejects_unknown_values(effort):
-    with pytest.raises(ValidationError):
-        WorkbenchGenerationConfig(thinking_effort=effort)
-
-
-def test_neutral_generation_overlay_changes_only_root_alias():
-    """UT-BE-WB-019: runtime generation values affect only the effective root."""
-    child = AgentConfig(
-        name="child",
-        description="",
-        tools=[],
-        model_name="shared_model",
-    )
-    root = AgentConfig(
-        name="root",
-        description="",
-        tools=[],
-        model_name="shared_model",
-        managed_agents=[child],
-    )
-    shared = ModelConfig(
-        cite_name="shared_model",
-        model_name="provider/model",
-        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
-        temperature=0.1,
-        top_p=0.95,
-    )
-    models = [shared]
-
-    apply_root_generation_overlay(
-        models,
-        root,
-        {"deep_thinking": False, "temperature": 0.7, "top_p": 0.8},
-    )
-
-    assert root.model_name == "workbench_root_model"
-    assert child.model_name == "shared_model"
-    assert shared.temperature == 0.1
-    assert models[-1].temperature == 0.7
-    assert models[-1].top_p == 0.8
-    assert models[-1].extra_body == {"enable_thinking": False}
-
-
-def test_thinking_settings_apply_to_root_without_mutating_child_model():
-    root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
-    shared = ModelConfig(
-        cite_name="shared_model",
-        model_name="provider/model",
-        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
-        extra_body={"existing": "value"},
-        reasoning_effort="high",
-        reasoning_budget_tokens=2048,
-    )
-    models = [shared]
-    apply_root_generation_overlay(
-        models,
-        root,
-        {"deep_thinking": True, "thinking_effort": "low"},
-    )
-    assert root.model_name == "workbench_root_model"
-    assert shared.extra_body == {"existing": "value"}
-    assert shared.reasoning_effort == "high"
-    assert models[-1].extra_body == {
-        "existing": "value",
-        "enable_thinking": True,
-    }
-    assert models[-1].enable_thinking is True
-    assert models[-1].reasoning_effort == "low"
-    assert models[-1].reasoning_budget_tokens is None
-
-
-def test_enabling_thinking_without_explicit_effort_inherits_provider_default():
-    root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
-    models = [ModelConfig(
-        cite_name="shared_model",
-        model_name="provider/model",
-        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
-    )]
-
-    apply_root_generation_overlay(models, root, {"deep_thinking": True})
-
-    assert models[-1].reasoning_effort is None
-    assert models[-1].extra_body == {"enable_thinking": True}
-
-
-def test_disabling_thinking_drops_stale_effort_from_root_only():
-    root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
-    shared = ModelConfig(
-        cite_name="shared_model",
-        model_name="provider/model",
-        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
-        extra_body={"enable_thinking": True, "reasoning_effort": "high"},
-        reasoning_effort="high",
-        reasoning_budget_tokens=2048,
-    )
-    models = [shared]
-    apply_root_generation_overlay(
-        models,
-        root,
-        {"deep_thinking": False, "thinking_effort": "medium"},
-    )
-    assert shared.extra_body == {"enable_thinking": True, "reasoning_effort": "high"}
-    assert models[-1].extra_body == {"enable_thinking": False}
-    assert models[-1].enable_thinking is False
-    assert models[-1].reasoning_effort is None
-    assert models[-1].reasoning_budget_tokens is None
+def test_su_ac_05_conflicting_values_cannot_mutate_aliases_or_defaults(profile):
+    root = AgentConfig(name="root", description="", tools=[], model_name="shared")
+    models = [ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid", resolved_profile=profile)]
+    with pytest.raises(ModelOutletValidationError):
+        apply_root_model_preferences(models, root, {"42": {"enable_thinking": False, "reasoning_budget_tokens": 64}})
+    assert len(models) == 1 and root.model_name == "shared"
 
 
 def test_ut_be_wb_011_materializes_an_immutable_run_skill_snapshot(tmp_path):

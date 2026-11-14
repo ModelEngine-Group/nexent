@@ -222,7 +222,10 @@ export function WorkbenchSessionProvider({
     onThreadIdChange: handleThreadIdChange,
   });
 
-  const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
+  const { isLoading: isLoadingAgents, agents } = usePublishedAgentList({
+    enabled: false,
+    identity,
+  });
 
   const handleWorkbenchModeChange = useCallback(
     (mode: "agent_create" | "skill_create" | "generic_chat") => {

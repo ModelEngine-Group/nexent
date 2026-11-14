@@ -101,9 +101,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   // AIDP documents open as a page-sized surface: the document is the whole
   // task, so it gets the viewport and a back arrow instead of a side drawer.
   const fullscreen = props.presentation === "fullscreen";
-  // Inline mode contributes only the preview surface; the surrounding page owns
-  // the chrome and shares the viewport with another panel.
-  const inline = props.presentation === "inline";
   const fileName =
     isLocalSource && localFile
       ? localFile.name
@@ -1429,15 +1426,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }
   };
 
-  // Inline presentation renders the preview surface only: no drawer, no
-  // portal, no header. The parent decides where the surface lives.
-  if (inline) {
-    if (!open) return null;
-    return (
-      <div className="h-full min-h-0 w-full overflow-hidden">
+  // Inline hosts own their header, download action and responsive panel layout.
+  if (props.presentation === "inline") {
+    return open ? (
+      <div
+        data-slot="inline-file-preview"
+        className="h-full min-h-0 overflow-hidden"
+      >
         {renderContent()}
       </div>
-    );
+    ) : null;
   }
 
   // Full-screen presentation: the document owns the viewport and the back arrow

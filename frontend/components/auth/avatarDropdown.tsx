@@ -1,5 +1,4 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState } from "react";
@@ -85,8 +84,8 @@ export function AvatarDropdown({
 
   const getRoleDisplayName = (role: string) => {
     switch (role) {
-      case USER_ROLES.SPEED:
-        return t("auth.speed");
+      case USER_ROLES.OPS:
+        return t("user.role.ops");
       case USER_ROLES.SU:
         return t("auth.su");
       case USER_ROLES.ADMIN:
@@ -132,7 +131,9 @@ export function AvatarDropdown({
                   {identity}
                 </div>
                 <Tag className="!m-0 !h-[15px] w-fit !border-0 !bg-[color-mix(in_oklab,lab(46.9268%_13.7028_-69.7937)_10%,transparent)] !px-1.5 !py-0.5 !text-[11px] !leading-[11px] !text-[lab(46.9268%_13.7028_-69.7937)]">
-                  {getRoleDisplayName(user.role)}
+                  {(user.roles ?? [user.role])
+                    .map(getRoleDisplayName)
+                    .join(" / ")}
                 </Tag>
               </div>
             </div>

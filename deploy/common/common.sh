@@ -463,12 +463,21 @@ deployment_merge_env_from_example() {
       if (key != "") {
         existing[key] = 1
       }
+      # Preserve existing installations when adding the dedicated MCP key.
+      if (key == "TOKEN") {
+        legacy_mcp_token = $0
+        sub(/TOKEN[[:blank:]]*=/, "NEXENT_MCP_INTERNAL_TOKEN=", legacy_mcp_token)
+      }
       next
     }
     {
       key = assignment_key($0)
       if (key != "" && !(key in existing)) {
-        print $0
+        if (key == "NEXENT_MCP_INTERNAL_TOKEN" && legacy_mcp_token != "") {
+          print legacy_mcp_token
+        } else {
+          print $0
+        }
       }
     }
   ' "$env_file" "$example_file")" || {
@@ -542,32 +551,13 @@ deployment_source_root_env() {
 }
 
 deployment_upgrade_local_accounts() {
-  local phase="$1"
-  local mode="$2"
-  local namespace="${3:-nexent}"
-  local interpreter=""
-  local common_dir script candidate
+  local mode="$1" namespace="${2:-nexent}" database="${3:-nexent-postgresql}"
+  local common_dir env_file config="${4:-nexent-config}"
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
-  if [ "$mode" = kubernetes ]; then
-    script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
-  fi
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
-      interpreter="$candidate"
-      break
-    fi
-  done
-  if [ -z "$interpreter" ]; then
-    echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
-    return 1
-  fi
-  local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
-  if [ "$phase" = apply ]; then
-    arguments+=(--apply)
-  fi
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$interpreter" "$script" "${arguments[@]}"
+  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
+  bash "$common_dir/../sql/tools/supabase_to_postgres/migrate.sh" \
+    --deployment "$mode" --namespace "$namespace" --database-target "$database" --config-target "$config" \
+    --env-file "$env_file" --apply --wait-timeout 300
 }
 
 deployment_env_dir() {
@@ -1146,6 +1136,11 @@ deployment_apply_legacy_inputs() {
         DEPLOYMENT_COMPONENTS="infrastructure,application,data-process"
         ;;
     esac
+  fi
+
+  # Legacy component choices never disable authentication.
+  if [ "${DEPLOYMENT_VERSION:-}" = "speed" ]; then
+    DEPLOYMENT_VERSION="full"
   fi
 
   if [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then

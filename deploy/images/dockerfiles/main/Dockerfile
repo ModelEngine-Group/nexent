@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 FROM python:3.11-slim AS base
 ARG MIRROR
 ARG APT_MIRROR
@@ -84,6 +85,8 @@ COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 # Layer 2: copy backend code
 COPY backend /opt/backend
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
+COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
 RUN /opt/backend/.venv/bin/python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"

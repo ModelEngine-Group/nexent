@@ -493,22 +493,21 @@ def test_single_agent_uses_tenant_model_on_workbench_root(mocker):
         },
     )
 
-    get_model = mocker.patch.object(workbench_service, "get_model_by_model_id", return_value={"model_id": 13})
-    mocker.patch.object(workbench_service, "is_model_available", return_value=True)
+    get_model = mocker.patch("management.db.model.repository.get_model_by_model_id", return_value={"model_id": 13})
+    mocker.patch("management.services.model.resolver.is_model_available", return_value=True)
     canonical, plan = workbench_service.resolve_workbench_config(
         WorkbenchSessionConfig(
             mode="single_agent_chat",
-            model_id=13,
             agent_mounts=[{"agent_id": 7, "version_no": 3}],
         ),
         tenant_id="tenant",
     )
 
-    assert canonical.model_id == 13
+    assert "model_id" not in canonical.model_dump()
     assert plan.root.identity.agent_id == 99
     assert [child.agent_id for child in plan.child_mounts] == [7]
-    assert plan.overlay.model_id == 13
-    get_model.assert_called_once_with(13, tenant_id="tenant")
+    assert plan.overlay.model_id is None
+    get_model.assert_not_called()
 
 
 @pytest.mark.parametrize("definitions", [[], [{"tool_id": 4, "author": "tenant", "is_available": False}], [{"tool_id": 4, "author": "other", "is_available": True}]])
@@ -526,7 +525,7 @@ def test_ut_be_wb_015_dependency_unavailability_fails_before_snapshot(mocker, de
 def test_ut_be_wb_012_shared_tool_parameter_conflicts_fail_before_snapshot(mocker):
     """UT-BE-WB-012: conflicting Tool parameters fail without a partial result."""
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
-    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", return_value={"name": "Skill", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
+    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", side_effect=lambda skill_id, _tenant: {"name": f"Skill {skill_id}", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
     mocker.patch.object(workbench_service, "query_tools_by_ids", return_value=[{"tool_id": 4, "author": "tenant", "is_available": True, "params": [{"name": "region"}]}])
     with pytest.raises(workbench_service.WorkbenchError) as error:
         workbench_service.resolve_workbench_config(_config(3, [{"skill_id": 11, "config_values": {"region": "CN"}}, {"skill_id": 12, "config_values": {"region": "US"}}]), tenant_id="tenant")

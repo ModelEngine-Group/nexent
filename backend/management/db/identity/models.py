@@ -9,14 +9,11 @@ from sqlalchemy import (
     Sequence,
     String,
     UniqueConstraint,
-    text,
     select,
+    text,
 )
-
-
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import column_property
-
 
 from management.db.base import SCHEMA, SimpleTableBase, TableBase
 
@@ -66,6 +63,8 @@ class TenantInvitationCode(TableBase):
                        doc="Tenant ID, foreign key")
     invitation_code = Column(String(100), nullable=False,
                              unique=True, doc="Invitation code")
+    roles = Column(ARRAY(String(30)), nullable=False,
+                   comment="Immutable built-in roles granted when this invitation is consumed")
     group_ids = Column(String, doc="Associated group IDs list")
     capacity = Column(Integer, nullable=False, default=1,
                       doc="Invitation code capacity")
@@ -236,8 +235,6 @@ class UserCasSession(TableBase):
     revoked_at = Column(TIMESTAMP(timezone=False), doc="Revocation time")
 
 
-
-
 class UserAccount(TableBase):
     """Authentication identity independent of tenant membership and provider bindings."""
 
@@ -249,15 +246,14 @@ class UserAccount(TableBase):
     )
     account_id = Column(Integer, Sequence("user_account_t_account_id_seq", schema=SCHEMA),
                         primary_key=True, comment="Technical account record identifier")
-    user_id = Column(String(100), nullable=False, comment="Stable UUID; service-serialized identity uniqueness")
-    user_email = Column(String(255), comment="Normalized login email; null for API-only identities or legacy profiles pending migration")
-    user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
+    user_id = Column(String(100), nullable=False, comment="Stable user identifier including legacy system IDs; service-serialized uniqueness")
+    user_email = Column(String(255), comment="Normalized login email; null for passwordless identities")
+    user_roles = Column(ARRAY(String(30)), nullable=False, default=list, server_default=text("'{}'::varchar[]"),
+                   comment="Authoritative built-in account roles; empty until assigned within registration")
     password_hash = Column(String(512), comment="Encoded local or imported password hash; never returned to API callers")
     password_hash_scheme = Column(String(30), comment="Password encoding scheme: scrypt or imported bcrypt")
     password_login_enabled = Column(Boolean, nullable=False, server_default=text("false"),
                                     comment="Whether this identity permits password authentication")
-    account_status = Column(String(30), nullable=False, server_default=text("'active'"),
-                            comment="Authentication state: active or disabled")
     token_version = Column(Integer, nullable=False, server_default=text("0"),
                            comment="Credential revision; password changes invalidate earlier JWTs")
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
@@ -265,9 +261,13 @@ class UserAccount(TableBase):
                              comment="Migration/provider provenance, API-only and system identity markers; never grants permissions")
 
 # Read projections preserve established association query/response contracts.
-# These expressions create no role/email columns on the association table.
+# These expressions create no role or email columns on the association table.
+UserTenant.roles = column_property(
+    select(UserAccount.user_roles).where(UserAccount.user_id == UserTenant.user_id,
+                                  UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery()
+)
 UserTenant.user_role = column_property(
-    select(UserAccount.user_role).where(UserAccount.user_id == UserTenant.user_id,
+    select(UserAccount.user_roles[1]).where(UserAccount.user_id == UserTenant.user_id,
                                       UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery().label("user_role")
 )
 UserTenant.user_email = column_property(

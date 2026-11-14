@@ -25,7 +25,13 @@ function formatTime(value?: string | null): string {
   return new Date(value).toLocaleString();
 }
 
-export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
+export default function ApiKeyList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const [page, setPage] = useState(1);
@@ -73,7 +79,7 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         key: "access_key",
         width: 320,
         render: (key: string) => (
-          <code className="whitespace-nowrap">{key}</code>
+          <code className="whitespace-nowrap">{readOnly ? "—" : key}</code>
         ),
       },
       {
@@ -221,13 +227,16 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         ),
       },
     ],
-    [pendingUserId, t]
+    [pendingUserId, readOnly, t]
   );
+  const visibleColumns = readOnly
+    ? columns.filter((column) => column.key !== "actions")
+    : columns;
 
   return (
     <Table
       dataSource={data?.items ?? []}
-      columns={columns}
+      columns={visibleColumns}
       rowKey="token_id"
       loading={isLoading}
       pagination={{

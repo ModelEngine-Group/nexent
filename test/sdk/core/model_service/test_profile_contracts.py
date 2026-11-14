@@ -220,3 +220,19 @@ def test_effort_null_sentinel_is_an_explicit_value_not_absent_control():
     assert restored.values == ["none", None, "default"]
     with pytest.raises(ValueError):
         EffortControl(values=[None, None])
+
+@pytest.mark.parametrize("value", ["false", 0, 1, [], {}])
+def test_shutdown_preference_rejects_non_boolean_values(value):
+    from nexent.core.model_service.profiles.contracts import ReasoningCapabilities
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ReasoningCapabilities.model_validate({"status": "supported", "can_disable": value})
+
+
+@pytest.mark.parametrize("value", [None, False, True])
+def test_shutdown_preference_preserves_unknown_and_explicit_decisions(value):
+    from nexent.core.model_service.profiles.contracts import ReasoningCapabilities
+
+    result = ReasoningCapabilities.model_validate({"status": "supported", "can_disable": value})
+    assert result.model_dump()["can_disable"] is value

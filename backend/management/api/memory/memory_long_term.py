@@ -1,18 +1,21 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP API for versioned tenant and user Markdown long-term memory."""
 
-from contracts.memory import ActivateVersionRequest, CreateVersionRequest
 from http import HTTPStatus
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
+from contracts.memory import ActivateVersionRequest, CreateVersionRequest
+from contracts.roles import has_any_role, roles_from_record
+from gateway.authentication.auth import get_current_user_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.long_term import (
-    LongTermMemoryConflict, LongTermMemoryError, get_memory_long_term_service,
+    LongTermMemoryConflict,
+    LongTermMemoryError,
+    get_memory_long_term_service,
 )
-from gateway.authentication.auth import get_current_user_id
 
 router = APIRouter(prefix="/memory/long-term", tags=["long-term-memory"])
 Scope = Literal["tenant", "user"]
@@ -21,7 +24,7 @@ Scope = Literal["tenant", "user"]
 def _authorize_mutation(scope: Scope, user_id: str) -> None:
     if scope == "tenant":
         row = get_user_tenant_by_user_id(user_id) or {}
-        if str(row.get("user_role") or "").upper() != "ADMIN":
+        if not has_any_role(roles_from_record(row), {"ADMIN"}):
             raise HTTPException(HTTPStatus.FORBIDDEN, "Tenant memory mutation requires the ADMIN role")
 
 

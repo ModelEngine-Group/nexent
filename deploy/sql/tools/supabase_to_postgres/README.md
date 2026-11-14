@@ -1,285 +1,317 @@
-# Supabase authentication upgrade
+# Historical account migration and deployment runbook
+
+This is the single operational guide for removing Supabase authentication from
+Nexent. Run commands from the repository root. Docker and Kubernetes use the
+application PostgreSQL database for accounts; ordinary deployments do not start
+Supabase, GoTrue or Kong. The legacy YAML files beside this guide are recovery
+assets for the original source database.
+
+## Completion rule and execution order
+
+Migration completion depends on account data, not table existence. Every active
+historical member must have usable local credentials, a recognized API-only,
+provider or SPEED identity, an explicitly disabled local account, or per-user
+source-unavailability exclusion evidence. New imports must pass this validation before commit. Existing incomplete tables
+stop deployment and require consistent backup recovery; no automatic repair runs. No historical membership relation
+means fresh initialization. Versions and SQL checksums do not select migration.
+
+**Run the importer before account SQL or the new application.** If account SQL
+already removed legacy role/email fields and no account holds their canonical
+copies, the importer stops with unresolved IDs and performs no automatic repair. Restore those business profiles
+from the target's pre-upgrade backup; Supabase cannot reconstruct application roles.
+
+| Stage | Docker | Kubernetes |
+| --- | --- | --- |
+| Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
+| Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
+| Target transaction | Recheck account coverage under the account-writer lock, run historical 001 and account-array 010, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
+| Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
+| Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
+
+The infrastructure baseline `init.sql` does not create `user_account_t`. Account
+SQL is kept out of infrastructure bootstrap. A migration error stops deployment
+before the subsequent application/Secret rollout. Direct Compose, Helm or
+`run-sql-migrations.sh` invocation bypasses this deployment sequence; complete the
+manual importer first when upgrading historical accounts.
+
+The importer keeps source rows in memory. Target schema creation, membership
+email/role transfer and credential import share one transaction. Failure or
+preview rolls back the new account table, its sequence and temporary import data,
+and restores the original membership columns/data. Retry reads the source again.
+There are no persistent credential snapshots or phase files. Intentionally
+unavailable source identities get ID/reason/audit-only records in
+`nexent.account_migration_exclusion_t` in the same transaction. These records let
+later deployments distinguish intentional exclusions after source removal.
+An existing incomplete table is not imported into or modified automatically.
+For a new migration, failed validation rolls back the new table, exclusions and
+profile moves before commit. Completed local accounts are preserved on rerun.
+
+The immutable `v2.9.0_001_local_user_accounts.sql` creates the legacy account schema, without
+`account_status` or pending placeholders. Legacy status columns are converted to
+`delete_flag` and dropped inside the same transaction; ordinary replay never
+recreates them. Existing soft-deleted accounts, credentials and operator changes
+are preserved on replay. The former 002 is consolidated into 001; existing SQL
+execution history is retained. Transaction-local membership profiles supply roles
+and emails to the importer without persisting unavailable ordinary identities.
+Active CAS/OAuth bindings remain in the project database; provider-only accounts
+have no local password login, while actual local password credentials retain it.
+
+The final account schema stores only `user_roles`; scalar response roles are
+computed. The importer applies 010 after historical 001 inside the same transaction
+and writes only the array. Inspection recognizes both layouts without recreating
+columns. Historical replay is followed by 010, which preserves existing arrays
+and drops any restored scalar column. Operations grants remain in independent
+011; account recovery has no dependency on operations tables.
+
+## Prepare the upgrade
+
+Back up the original Supabase and target PostgreSQL data, settings and signing
+keys. Freeze registration/password/provider changes during cutover. Use a matching
+checkout, deployment package and backend image. Retain original storage until
+acceptance completes.
+
+The host needs Bash and Docker CLI, or Bash and kubectl with access to the original
+namespace. **No host Python, pip, PostgreSQL driver or jq is required.** The selected
+`NEXENT_IMAGE` must package the current Python worker, its existing psycopg2
+runtime, `v2.9.0_001_local_user_accounts.sql`, and
+`v2.9.0_010_account_and_ops_roles.sql`. The worker applies the account schema changes
+inside the credential transaction. The startup SQL runner also applies invitation
+roles and operations grants. Standard deployment selects the image automatically.
+Preload it for offline deployment. The migration worker uses the main backend image.
+
+`migrate.sh` is the host entry point for both Docker and Kubernetes.
+`migrate_docker.py` runs inside the worker container or Job. Recovery defaults
+for images, ports and service names are provided by `legacy.sh`.
+
+Existing deployment settings are reused. Exported values override the selected
+Shell-compatible `--env-file` (default `deploy/env/.env`). The source password
+prefers `SUPABASE_POSTGRES_PASSWORD`, then the original container/pod environment;
+manual interactive execution prompts only when both are unavailable.
+Noninteractive missing credentials stop the upgrade. Changing an environment
+password does not change an existing PostgreSQL cluster's password.
+
+| Setting | Purpose |
+| --- | --- |
+| `NEXENT_IMAGE` | Version-matched backend image; set explicitly for standalone commands |
+| `NEXENT_POSTGRES_PASSWORD`, `POSTGRES_USER`, `POSTGRES_DB` | Original target credentials |
+| `SUPABASE_POSTGRES_PASSWORD`, `SUPABASE_POSTGRES_USER`, `SUPABASE_POSTGRES_DB` | Original source credentials |
+| `SUPABASE_POSTGRES_HOST`, `SUPABASE_POSTGRES_PORT` | Explicit remote source endpoint, reachable from the worker |
+| `SUPABASE_MIGRATION_DB_CONTAINER` | Explicit original Docker source when discovery is ambiguous |
+| `SUPABASE_MIGRATION_AUTH_CONTAINER`, `SUPABASE_MIGRATION_KONG_CONTAINER` | Exact Docker peers reclaimed after successful apply |
+
+Do not add migration DSN or `MIGRATION_SOURCE_*` / `MIGRATION_TARGET_*` variables.
 
 ## Automatic deployment
 
-Run the normal `deploy.sh`. Docker invokes `migrate_docker.py`; Kubernetes invokes the
-dedicated `migrate_k8s.py`, sharing account import logic. Users do not run a separate migration
-command or install host database packages. The deployment host requires Python
-3.8+, Docker or kubectl, and access to the original source data.
-
-Before replacing the application, deployment checks the account SQL version and
-SHA-256 in `nexent.schema_migrations`, together with data-import and cleanup
-checkpoints. An incomplete upgrade snapshots only `auth.users` and
-`auth.identities` into a private file under `deploy/env/.migration-state/`.
-Stopped existing Docker source databases are started automatically. Exported
-`SUPABASE_POSTGRES_PASSWORD` takes precedence; otherwise the original source
-container's password is reused without prompting. Source reads are read-only.
-
-Config then runs the normal versioned SQL migration runner. After it records
-`v2.9.0_001_local_user_accounts.sql` at the expected checksum, deployment runs
-`migrate_docker.py` with `--apply` using Config's existing Python/database dependencies.
-Account import and its data checkpoint commit in one transaction. Deployment
-then removes the selected source DB/Auth/Kong containers and records cleanup,
-before creating/checking the super admin. Data volumes and backups remain.
-Kubernetes snapshots the source PVC/PV definitions and sets the PV reclaim
-policy to `Retain` before Helm replaces the legacy resources.
-
-A fresh installation with no historical identities needs no source. A completed
-upgrade skips source access. An import failure leaves the source and private
-snapshot available; a cleanup failure retains the snapshot and committed data
-checkpoint. Fix the reported prerequisite and rerun `deploy.sh`. SQL completion
-alone never skips an unfinished credential import. The snapshot is deleted only
-after both import and cleanup succeed; protect retained files as credentials.
-Infrastructure-only and data-process-only deployments do not invoke this flow.
-
-Back up both databases and freeze account/password/provider-binding writes
-during cutover. If the original source containers were deleted, recover them
-from their existing data using the manual recovery commands below; automatic
-deployment refuses to create an empty source for historical login identities.
-
-## Manual recovery and preview
-
-### Kubernetes entry point
-
-Kubernetes `deploy.sh` automatically uses `migrate_k8s.py`. It shares account
-mapping/import and checkpoints with `migrate_docker.py`, while handling Kubernetes
-source startup and actual PVC/PV bindings separately. A source Deployment scaled
-to zero is scaled to one and awaited. Custom existing claims are discovered from
-the pod template; every bound PV is archived and protected with `Retain` before
-Helm removes legacy resources. Missing/unbound persistent storage blocks rollout.
-Retry snapshots are checked against the namespace, target database and API server.
-
-For recovery, use the same kubeconfig context, namespace and state directory:
-
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_k8s.py --deploy-phase prepare --namespace nexent
-# Deploy the application so Config executes the versioned SQL migrations.
-python deploy/sql/tools/supabase_to_postgres/migrate_k8s.py --deploy-phase apply --apply --namespace nexent
+```bash
+bash deploy.sh docker
+# Or:
+bash deploy.sh k8s
 ```
 
-Optional `--source-container`, `--database-target` and `--config-target` select
-Deployment names in this namespace. `up/down` commands are Docker-only. Keep
-private state files and source storage for recovery. Helm may remove old source
-workloads during rollout; the read-only account snapshot remains available even
-when a later import fails. Recovery of the complete old authentication stack
-also requires the original Helm values, Secrets and ConfigMaps and a business
-database backup; a retained PV alone does not restore that stack.
+The shared Shell hook runs before application SQL, application Secret replacement
+and business rollout. It executes psql inside the target DB container/pod to
+classify the target. An existing account table skips import; absence of both
+account/membership tables means fresh installation; membership without accounts
+requires historical import. Missing original sources stop legacy upgrades.
 
-Run this tool on the deployment host with Python 3.11. Activate the backend
-virtual environment, or install the standalone dependencies:
+Docker uses an owned one-shot container with the backend image's entrypoint
+overridden to the Python worker. It attaches that container to the existing target
+and source bridge networks, uses actual database internal ports/IPs and requires
+no published DB ports. A source on the host can use its published port; loopback
+addresses are translated to the worker network's host gateway. Host-network-only
+DB containers need a reachable explicit endpoint/bridge network. The worker has
+no Docker socket. Docker starts an existing stopped source. If the original DB
+container was removed, the migration recreates just the DB service using the
+recovery Compose YAML and `SUPABASE_DATA_DIR` or `ROOT_DIR/volumes/db/data`.
+Both the host and the container check for `PG_VERSION` and `global/pg_control`
+before PostgreSQL starts. Use the original database password. An applied,
+committed migration removes the recovered container and retains its data;
+failure or preview retains the container for retry.
 
-```sh
-python -m pip install -r deploy/sql/tools/supabase_to_postgres/requirements.txt
+Kubernetes uses a separate Job before application Helm startup. The host resolves
+original database endpoints/credentials and preserves source Deployment/PVC/PV
+recovery definitions beside the selected env file under `backups/`, then sets
+bound PV reclaim policies to `Retain`. Missing, ephemeral or unbound source storage
+blocks the upgrade. A zero-replica source is scaled up and awaited. The Job receives
+credentials through an owned temporary Secret, has no mounted Kubernetes API
+token, uses no control CLI, and bypasses application startup SQL. It inherits
+existing Config image-pull Secret references, or the namespace's default ServiceAccount
+pull configuration. Configure registry access before migrating if those references
+are unavailable. Network policies must allow source/target PostgreSQL access.
+
+Python connects to both DBs inside the worker, reads a consistent read-only source
+snapshot, rechecks completion under the writer lock, and applies the existing
+schema/credential transaction. It never invokes Docker/kubectl. The host removes
+its own worker container or Job/Secret on exit. Temporary host Secret input files
+are private and removed after Job creation or on failure. No account snapshots are
+written to disk. Job timeouts and migration failures stop subsequent rollout while
+retaining source DB/Auth/Kong workloads. Only a committed successful apply reclaims
+those source workloads, with persistent storage/backups retained. Cleanup errors
+after commit are reported separately and do not erase imported credentials.
+
+Keep the original namespace, context, Helm values, Secrets and ConfigMaps for
+recovery. This operation does not convert legacy single-release Helm ownership
+into the current two-release layout; resolve ownership errors first.
+
+## Manual preview and import
+
+Run before application/bootstrap SQL against the original business PostgreSQL.
+The host uses the same Shell entry for both deployment types:
+
+```bash
+export NEXENT_IMAGE='nexent/nexent:<matching-version>'
+# Docker preview, then apply:
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh --apply
+# Kubernetes preview, then apply:
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh --deployment kubernetes --namespace nexent
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh --deployment kubernetes --namespace nexent --apply
 ```
 
-The tool loads `deploy/env/.env` by default. Exported environment variables take
-precedence. `--env-file PATH` selects another deployment file. No configuration
-file is rewritten. Normal backend/SDK environment configuration is unaffected.
+`--database-target NAME` selects the target DB container or Kubernetes workload.
+`--source-container NAME` selects the original source; `--no-start-source` rejects
+stopped sources and disables automatic Docker recovery. `--wait-timeout` accepts 1–300 seconds (default 300). Kubernetes
+`--config-target` selects the existing Config Deployment used only for registry
+pull references; no running Config is required. Preview rolls back all target
+schema/data changes and retains source workloads/storage.
 
-### Manual flow
+After success, run normal deployment. The regular SQL runner records/replays
+consolidated 001 without recreating the retired status column.
 
-1. Back up both databases and freeze account/password/provider-binding writes.
-2. Apply `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` to the existing
-   application PostgreSQL if the deployment SQL runner has not done so.
-3. Run the host-side preview. It never writes account rows.
+## Restore or remove the legacy Docker stack
 
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py
-```
+Recovery YAML, production overlay, Kong configuration and `legacy.env.example`
+remain beside this guide. Use original image versions, passwords and data files.
+The host Shell refuses recovery unless the data directory contains `PG_VERSION`
+and `global/pg_control`:
 
-4. Review counts/conflicts, then explicitly apply:
-
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --apply
-```
-
-For a default local source the tool discovers the existing Supabase database
-container, including names such as `supabase_db` and `supabase-db-mini`. If it is
-stopped, the tool starts that existing container and waits up to 30 seconds for
-PostgreSQL. It uses the published host port reported by Docker. It never creates
-an empty source or changes data volumes. After a successful local `--apply`
-commits, it stops and removes the selected source DB plus the configured legacy
-Auth/Kong containers. A preview or failed import retains the stack for inspection
-and retry. A dry-run may start the existing source container but never imports
-rows or removes containers. If multiple candidates exist, select one explicitly:
-
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --source-container supabase_db
-```
-
-Use `--no-start-source` to reject a stopped container and `--wait-timeout 60` to
-allow a longer startup. A missing source container requires recovery of the old
-container/data or reachable SUPABASE_POSTGRES_HOST/PORT settings; the tool cannot reconstruct
-passwords from tenant membership alone.
-
-The selected DB name is used for cleanup. Auth/Kong default to
-`supabase-auth-mini` and `supabase-kong-mini`; set
-`SUPABASE_MIGRATION_AUTH_CONTAINER` / `SUPABASE_MIGRATION_KONG_CONTAINER` in the
-existing deployment environment if the source stack uses different names. Cleanup
-uses exact names, never application-wide Compose down, and does not delete data
-volumes or backups. A remote source selected only by HOST/PORT does not cause
-local container removal. If cleanup fails after commit, the command reports
-`Account migration committed; source cleanup failed`; the accounts remain
-migrated. Correct Docker access/configuration and use `migrate_docker.py down` with
-the original source names to finish cleanup; repeating the importer is safe.
-
-## Historical API-only identities
-
-The historical fixed `user_id` / `tenant_id` / `SPEED` demo identity is a system
-identity. Its untouched migration placeholder is marked `system_identity=speed`,
-kept disabled with password login off, and removed from credential-pending state.
-Speed-mode authentication retains its existing default context; full-mode
-authentication does not gain access. Replays preserve operator changes. Custom
-SPEED identities and unknown blank-email users are not automatically activated.
-Deployment preparation recognizes this repairable seed before Config reruns SQL,
-so an old pending seed alone does not require a Supabase database.
-
-CAS/OAuth provider bindings and CAS sessions already reside in application
-PostgreSQL and are retained. Historical registration code also created project
-identities in Supabase: these identity records still require import under their
-original UUIDs. Provider bindings alone do not prove account activation eligibility
-or reconstruct passwords/disabled status. CAS-created random passwords remain
-ineligible for password login; OAuth/password accounts retain their original rules.
-
-API-only users created by the batch endpoint have no Supabase `auth.users` row.
-The 2.9.0 SQL recognizes an active USER/DEV membership with an empty email and
-historical token evidence, retains the original UUID and API Key, and makes the
-account active with password login disabled. A revoked key stays revoked. A
-normal login identity, deleted membership, or identity without this evidence stays
-disabled until its normal credential migration completes.
-
-The same SQL repairs untouched pending placeholders created by the earlier draft
-migration, even when the old membership columns have already been removed. It
-does not reactivate an account subsequently disabled/deleted or modified by an
-operator. Batch creation now writes the passwordless account, membership, group
-link and key in one transaction, so a later failure rolls back the entire batch.
-
-## Restore a stopped or removed legacy stack manually
-
-The original Compose definitions now live beside the migration tools:
-`docker-compose-supabase.yml`, `docker-compose-supabase.prod.yml`, and `kong.yml`.
-They are excluded from normal Nexent deployment. Historical SQL files remain at
-`deploy/sql/supabase`; the relocated YAML references them without modifying them.
-
-If the old containers have been removed, the importer cannot start them by name.
-Recover them explicitly from their original bind data before importing. Prepare
-an environment file outside Git based on `legacy.env.example`, or export the
-original values. `ROOT_DIR` is the original deployment storage root whose
-`volumes/db/data/PG_VERSION` already exists. `SUPABASE_DATA_DIR` may specify the
-exact existing PostgreSQL directory instead. The normal Nexent image/offline selection does not include these retired images;
-keep the old local images or configure their registry mirrors explicitly.
-Use the original PostgreSQL image version and password; a different environment password does not reset an existing
-PostgreSQL cluster's credentials.
-
-```sh
-# Environment may instead come from --env-file /private/path/legacy.env.
+```bash
 export ROOT_DIR=/absolute/path/to/original/nexent-data
-# If already exported, SUPABASE_POSTGRES_PASSWORD is reused; otherwise up prompts.
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up
+# Or export SUPABASE_DATA_DIR directly.
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh up
+# Optional complete old stack/production overlay, using original auth keys:
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh up --with-auth --production
+# Exact configured source containers only; retain volumes and data:
+bash deploy/sql/tools/supabase_to_postgres/migrate.sh down
 ```
 
-Default `up` selects only the legacy database, publishing PostgreSQL on loopback
-port 5436. It refuses to initialize an empty source: `PG_VERSION` must exist and
-the data bind uses `create_host_path: false`. If the DB container is merely
-stopped, it starts that existing container without changing its settings. If it
-was removed, Compose recreates the container against the same data directory.
-It never auto-restores a backup or runs `initdb` on a new directory.
+DB-only recovery is the default. Full auth needs original `JWT_SECRET`,
+`SUPABASE_KEY`, `SERVICE_ROLE_KEY` and `DASHBOARD_PASSWORD`. Existing stopped
+containers start intact. A partially present requested stack requires explicit
+down/up against verified original data. Compose uses `create_host_path: false`
+and never restores a backup automatically. Avoid `down -v`, volume pruning and
+source-directory deletion. No recovery or migration command needs host Python.
 
-To restore old GoTrue and Kong as well, provide the original `JWT_SECRET`,
-`SUPABASE_KEY`, `SERVICE_ROLE_KEY`, and Kong `DASHBOARD_PASSWORD` through the environment/file:
+## Identity and authentication behavior
 
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up --with-auth
-# Optional relocated production compatibility overlay:
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up --with-auth --production
-```
-
-GoTrue/Kong are explicit `legacy-auth` profile services. The production overlay
-keeps a loopback database binding so the host-side importer can connect. HTTP(S)
-ports also bind to loopback by default. Startup uses `restart: "no"`, avoiding
-old auth services restarting automatically after the migration window.
-
-Then run the host-side importer using the same source credentials and environment
-file. Preserve the normal target PostgreSQL settings:
-
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --apply
-```
-
-After verification, manually remove legacy containers:
-
-```sh
-python deploy/sql/tools/supabase_to_postgres/migrate_docker.py down
-```
-
-`down` stops/removes only the three configured Supabase container names. It
-retains bind directories and named volumes, and removes only a dedicated network
-owned by the migration Compose project. It never downs the application Compose
-project, deletes `nexent_network`, or calls volume deletion. It also handles old
-containers created under the former deployment project. If only part of the
-requested stack exists, `up` asks for an explicit `down` then `up` to avoid name
-or project conflicts. Verify the original data path before that sequence.
-
-The helper defaults to `deploy/env/.env`; both `up` and `down` accept `--env-file`.
-Use the same environment file for teardown when custom container/network names
-were used. Available overrides are listed in `legacy.env.example`, including
-image tags, container names, published ports and the dedicated project/network.
-Direct Docker Compose use is also possible with these YAML files and exported
-variables, but the helper additionally validates the existing `PG_VERSION` and
-handles containers retained from the previous Compose project. Avoid `down -v`,
-volume pruning and deleting the original data directory.
-
-## Connections and password priority
-
-| Setting | Default behavior |
+| Identity/data | Migration behavior |
 | --- | --- |
-| Source host/port | `127.0.0.1:5436`, replaced by the existing container's actual published binding |
-| Source database/user | `SUPABASE_POSTGRES_DB` / `SUPABASE_POSTGRES_USER`, default `supabase` / `postgres` |
-| Source password | `SUPABASE_POSTGRES_PASSWORD`, then hidden interactive input |
-| Target host/port | `127.0.0.1:5434`; Docker service hostname `nexent-postgresql` maps to that published host endpoint |
-| Target database/user/password | Existing `POSTGRES_DB`, `POSTGRES_USER`, `NEXENT_POSTGRES_PASSWORD` |
+| Supabase password users | Preserve UUID, compatible bcrypt/scrypt hash, source timestamps, email confirmation and bounded provider metadata |
+| Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
+| API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
+| Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. The retired SPEED role is removed without granting replacement permissions |
+| Unknown/custom identities | Unresolved active members stop migration with IDs; recover source/business profiles without generating replacement IDs or roles |
+| CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Preserve original IDs and valid bindings. Provider-only identities stay passwordless; accounts with actual local password credentials retain password login. Import Supabase credentials only where those source identities exist |
+| Audit and refresh data | Do not read/import `auth.audit_log_entries`, Supabase sessions, refresh tokens or recovery/confirmation secrets. No audit archive is created |
 
-If a source password is exported or present in the
-deployment file, the tool does not prompt. Missing passwords use `getpass` in an
-interactive terminal. Noninteractive runs fail with a clear prerequisite message
-instead of waiting for input. Neither Docker stderr nor connection details are
-printed on errors. Set connection secrets through environment variables rather
-than command-line arguments or committed configuration.
+Canonical `user_email` and the legacy role move from `user_tenant_t` to the account.
+The role is stored only in `user_roles`; scalar API values are derived from that array;
+tenant, group, key and business ownership remain unchanged. Provider metadata
+never supplies an application role. `source` counts rows read from the original source.
+`updated` counts hydrated legacy profiles,
+`inserted` counts source identities absent from those profiles, and
+`disabled_orphans` counts excluded source users without active tenant membership; `excluded_inactive` counts all excluded source identities. Repeat
+imports inspect coverage and preserve newer credentials/edits.
 
-## Data contract and layout
+Ordinary login uses signed JWTs without a server session table. The existing
+`session` response envelope stays compatible, with an empty refresh token.
+Expired tokens require login; the legacy refresh endpoint rejects old credentials.
+Logout clears cookies; a copied ordinary JWT remains valid until expiry unless
+its credential revision or account availability changes. Password changes write
+salted scrypt and increment the credential revision. CAS retains its dedicated
+session table and sid revocation. Registration still requires an invitation.
 
-`migrate_docker.py` contains deployment orchestration, manual CLI, configuration, source
-container handling, validation and transactional import. Runtime login code does
-not import this operator tool.
+Keep `JWT_SECRET` stable across application services and repeated deployments.
+The new issuer and required credential revision reject legacy Supabase JWTs.
+The normal SU bootstrap uses `suadmin@nexent.com`, the configured
+`NEXENT_SUPER_ADMIN_PASSWORD` or the existing default. It prints credentials only
+after confirming a newly created account; existing/error/manual-hidden flows do
+not print them. Re-running deployment cannot recover a password from its hash.
 
-`--apply` imports accounts in one target transaction. Repeating
-the import skips matching accounts and preserves their newer passwords/status.
-Source reads use a read-only repeatable-read transaction. Provider metadata never
-grants application roles; live refresh credentials are never imported. The SQL
-startup runner owns SQL order; `deploy.sh` invokes this tool around that runner.
+Email reuse is checked after final account eligibility is computed. Soft-deleted,
+banned, anonymous or orphaned ordinary identities do not occupy an
+email in the new account table. Temporary schema-created unavailable profiles are
+removed in the same transaction, except the recognized SPEED system identity.
+Only final active duplicate emails fail; logs contain the conflicting account IDs
+without email values, hashes or connection details. Docker and Kubernetes preserve
+the same structured conflict through psql error transport. Complete
+account data skips source import, without retroactive deletion of local accounts.
+Missing roles or ordinary password credentials reject the current transaction.
+Historical associations without an eligible account cannot authenticate and no
+longer block SU preflight merely because the association row remains.
 
-See the [cutover and verification runbook](../../../../docs/local-authentication-migration.md)
-for excluded source fields and acceptance checks. Keep source backups until
-original passwords, UUID/ownership and provider bindings have been verified.
+## Troubleshooting and recovery
 
-Source `auth.audit_log_entries` is excluded entirely: the tool never reads it,
-creates no audit archive, and returns only account counters. Existing application
-business/security auditing is independent and unchanged.
+Start with sanitized deployment output and database/workload readiness. Do not
+paste password hashes, signing keys, DSNs or private environment files into logs.
+The following query only reports schema presence:
 
-Connections use only the existing SUPABASE_POSTGRES_HOST/PORT/DB/USER/PASSWORD
-and POSTGRES_HOST/PORT/DB/USER plus NEXENT_POSTGRES_PASSWORD fields. An explicit
-source host address connects directly; default settings and Docker service
-aliases retain automatic discovery/startup. --source-container explicitly selects
-a local container when needed. No migration-specific DSN or endpoint variables
-are read.
+```bash
+docker exec nexent-postgresql psql -U root -d nexent -c \
+  "SELECT to_regclass('nexent.user_account_t') AS accounts;"
+# Kubernetes equivalent:
+kubectl --namespace nexent exec deployment/nexent-postgresql -- psql -U root -d nexent -c \
+  "SELECT to_regclass('nexent.user_account_t') AS accounts;"
+```
 
-## Canonical account profile upgrade
+Use your configured DB/user. Schema presence alone cannot establish completion.
+The Shell entry logs its shared data inspection as counters and unresolved IDs.
+Inspect `[account-migration][preflight]`, `[source]`, `[snapshot]`, `[worker]`,
+`[result]`, `[committed]` and `[cleanup]` to identify the stage and outcome. No credential values
+are logged. A skipped run explicitly says source cleanup was not attempted;
+a remote source requires manual cleanup, while preview and failure retain it.
 
-Apply the single `v2.9.0_001_local_user_accounts.sql` before importing. It moves
-legacy role/email into `user_account_t.user_role/user_email`, removes their old
-association columns and preserves the original user UUID. Disabled placeholders
-created by SQL are filled by `--apply`; this appears in the `updated` counter.
-Completed accounts remain `skipped`. Repeated SQL/import runs preserve newer
-passwords, credential revisions and profile edits. Conflicting local metadata
-aborts the SQL transaction. See the cutover runbook for details.
+| Symptom | Checks and recovery |
+| --- | --- |
+| Account table exists but historical passwords were never imported | Check whether 001 or the new application was started manually first. Stop identity writes and recover a consistent pre-upgrade target backup, including original membership roles/emails, then run migration before application SQL. Reconcile newer local credentials before backup recovery. The script reports unresolved IDs and stops without automatically repairing or deleting existing account data |
+| SU bootstrap reports an existing SU membership or missing account profile | Verify original ID and membership/account consistency. Deleting only account rows leaves tenant ownership behind. Restore the matching target backup; do not replace the owner with a new UUID or delete memberships to bypass preflight |
+| Original source container or data directory missing | For Docker, set `SUPABASE_DATA_DIR` to the original PostgreSQL data directory or check `ROOT_DIR`. Restore that data from backup if needed, then retry deployment. Check the configured container name if another candidate exists. For Kubernetes or remote sources, restore the original workload or verify the remote endpoint |
+| Source stopped, no published port, or readiness timeout | The Shell coordinator starts an existing source and the worker uses internal endpoints. Check source readiness, both Docker bridge networks or Kubernetes services/network policies, and adjust `--wait-timeout` within its supported range |
+| Password unavailable or PostgreSQL authentication fails | Use the original `SUPABASE_POSTGRES_PASSWORD` and target credentials. Check the selected environment file and exported values; automatic local mode can read original container/pod settings. Changing a new container environment does not reset the old DB password |
+| Target account/role/email conflict, ambiguous source IDs, unsupported date or hash | Resolve the actual conflicting legacy metadata or recover its backup. Import must preserve stable IDs and supported hashes; do not invent UUIDs, roles or replacement passwords. Failure leaves the original target schema/data available for a clean retry |
+| `ModuleNotFoundError` for dotenv or psycopg2 | Rebuild/select the matching backend image. The worker requires its packaged database driver; installing packages on the host does not fix the image |
+| Python path contains `C:/c/...` or `/opt/C:/Program Files/Git/...` | Use the current `migrate.sh` entry, which never launches host Python. Docker/kubectl container paths retain scoped exclusions; host filenames passed to native kubectl are converted explicitly |
+| Missing `migration.py`, `migrate.py`, `legacy_stack.py`, or old version/pending-account errors | Use a consistent checkout/package. Current host entry is `migrate.sh`; the image contains its Python worker; remove stale launch commands instead of restoring deleted migration environment variables or phase files |
+| SQL bootstrap or application startup fails | Inspect Config/bootstrap Job logs and the normal SQL runner output. Fix the failing schema/service prerequisite and retry deployment. A failed new credential transaction rolls back its table/profile changes; an existing completed table is preserved |
+| Cleanup incomplete after migration committed | Accounts are already committed. Correct Docker/kubectl access and finish exact-resource cleanup, retaining volumes/backups. Do not drop the account table or rerun a source restore to undo a cleanup warning |
+| Kubernetes source has missing/unbound/ephemeral storage | Verify the source Deployment and actual PVC/PV bindings. Preserve original storage definitions and restore its original bound storage before retrying; never substitute a new empty claim |
+| Kubernetes rejects a legacy single Helm release | Resolve infrastructure/application resource ownership and the two-release layout first. Account import does not migrate Helm ownership; keep original values, Secrets and storage for that operation |
+| Helm reports `secrets.jwtSecret is required for local authentication` | Supply the original signing key through private `nexent-common.secrets.jwtSecret` values. The deployment script generates/reuses it; a shell variable alone does not populate direct Helm values |
+
+Do not delete `user_account_t` after a completed migration to force another import.
+Its role/email fields may now be the only canonical copies. A partially upgraded
+older target requires backup recovery or an explicit, reviewed data repair.
+
+## Acceptance and application rollback
+
+Verify original password login, wrong/unconfirmed/unavailable user rejection,
+original UUID/tenant/role/group and business ownership, password-change JWT
+revocation, existing API keys and revoked keys, and fresh/rerun SU bootstrap.
+Verify provider bindings and CAS sid/single logout against actual providers before
+production cutover. Local mocks do not establish external-provider acceptance.
+
+Before new identity/password writes, application rollback requires restoring the
+target PostgreSQL backup and original application configuration together against
+the preserved source. The old application needs membership email/role columns;
+rolling back only its image is insufficient. After cutover writes, reconcile new
+accounts, password and profile changes before restoring an older backup. SQL
+replay is a forward upgrade and cannot recover intentionally deleted account data.
+
+Local verification uses `AUTH-LOCAL-D5-001` for real PostgreSQL schema/credential
+atomicity, SQL replay and source lifecycle, and `AUTH-LOCAL-D2-001`, `API-005`,
+`API-006` for native HTTP/authentication behavior. `deploy/tests/test_common.sh`
+guards Shell-worker-before-application execution order and failure propagation.
+`NEXENT_AUTH_TEST_DSN` must identify an isolated instance allowed to create/drop
+test databases. Kubernetes command/storage unit tests and Shell checks are separate from actual
+cluster Job verification; report the executed cluster/context and fixture scope.

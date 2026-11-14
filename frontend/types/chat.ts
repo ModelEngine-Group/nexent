@@ -194,7 +194,7 @@ export type FilePreviewProps = {
    * - `"drawer"` (default): a side drawer over the current page.
    * - `"fullscreen"`: a full-viewport surface with a back arrow, used where a
    *   document is the whole task (AIDP knowledge base documents).
-   * - "inline": the preview surface embedded in a parent page.
+   * - `"inline"`: content only; the host owns the surrounding panel and controls.
    */
   presentation?: "drawer" | "fullscreen" | "inline";
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);

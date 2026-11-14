@@ -21,7 +21,7 @@ export class AuthPage {
     await this.page.getByPlaceholder("请输入密码").first().fill(user.password);
     const [response] = await Promise.all([
       this.page.waitForResponse((candidate) => candidate.url().includes("/api/user/signin") && candidate.request().method() === "POST"),
-      this.page.getByRole("button", { name: "登 录", exact: true }).click(),
+      this.page.getByRole("button", { name: "登录", exact: true }).click(),
     ]);
     await expect(this.page.getByRole("button", { name: "登录账户" })).toBeHidden();
     return response.status();
@@ -41,7 +41,7 @@ export class AuthPage {
     await this.page.getByRole("menuitem", { name: /退出登录/ }).click();
     const [response] = await Promise.all([
       this.page.waitForResponse((candidate) => candidate.url().includes("/api/user/logout")),
-      this.page.getByRole("button", { name: "确 定", exact: true }).click(),
+      this.page.getByRole("button", { name: "确定", exact: true }).click(),
     ]);
     await this.expectLoggedOut();
     return response.status();

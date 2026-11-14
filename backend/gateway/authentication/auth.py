@@ -14,18 +14,34 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from http import HTTPStatus
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
-from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, JWT_SECRET, JWT_ISSUER
+from fastapi import Depends, Header, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
     NorthboundContext,
     PendingOAuthIdentity,
 )
-from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID, OAUTH_PENDING_PURPOSE
-from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    LANGUAGE,
+    MOCK_JWT_SECRET_KEY,
+    OAUTH_PENDING_PURPOSE,
+)
+from contracts.constants.environment import (
+    DEBUG_JWT_EXPIRE_SECONDS,
+    JWT_EXPIRY_SECONDS,
+    JWT_ISSUER,
+    JWT_SECRET,
+)
 from contracts.errors.exceptions import (
     LimitExceededError,
     OAuthLinkError,
@@ -33,8 +49,17 @@ from contracts.errors.exceptions import (
     TokenExpiredError,
     UnauthorizedError,
 )
-from fastapi import Depends, Header, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from contracts.roles import (
+    has_any_role,
+    normalize_roles,
+    primary_role,
+    roles_from_record,
+)
+from gateway.authentication.credentials import (
+    extract_bearer_token,
+    require_active_account,
+)
+from gateway.authentication.northbound_auth import authenticate_api_key
 from infrastructure.security.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
@@ -47,14 +72,13 @@ from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )
+from management.db.identity.cas_session import is_cas_session_active
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.request_context import get_user_language
 from permissions.models import CurrentUser
 
 # Module logger
 logger = logging.getLogger(__name__)
-
-from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
 def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
@@ -68,8 +92,8 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
     if tenant_id:
         return tenant_id
 
-    user_role = (user_tenant.get("user_role") or "").upper()
-    if user_role == ASSET_OWNER_ROLE:
+    user_role = roles_from_record(user_tenant)
+    if has_any_role(user_role, {ASSET_OWNER_ROLE}):
         return ASSET_OWNER_TENANT_ID
 
     return DEFAULT_TENANT_ID
@@ -86,10 +110,6 @@ def get_jwt_expiry_seconds(token: str) -> int:
         int: Token validity period (seconds), returns configured default if parsing fails
     """
     try:
-        # Speed mode: treat sessions as never expiring
-        if IS_SPEED_MODE:
-            # 10 years in seconds
-            return 10 * 365 * 24 * 60 * 60
         # Ensure token is pure JWT, remove possible Bearer prefix
         jwt_token = extract_bearer_token(token)
 
@@ -126,9 +146,6 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
     Returns:
         int: Expiration time timestamp
     """
-    # Speed mode: far future expiration
-    if IS_SPEED_MODE:
-        return int((datetime.now() + timedelta(days=3650)).timestamp())
 
     expiry_seconds = get_jwt_expiry_seconds(token) if token else JWT_EXPIRY_SECONDS
     return int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
@@ -150,16 +167,6 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
         algorithms=["HS256"],
         options={"verify_exp": False, "verify_aud": False},
     )
-
-
-def require_active_account(user_id: str) -> dict:
-    """Reject deleted/disabled identities before any business authorization."""
-    from management.db.identity.account import get_account
-
-    account = get_account(user_id)
-    if not account or account["account_status"] != "active":
-        raise TokenExpiredError("Account is unavailable")
-    return account
 
 
 def _decode_jwt_token(authorization: str) -> dict:
@@ -244,7 +251,6 @@ def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -
     if not session_id:
         return
 
-    from management.db.identity.cas_session import is_cas_session_active
 
     if not is_cas_session_active(str(session_id)):
         raise TokenExpiredError("CAS session has expired or been revoked")
@@ -260,10 +266,6 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
-    # In speed mode, allow unauthenticated access with default user for demo/dev
-    if IS_SPEED_MODE:
-        logging.debug("Speed mode detected - returning default user ID and tenant ID")
-        return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
     if authorization is None or (
@@ -280,6 +282,10 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
         ensure_cas_session_active_from_authorization(authorization)
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
+        if not user_tenant_record:
+            raise TokenExpiredError("No active tenant relationship")
+        if not roles_from_record(user_tenant_record):
+            raise TokenExpiredError("No active roles for this account")
         if user_tenant_record and user_tenant_record.get("tenant_id"):
             tenant_id = user_tenant_record["tenant_id"]
             logging.debug(f"Found tenant ID for user {user_id}: {tenant_id}")
@@ -299,18 +305,19 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
 
 def get_current_user_context(
     authorization: Optional[str] = None,
-) -> tuple[str, str, str]:
-    """Return the authenticated user ID, tenant ID, and normalized role."""
+) -> tuple[str, str, tuple[str, ...]]:
+    """Read current membership roles on every authenticated request."""
     user_id, tenant_id = get_current_user_id(authorization)
 
-    if IS_SPEED_MODE:
-        return user_id, tenant_id, "SPEED"
 
     user_tenant_record = get_user_tenant_by_user_id(user_id)
     if not user_tenant_record:
         raise TokenExpiredError("User tenant relationship not found")
 
-    user_role = str(user_tenant_record.get("user_role") or "").upper()
+    try:
+        user_role = roles_from_record(user_tenant_record)
+    except ValueError as exc:
+        raise TokenExpiredError("User roles are unavailable") from exc
     if not user_role:
         raise TokenExpiredError("User role not found")
 
@@ -390,7 +397,6 @@ def get_current_user_info(
 
 def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
     """Apply gateway identity policy and return the existing user response shape."""
-    from types import SimpleNamespace
 
     try:
         user_id, _ = get_current_user_id(token)
@@ -423,22 +429,6 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """Compatibility tuple over the shared gateway identity contract."""
     principal = authenticate_identity(authorization)
     return principal.user_id, principal.tenant_id
-
-
-def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
-    """Accept Bearer credentials and the established single-token legacy form."""
-    if not authorization:
-        return None
-    if not isinstance(authorization, str):
-        raise TokenExpiredError("Invalid authorization header")
-    parts = authorization.strip().split()
-    if not parts:
-        return None
-    if len(parts) == 1 and parts[0].lower() != "bearer":
-        return parts[0]
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1]
-    raise TokenExpiredError("Invalid authorization header")
 
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
@@ -531,16 +521,16 @@ def authenticate_identity(
             user_id, tenant_id, role = get_current_user_context(authorization)
         else:
             user_id, tenant_id = _resolve_session_user(authorization)
-            role = "SPEED" if IS_SPEED_MODE else ""
+            role = ()
         return AuthenticatedIdentity(
             user_id,
             tenant_id,
-            role=role,
+            role=primary_role(role) if role else "",
+            roles=normalize_roles(role, allow_empty=True),
             language=get_user_language(request),
             kind=kind,
         )
     if kind == CredentialKind.API_KEY:
-        from gateway.authentication.northbound_auth import authenticate_api_key
 
         return authenticate_api_key(authorization, request)
     if kind == CredentialKind.INTERNAL:
@@ -559,9 +549,9 @@ def authenticate(
     header_token = authorization
     if not header_token and _credentials:
         header_token = _credentials.credentials
-    if not header_token and not IS_SPEED_MODE:
+    if not header_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     principal = authenticate_identity(header_token, require_role=True)
     return CurrentUser(
-        user_id=principal.user_id, tenant_id=principal.tenant_id, role=principal.role
+        user_id=principal.user_id, tenant_id=principal.tenant_id, role=principal.role, roles=principal.roles
     )

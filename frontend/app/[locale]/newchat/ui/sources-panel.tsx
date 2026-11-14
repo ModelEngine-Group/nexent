@@ -21,7 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Pagination } from "antd";
 import { cn } from "@/lib/utils";
 import { getCitationKey } from "@/lib/citationDisplay";
 import {
@@ -245,7 +245,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3"
+        className="aui-sources-panel-scroll min-h-0 flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3"
       >
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -302,7 +302,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           aria-label={t("chat.sources.pagination")}
           className="flex shrink-0 justify-center border-t border-slate-200 px-3 py-3"
         >
-          <StandardPaginator
+          <Pagination
             size="small"
             current={currentPage}
             pageSize={20}

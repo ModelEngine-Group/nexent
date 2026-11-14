@@ -18,7 +18,9 @@ def test_long_text_preserves_preparation_and_calls_same_model(openai_profile, mo
     adapter = OpenAILongContextLLMAdapter(context(openai_profile, LongContextLLMContext, "llm_long_context"))
     adapter._build_model()
     assert isinstance(adapter._model, LegacyChatModel)
-    assert adapter.max_context_tokens == openai_profile.capabilities.context.combined_window
+    assert adapter.max_context_tokens == (
+        openai_profile.capabilities.context.combined_window - openai_profile.capabilities.context.output_limit
+    )
     mocker.patch.object(adapter, "_get_tokenizer", return_value=None)
     generate = mocker.patch.object(adapter._model, "generate", return_value="answer")
     result, percent = adapter.analyze_long_text("text", "system", "analyze")

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -174,8 +174,7 @@ CAPACITY_SUGGESTION_ENABLED = os.getenv('CAPACITY_SUGGESTION_ENABLED', 'true').l
 CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Deployment Version Configuration
-DEPLOYMENT_VERSION = os.getenv('DEPLOYMENT_VERSION', 'full')
-IS_SPEED_MODE = DEPLOYMENT_VERSION == 'speed'
+DEPLOYMENT_VERSION = validate_deployment_version(os.getenv('DEPLOYMENT_VERSION', 'full'))
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv('ENABLE_AIDP_KNOWLEDGE', 'false').lower() in ('true', '1', 'yes', 'on')
@@ -289,13 +288,6 @@ WORKER_NAME = os.getenv('WORKER_NAME')
 # Keep the historical default when the variable is not provided.
 WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_COUNT + 1)))
 
-# Voice Service Configuration
-APPID = os.getenv('APPID', '')
-TOKEN = os.getenv('TOKEN', '')
-CLUSTER = os.getenv('CLUSTER', 'volcano_tts')
-VOICE_TYPE = os.getenv('VOICE_TYPE', 'zh_male_jieshuonansheng_mars_bigtts')
-SPEED_RATIO = float(os.getenv('SPEED_RATIO', '1.3'))
-
 # ===== Memory System =====
 # MMR (Maximal Marginal Relevance) configuration
 MMR_LAMBDA = float(os.getenv('MMR_LAMBDA', '0.7'))
@@ -336,6 +328,7 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(os.getenv('PROVIDER_REQUEST_TIMEOUT_SECON
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv('NEXENT_MCP_SERVER')
+NEXENT_MCP_INTERNAL_TOKEN = os.getenv('NEXENT_MCP_INTERNAL_TOKEN', '')
 MCP_MANAGEMENT_API = os.getenv('MCP_MANAGEMENT_API', 'http://localhost:5015')
 
 # Maximum number of configured MCP services per tenant.
@@ -354,7 +347,6 @@ _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIR
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
-
 
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
@@ -389,7 +381,7 @@ MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv('MONITORING_EXCLUDED_EL
 MONITORING_EXCLUDED_SPAN_NAMES = os.getenv('MONITORING_EXCLUDED_SPAN_NAMES', 'knowledge.process.submit,knowledge.upload.batch')
 MONITORING_PROJECT_NAME = os.getenv('MONITORING_PROJECT_NAME', '')
 MONITORING_DASHBOARD_URL = os.getenv('MONITORING_DASHBOARD_URL', '')
-MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU,SPEED')
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU')
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
@@ -458,7 +450,6 @@ MEMORY_PROVIDER_PLUGINS_DIR = os.getenv('MEMORY_PROVIDER_PLUGINS_DIR', '')
 NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm_models.json')
 
 # Exact, operator-verified endpoint/model reasoning transport overrides.
-MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv('MODEL_REASONING_WIRE_PROFILES_PATH', str(_CONFIG_DIRECTORY / 'model_reasoning_wire_profiles.json'))
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv

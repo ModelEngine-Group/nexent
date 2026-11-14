@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
 import { LockOpen, Send } from "lucide-react";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { API_ENDPOINTS } from "@/services/api";
 import {
   getAgentIcon,
@@ -70,7 +69,7 @@ export function AgentConfigHeader({
     <div
       ref={actionAreaRef}
       data-testid="agent-config-header"
-      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-7 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
+      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-7 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
     >
       <span
         aria-hidden="true"
@@ -126,7 +125,7 @@ export function AgentConfigHeader({
         </div>
       </div>
       <div
-        className="flex shrink-0 items-center gap-1 rounded-[6px] bg-[rgba(25,25,25,0.05)] p-[2px] [&_.ant-btn]:!h-7 [&_.ant-btn]:!min-w-[102px] [&_.ant-btn]:!whitespace-nowrap [&_.ant-btn]:!px-4 [&_.ant-btn]:!py-[3px] [&_.ant-btn]:!text-sm [&_.ant-btn]:!font-normal [&_.ant-btn]:!leading-[22px] [&_.ant-btn]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
+        className="flex shrink-0 items-center gap-1 rounded-[var(--radius-control)] bg-[rgba(25,25,25,0.05)] p-[2px] [&_.ant-btn]:!h-7 [&_.ant-btn]:!min-w-[102px] [&_.ant-btn]:!whitespace-nowrap [&_.ant-btn]:!px-4 [&_.ant-btn]:!py-[3px] [&_.ant-btn]:!text-sm [&_.ant-btn]:!font-normal [&_.ant-btn]:!leading-[22px] [&_.ant-btn]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
         role="group"
         aria-label={t("agent.highFidelity.workflowModes")}
       >
@@ -137,7 +136,7 @@ export function AgentConfigHeader({
           onClick={onConfigure}
           className={
             !debugVisible && !publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -150,7 +149,7 @@ export function AgentConfigHeader({
           onClick={onDebug}
           className={
             debugVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -163,7 +162,7 @@ export function AgentConfigHeader({
           onClick={onPublication}
           className={
             publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -181,15 +180,14 @@ export function AgentConfigHeader({
             />
           </Tooltip>
         )}
-        <StandardButton
-          variant="primary"
+        <Button
+          type="primary"
           icon={<Send size={16} />}
           disabled={agentId === null || readOnly}
           onClick={onPublish}
-          className="!bg-[#2673e5]"
         >
           {t("agent.config.button.publish")}
-        </StandardButton>
+        </Button>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@
 
 import { Button, Modal, Tooltip } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
-import { RotateCw } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import {
   forwardRef,
   type HTMLAttributes,
@@ -16,7 +16,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
 import styles from "./ParamDialog.module.css";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
@@ -40,7 +39,9 @@ export function ParamDialog({
   footer,
   children,
   variant,
+  splitLayout = false,
 }: {
+  splitLayout?: boolean;
   variant?: "skill" | "tool" | "model" | "publish";
   open: boolean;
   title: ReactNode;
@@ -68,7 +69,7 @@ export function ParamDialog({
       open={open}
       onCancel={onClose}
       centered
-      width={480}
+      width={splitLayout ? "min(1040px, calc(100vw - 32px))" : 480}
       footer={null}
       closable={false}
       zIndex={zIndex}
@@ -83,7 +84,11 @@ export function ParamDialog({
         body: { padding: 0 },
       }}
     >
-      <div className={styles.dialog} data-config-variant={variant}>
+      <div
+        className={styles.dialog}
+        data-config-variant={variant}
+        data-config-layout={splitLayout ? "split" : undefined}
+      >
         <div
           data-config-part="heading"
           className="flex shrink-0 flex-col gap-2"
@@ -95,8 +100,11 @@ export function ParamDialog({
             <span className="min-w-0 text-[16px] font-bold leading-6 text-[#1A1A1A]">
               {title}
             </span>
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("common.close")}
+              icon={<X size={14} />}
               onClick={onClose}
             />
           </div>
@@ -325,7 +333,7 @@ export function ParamLabel({
           *
         </span>
       )}
-      {label}
+      <span data-config-label-text>{label}</span>
       {infoNode &&
         (showInfo && infoText ? (
           <Tooltip title={infoText}>{infoNode}</Tooltip>

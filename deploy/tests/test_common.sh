@@ -323,6 +323,7 @@ deployment_prepare_config --local-config "$FULL_CONFIG" --use-local-config --app
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "use local config should keep saved data-process when legacy env exists"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "use local config should select data-process docker service"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "use local config should keep saved port policy over legacy mode"
+assert_eq "full" "$DEPLOYMENT_VERSION" "legacy speed input must retain authentication"
 assert_eq "local-latest" "$DEPLOYMENT_IMAGE_SOURCE" "use local config should keep saved image source over legacy mainland flag"
 unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 
@@ -1009,6 +1010,7 @@ DUPLICATE=second
 export EXPORTED_VALUE=custom
   LEADING_SPACE_VALUE=custom
 SPECIAL_EXISTING='literal $EXISTING # value \\ path'
+TOKEN='legacy $MCP_FIXTURE # token'
 EOF
 MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
 {
@@ -1023,6 +1025,7 @@ MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
   printf '%s\n' 'NEW_DUPLICATE=first-default'
   printf '%s\n' 'NEW_DUPLICATE=second-default'
   printf '%s\n' 'NEW_EMPTY='
+  printf '%s\n' 'NEXENT_MCP_INTERNAL_TOKEN=template-default'
 } > "$MERGE_ENV_ROOT/deploy/env/.env.example"
 cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/original.env"
 MERGE_OUTPUT="$(deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker")"
@@ -1045,6 +1048,9 @@ assert_contains "$MERGED_ENV_CONTENT" 'NEW_FIRST="  literal $NEW_VALUE # hash \\
 assert_contains "$MERGED_ENV_CONTENT" "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\"" "command substitutions should be appended without execution"
 assert_contains "$MERGED_ENV_CONTENT" $'NEW_DUPLICATE=first-default\nNEW_DUPLICATE=second-default\nNEW_EMPTY=' "new template assignments should retain template order and duplicates"
 assert_not_contains "$MERGE_OUTPUT" "custom" "merge logs should not expose environment values"
+assert_contains "$MERGED_ENV_CONTENT" "NEXENT_MCP_INTERNAL_TOKEN='legacy \$MCP_FIXTURE # token'" "upgrade should preserve the existing MCP token and its quoting"
+assert_not_contains "$MERGED_ENV_CONTENT" 'NEXENT_MCP_INTERNAL_TOKEN=template-default' "upgrade should prefer the existing token over the template default"
+assert_not_contains "$MERGE_OUTPUT" 'legacy $MCP_FIXTURE' "upgrade logs should not expose the token"
 [ ! -e "$MERGE_SIDE_EFFECT" ] || {
   echo "FAIL: .env merge should never execute template values"
   exit 1
@@ -1056,6 +1062,10 @@ cmp -s "$MERGE_ENV_ROOT/merged-snapshot.env" "$MERGE_ENV_ROOT/deploy/env/.env" |
   echo "FAIL: .env merge should not rewrite files when no variables are missing"
   exit 1
 }
+
+printf '%s\n' 'TOKEN=legacy' 'NEXENT_MCP_INTERNAL_TOKEN=' > "$MERGE_ENV_ROOT/deploy/env/.env"
+deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker" >/dev/null
+assert_eq 'NEXENT_MCP_INTERNAL_TOKEN=' "$(grep '^NEXENT_MCP_INTERNAL_TOKEN=' "$MERGE_ENV_ROOT/deploy/env/.env")" "the dedicated key should win even when explicitly empty"
 
 EMPTY_ENV_ROOT="$TMP_DIR/empty-env-root"
 mkdir -p "$EMPTY_ENV_ROOT/deploy/env"
@@ -1355,24 +1365,64 @@ deployment_prepare_config --components infrastructure,supabase --port-policy dev
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "legacy authentication component must use application local accounts"
 assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must keep auth enabled"
 assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
-# Exercise the host migration hook with a controlled Python executable.
-mkdir -p "$TMP_DIR/auto-auth-bin"
-cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
-#!/usr/bin/env bash
-if [ "${1:-}" = -c ]; then exit 0; fi
-printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
-printf '%s\n' "$MSYS_NO_PATHCONV/$MSYS2_ARG_CONV_EXCL" >> "$AUTH_HOOK_ARGUMENTS"
-PYTHON
-chmod +x "$TMP_DIR/auto-auth-bin/python3"
+# The host hook delegates to Shell without looking up any Python interpreter.
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
+bash() { printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
+deployment_upgrade_local_accounts docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.sh" "deployment must use the Shell migration coordinator"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
-assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "prepare must not import accounts"
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes deployment must select its dedicated entry point"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete migration before rollout"
+deployment_upgrade_local_accounts kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "kubernetes" "Kubernetes must select its Shell transport"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "Git Bash must not rewrite container paths"
+assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "python" "host hook must not invoke Python"
+
+# Guard the real deployment call sites, including HTTPS and bootstrap paths
+# which can start Config and execute SQL indirectly.
+assert_call_before() {
+  local script="$1" first="$2" second="$3"
+  local content before_first before_second
+  content="$(cat "$script")"
+  assert_contains "$content" "$first" "required deployment call is missing"
+  assert_contains "$content" "$second" "required deployment boundary is missing"
+  before_first="${content%%"$first"*}"
+  before_second="${content%%"$second"*}"
+  [ "${#before_first}" -lt "${#before_second}" ] || {
+    echo "FAIL: $first must run before $second"
+    exit 1
+  }
+}
+DOCKER_ACCOUNT_CALL='deployment_upgrade_local_accounts docker || exit 1'
+K8S_ACCOUNT_CALL='deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" '  deploy_infrastructure ||' "$DOCKER_ACCOUNT_CALL"
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_https_nginx ||'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_core_services ||'
+assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" $'\n    render_runtime_secret_values\n'
+if grep -Fq 'deploy_application_release()' "$SCRIPT_DIR/../k8s/deploy.sh"; then
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    if ! deploy_application_release; then'
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" '        helm_upgrade_application_release true ||' '        run_system_agent_bootstrap ||'
+else
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
+fi
+assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
+for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+  eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
+done
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
+assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+
+export AUTH_HOOK_EXIT=17
+if deployment_upgrade_local_accounts docker; then
+  echo "FAIL: a migration error must propagate to the deployment caller"
+  exit 1
+fi
+unset AUTH_HOOK_EXIT
 
 echo "All deployment common tests passed."
+
+unset -f bash
+bash "$SCRIPT_DIR/test_account_migration.sh"

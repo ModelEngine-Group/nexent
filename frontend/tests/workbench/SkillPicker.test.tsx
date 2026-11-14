@@ -537,3 +537,28 @@ beforeEach(async () => {
     interpolation: { escapeValue: false },
   });
 });
+
+it("requests mount summaries while preserving required configuration and selected IDs", async () => {
+  const confirm = vi.fn();
+  const item = {
+    ...base,
+    config_schemas: [{ name: "region", type: "string", required: true }],
+    config_values: { region: "west" },
+  };
+  delete item.content;
+  vi.mocked(fetchSkillsList).mockResolvedValue([item]);
+  render(
+    <SkillPicker
+      open
+      selected={[{ skill_id: 1, config_values: { region: "east" } }]}
+      onCancel={vi.fn()}
+      onConfirm={confirm}
+    />
+  );
+  await screen.findByRole("option", { name: /Default Skill/ });
+  expect(fetchSkillsList).toHaveBeenCalledExactlyOnceWith(undefined, "mount");
+  await userEvent.click(screen.getByRole("button", { name: "确认" }));
+  expect(confirm.mock.calls[0][0]).toEqual([
+    { skill_id: 1, config_values: { region: "east" } },
+  ]);
+});

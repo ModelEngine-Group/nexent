@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: WB-CREATION-CONFIRM-D2-001
+implementations:
+  - framework: pytest
+    file: test_api.py
+    selector: test_creation_confirmation
+acceptance_bindings:
+  AC-01: [test_creation_confirmation_http_receipt]
+  AC-02: [test_creation_confirmation_rejects_malformed_requests, test_creation_confirmation_maps_domain_rejection, test_creation_confirmation_expired_identity]
+timeout_seconds: 120
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
