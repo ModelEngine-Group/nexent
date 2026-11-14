@@ -206,3 +206,61 @@ class TestChunkSearchImpl:
                 SERVER_URL, API_KEY, "aidp-kb-demo", "演示.pdf", "检索",
             )
         assert exc_info.value.error_code == fusion.ErrorCode.AIDP_RESPONSE_ERROR
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_code"),
+        [
+            (httpx.ReadTimeout("upstream timed out"), "AIDP_CONNECTION_ERROR"),
+            (
+                httpx.Response(
+                    200,
+                    content=b"<html>upstream error</html>",
+                    request=httpx.Request("POST", "http://aidp.example/search"),
+                ),
+                "AIDP_RESPONSE_ERROR",
+            ),
+        ],
+        ids=["timeout", "invalid-json"],
+    )
+    def test_upstream_failure_keeps_error_and_does_not_retry(
+        self, fusion, monkeypatch, failure, expected_code
+    ):
+        client = _install_client(monkeypatch, fusion, failure)
+        if isinstance(failure, httpx.RequestError):
+            client.post.side_effect = failure
+
+        with pytest.raises(fusion.AppException) as exc_info:
+            fusion.search_aidp_chunks_impl(
+                SERVER_URL, API_KEY, "kb-1", "report.pdf", "contract",
+            )
+
+        assert exc_info.value.error_code == getattr(fusion.ErrorCode, expected_code)
+        client.post.assert_called_once()
+
+    def test_keeps_valid_hit_when_other_hits_have_no_usable_id(self, fusion, monkeypatch):
+        client = _install_client(monkeypatch, fusion, _ok_response({
+            "result": [
+                None,
+                {"id": "unusable", "title": "report.pdf"},
+                {"id": -1, "title": "report.pdf"},
+                {"id": "12", "title": "report.pdf", "text": "contract"},
+            ],
+        }))
+
+        result = fusion.search_aidp_chunks_impl(
+            SERVER_URL, API_KEY, "kb-1", "report.pdf", "contract",
+        )
+
+        assert [(row["chunk_id"], row["page_ids"]) for row in result["value"]] == [(12, [])]
+        client.post.assert_called_once()
+
+    def test_rejects_whitespace_only_query_before_aidp_request(self, fusion, monkeypatch):
+        client = _install_client(monkeypatch, fusion, _ok_response({"result": []}))
+
+        with pytest.raises(fusion.AppException) as exc_info:
+            fusion.search_aidp_chunks_impl(
+                SERVER_URL, API_KEY, "kb-1", "report.pdf", "  ",
+            )
+
+        assert exc_info.value.error_code == fusion.ErrorCode.COMMON_VALIDATION_ERROR
+        client.post.assert_not_called()
