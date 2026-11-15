@@ -72,3 +72,16 @@ async def test_missing_outlet_does_not_probe_any_endpoint(health, monkeypatch):
     with pytest.raises(LookupError, match="MODEL_CONFIGURATION_NOT_FOUND"):
         await module.check_model_connectivity("missing", "tenant")
     profiles.validate_model_outlet.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inventory_probe_does_not_update_the_saved_outlet(health, monkeypatch):
+    module, profiles = health
+    monkeypatch.setattr(module, "get_model_by_display_name", Mock(return_value={
+        "model_type": "llm", "model_id": 42, "model_name": "exact",
+    }))
+
+    result = await module.check_model_connectivity("chosen", "tenant", persist_status=False)
+
+    assert result["connectivity"] is True
+    assert profiles.validate_model_outlet.await_args.kwargs == {"persist_status": False}

@@ -514,12 +514,12 @@ class TestLogout:
         assert client.post("/user/logout").status_code == 200
 
     def test_invalid_jwt_cannot_revoke_arbitrary_cas_sid(self):
-        with patch("management.api.identity.user_management.get_current_user_id", side_effect=UnauthorizedError("invalid")), patch("management.db.identity.cas_session.revoke_cas_session_by_session_id") as revoke:
+        with patch("management.api.identity.user_management.get_current_user_id", side_effect=UnauthorizedError("invalid")), patch("management.api.identity.user_management.revoke_cas_session_by_session_id") as revoke:
             assert client.post("/user/logout", headers={"Authorization":"Bearer forged"}).status_code == 200
             revoke.assert_not_called()
 
     def test_valid_cas_logout_revokes_session_and_returns_url(self):
-        with patch("management.api.identity.user_management.get_current_user_id",return_value=("u","t")), patch("management.api.identity.user_management.extract_session_id_from_authorization",return_value="sid"), patch("management.api.identity.user_management.build_logout_url",return_value="https://cas.example.com/logout"), patch("management.db.identity.cas_session.revoke_cas_session_by_session_id") as revoke:
+        with patch("management.api.identity.user_management.get_current_user_id",return_value=("u","t")), patch("management.api.identity.user_management.extract_session_id_from_authorization",return_value="sid"), patch("management.api.identity.user_management.build_logout_url",return_value="https://cas.example.com/logout"), patch("management.api.identity.user_management.revoke_cas_session_by_session_id") as revoke:
             response=client.post("/user/logout",headers={"Authorization":"Bearer valid"})
             assert response.status_code==200
             assert response.json()["data"]["cas_logout_url"]=="https://cas.example.com/logout"
@@ -793,6 +793,10 @@ class TestCurrentUserInfo:
 
 
 class TestRevokeUserAccount:
+    @pytest.fixture(autouse=True)
+    def authoritative_roles(self, mocker):
+        self.role_context = mocker.patch("management.api.identity.user_management.get_current_user_context", return_value=("user", "tenant", ("USER",)))
+
     """Tests for the /user/revoke endpoint"""
 
     @patch('management.api.identity.user_management.delete_user_and_cleanup', new_callable=AsyncMock)
@@ -817,6 +821,7 @@ class TestRevokeUserAccount:
     @patch('management.api.identity.user_management.get_current_user_id')
     def test_revoke_forbidden_admin(self, mock_get_ids, mock_validate):
         mock_get_ids.return_value = ("admin123", "tenant456")
+        self.role_context.return_value = ("admin123", "tenant456", ("ADMIN",))
         user = MagicMock()
         user.user_metadata = {"role": "admin"}
         mock_validate.return_value = (True, user)

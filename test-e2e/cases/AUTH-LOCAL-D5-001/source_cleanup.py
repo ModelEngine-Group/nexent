@@ -4,26 +4,35 @@
 import json
 import os
 import subprocess
-import sys
 import time
 from uuid import uuid4
 
 import psycopg2
-from psycopg2.extensions import parse_dsn
 
 
 def docker(*args):
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def assert_source_cleanup(root, target):
+def assert_source_cleanup(root, temporary, build_worker_image):
     run_id = uuid4().hex
     names = {kind: "supabase-auth-test-" + kind + "-" + run_id for kind in ["db", "auth", "kong"]}
     volume = "auth-source-test-" + run_id
     unrelated = "unrelated-auth-test-" + run_id
+    target = "auth-cleanup-target-" + run_id
+    image = "nexent-account-cleanup-test:" + run_id
     password = "SourceTestOnly123"
     docker("volume", "create", "--label", "codex.test=" + run_id, volume)
     try:
+        build_worker_image(root, image, run_id)
+        docker("run", "-d", "--name", target, "--label", "codex.test=" + run_id,
+               "-e", "POSTGRES_PASSWORD=" + password, "postgres:15-alpine")
+        deadline = time.monotonic() + 30
+        while subprocess.run(["docker", "exec", target, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True, check=False).returncode:
+            assert time.monotonic() < deadline, "Target database did not start"
+            time.sleep(0.2)
+        docker("exec", target, "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+               "CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100), tenant_id varchar(100), user_role varchar(30), user_email varchar(255), delete_flag varchar(1) DEFAULT 'N')")
         docker("run", "-d", "--name", names["db"], "--label", "codex.test=" + run_id,
                "-e", "POSTGRES_PASSWORD=" + password, "-p", "127.0.0.1::5432",
                "-v", volume + ":/var/lib/postgresql/data", "postgres:15-alpine")
@@ -47,14 +56,16 @@ def assert_source_cleanup(root, target):
                 cursor.execute("CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid,email text,encrypted_password text)")
             docker("exec", names["db"], "sh", "-c", "printf retained-backup > /var/lib/postgresql/data/migration-test-backup")
             docker("stop", names["db"])
-            params = parse_dsn(target)
             env = {**os.environ, "SUPABASE_POSTGRES_HOST": "supabase_db", "SUPABASE_POSTGRES_DB": "postgres",
                    "SUPABASE_POSTGRES_PASSWORD": password, "SUPABASE_POSTGRES_USER": "postgres",
-                   "POSTGRES_HOST": params["host"], "POSTGRES_PORT": params["port"], "POSTGRES_DB": params["dbname"],
-                   "POSTGRES_USER": params["user"], "NEXENT_POSTGRES_PASSWORD": params["password"],
+                   "POSTGRES_DB": "postgres", "POSTGRES_USER": "postgres", "NEXENT_POSTGRES_PASSWORD": password,
+                   "NEXENT_IMAGE": image, "DEPLOYMENT_IMAGE_SOURCE": "local-latest",
                    "SUPABASE_MIGRATION_DB_CONTAINER": names["db"], "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"],
                    "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"], "SUPABASE_MIGRATION_NETWORK": "unused-" + run_id}
-            command = [sys.executable, str(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"), "--source-container", names["db"], "--wait-timeout", "30"]
+            bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "bash"
+            command = [bash, (root / "deploy/sql/tools/supabase_to_postgres/migrate.sh").as_posix(),
+                       "--database-target", target, "--env-file", (temporary / "unused.env").as_posix(),
+                       "--source-container", names["db"], "--wait-timeout", "30"]
             preview = subprocess.run(command, env=env, capture_output=True, text=True)
             assert preview.returncode == 0, preview.stderr
             assert json.loads(preview.stdout)["dry_run"]
@@ -92,8 +103,11 @@ def assert_source_cleanup(root, target):
             source.close()
     finally:
         existing = docker("ps", "-a", "--format", "{{.Names}}").splitlines()
-        for name in [*names.values(), unrelated]:
+        for name in [*names.values(), unrelated, target]:
             if name in existing and docker("inspect", "--format", '{{index .Config.Labels "codex.test"}}', name) == run_id:
                 docker("rm", "-f", name)
         if docker("volume", "inspect", "--format", '{{index .Labels "codex.test"}}', volume) == run_id:
             docker("volume", "rm", volume)
+        images = docker("image", "ls", "--filter", f"label=codex.test={run_id}", "--format", "{{.Repository}}:{{.Tag}}")
+        if image in images.splitlines():
+            docker("image", "rm", image)

@@ -6,7 +6,7 @@ from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FO
 from contracts.skill import InstallSkillsRequest
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from starlette.responses import JSONResponse
@@ -19,6 +19,7 @@ from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingErro
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from permissions.resource_access import resource_read_tenant
 from gateway.authentication.auth import get_current_user_id
 
 
@@ -60,18 +61,34 @@ def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
 async def list_skills(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
+    view: Literal["full", "mount"] = Query(
+        "full", description="Use mount for metadata without Skill content or tool associations"
+    ),
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)
         # Super admin can query a specific tenant's skills; otherwise use current user's tenant
-        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        inventory_tenant = resource_read_tenant(request, shared=True)
+        effective_tenant_id = inventory_tenant or tenant_id or current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
+        list_options = {"for_mount": True} if view == "mount" else {}
+        if inventory_tenant:
+            fields = ("skill_id", "name", "description", "source", "tags", "update_time")
+            skills = [
+                {field: skill.get(field) for field in fields}
+                for skill in service.list_skills(**list_options)
+            ]
+            return JSONResponse(content={"skills": skills})
         skills = service.list_visible_skills(
             tenant_id=effective_tenant_id,
             user_id=user_id,
+            **list_options,
         )
         return JSONResponse(content={"skills": skills})
+    except HTTPException:
+        raise
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

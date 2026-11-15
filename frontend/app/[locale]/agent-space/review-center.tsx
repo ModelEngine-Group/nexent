@@ -1,4 +1,6 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useMemo, useState } from "react";
 import { App, Button, Empty, Spin } from "antd";
@@ -6,7 +8,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { AgentDetail } from "@/components/agent/agent-detail";
-import { USER_ROLES } from "@/const/auth";
+
 import {
   useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
@@ -27,7 +29,7 @@ export function ReviewCenter({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = hasRole(user, "ADMIN");
   const currentUserEmail = user?.email;
   const [page, setPage] = useState(1);
   const pageSize = REVIEW_PAGE_SIZE;

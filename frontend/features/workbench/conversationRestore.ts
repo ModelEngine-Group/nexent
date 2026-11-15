@@ -4,11 +4,11 @@ import { t as translate } from "i18next";
 import { getCreatorMode } from "@/lib/creatorConversation";
 import { initialWorkbenchState } from "./state";
 import { previewWorkbenchAgent } from "./api";
-import { fetchSkillsList } from "@/services/skillService";
+import { fetchSkillById } from "@/services/agentConfigService";
 import type { WorkbenchSessionConfig } from "./types";
 import type { ConversationKnowledgeScope } from "@/types/knowledgeScope";
 
-/** Resolve display resources before releasing the conversation's send gate. */
+/** Validate only saved mounts before releasing the conversation send gate. */
 export async function resolveRestoredWorkbench(conversation: {
   workbench_config?: WorkbenchSessionConfig | null;
   workbench_config_version?: number;
@@ -26,24 +26,19 @@ export async function resolveRestoredWorkbench(conversation: {
   if (!config)
     throw new Error("This conversation does not belong to Workbench");
   const version = conversation.workbench_config_version ?? 0;
-  await Promise.all(
-    config.agent_mounts.map((mount) =>
-      previewWorkbenchAgent(mount.agent_id, mount.version_no)
-    )
-  );
   const skillNames: Record<number, string> = {};
-  if (config.skill_mounts.length) {
-    const skills = await fetchSkillsList();
-    for (const mount of config.skill_mounts) {
-      const skill = skills.find(
-        (item) => Number(item.skill_id) === mount.skill_id
-      );
-      if (!skill)
+  await Promise.all([
+    ...config.agent_mounts.map((mount) =>
+      previewWorkbenchAgent(mount.agent_id, mount.version_no)
+    ),
+    ...config.skill_mounts.map(async (mount) => {
+      const result = await fetchSkillById(mount.skill_id);
+      if (!result.success || !result.data)
         throw new Error(
           translate("ui.localization.conversationSkillsUnavailable")
         );
-      skillNames[mount.skill_id] = skill.name;
-    }
-  }
+      skillNames[mount.skill_id] = result.data.name || `#${mount.skill_id}`;
+    }),
+  ]);
   return { config, version, skillNames };
 }

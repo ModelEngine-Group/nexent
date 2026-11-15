@@ -309,11 +309,14 @@ class SkillService(SkillArchiveOperations):
             out.pop("config_schemas", None)
         return out
 
-    def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_skills(
+        self, tenant_id: Optional[str] = None, *, for_mount: bool = False
+    ) -> List[Dict[str, Any]]:
         """List all skills for a tenant.
 
         Args:
             tenant_id: Tenant ID for filtering skills. Uses instance tenant_id if not provided.
+            for_mount: Omit Skill content and tool relations while retaining configuration metadata.
 
         Returns:
             List of skill info dicts
@@ -322,7 +325,10 @@ class SkillService(SkillArchiveOperations):
         if not effective_tenant_id:
             raise SkillException("tenant_id is required")
         try:
-            skills = skill_db.list_skills(effective_tenant_id)
+            skills = (
+                skill_db.list_skill_mount_summaries(effective_tenant_id)
+                if for_mount else skill_db.list_skills(effective_tenant_id)
+            )
             enriched = [self._enrich_configs_from_yaml(s) for s in skills]
             return enriched
         except Exception as e:
@@ -334,13 +340,18 @@ class SkillService(SkillArchiveOperations):
         *,
         tenant_id: Optional[str] = None,
         user_id: str,
+        for_mount: bool = False,
     ) -> List[Dict[str, Any]]:
         """List skills visible to a user and attach the resolved permission."""
         user_role = _get_user_role(user_id)
         user_group_ids = set(query_group_ids_by_user(user_id) or [])
+        skills = (
+            self.list_skills(tenant_id=tenant_id, for_mount=True)
+            if for_mount else self.list_skills(tenant_id=tenant_id)
+        )
         visible_skills = [
             skill
-            for skill in self.list_skills(tenant_id=tenant_id)
+            for skill in skills
             if can_view_skill(
                 skill=skill,
                 user_id=user_id,

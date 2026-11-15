@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_, update as sa_update
+from sqlalchemy.orm import defer
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.client import get_db_session
@@ -332,7 +333,7 @@ def _replace_skill_tool_relations(
         )
 
 
-def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
+def _to_dict(skill: SkillInfo, *, include_content: bool = True) -> Dict[str, Any]:
     """Convert SkillInfo to dict."""
     return {
         "skill_id": skill.skill_id,
@@ -340,7 +341,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
         "tags": _normalize_skill_tags(skill.skill_tags),
-        "content": skill.skill_content or "",
+        **({"content": skill.skill_content or ""} if include_content else {}),
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
         "source": skill.source,
@@ -384,6 +385,19 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
             result["tool_ids"] = _get_tool_ids(session, s.skill_id)
             results.append(result)
         return results
+
+
+def list_skill_mount_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """Read mount metadata without loading Skill bodies or tool relations."""
+    with get_db_session() as session:
+        skills = (
+            session.query(SkillInfo)
+            .options(defer(SkillInfo.skill_content))
+            .filter(SkillInfo.tenant_id == tenant_id, SkillInfo.delete_flag != "Y")
+            .order_by(SkillInfo.create_time.desc(), SkillInfo.skill_id.desc())
+            .all()
+        )
+        return [_to_dict(skill, include_content=False) for skill in skills]
 
 
 def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:

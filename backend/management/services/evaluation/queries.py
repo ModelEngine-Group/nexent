@@ -6,9 +6,17 @@ from typing import Any
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.codes import ErrorCode
-from contracts.evaluation import EvalPassStatus
 from contracts.errors.exceptions import AppException
-from management.db.evaluation.runs import get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent
+from contracts.evaluation import EvalPassStatus
+from contracts.roles import has_any_role, roles_from_record
+from management.db.evaluation.runs import (
+    get_agent_evaluation,
+    get_evaluation_case_scores,
+    hard_delete_agent_evaluation,
+    list_agent_evaluation_cases,
+    list_agent_evaluations_by_agent,
+)
+from management.db.evaluation.sets import hard_delete_evaluation_set
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.evaluation.common import (
     logger,
@@ -174,7 +182,7 @@ def get_evaluation_stats_impl(
 def _resolve_user_role(user_id: str) -> str:
     """Return the caller's tenant role; unknown callers fall back to USER."""
     record = get_user_tenant_by_user_id(user_id)
-    return str((record or {}).get("user_role") or "USER").upper()
+    return roles_from_record(record)
 
 
 def delete_agent_evaluation_run_impl(
@@ -186,7 +194,7 @@ def delete_agent_evaluation_run_impl(
         agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
     )
     is_creator = run.get("created_by") == user_id
-    if not is_creator and _resolve_user_role(user_id) not in CAN_EDIT_ALL_USER_ROLES:
+    if not is_creator and not has_any_role(_resolve_user_role(user_id), CAN_EDIT_ALL_USER_ROLES):
         raise AppException(ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE)
 
     evaluator_config_raw = run.get("evaluator_config")
@@ -194,7 +202,6 @@ def delete_agent_evaluation_run_impl(
         "no_set_mode"
     ):
         try:
-            from management.db.evaluation.sets import hard_delete_evaluation_set
 
             hard_delete_evaluation_set(run["evaluation_set_id"], tenant_id)
         except Exception as exc:  # noqa: BLE001

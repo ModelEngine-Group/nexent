@@ -129,3 +129,32 @@ def test_empty_length_retains_usage_event_and_legacy_diagnostics(setup, monitori
     usages = [call.args[1] for call in manager.add_span_event.call_args_list if call.args[0] == 'model_usage']
     assert usages[0]['input_tokens'] == 10 and usages[0]['attempt'] == 1
     manager.create_token_tracker.return_value.record_completion.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('asynchronous', [False, True])
+async def test_cumulative_usage_reaches_legacy_and_monitoring_once(setup, monitoring, asynchronous):
+    profile, _request, limiter, factory = setup
+    manager, _calls, active = monitoring
+    frames = [frame({'content': 'OK'})]
+    for count in (0, 1, 36):
+        frames.append(SSEEvent(json.dumps({'choices': [], 'usage': {
+            'prompt_tokens': 34, 'completion_tokens': count, 'total_tokens': 34 + count,
+        }})))
+    frames.extend([
+        frame(finish='stop'),
+        SSEEvent(json.dumps({'choices': [], 'usage': {
+            'completion_tokens_details': {'reasoning_tokens': 35},
+        }})), SSEEvent('[DONE]'),
+    ])
+    model = LegacyChatModel(profile, factory(Sender([frames]), monitoring=manager))
+    messages = [{'role': 'user', 'content': 'hello'}]
+    chunks = [chunk async for chunk in model.agenerate_stream(messages)] if asynchronous else list(model.generate_stream(messages))
+    usages = [chunk.token_usage for chunk in chunks if chunk.token_usage is not None]
+    assert len(usages) == 1
+    assert (usages[0].input_tokens, usages[0].output_tokens) == (34, 36)
+    assert ''.join(chunk.content or '' for chunk in chunks) == 'OK'
+    manager.create_token_tracker.return_value.record_completion.assert_called_once_with(34, 36, total_tokens=70)
+    events = [call.args[1] for call in manager.add_span_event.call_args_list if call.args[0] == 'model_usage']
+    assert len(events) == 1 and events[0]['reasoning_tokens'] == 35 and events[0]['total_tokens'] == 70
+    assert not active and not limiter._entries

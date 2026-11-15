@@ -2,7 +2,7 @@
 
 import type { ModelParameterRule } from "@/types/modelProfile";
 
-/** Required outlet controls remain available before provider discovery completes. */
+/** Optional sampling controls remain available before provider discovery completes. */
 export function outletSamplingRules(
   rules: ModelParameterRule[]
 ): ModelParameterRule[] {
@@ -18,7 +18,7 @@ export function outletSamplingRules(
     ui_group: "advanced",
     ...rules.find((rule) => rule.key === key),
     visible: true,
-    required: true,
+    required: false,
   }));
 }
 
@@ -27,14 +27,17 @@ export function outletSamplingValues(
   defaults: Record<string, unknown> = {}
 ) {
   return {
-    temperature: defaults.temperature ?? 0.7,
-    top_p: defaults.top_p ?? 1,
+    ...(Object.hasOwn(defaults, "temperature")
+      ? { temperature: defaults.temperature }
+      : {}),
+    ...(Object.hasOwn(defaults, "top_p") ? { top_p: defaults.top_p } : {}),
     ...values,
   };
 }
 
 export function samplingComplete(values: Record<string, unknown>) {
   return [values.temperature, values.top_p].every(
-    (value) => typeof value === "number" && Number.isFinite(value)
+    (value) =>
+      value == null || (typeof value === "number" && Number.isFinite(value))
   );
 }

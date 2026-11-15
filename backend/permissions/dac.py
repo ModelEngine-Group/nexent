@@ -8,12 +8,17 @@ decision matrix stays easy to unit test.
 
 from typing import List, Optional
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
+    PERMISSION_READ,
+)
+from contracts.roles import has_any_role, normalize_roles
 from permissions.models import Resource, ResourceAccess
 
-
-MANAGEMENT_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
-ASSET_OWNER_READER_ROLES = {"SU", "ADMIN", "SPEED", "DEV"}
+MANAGEMENT_ROLES = {"SU", "ADMIN", "ASSET_OWNER"}
+ASSET_OWNER_READER_ROLES = {"SU", "ADMIN", "DEV"}
 GROUP_ACCESS_ROLES = {"USER", "DEV"}
 
 
@@ -22,6 +27,25 @@ class ResourceAccessControl:
 
     @staticmethod
     def check(
+        resource: Resource,
+        user_id: str,
+        role,
+        user_groups=None,
+        user_tenant_id=None,
+        asset_owner_tenant_id=None,
+    ) -> ResourceAccess:
+        """Union each role's resource grant without weakening any role's boundaries."""
+        try:
+            roles = normalize_roles(role, allow_empty=True)
+        except ValueError:
+            return ResourceAccess.deny()
+        grants = [ResourceAccessControl._check_one(
+            resource, user_id, item, user_groups, user_tenant_id, asset_owner_tenant_id
+        ) for item in roles if item != "OPS"]
+        return max(grants, key=lambda grant: (grant.can_edit, grant.can_read), default=ResourceAccess.deny())
+
+    @staticmethod
+    def _check_one(
         resource: Resource,
         user_id: str,
         role: Optional[str],
@@ -38,7 +62,7 @@ class ResourceAccessControl:
         ``asset_owner_tenant_id`` is injectable for callers that override the
         default tenant marker (for example in tests or for deployment configs).
         """
-        normalized_role = (role or "").upper()
+        normalized_role = role
         normalized_user_id = str(user_id or "")
         record_tenant_id = str(resource.tenant_id or "")
         normalized_user_tenant_id = str(user_tenant_id or "")
@@ -54,7 +78,7 @@ class ResourceAccessControl:
             return _check_asset_owner_access(normalized_role)
         if record_tenant_id and record_tenant_id != normalized_user_tenant_id:
             return ResourceAccess.deny()
-        if normalized_role == "USER" and str(resource.created_by or "") != normalized_user_id:
+        if has_any_role(normalized_role, {'USER'}) and str(resource.created_by or "") != normalized_user_id:
             return ResourceAccess.deny()
         if str(resource.knowledge_sources or "") == "datamate":
             return ResourceAccess.read_only()
@@ -65,7 +89,7 @@ class ResourceAccessControl:
 
         if str(resource.created_by or "") == normalized_user_id:
             return ResourceAccess.creator(matched_groups=matched_groups)
-        if normalized_role in MANAGEMENT_ROLES:
+        if has_any_role(normalized_role, MANAGEMENT_ROLES):
             return _check_management_access(resource)
         return _check_group_access(resource, normalized_role, matched_groups, resource_groups, normalized_user_groups)
 
@@ -87,9 +111,9 @@ def _normalize_group_ids(group_ids: Optional[List[object]]) -> List[object]:
 
 def _check_asset_owner_access(role: str) -> ResourceAccess:
     """Resolve access to resources owned by the asset-owner tenant."""
-    if role == "ASSET_OWNER":
+    if has_any_role(role, {'ASSET_OWNER'}):
         return ResourceAccess.edit()
-    if role in ASSET_OWNER_READER_ROLES:
+    if has_any_role(role, ASSET_OWNER_READER_ROLES):
         return ResourceAccess.read_only()
     return ResourceAccess.deny()
 
@@ -109,7 +133,7 @@ def _check_group_access(
     user_groups: List[object],
 ) -> ResourceAccess:
     """Resolve access for users whose permission is group-scoped."""
-    if role not in GROUP_ACCESS_ROLES or _is_private(resource):
+    if not has_any_role(role, GROUP_ACCESS_ROLES) or _is_private(resource):
         return ResourceAccess.deny()
 
     # Legacy data may leave both sides empty (NULL/empty groups). Keep the

@@ -4960,6 +4960,44 @@ async def test_prepare_agent_run(
 @patch("management.services.agent.run.build_memory_context")
 @patch("management.services.agent.run.create_agent_run_info", new_callable=AsyncMock)
 @patch("management.services.agent.run.agent_run_manager")
+async def test_prepare_agent_run_forwards_request_metadata(
+    mock_agent_run_manager,
+    mock_create_run_info,
+    mock_build_memory_context,
+):
+    """Request metadata only reaches create_agent_run_info when it is set."""
+    metadata = {"project_id": "P001", "_mcp_headers": {"Cookie": "sid=1"}}
+    mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
+    mock_create_run_info.return_value = mock_run_info
+    mock_build_memory_context.return_value = MagicMock()
+
+    await prepare_agent_run(
+        AgentRequest(
+            agent_id=1,
+            conversation_id=123,
+            query="test query",
+            history=[],
+            minio_files=[],
+            requested_output_tokens=4096,
+            is_debug=False,
+            metadata=metadata,
+        ),
+        user_id="test_user",
+        tenant_id="test_tenant",
+    )
+
+    assert mock_create_run_info.await_args.kwargs["metadata"] == metadata
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run.build_memory_context")
+@patch("management.services.agent.run.create_agent_run_info", new_callable=AsyncMock)
+@patch("management.services.agent.run.agent_run_manager")
 async def test_prepare_agent_run_can_disable_automation_tool(
     mock_agent_run_manager,
     mock_create_run_info,

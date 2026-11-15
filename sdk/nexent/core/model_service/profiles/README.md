@@ -163,14 +163,36 @@ records; exact request model IDs remain operator-provided until documented.
 
 ## Nexent experience precedence
 
-Source TOML remains unchanged. Outlet previews first combine authored model,
-provider and exact hosted-model facts, then overlay Nexent supplement rules in
-model, provider, exact-combination order. Higher layers replace a parameter's
+Source TOML remains unchanged. Outlet previews apply each source followed by its Nexent preferences, in
+model, provider, exact hosted-model order. Exact hosted facts therefore override
+less specific model preferences; exact hosted preferences apply last. Higher layers replace a parameter's
 complete declaration, a named implementation binding or an instruction strategy;
 unmentioned keys inherit. Capability changes retain their evidence and previous
 values. Permitted user values are applied last; fixed values, schema constraints,
 conditions, registered references and protected request paths remain validated.
 
-Composer `profile_policy_composer_v6` participates in catalog revisions. Saving
+Composer `profile_policy_composer_v8` participates in catalog revisions. Saving
 revalidates the same draft before freezing the outlet; connection checks run after
 saving. Existing outlets continue using their stored snapshot without recomposition.
+
+
+## Custom-provider thinking policy
+
+A custom OpenAI Chat provider with declared reasoning support receives a compatible
+`enable_thinking` toggle when neither a toggle nor an effort-off declaration is
+saved. This is configuration freedom, not a claim that a remote service honors it.
+Explicit provider bindings and operator-selected formats retain their paths.
+Nexent supplements use `/reasoning/can_disable` for confirmed shutdown capability;
+`false` prevents the fallback, while absence is distinct from an always-on claim.
+Older outlets receive only this bounded control completion and explicit shutdown
+restriction; credentials, identity, context and other saved facts are preserved.
+The source TOML files remain unchanged.
+
+Model-level OpenAI-compatible preferences declare effort controls for exact models
+with pinned evidence. Hosted controls replace incompatible inherited reasoning
+parameters, including an explicitly empty control set. Provider-specific budget
+fields are not added to generic model preferences; operators retain the existing
+manual request-parameter editor for other fields. Existing saved outlets are not
+recomposed when these preferences change. Migration review is a one-time event:
+a positive stored reviewed revision remains confirmed after ordinary edits, while
+confirmation itself still checks the current revision and administrator permission.

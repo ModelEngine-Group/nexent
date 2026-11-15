@@ -83,12 +83,6 @@ config:
     maxFileSizeMb: "20"
   modelEngine:
     enabled: "false"
-  voiceService:
-    appid: "app_id"
-    token: "token"
-    cluster: "volcano_tts"
-    voiceType: "zh_male_jieshuonansheng_mars_bigtts"
-    speedRatio: "1.3"
   modelPath:
     clipModelPath: "/opt/models/clip-vit-base-patch32"
     nltkData: "/opt/models/nltk_data"
@@ -213,6 +207,7 @@ config:
 
 # Secrets used by common templates
 secrets:
+  mcpInternalToken: "token"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
   minio:

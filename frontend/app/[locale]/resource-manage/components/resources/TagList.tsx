@@ -1,13 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useState } from "react";
-import { Alert, Empty, Select, Spin } from "antd";
+import { Alert, Empty, Select, Spin, Button } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import TagDefinitionManagementPanel from "@/components/tag/TagDefinitionManagementPanel";
 import { USER_ROLES } from "@/const/auth";
 import { tagManagementApi } from "@/services/tagManagementService";
@@ -34,9 +34,8 @@ export default function TagList({ tenantId }: TagListProps) {
   const canManage = [
     USER_ROLES.SU,
     USER_ROLES.ADMIN,
-    USER_ROLES.SPEED,
     USER_ROLES.ASSET_OWNER,
-  ].includes(user.role as USER_ROLES);
+  ].some((role) => hasRole(user, role));
 
   return (
     <TenantTagList key={tenantId} tenantId={tenantId} canManage={canManage} />
@@ -79,9 +78,7 @@ function TenantTagList({
         showIcon
         title={error.message}
         action={
-          <StandardButton onClick={() => void refetch()}>
-            {t("common.retry")}
-          </StandardButton>
+          <Button onClick={() => void refetch()}>{t("common.retry")}</Button>
         }
       />
     );

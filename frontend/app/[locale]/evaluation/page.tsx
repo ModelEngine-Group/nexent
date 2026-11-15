@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
+
 import {
   useState,
   useEffect,
@@ -71,7 +72,6 @@ const { Text, Title } = Typography;
 const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
   USER_ROLES.SU,
   USER_ROLES.ADMIN,
-  USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
 
@@ -182,7 +182,7 @@ function RunsTab() {
   const { user } = useAuthorizationContext();
   const canDeleteRun = (r: any) =>
     (user?.id != null && r?.created_by === user.id) ||
-    EVALUATION_DELETE_ALL_ROLES.has(user?.role ?? "");
+    hasRole(user, ...EVALUATION_DELETE_ALL_ROLES);
 
   // ── Drawer (create-evaluation form) state ─────────────────────────────
   // Short variable names intentionally match the drawer inputs one-to-one:

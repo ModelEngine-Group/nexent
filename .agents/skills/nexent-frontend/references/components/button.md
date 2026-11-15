@@ -47,10 +47,10 @@ Tailwind CSS:
 text-white border-0 rounded-[4px] bg-[#0067d1]
 ```
 
-Use the reusable component:
+Use the native component with the central theme:
 
 ```tsx
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "antd";
 ```
 
-The reusable component disables Ant Design automatic spacing between adjacent CJK characters so localized labels are rendered exactly as provided.
+RootProvider disables automatic CJK spacing through ConfigProvider. Use native `type="primary"`, `danger`, `loading`, `disabled`, size and variant APIs. NEXENT_THEME provides project dimensions, radius, padding and semantic colors; do not add forced primary background classes.

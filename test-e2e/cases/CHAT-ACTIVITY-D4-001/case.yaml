@@ -6,14 +6,15 @@ case:
   feature_id: CHAT-SIDEBAR
   requirement_ids:
   - CHAT-AUTOMATION-ACTIVITY-20261020
+  - CHAT-EVENT-HISTORY-20261105
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-004
-  title: Background conversation activity refresh preserves the active composer
+  title: Event-driven history refresh avoids idle polling and preserves the active composer
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: Background conversation activity refresh preserves the active composer
+  objective: Event-driven history refresh avoids idle polling and preserves the active composer
   preconditions:
   - Repository dependencies and the declared controlled profile are available; fixtures are isolated.
   test_data:
@@ -30,18 +31,20 @@ case:
     - newer
   steps:
   - order: 1
-    action: Open Workbench with newer and older histories, type an unsent draft, then change the controlled backend
-      activity of the older history.
-    expected: The older history appears first without a page reload and the draft remains.
+    action: Open Workbench with newer and older histories, type an unsent draft, change the controlled backend
+      activity of the older history, and advance sixty seconds without a foreground or operation event.
+      Then return to the page to reconcile history.
+    expected: Idle time causes no history request; foreground return brings the older history first without a page reload and the draft remains.
   - order: 2
-    action: Wait for visible polling, scroll the loaded sidebar, and delay the list reload triggered by focus/network refresh while preserving the active conversation and pins.
-    expected: Loaded rows remain mounted without skeleton replacement or scroll reset while the reload is pending. Duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+    action: Exercise overlapping focus/network events with a delayed list response while observing existing rows,
+      their scroll position, the active conversation and pins.
+    expected: Events coalesce into one reload; existing rows remain mounted with no skeleton replacement, duplication or active-runtime reset.
   - order: 3
     action: Send the first message in the active local Workbench thread through a controlled run endpoint that assigns its server ID and adds a new history row.
     expected: The new row appears while the original composer remains mounted and the sent message and controlled response remain visible.
   expected_results:
-  - The older history appears first without a page reload and the draft remains.
-  - Loaded rows and sidebar scroll remain stable during pending background refresh; duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+  - Idle time causes no history request; foreground return brings the older history first without a page reload and the draft remains.
+  - Events coalesce into one reload; existing rows remain mounted with no skeleton replacement, duplication or active-runtime reset.
   - First persistence preserves the mounted active chat and displays the new history, sent message and controlled response without historical rehydration blanking the view.
   forbidden_side_effects:
   - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
@@ -56,7 +59,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: The older history appears first without a page reload and the draft remains.
+    description: Idle time causes no history request; foreground return brings the older history first without a page reload and the draft remains.
     steps:
     - 1
     expected_results:
@@ -64,7 +67,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-02
-    description: Pending background refresh preserves loaded row DOM and sidebar scroll without skeleton replacement; duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+    description: Events coalesce into one reload; existing rows remain mounted with no skeleton replacement, duplication or active-runtime reset.
     steps:
     - 2
     expected_results:
@@ -79,7 +82,7 @@ case:
   actor: Authenticated Workbench user
   journey:
   - Open and retain a draft
-  - Observe background activity without reload
+  - Remain idle without history reads, then return to observe external activity
   - Refocus and recover network
   final_business_result:
   - The newly active conversation fronts the list without changing the active composer or stream.

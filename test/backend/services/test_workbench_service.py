@@ -525,7 +525,7 @@ def test_ut_be_wb_015_dependency_unavailability_fails_before_snapshot(mocker, de
 def test_ut_be_wb_012_shared_tool_parameter_conflicts_fail_before_snapshot(mocker):
     """UT-BE-WB-012: conflicting Tool parameters fail without a partial result."""
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
-    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", return_value={"name": "Skill", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
+    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", side_effect=lambda skill_id, _tenant: {"name": f"Skill {skill_id}", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
     mocker.patch.object(workbench_service, "query_tools_by_ids", return_value=[{"tool_id": 4, "author": "tenant", "is_available": True, "params": [{"name": "region"}]}])
     with pytest.raises(workbench_service.WorkbenchError) as error:
         workbench_service.resolve_workbench_config(_config(3, [{"skill_id": 11, "config_values": {"region": "CN"}}, {"skill_id": 12, "config_values": {"region": "US"}}]), tenant_id="tenant")
