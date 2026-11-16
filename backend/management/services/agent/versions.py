@@ -31,6 +31,8 @@ from management.db.agent.version import (
     insert_version,
     query_agent_draft,
     query_agent_snapshot,
+    query_agent_snapshots,
+    query_version_lists,
     query_current_version_no,
     query_version_list,
     restore_agent_draft,
@@ -47,6 +49,7 @@ from management.services.agent.a2a.validation import validate_a2a_agent_name
 from management.services.agent.read import (
     apply_duplicate_name_availability_rules,
     check_agent_availability,
+    load_agent_list_context,
 )
 from management.services.model.resolver import is_model_configured
 from management.services.permission.asset_owner import (
@@ -859,7 +862,16 @@ def _get_version_detail_or_draft(
     return result
 
 
-async def list_published_agents_impl(
+async def list_published_agents_impl(tenant_id: str, user_id: str) -> list[dict]:
+    """Run published list assembly on the bounded management I/O lane."""
+    from management.utils.managed_read import run_management_read
+
+    return await run_management_read(
+        "published-agent-list", _list_published_agents_sync, tenant_id, user_id,
+    )
+
+
+def _list_published_agents_sync(
     tenant_id: str,
     user_id: str,
 ) -> list[dict]:
@@ -897,9 +909,9 @@ async def list_published_agents_impl(
         # Get all draft agents (version_no=0)
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
-        model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 
+        visible_agents = []
         for agent in agent_list:
             if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
                 continue
@@ -921,8 +933,25 @@ async def list_published_agents_impl(
             if not current_version_no or current_version_no <= 0:
                 continue
 
+            visible_agents.append(agent)
+
+        version_lists = query_version_lists([a["agent_id"] for a in visible_agents], tenant_id)
+        selected_versions = {}
+        for agent in visible_agents:
+            versions = version_lists.get(agent["agent_id"], [])
+            if versions:
+                current = agent["current_version_no"]
+                selected_versions[agent["agent_id"]] = (
+                    current if any(v["version_no"] == current for v in versions) else versions[0]["version_no"]
+                )
+        snapshots = query_agent_snapshots(selected_versions, tenant_id)
+        read_context = load_agent_list_context([snapshot[0] for snapshot in snapshots.values()], tenant_id)
+        model_cache = read_context.model_cache()
+        for agent in visible_agents:
+            agent_id = agent["agent_id"]
+            current_version_no = agent["current_version_no"]
             # Verify current_version_no exists, if not find the latest available version
-            available_versions = query_version_list(agent_id=agent_id, tenant_id=tenant_id)
+            available_versions = version_lists.get(agent_id, [])
 
             if not available_versions:
                 logger.warning(f"No available versions found for agent_id={agent_id}")
@@ -937,11 +966,7 @@ async def list_published_agents_impl(
                 current_version_no = available_versions[0]["version_no"]
 
             # Get the published version snapshot
-            agent_snapshot, tools_snapshot, relations_snapshot = query_agent_snapshot(
-                agent_id=agent_id,
-                tenant_id=tenant_id,
-                version_no=current_version_no,
-            )
+            agent_snapshot, tools_snapshot, relations_snapshot = snapshots.get(agent_id, (None, [], []))
 
             if not agent_snapshot:
                 logger.warning(
@@ -974,7 +999,7 @@ async def list_published_agents_impl(
 
             # Filter out deleted models (delete_flag='Y' in model_record_t)
             raw_model_ids = agent_info.get("model_ids") or []
-            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            valid_model_ids = read_context.valid_model_ids(raw_model_ids)
             agent_info["model_ids"] = valid_model_ids
 
             # Check agent availability using the shared function
@@ -982,7 +1007,8 @@ async def list_published_agents_impl(
                 agent_id=agent_id,
                 tenant_id=tenant_id,
                 agent_info=agent_info,
-                model_cache=model_cache
+                model_cache=model_cache,
+                read_context=read_context,
             )
             for model_id in valid_model_ids:
                 if model_id not in model_cache:
