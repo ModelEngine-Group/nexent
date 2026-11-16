@@ -19,15 +19,16 @@ feature:
   - rule_id: JIUWEN-RESOURCES-RULE-002
     description: Core selection preserves saved policies and resource bindings; unsupported capabilities fail explicitly.
   - rule_id: JIUWEN-RESOURCES-RULE-003
-    description: Management and migration persist trusted versioned snapshots; runtime restores without catalog
-      and rejects stale/cross-tenant profiles.
+    description: ModelService standard row storage owns complete versioned profiles without a Jiuwen schema extension.
+      Management rejects stale expected revisions; runtime restores detached tenant/identity-validated profiles
+      without catalog lookup. Explicit legacy migration imports valid frozen envelopes only when no canonical profile
+      exists, rejecting stale or corrupt envelopes without fallback.
   - rule_id: JIUWEN-RESOURCES-RULE-004
     description: Each child invocation selects its own Core and frozen model outlet/options; A2A uses its configured
       remote protocol, authenticated context, deadline and cancellation ownership. Deployment configuration independently
       controls the collaboration deadline including queue wait and the Jiuwen tool invocation deadline (both default
-      to 300 seconds); the earliest applicable tool, collaboration, A2A request or parent deadline applies.
-      Concurrent and repeated local
-      Jiuwen invocations share one lifecycle-owned Runner loop while retaining independent task/session/cancellation/observer
+      to 300 seconds); the earliest applicable tool, collaboration, A2A request or parent deadline applies. Concurrent
+      and repeated local Jiuwen invocations share one lifecycle-owned Runner loop while retaining independent task/session/cancellation/observer
       ownership; cancelling one invocation must not stop unrelated runs.
   required_test_stages:
   - D3
@@ -37,4 +38,5 @@ feature:
     requirement_ids:
     - JIUWEN-M3-20261015
     - JIUWEN-SAVED-SKILLS-20261021
+    - JIUWEN-STORAGE-UNIFY-20261116
     spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

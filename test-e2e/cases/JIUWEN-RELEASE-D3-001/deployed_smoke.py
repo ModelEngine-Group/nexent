@@ -22,7 +22,7 @@ from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 from management.services.configuration.user.memory import get_memory_switch
-from management.services.model.runtime_snapshot import restore_runtime_model_snapshot
+from management.services.model.adapter import restore_model_snapshot
 from smolagents import Tool
 from management.services.permission.identity.authentication_helpers import generate_session_jwt
 
@@ -34,7 +34,7 @@ def saved_model(model_id, alias):
     with get_db_session() as session:
         model = session.query(ModelRecord).filter_by(model_id=model_id, tenant_id=TENANT, delete_flag="N").one()
         row = {c.name: getattr(model, c.name) for c in ModelRecord.__table__.columns}
-        profile = restore_runtime_model_snapshot(row, TENANT, strict=True)
+        profile = restore_model_snapshot(row, TENANT)
         return ModelConfig(
             cite_name=alias,
             model_name=profile.identity.request_model_id,

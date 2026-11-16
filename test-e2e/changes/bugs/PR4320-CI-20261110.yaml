@@ -66,13 +66,13 @@ change:
     - test/sdk/core/model_service/test_protocol_diagnostics.py
     - test/sdk/monitor/test_monitoring_token_totals.py
     - test/backend/agents/test_global_agent_core.py
-    - test/backend/services/test_model_runtime_provisioning_service.py
+    - test/backend/services/test_model_runtime_options.py
     - test/backend/utils/test_agent_prompt_bundle.py
     - test/sdk/core/agents/test_jiuwen_native_files.py
     - test/sdk/core/agents/test_jiuwen_adapter_preflight.py
     - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
     - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
-    - test/backend/database/test_model_runtime_profile_batch.py
+    - test/backend/database/test_model_legacy_snapshot_column.py
     - test/sdk/core/agents/test_jiuwen_context.py
   notes: SPEC runtime-agent-core-factory PR4320 CI section. Header-only formal script
     changes retain all acceptance contracts/bindings and need static validation, not
@@ -82,8 +82,9 @@ change:
     approved restoration of develop SQL ownership; ten reintroduced old copies are
     removed across this fix. Six of the final seven have identical SQL bodies; the
     activity/source copy is superseded by the documented v2.8.0 simplification.
-    The unmerged runtime_outlet_snapshot column and its migration remain required
-    by the current ORM and legacy write bridge, independently of global Core policy.
+    The transitional column and its migration were subsequently retired by
+    JIUWEN-STORAGE-UNIFY-20261116; canonical ModelService storage replaces the
+    former ORM column and legacy write bridge, independently of global Core policy.
     Additional patch coverage reuses existing suites and the actual profile catalog
     sentinel in JIUWEN-RESOURCES-D5-002. Three unreferenced duplicate modules are
     removed in favor of existing owners; models sources and coverage thresholds stay

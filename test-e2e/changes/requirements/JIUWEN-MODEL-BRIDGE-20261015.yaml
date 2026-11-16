@@ -35,7 +35,7 @@ change:
     - test/sdk/core/agents/test_jiuwen_model_service.py
     - test/sdk/core/agents/test_jiuwen_protocol.py
     - test/sdk/core/agents/test_jiuwen_history.py
-    - test/backend/services/test_model_runtime_snapshot_service.py
+    - test/backend/services/test_model_legacy_snapshot_migration.py
     - test/sdk/core/agents/test_run_agent.py
     - test/sdk/core/agents/test_agent_model.py
     - test/backend/agents/test_create_agent_info.py

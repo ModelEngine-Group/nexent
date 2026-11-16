@@ -50,19 +50,18 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
             raise AssertionError("Isolated PostgreSQL did not become ready")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres", echo=False)
         from management.db import client
+        from management.db.client import get_db_session
         from management.db.models import ModelRecord
-        from management.db.model.repository import create_model_record as create_legacy
-        from management.db.model.repository import get_model_by_model_id
-        from management.db.model.repository import update_model_record as update_legacy
-        from management.db.model.runtime_profile import provision_runtime_outlet_batch
-        from management.services.model.runtime_provisioning import (
-            build_runtime_outlet_snapshot,
-            create_model_record,
-            update_model_record,
-        )
-        from management.services.model.runtime_snapshot import (
-            restore_runtime_model_snapshot,
-        )
+        from management.db.model.repository import create_model_record, get_model_by_model_id
+        from management.db.model.outlets import create_resolved_model_record, update_resolved_model_record
+        from management.services.model.adapter import restore_model_snapshot
+        from management.services.model.outlet_legacy import create_legacy_llm_outlet, update_legacy_llm_outlet
+        from management.services.model.outlet_migration import migrate_legacy_outlets, build_legacy_outlet_snapshot
+        from management.services.model.legacy_snapshot import model_source_fingerprint
+        from contracts.errors.exceptions import ModelOutletConflictError
+        from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+        from nexent.core.model_service.registry import model_service_references
+        from sqlalchemy import inspect
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
         with engine.begin() as connection:
@@ -71,113 +70,138 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE nexent.model_record_t ALTER COLUMN model_id SET DEFAULT "
                                     "nextval('nexent.model_record_t_model_id_seq')"))
+        assert "runtime_outlet_snapshot" not in {c["name"] for c in inspect(engine).get_columns("model_record_t", schema="nexent")}
+        data = {"model_type": "llm", "model_name": "qwen3.5-plus", "model_repo": "",
+            "display_name": "managed", "model_factory": "alibaba-cn", "api_key": "fixture-credential",
+            "base_url": "http://127.0.0.1:9999/v1", "max_output_tokens": 512,
+            "default_output_reserve_tokens": 256, "extra_params": {"enable_thinking": False}}
+        managed_id = create_legacy_llm_outlet(data, "actor", "tenant")
+        before = get_model_by_model_id(managed_id, "tenant")
+        captured = restore_model_snapshot(before, "tenant")
+        assert captured.config_revision == 1 and captured.outlet_id == managed_id
+        assert "fixture-credential" not in json.dumps(before["resolved_profile"])
+        assert migrate_legacy_outlets(dry_run=True)["items"] == []
+        assert migrate_legacy_outlets()["items"] == []
+        assert get_model_by_model_id(managed_id, "other") is None
+        with pytest.raises(ValueError):
+            restore_model_snapshot(before, "other")
+
+        # Exercise the existing generic legacy migration when no optional column exists.
+        assert create_model_record({**data, "display_name": "no-envelope"}, "actor", "tenant")
+        preview = migrate_legacy_outlets(dry_run=True)
+        plain_id = preview["items"][0]["model_id"]
+        assert preview["ready"] == 1 and get_model_by_model_id(plain_id, "tenant")["profile_schema_version"] is None
+        assert migrate_legacy_outlets()["migrated"] == 1
+        assert migrate_legacy_outlets()["items"] == []
+        assert restore_model_snapshot(get_model_by_model_id(plain_id, "tenant"), "tenant").outlet_id == plain_id
+
+        # Reproduce an already-deployed optional column, never a required product migration.
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE nexent.model_record_t ADD COLUMN runtime_outlet_snapshot JSONB"))
+        frozen = {}
+        for label in ("frozen", "stale", "tampered"):
+            assert create_model_record({**data, "display_name": label}, "actor", "tenant")
+            with engine.connect() as connection:
+                model_id = connection.execute(select(ModelRecord.model_id).where(ModelRecord.display_name == label)).scalar_one()
+            old = get_model_by_model_id(model_id, "tenant")
+            from configs.model_catalog_loader import resolve_reasoning_capability
+            profile = build_legacy_outlet_snapshot(old, legacy_capability=resolve_reasoning_capability(
+                old["model_name"], old["base_url"], old["model_factory"]), migrated_at="2026-11-16T00:00:00Z")
+            if label == "frozen":
+                profile = type(profile).model_validate({**profile.model_dump(), "config_revision": 4})
+            encoded = encode_resolved_model_profile(profile, registered_references=model_service_references())
+            envelope = {"version": 1, "revision": profile.config_revision,
+                "source_fingerprint": model_source_fingerprint(old), "row": encoded}
+            if label == "stale":
+                envelope["source_fingerprint"] = "stale"
+            if label == "tampered":
+                envelope["row"]["tenant_id"] = "other"
+            with engine.begin() as connection:
+                connection.execute(text("UPDATE nexent.model_record_t SET runtime_outlet_snapshot=CAST(:payload AS jsonb) WHERE model_id=:id"),
+                    {"id": model_id, "payload": json.dumps(envelope)})
+            frozen[label] = (model_id, profile, envelope)
+        # Canonical configuration always wins over an obsolete or corrupt envelope.
+        with engine.begin() as connection:
+            connection.execute(text("UPDATE nexent.model_record_t SET runtime_outlet_snapshot='{}'::jsonb WHERE model_id=:id"), {"id": managed_id})
+        monkeypatch.setattr("management.services.model.profiles.get_model_profile_catalog",
+            lambda: pytest.fail("Frozen model was reinterpreted against a catalog"))
+        preview = migrate_legacy_outlets(dry_run=True)
+        assert preview["ready"] == 1 and preview["failed"] == 2
+        assert get_model_by_model_id(frozen["frozen"][0], "tenant")["profile_schema_version"] is None
+        result = migrate_legacy_outlets()
+        assert result["migrated"] == 1 and result["failed"] == 2
+        assert "fixture-credential" not in json.dumps(result)
+        imported = get_model_by_model_id(frozen["frozen"][0], "tenant")
+        assert restore_model_snapshot(imported, "tenant").model_dump() == frozen["frozen"][1].model_dump()
+        assert imported["api_key"] == "fixture-credential"
+        assert restore_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant").model_dump() == captured.model_dump()
+        assert migrate_legacy_outlets()["migrated"] == 0
+        for label in ("stale", "tampered"):
+            rejected = get_model_by_model_id(frozen[label][0], "tenant")
+            assert rejected["profile_schema_version"] is None and rejected["temperature"] is None
+            assert "migration_error" in rejected["resolved_profile"]
+        with engine.connect() as connection:
+            saved_envelope = connection.execute(text("SELECT runtime_outlet_snapshot FROM nexent.model_record_t WHERE model_id=:id"),
+                {"id": frozen["frozen"][0]}).scalar_one()
+            assert saved_envelope == frozen["frozen"][2]
+
+        # Runtime and ordinary management must still work after the obsolete column is removed.
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE nexent.model_record_t DROP COLUMN runtime_outlet_snapshot"))
-            connection.execute(text("INSERT INTO nexent.model_record_t "
-                "(model_name,model_type,model_repo,display_name,tenant_id,base_url,delete_flag) "
-                "VALUES ('custom-model','llm','','legacy','tenant','http://127.0.0.1:9999/v1','N')"))
-        migration = ROOT / "deploy/sql/migrations/v2.7.2_1015_runtime_outlet_snapshot.sql"
-        ddl = migration.read_text(encoding="utf-8")
-        with engine.begin() as connection:
-            connection.exec_driver_sql(ddl)
-            connection.exec_driver_sql(ddl)
-        with engine.connect() as connection:
-            legacy_id = connection.execute(text("SELECT model_id FROM nexent.model_record_t")).scalar_one()
-            assert connection.execute(text("SELECT count(*) FROM nexent.model_record_t")).scalar_one() == 1
-        initial = get_model_by_model_id(legacy_id, "tenant")
-        assert initial["runtime_outlet_snapshot"] is None
-        assert provision_runtime_outlet_batch(build_runtime_outlet_snapshot)[0]["status"] == "migrated"
-        assert get_model_by_model_id(legacy_id, "tenant")["runtime_outlet_snapshot"] is None
-        assert provision_runtime_outlet_batch(build_runtime_outlet_snapshot, dry_run=False)[0]["status"] == "migrated"
-        assert provision_runtime_outlet_batch(build_runtime_outlet_snapshot, dry_run=False)[0]["status"] == "ready"
-        legacy = get_model_by_model_id(legacy_id, "tenant")
-        assert restore_runtime_model_snapshot(legacy, "tenant").capabilities.tools.status == "unsupported"
-
-        data = {"model_type": "llm", "model_name": "qwen3.5-plus", "model_repo": "",
-                "display_name": "managed", "model_factory": "alibaba-cn", "api_key": "fixture-credential",
-                "base_url": "http://127.0.0.1:9999/v1", "max_output_tokens": 512,
-                "default_output_reserve_tokens": 256, "extra_params": {"enable_thinking": False}}
-        assert create_model_record(data, "actor", "tenant") is True
-        with engine.connect() as connection:
-            managed_id = connection.execute(select(ModelRecord.model_id)
-                .where(ModelRecord.display_name == "managed")).scalar_one()
-        before = get_model_by_model_id(managed_id, "tenant")
-        captured = restore_runtime_model_snapshot(before, "tenant")
-        assert captured.config_revision == 1
-        assert "fixture-credential" not in json.dumps(before["runtime_outlet_snapshot"])
-        assert update_model_record(managed_id, {"temperature": .2}, "actor", "other") is False
-        assert get_model_by_model_id(managed_id, "other") is None
-        assert update_model_record(managed_id, {"temperature": .2}, "actor", "tenant") is True
-        after = get_model_by_model_id(managed_id, "tenant")
-        current = restore_runtime_model_snapshot(after, "tenant")
+        assert restore_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant").outlet_id == managed_id
+        update_legacy_llm_outlet(before, {"temperature": .2}, "actor", "tenant")
+        current = restore_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant")
         assert current.config_revision == 2 and current.parameter_values["temperature"] == .2
-        assert captured.config_revision == 1 and captured.parameter_values["temperature"] is None
-        monkeypatch.setattr("management.services.model.profiles.get_model_profile_catalog",
-                            lambda: pytest.fail("Saved outlet was reinterpreted against catalog"))
-        from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
+        with pytest.raises(ModelOutletConflictError):
+            update_legacy_llm_outlet(before, {"temperature": .9}, "actor", "tenant")
 
-        entered, release = threading.Event(), threading.Event()
-        manager = ThreadManager("profile-save-race", {
+        # Two real writers sharing a revision cannot silently overwrite each other.
+        barrier = threading.Barrier(2)
+        outcomes = []
+        from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
+        manager = ThreadManager("canonical-profile-race", {
             "model-tool-io": LanePolicy(name="model-tool-io", max_workers=2, max_queue_size=2)})
         manager.start()
-
-        def held_builder(row):
-            entered.set()
-            assert release.wait(3)
-            return build_runtime_outlet_snapshot(row)
-
+        def save(value):
+            row = get_model_by_model_id(managed_id, "tenant")
+            barrier.wait(timeout=5)
+            try:
+                update_legacy_llm_outlet(row, {"temperature": value}, "actor", "tenant")
+                outcomes.append("saved")
+            except ModelOutletConflictError:
+                outcomes.append("conflict")
         try:
-            first = manager.submit("model-tool-io", ManagedTaskSpec(task_name="first-save", owner=__name__),
-                update_legacy, managed_id, {"temperature": .3}, "actor", "tenant", runtime_profile_builder=held_builder)
-            assert entered.wait(3)
-            second = manager.submit("model-tool-io", ManagedTaskSpec(task_name="second-save", owner=__name__),
-                update_model_record, managed_id, {"top_p": .8}, "actor", "tenant")
-            time.sleep(.05)
-            assert not second.future.done()
-            release.set()
-            assert first.future.result(timeout=3) and second.future.result(timeout=3)
+            tasks = [manager.submit("model-tool-io", ManagedTaskSpec(task_name="save", owner=__name__), save, value)
+                for value in (.3, .4)]
+            for task in tasks:
+                task.future.result(timeout=15)
         finally:
-            release.set()
-            assert not asyncio.run(manager.shutdown(timeout=3)).stuck_execution_ids
-        concurrent = get_model_by_model_id(managed_id, "tenant")
-        concurrent_profile = restore_runtime_model_snapshot(concurrent, "tenant")
-        assert concurrent_profile.config_revision == 4
-        assert concurrent_profile.parameter_values["temperature"] == .3
-        assert concurrent_profile.parameter_values["top_p"] == .8
-        assert concurrent_profile.parameter_rules == captured.parameter_rules
-        tampered = deepcopy(concurrent["runtime_outlet_snapshot"])
-        tampered["row"]["model_id"] += 1000
-        with engine.begin() as connection:
-            connection.execute(ModelRecord.__table__.update().where(ModelRecord.model_id == managed_id)
-                               .values(runtime_outlet_snapshot=tampered))
-        with pytest.raises(ValueError, match="IDENTITY_MISMATCH"):
-            restore_runtime_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant")
-        with engine.begin() as connection:
-            connection.execute(ModelRecord.__table__.update().where(ModelRecord.model_id == managed_id)
-                               .values(runtime_outlet_snapshot=concurrent["runtime_outlet_snapshot"]))
+            assert not asyncio.run(manager.shutdown(timeout=5)).stuck_execution_ids
+        assert sorted(outcomes) == ["conflict", "saved"]
+        stable = get_model_by_model_id(managed_id, "tenant")
+        stable_profile = restore_model_snapshot(stable, "tenant")
+        assert stable_profile.config_revision == 3
+        # The public update applies the shared outlet-only output policy once;
+        # later concurrent updates must retain those saved rules and capabilities.
+        assert stable_profile.parameter_rules == current.parameter_rules
+        assert stable_profile.capabilities == current.capabilities
 
-        def broken(_row):
-            raise ValueError("Controlled provisioning failure")
-
-        with pytest.raises(ValueError, match="Controlled provisioning failure"):
-            create_legacy({**data, "display_name": "must-rollback"}, "actor", "tenant",
-                          runtime_profile_builder=broken)
-        with pytest.raises(ValueError, match="Controlled provisioning failure"):
-            update_legacy(managed_id, {"temperature": .9}, "actor", "tenant", runtime_profile_builder=broken)
-        rolled_back = get_model_by_model_id(managed_id, "tenant")
-        assert rolled_back["temperature"] == .3
-        assert rolled_back["runtime_outlet_snapshot"] == concurrent["runtime_outlet_snapshot"]
+        # Caller-owned transactions roll back both the row and complete configuration.
+        data = stable_profile.model_dump()
+        data["outlet_id"] = None
+        data["config_revision"] = 1
+        data["connection"]["credential_ref"]["model_id"] = None
+        data["identity"]["display_name"] = "must-rollback"
+        new_profile = type(stable_profile).model_validate(data)
+        with pytest.raises(ValueError, match="controlled rollback"):
+            with get_db_session() as session:
+                create_resolved_model_record(new_profile, "actor", "tenant", registered_references=model_service_references(),
+                    api_key="fixture-credential", db_session=session)
+                update_resolved_model_record(stable_profile, 3, "actor", "tenant", registered_references=model_service_references(), db_session=session)
+                raise ValueError("controlled rollback")
+        assert restore_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant").model_dump() == stable_profile.model_dump()
         with engine.connect() as connection:
-            assert connection.execute(select(ModelRecord.model_id)
-                .where(ModelRecord.display_name == "must-rollback")).first() is None
-        with engine.begin() as connection:
-            connection.execute(text("UPDATE nexent.model_record_t SET temperature=.5 WHERE model_id=:id"),
-                               {"id": managed_id})
-        with pytest.raises(ValueError, match="STALE_SNAPSHOT"):
-            restore_runtime_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant")
-        # Management repair restores executable state at the next revision.
-        assert update_model_record(managed_id, {"temperature": .5}, "actor", "tenant")
-        assert restore_runtime_model_snapshot(get_model_by_model_id(managed_id, "tenant"), "tenant").config_revision == 5
+            assert connection.execute(select(ModelRecord.model_id).where(ModelRecord.display_name == "must-rollback")).first() is None
     finally:
         if engine is not None:
             engine.dispose()

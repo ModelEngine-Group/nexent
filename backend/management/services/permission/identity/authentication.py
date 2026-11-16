@@ -87,13 +87,6 @@ from management.utils.orm import as_dict
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 
 
-def create_model_record(*args, **kwargs):
-    """Provision trusted snapshots when a tenant receives its initial models."""
-    from management.services.model.runtime_provisioning import create_model_record as persist
-
-    return persist(*args, **kwargs)
-
-
 def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     """Return a non-empty username stored for a linked authentication provider."""
     try:

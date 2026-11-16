@@ -6,6 +6,7 @@ case:
   feature_id: JIUWEN-RESOURCES
   requirement_ids:
   - JIUWEN-M3-20261015
+  - JIUWEN-STORAGE-UNIFY-20261116
   business_rule_ids:
   - JIUWEN-RESOURCES-RULE-003
   title: Trusted model snapshot migration and transactional management lifecycle
@@ -13,43 +14,36 @@ case:
   priority: P0
   status: active
   automation: automated
-  objective: Prove the actual PostgreSQL migration, canonical snapshot persistence
-    and stale/tenant guards.
+  objective: Prove standard ModelService storage without a Jiuwen schema extension, safe optional legacy snapshot
+    migration and transactional isolation.
   preconditions:
-  - Docker and a locally available PostgreSQL image; an isolated disposable database
-    with no production data.
+  - Docker and a locally available PostgreSQL image; an isolated disposable database with no production data.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Execute migration, management save and runtime restore against an isolated
-      PostgreSQL database.
-    expected: Schema upgrade is idempotent and preserves legacy model rows; dry-run
-      does not persist and applied provisioning can be repeated safely.
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: A database without the transitional column supports standard model writes and runtime reads; the existing
+      migration handles absent/present old columns, dry-run, idempotent apply and canonical-row precedence without
+      DDL.
   - order: 2
-    action: Execute migration, management save and runtime restore against an isolated
-      PostgreSQL database.
-    expected: Management create/update save canonical snapshots atomically with monotonic
-      revisions; rollback leaves both row and profile unchanged. Concurrent saves
-      preserve both edits under the row lock and ordinary saves retain frozen declarations/capabilities
-      without catalog lookup.
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: Management create/update persist complete profiles atomically with optimistic revision conflicts and
+      rollback; saved declarations and capabilities remain frozen without catalog lookup.
   - order: 3
-    action: Execute migration, management save and runtime restore against an isolated
-      PostgreSQL database.
-    expected: Runtime uses persisted snapshots without catalog lookup, rejects stale/cross-tenant/tampered
-      rows, and a newly accepted turn sees the updated revision.
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: Legacy snapshot migration preserves frozen parameters, identity and credentials; stale, corrupt or
+      cross-tenant snapshots fail closed without fallback, partial writes or exposure.
   expected_results:
-  - Schema upgrade is idempotent and preserves legacy model rows; dry-run does not
-    persist and applied provisioning can be repeated safely.
-  - Management create/update save canonical snapshots atomically with monotonic revisions;
-    rollback leaves both row and profile unchanged. Concurrent saves preserve both
-    edits under the row lock and ordinary saves retain frozen declarations/capabilities
-    without catalog lookup.
-  - Runtime uses persisted snapshots without catalog lookup, rejects stale/cross-tenant/tampered
-    rows, and a newly accepted turn sees the updated revision.
+  - A database without the transitional column supports standard model writes and runtime reads; the existing migration
+    handles absent/present old columns, dry-run, idempotent apply and canonical-row precedence without DDL.
+  - Management create/update persist complete profiles atomically with optimistic revision conflicts and rollback;
+    saved declarations and capabilities remain frozen without catalog lookup.
+  - Legacy snapshot migration preserves frozen parameters, identity and credentials; stale, corrupt or cross-tenant
+    snapshots fail closed without fallback, partial writes or exposure.
   forbidden_side_effects:
-  - No credential in saved snapshot, cross-tenant mutation, partial configuration
-    commit or writes to an existing application database.
+  - No credential in saved snapshot, cross-tenant mutation, partial configuration commit or writes to an existing
+    application database.
   acceptance:
   - id: AC-01
     description: Prove persisted trusted outlet lifecycle and isolation.
@@ -66,19 +60,16 @@ case:
   execution:
     profiles:
     - name: mock
-      required_services:
-      - http-fixture
-      - model-provider
+      required_services: []
     timeout_seconds: 90
   risk_type: DEPLOYMENT
   risk: Partial model/profile writes or stale migration snapshots route requests incorrectly.
   condition:
-  - Legacy LLM rows, repeated upgrade/backfill, rejected tenant update and a failed
-    transaction.
+  - Legacy LLM rows with and without historical envelopes, repeated import, rejected tenant/revision updates and
+    a failed transaction.
   metrics:
-  - Row count, snapshot revisions, decoded identity and rollback state.
+  - Row count, canonical revisions, profile equality, rollback and absence of transitional SQL in ordinary operations.
   thresholds:
-  - Zero data loss or partial writes; no cross-tenant update; snapshot contains no
-    raw credential.
+  - Zero data loss or partial writes; no cross-tenant update; snapshot contains no raw credential.
   recovery_expectations:
   - Retry succeeds; next turn reads the new snapshot.

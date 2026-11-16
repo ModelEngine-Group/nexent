@@ -39,8 +39,8 @@ change:
       or saved trusted outlets. Add missing UT and runtime evidence without duplicate
       D1.
     test_selectors:
-    - test/backend/services/test_model_runtime_provisioning_service.py
-    - test/backend/services/test_model_runtime_snapshot_service.py
+    - test/backend/services/test_model_runtime_options.py
+    - test/backend/services/test_model_legacy_snapshot_migration.py
     - test/sdk/core/agents/test_jiuwen_resources.py
     - test/sdk/core/agents/test_jiuwen_model_service.py
     - test/sdk/core/agents/test_jiuwen_history.py

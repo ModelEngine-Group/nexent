@@ -16,7 +16,7 @@ from contracts.model import ProviderEnum
 from management.utils.managed_read import managed_read
 from management.db.model.repository import delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_model_records_page, get_models_by_display_name, get_models_by_tenant_factory_type
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
-from management.services.model.runtime_provisioning import create_model_record, update_model_record
+from management.db.model.repository import create_model_record, update_model_record
 from management.services.model.names import (
     add_repo_to_name,
     sort_models_by_id,
@@ -935,7 +935,6 @@ async def list_models_for_tenant(tenant_id: str):
         }
 
         for record in records:
-            record.pop("runtime_outlet_snapshot", None)
             _enrich_model_reasoning_capability(record)
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
@@ -968,7 +967,6 @@ async def list_llm_models_for_tenant(tenant_id: str):
         records = get_model_records({"model_type": "llm"}, tenant_id)
         result: List[Dict[str, Any]] = []
         for record in records:
-            record.pop("runtime_outlet_snapshot", None)
             _enrich_model_reasoning_capability(record)
             result.append({
                 "model_id": record["model_id"],

@@ -200,6 +200,11 @@ def migrate_legacy_outlets(*, dry_run=False, batch_size=100):
     migrated_at = datetime.now(timezone.utc).isoformat()
 
     def construct(record):
+        from management.services.model.legacy_snapshot import restore_legacy_outlet_snapshot
+
+        frozen = restore_legacy_outlet_snapshot(record)
+        if frozen is not None:
+            return frozen
         name = add_repo_to_name(record.get("model_repo") or "", record["model_name"])
         capability = resolve_reasoning_capability(name, record.get("base_url"), record.get("model_factory"),
                                                   allow_gateway_fallback=False)
@@ -209,7 +214,7 @@ def migrate_legacy_outlets(*, dry_run=False, batch_size=100):
     cursor = 0
     while True:
         batch = migrate_legacy_model_records(construct, registered_references=model_service_references(),
-            batch_size=batch_size, after_model_id=cursor, dry_run=dry_run)
+            batch_size=batch_size, after_model_id=cursor, dry_run=dry_run, include_legacy_snapshot=True)
         if not batch:
             break
         results.extend(batch)
