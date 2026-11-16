@@ -1,0 +1,55 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SKILL-SUMMARY-20261113
+  change_type: bugfix
+  bug_id: WB-SKILL-SUMMARY-20261113
+  title: Use lightweight Skill metadata for Workbench mounting
+  description: Opt in to view=mount without returning content or querying tool relations;
+    retain configuration and existing full-list contracts.
+  observed_behavior: The mount picker downloads full Skill content and queries tool
+    relations which it never submits or displays.
+  expected_behavior: The picker requests lightweight metadata; the database excludes
+    content and relation queries; configuration, authorization and full/detail/runtime
+    behavior remain intact.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing picker UT validates configuration and selection but not
+      list projection; existing database UT expects full objects and per-skill tool
+      lookups.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - WB-SKILL-SUMMARY-D2-001
+    modified:
+    - WB-RESOURCE-LAZY-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Mount summary SQL excludes Skill content and does not query SkillToolRelation,
+      while preserving order, tenant and soft-delete filters.
+    - Mount service retains visibility and configuration enrichment; full list stays
+      backward compatible.
+    - Frontend sends view=mount only from the picker, including install refresh; configuration
+      and cancellation remain unchanged.
+    reason: Unit tests own query projection and service branches; loopback HTTP D2
+      owns the additive API contract and D4 owns actual browser query selection. No
+      duplicate formal D1.
+    test_selectors:
+    - test/backend/services/test_skill_mount_summary.py
+    - frontend/tests/workbench/SkillMountListApi.test.ts
+    - frontend/tests/workbench/SkillPicker.test.tsx
+  notes: 'Existing branch and earlier lazy-loading edits remain. Baseline: nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls.
+    WB-CONTROLS owns runtime responsibility. D2 is self-contained: real FastAPI router/service
+    over a loopback Uvicorn server, controlled authentication/storage and local-config
+    boundaries, ephemeral port and finally-owned socket/thread cleanup; families empty.
+    D4 reuses intercepted tenant APIs, runner context and owned cleanup. No production
+    deployment or schema migration.'

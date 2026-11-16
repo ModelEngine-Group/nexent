@@ -26,6 +26,9 @@ campaign_fixture = campaign_module.campaign_fixture
 spec = importlib.util.spec_from_file_location("terminal_daily_launcher", TOOLS.parent / "scripts/daily-launch.py")
 launcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launcher)
+worker_spec = importlib.util.spec_from_file_location("terminal_daily_worker", TOOLS.parent / "scripts/daily-worker.py")
+worker = importlib.util.module_from_spec(worker_spec)
+worker_spec.loader.exec_module(worker)
 ENV = {"LARK_CLI": "offline-cli", "FEISHU_REPORT_CHAT_ID": "offline-chat"}
 
 
@@ -47,14 +50,15 @@ def test_every_terminal_state_sends_and_preserves_results(tmp_path, status):
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
     send.assert_called_once()
-    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert f"批次终态：{status}" in text
     assert "环境恢复状态：" in text
     assert "Original report" in text
     if status == "INTERRUPTED":
         assert "Interrupted" in text and "NOT_EXECUTED=1" in text
     assert (tmp_path / "summary.json").read_bytes() == original
-    assert send.call_args.args[0][-1] == "./notification-report.md"
+    assert send.call_args.args[0][-1] == "./report.md"
+    assert not (tmp_path / "notification-report.md").exists()
 
 
 @pytest.mark.parametrize("verified", [False, True])
@@ -66,10 +70,10 @@ def test_restored_configuration_is_not_mistaken_for_verified_recovery(tmp_path, 
     save(tmp_path / "status.json", state)
     with patch.object(suite_notify, "logged", return_value=0):
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
-    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "restore-local" in text
-    assert ("恢复用例验证通过" in text) is verified
-    assert ("恢复用例未通过或尚未完成" in text) is (not verified)
+    assert ("部署模式、服务检查通过" in text) is verified
+    assert ("环境恢复检查未通过或尚未完成" in text) is (not verified)
 
 
 def test_missing_report_still_sends_saved_terminal_reason(tmp_path):
@@ -81,6 +85,15 @@ def test_missing_report_still_sends_saved_terminal_reason(tmp_path):
     text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
     assert "详细报告未生成" in text and "Deployment preflight failed" in text
     assert "未记录恢复验证证据" in text
+
+
+def test_prepared_launch_reports_pending_redeployment_instead_of_recovered_environment(tmp_path):
+    receipt(tmp_path, "INCOMPLETE", error="worker could not start")
+    save(tmp_path / "recovery.json", {"status": "PREPARED_FOR_REDEPLOY"})
+    with patch.object(suite_notify, "logged", return_value=0):
+        assert suite_notify.send_report(tmp_path, ENV) == "SENT"
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "待重新部署及恢复验证" in text and "前批恢复标记仍待处理" in text
 
 
 @pytest.mark.parametrize("delivery", [124, RuntimeError("offline transport failure")])
@@ -117,11 +130,11 @@ def test_notification_redacts_known_secret_without_rewriting_local_evidence(tmp_
     receipt(tmp_path, "INCOMPLETE", error="Service failed with fake-secret-value")
     with patch.object(suite_notify, "logged", return_value=0):
         assert suite_notify.send_report(tmp_path, {**ENV, "TEST_API_KEY": "fake-secret-value"}) == "SENT"
-    assert "fake-secret-value" not in (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    assert "fake-secret-value" not in (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "fake-secret-value" in (tmp_path / "summary.json").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("failure", [None, "build", "interrupt", "recovery-probe", "restore-local", "publish"])
+@pytest.mark.parametrize("failure", [None, "build", "interrupt", "case-timeout", "restore-local", "publish"])
 def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, failure):
     repo, home, env_path, original, records, settings = campaign_fixture(tmp_path)
     settings["hooks"]["build"] = [["offline-build"]]
@@ -143,7 +156,7 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
             raise KeyboardInterrupt()
         directory.mkdir(parents=True)
         rows = [{"case_id": r["case_id"], "stage": r["stage"], "result":
-                 "TIMEOUT" if failure == "recovery-probe" and directory.name == "restore-local" else "PASS"}
+                 "TIMEOUT" if failure == "case-timeout" and r["case_id"] == "PW-KB-LOCAL-01" else "PASS"}
                 for r in selected]
         for row in rows:
             if on_result:
@@ -158,8 +171,8 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
             patch("report_ownership.enrich", side_effect=lambda repo, rows, head: (rows, [])), \
             patch("suite_publish.publish_latest", side_effect=OSError("offline publication failure")) as publish, \
             patch.object(suite_notify, "logged", return_value=0) as send:
-        code = modes.execute_campaign(repo, home, records[:2], settings, daily=True,
-                                      publish_latest=failure in {"publish", "recovery-probe", "restore-local"},
+        code = modes.execute_campaign(repo, home, records if failure == "case-timeout" else records[:2], settings, daily=True,
+                                      publish_latest=failure in {"publish", "case-timeout", "restore-local"},
                                       execute_one=execute, all_records=records, hook=hook,
                                       machine_env=lambda *_: env, on_batch_created=created.append)
     assert len(created) == 1
@@ -168,15 +181,16 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
     assert json.loads((directory / "notification.json").read_text())["status"] == "SENT"
     summary = json.loads((directory / "summary.json").read_text())
     assert code == (0 if failure in {None, "publish"} else 1)
-    assert summary["execution_complete"] is (failure in {None, "publish"})
-    text = (directory / "notification-report.md").read_text(encoding="utf-8")
-    if failure in {"recovery-probe", "restore-local"}:
+    assert summary["execution_complete"] is (failure in {None, "publish", "case-timeout"})
+    text = (directory / "report.md").read_text(encoding="utf-8")
+    if failure == "restore-local":
         publish.assert_not_called()
         assert prior_report.read_text(encoding="utf-8") == "previous complete batch"
         assert "环境可用性未验证" in text or "不能认为环境已恢复可用" in text
-    if failure == "recovery-probe":
-        assert summary["counts"] == {"PASS": 2}  # The separate recovery probe is not a third business case.
-        assert "restore-local" in text
+    if failure == "case-timeout":
+        assert summary["counts"] == {"PASS": 2, "TIMEOUT": 1}
+        publish.assert_called_once()
+        assert "部署模式、服务检查通过" in text
     assert env_path.read_bytes() == original
     assert text.count("## 终态与环境恢复") == 1
 
@@ -223,6 +237,7 @@ def test_launcher_reports_preflight_failures_without_product_configuration(tmp_p
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
+    monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
 
     def sync(*args, **kwargs):
         if failure == "signal":
@@ -277,9 +292,15 @@ def test_launcher_uses_explicit_batch_link_or_reports_preparation_failure(tmp_pa
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
+    monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
     monkeypatch.setattr(launcher, "sync_checkout", lambda *a, **k: "fixed-revision")
     monkeypatch.setattr(launcher, "git", lambda *a, **k: "")
-    monkeypatch.setattr(launcher, "logged", lambda *a, **k: 1 if failure == "validation" else 0)
+    monkeypatch.setattr(worker, "logged", lambda *a, **k: 1 if failure == "validation" else 0)
+    monkeypatch.setattr(worker, "checked_revision", lambda *a: None)
+    monkeypatch.setattr(worker, "inherited_locks", lambda *a: nullcontext())
+    monkeypatch.setattr(worker, "prepare_daily_retry", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(launcher, "run_worker", lambda repo, home, directory, head, publish, locks:
+                        worker.execute(repo, home, directory, head, publish))
     monkeypatch.setattr(static_assets, "apply", lambda *a, **k: None)
     monkeypatch.setattr(suite, "selection", lambda *a, **k: [])
     monkeypatch.setattr(suite, "doctor", lambda *a, **k: ["offline missing browser"] if failure == "doctor" else [])

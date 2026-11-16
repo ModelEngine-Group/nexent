@@ -459,6 +459,7 @@ class TestListSkillsEndpoint:
                 mock_service.list_visible_skills.assert_called_once_with(
                     tenant_id="target_tenant",
                     user_id="super_user",
+                    include_content=False,
                 )
 
 

@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SKILL-PRECEDENCE-20261113
+  change_type: bugfix
+  bug_id: WB-SKILL-PRECEDENCE-20261113
+  title: Explicit Workbench skills replace same-name defaults coherently
+  description: Select one effective Skill per runtime name before resolving configuration, files and tool dependencies.
+  observed_behavior: Different platform and tenant IDs retain same-name Skills and tools, causing duplicate tool errors or shared snapshot paths.
+  expected_behavior: Authorized explicit mounts replace same-name defaults as complete resources; ambiguous peers and conflicting tool identifiers fail safely before execution.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests cover repeated IDs and shared tool IDs, not platform and tenant copies with different IDs and the same runtime name.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [WB-SKILL-SUMMARY-D2-001, WB-RESOURCE-LAZY-D4-001]
+    added: [WB-SKILL-PRECEDENCE-D1-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Each of the six default Skill names is replaced by an authorized explicit same-name Skill without mixing configuration or dependencies; removing the mount restores defaults.
+    - Same-priority ambiguity, unauthorized explicit resources and unavailable or conflicting effective dependencies fail safely.
+    - Duplicate snapshot names are rejected before filesystem writes and inputs remain immutable.
+    reason: Existing resolver and materialization UT prove isolated behavior. New component proof additionally executes resolution, real storage capture, frozen materialization, dependency resolution and SDK Skill reading together; it is not a wrapper around UT. No new D2 route or D3 provider contract is introduced.
+    test_selectors:
+    - test/backend/services/test_workbench_skill_precedence.py
+  notes: >-
+    Baseline is nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls; runtime owns WB-CONTROLS.
+    Read existing test_workbench_service_coverage repeated-ID assertions, test_create_agent_info shared-tool/config assertions, and test_workbench_generation_overlay snapshot assertions.
+    D1 adds winner consistency across real component collaborators and SDK file access with only metadata/storage-source boundaries controlled; tmp_path and captured source directories are owned and cleaned.
+    D2/D4 are unchanged regression-only selections. Live browser/model smoke is recorded separately from automated component acceptance.
