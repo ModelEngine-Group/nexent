@@ -263,10 +263,12 @@ mock_nexent_core_utils_module.prompt_template_utils = mock_prompt_template_utils
 mock_nexent_core_utils_module.tools_common_message = mock_tools_common_message_module
 
 mock_nexent_core_models_module = types.ModuleType("nexent.core.models")
+mock_nexent_core_models_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "models")]
 mock_nexent_core_models_module.OpenAILongContextModel = MagicMock()
 mock_nexent_core_models_module.OpenAIVLModel = MagicMock()
 
 mock_nexent_core_module = types.ModuleType("nexent.core")
+mock_nexent_core_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_nexent_core_module.utils = mock_nexent_core_utils_module
 mock_nexent_core_module.models = mock_nexent_core_models_module
 mock_nexent_core_module.MessageObserver = _MockMessageObserver
@@ -336,6 +338,7 @@ module_mocks = {
     "nexent.core.management.services.agent.prompt": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
+    "sdk.nexent.core.models": mock_nexent_core_models_module,
     "nexent.storage": mock_nexent_storage_module,
     "nexent.multi_modal": mock_nexent_multi_modal_module,
     "nexent.multi_modal.load_save_object": mock_nexent_load_save_module,
@@ -1513,7 +1516,7 @@ def test_create_tool_invalid_config_type(nexent_agent_instance):
 
 
 def test_create_tool_exception_handling(nexent_agent_instance):
-    """create_tool should handle exceptions and raise ValueError with error message."""
+    """create_tool should propagate the original tool creation exception."""
     tool_config = ToolConfig(
         class_name="DummyTool",
         name="dummy",
@@ -1530,7 +1533,7 @@ def test_create_tool_exception_handling(nexent_agent_instance):
             "create_local_tool",
             side_effect=Exception("Tool creation failed"),
     ):
-        with pytest.raises(ValueError, match="Error in creating tool: Tool creation failed"):
+        with pytest.raises(Exception, match="Tool creation failed"):
             nexent_agent_instance.create_tool(tool_config)
 
 
@@ -2121,6 +2124,26 @@ def test_agent_run_with_observer_rethrows_mcp_timeout(nexent_agent_instance, moc
 
     assert exc_info.value is timeout_error
     mock_core_agent.observer.add_message.assert_not_called()
+
+
+def test_agent_run_with_observer_step_mcp_failure_emits_friendly_error(
+    nexent_agent_instance, mock_core_agent
+):
+    """Classified MCP failures surface a friendly, retryable step error with a code."""
+    nexent_agent_instance.agent = mock_core_agent
+    grouped = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    mock_core_agent.run.side_effect = grouped
+
+    with pytest.raises(ValueError, match="Error in interaction"):
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    kwargs = mock_core_agent.observer.add_message.call_args.kwargs
+    assert kwargs["process_type"] == ProcessType.ERROR
+    assert "MCP tool service connection failed" in kwargs["content"]
+    assert kwargs["error_code"] == "mcp_connection_refused"
+    assert kwargs["retryable"] is True
 
 
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
@@ -2888,7 +2911,7 @@ class TestCreateToolExceptionHandling:
             source="builtin",
         )
 
-        with pytest.raises(ValueError, match=r"Error in creating tool: Unknown builtin tool: UnknownTool"):
+        with pytest.raises(ValueError, match=r"Unknown builtin tool: UnknownTool"):
             nexent_agent_instance.create_tool(tool_config)
 
 

@@ -1,0 +1,20 @@
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "上的"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "疑问，"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "还是日常生活中的好奇"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "，我"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "都很乐意为你"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "提供帮助"}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "。"}, "stop_reason": 154827}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "system_fingerprint": "vllm-0.23.0-tp4-dp8-ep-c4e83305", "choices": [{"finish_reason": "stop", "index": 0, "delta": {}}]}
+
+data: {"id": "chatcmpl-vllm-023-glm-sample", "created": 1792672554, "model": "GLM-V5.2", "object": "chat.completion.chunk", "system_fingerprint": "vllm-0.23.0-tp4-dp8-ep-c4e83305", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 231, "prompt_tokens": 13, "total_tokens": 244, "completion_tokens_details": {"reasoning_tokens": 182}, "prompt_tokens_details": {"cached_tokens": 0}}}
+
+data: [DONE]
+

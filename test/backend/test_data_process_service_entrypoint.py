@@ -242,3 +242,40 @@ def test_main_exits_when_service_dependencies_fail(service_module, monkeypatch):
     with pytest.raises(SystemExit):
         service_module.main()
     assert stopped == [True]
+
+
+def test_missing_redis_client_returns_failure_without_cleanup(service_module, monkeypatch):
+    monkeypatch.setitem(sys.modules, "redis", None)
+    cleanup_service = MagicMock()
+    task_state = types.ModuleType("management.services.knowledge_base.task_state")
+    task_state.get_redis_service = cleanup_service
+    monkeypatch.setitem(sys.modules, task_state.__name__, task_state)
+    logger = MagicMock()
+    monkeypatch.setattr(service_module, "logger", logger)
+
+    manager = service_module.ServiceManager({})
+
+    assert manager.start_redis() is False
+    cleanup_service.assert_not_called()
+    logger.error.assert_called_once()
+    assert "uv pip install redis" in logger.error.call_args.args[0]
+
+
+def test_missing_flower_command_does_not_register_or_monitor_a_process(service_module, monkeypatch):
+    popen = MagicMock(side_effect=FileNotFoundError("launch command unavailable"))
+    thread = MagicMock()
+    sleep = MagicMock()
+    logger = MagicMock()
+    monkeypatch.setattr(service_module.subprocess, "Popen", popen)
+    monkeypatch.setattr(service_module.threading, "Thread", thread)
+    monkeypatch.setattr(service_module.time, "sleep", sleep)
+    monkeypatch.setattr(service_module, "logger", logger)
+    manager = service_module.ServiceManager({})
+
+    assert manager.start_flower() is False
+    popen.assert_called_once()
+    assert popen.call_args.args[0][:3] == [sys.executable, "-m", "celery"]
+    assert service_module.service_processes["flower"] is None
+    thread.assert_not_called()
+    sleep.assert_not_called()
+    assert any("uv pip install flower" in call.args[0] for call in logger.error.call_args_list)

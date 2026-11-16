@@ -5,7 +5,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
-import { ModelOption } from "@/types/modelConfig";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -20,6 +19,7 @@ export type AgentConfigUpdate = Partial<
     | "is_main_agent"
     | "provide_run_summary"
     | "allow_chat_metadata"
+    | "allow_mcp_header_passthrough"
     | "enable_protocol_repair_retry"
     | "description"
     | "prompt"
@@ -131,6 +131,7 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  allow_mcp_header_passthrough?: boolean;
   /** Agent-owned model inference snapshots used by the chat runtime. */
   model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   enable_protocol_repair_retry?: boolean;
@@ -139,6 +140,10 @@ export interface PublishedAgent {
 }
 
 export interface ModelParamsOverrideEntry {
+  parameter_values?: Record<string, unknown>;
+  context_window_tokens?: number;
+  custom_overrides?: Record<string, unknown>;
+  /** Historical fields accepted only while reading older Agent versions. */
   temperature?: number | null;
   top_p?: number | null;
   extra_params?: Record<string, unknown> | null;
@@ -173,6 +178,7 @@ export interface Agent {
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
+  allow_mcp_header_passthrough?: boolean;
   enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;

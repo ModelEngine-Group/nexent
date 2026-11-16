@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-LONG-TEXT-BUDGET-20261103
+  change_type: bugfix
+  bug_id: MODEL-LONG-TEXT-BUDGET-20261103
+  title: Reserve output capacity before truncating resolved-outlet long text
+  description: Intersect the independent input cap with the combined window less the output allowance, preserving wire parameters.
+  observed_behavior: A window of 8192 with input cap 7000 and output allowance 4096 still permits about 6900 input tokens.
+  expected_behavior: Prepared input respects both constraints and output reserve; unknown or exhausted safe capacity fails before dispatch.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing long-text tests verify short content and a raw window only, without reserving output or intersecting capacities.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-036]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [MODEL-LEGACY-TOOLS-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both capacity constraints, output aliases and existing prompt buffer are respected.
+    - An omitted output cap reserves declared output capacity without injecting a wire default.
+    - Input-only limits remain usable; exhausted or unknown shared capacity rejects before dispatch.
+    reason: Unit tests prove the precise budget boundary; existing legacy transport integration is regression-only, with a separate actual packaged long-text model call and Phoenix evidence. No duplicate formal D1 is added.
+    test_selectors:
+    - test/sdk/core/model_service/test_gateway_long_text_budget.py
+    - test/sdk/core/model_service/test_gateway_long_text_outlet.py
+    - test/sdk/core/model_service/test_gateway_resolved_model.py
+    - test/sdk/core/models/test_openai_long_context_model.py
+  notes: User approved PR4120 forward fix after PR4083 merged. Design in nexent-doc/docs/Developing/model-access-native-agent/PR4120-LONG-TEXT-BUDGET-20261103.md. Existing API, schema, truncation strategies and ordinary Agent budgeting are unchanged; no new output default, credentials or runtime policy. Regression case assets and contracts are unchanged.

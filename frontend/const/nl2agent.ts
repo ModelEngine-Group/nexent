@@ -15,12 +15,6 @@ export const NL2AGENT_DEFAULT_SUGGESTIONS = [
     promptKey: "nl2agent.suggestions.generatePrompts.prompt",
   },
   {
-    id: "recommend-knowledge-bases",
-    titleKey: "nl2agent.suggestions.recommendKnowledgeBases.title",
-    descriptionKey: "nl2agent.suggestions.recommendKnowledgeBases.description",
-    promptKey: "nl2agent.suggestions.recommendKnowledgeBases.prompt",
-  },
-  {
     id: "generate-conversation-guide",
     titleKey: "nl2agent.suggestions.generateConversationGuide.title",
     descriptionKey:

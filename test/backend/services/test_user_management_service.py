@@ -250,8 +250,8 @@ class TestFormatRolePermissions(unittest.TestCase):
 class TestCreateToken(unittest.IsolatedAsyncioTestCase):
     """Tests for create_token function in user_management_service."""
 
-    @patch('management.db.identity.token.soft_delete_tokens_by_user')
-    @patch('management.db.client.get_db_session')
+    @patch('management.services.permission.identity.authentication.soft_delete_tokens_by_user')
+    @patch('management.services.permission.identity.authentication.get_db_session')
     @patch('management.services.permission.identity.authentication.create_token_record')
     @patch('management.services.permission.identity.authentication.generate_access_key')
     def test_create_token_success(

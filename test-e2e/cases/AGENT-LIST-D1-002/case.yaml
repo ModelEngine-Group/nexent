@@ -57,12 +57,12 @@ case:
     action: Render the unpublished read-only row and a row with missing metadata.
     expected: Creation time is labeled as creation rather than update, unpublished
       status remains truthful, missing values use existing localized fallbacks, and
-      publication is disabled for read-only data.
+      no publication shortcut is exposed for any permission level.
   - order: 3
-    action: Activate card details, then open the more menu and use Configure and Publish
+    action: Activate card configuration, then open the more menu and use version management
       on an editable row.
     expected: Each existing callback receives the correct Agent or numeric ID; Configure
-      and Publish are menu actions, a decorative status dot creates no extra control,
+      and Publish are absent from the menu while version management remains available, a decorative status dot creates no extra control,
       and no new business request occurs.
   expected_results:
   - Actual title, description, category, timestamp and publication status content
@@ -70,7 +70,7 @@ case:
     proved by AGENT-LIST-D4-002.
   - Status and dates derive from actual metadata, with creation versus update labels
     preserved and missing data never fabricated.
-  - Details, configure, publication and more-menu callbacks retain their existing
+  - Card configuration and version-menu callbacks retain their existing
     data/permission contracts.
   - The status dot is purely decorative and introduces no extra interactive element
     or callback.
@@ -95,8 +95,8 @@ case:
     timestamp placeholders.
   - Status dot is aria-hidden, has no focus/interactive role and leaves existing status
     text available.
-  - Existing details/configure/publication callbacks remain available from the more menu,
-    and read-only publication protection is unchanged.
+  - Card activation retains configuration navigation; publication shortcuts are absent from the list
+    while the editor publication workflow remains unchanged.
   acceptance:
   - id: AC-01
     description: Prove isolated card metadata, decorative status semantics and action

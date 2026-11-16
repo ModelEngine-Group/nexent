@@ -23,13 +23,22 @@ class DatabaseIdentityProvider:
                                   or query["token_version"] != account["token_version"]
                                   or not snapshot["session_active"]):
             raise IdentityError("Invalid or revoked session")
-        role = str(account.get("user_role") or "").upper()
+        values = account.get("user_roles")
+        if values is None:
+            values = [account.get("user_role")] if account.get("user_role") else []
+        allowed = ("SU", "ADMIN", "DEV", "USER", "OPS", "ASSET_OWNER")
+        if (not isinstance(values, (list, tuple)) or not values
+                or any(not isinstance(value, str) or value not in allowed for value in values)
+                or (set(values) & {"SU", "ASSET_OWNER"} and len(set(values)) != 1)):
+            raise IdentityError("Invalid account roles")
+        roles = [value for value in allowed if value in values]
+        role = roles[0]
         tenant_id = membership.get("tenant_id")
         if kind == "session" and not tenant_id:
             tenant_id = {"SU": "tenant_id", "ASSET_OWNER": "asset_owner_tenant_id"}.get(role)
         if not isinstance(tenant_id, str) or not tenant_id or not role:
             raise IdentityError("No active membership")
-        return {"user_id": account["user_id"], "tenant_id": tenant_id, "role": role,
+        return {"user_id": account["user_id"], "tenant_id": tenant_id, "role": role, "roles": roles,
                 "kind": kind, "token_id": snapshot["token_id"], "language": query.get("language", "zh"),
                 "email": account.get("user_email", ""),
                 "session_id": query.get("session_id") if kind == "session" else None}

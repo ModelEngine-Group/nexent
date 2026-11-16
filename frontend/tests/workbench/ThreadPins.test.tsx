@@ -1,7 +1,18 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { beforeEach, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
+import { conversationService } from "@/services/conversationService";
+import type { WorkbenchPinItem, WorkbenchPins } from "@/types/conversation";
 import {
   PinnedThreadsProvider,
   usePinnedThreads,
@@ -38,7 +49,68 @@ function Probe({ thread = saved }: { thread?: ThreadPinIdentity }) {
   );
 }
 
-beforeEach(() => window.localStorage.clear());
+let client: QueryClient;
+let activeScope: string | null;
+let serverPins: Map<string, WorkbenchPinItem[]>;
+
+const pin = (
+  id: number,
+  conversationType: "workbench" | "agent_chat" = "workbench"
+): WorkbenchPinItem => ({
+  conversation_id: id,
+  conversation_title: `History ${id}`,
+  conversation_type: conversationType,
+  create_time: 1,
+  update_time: 1,
+  pinned_at: "2026-11-05T00:00:00Z",
+});
+
+function view(
+  children: ComponentProps<typeof PinnedThreadsProvider>["children"],
+  props: Omit<ComponentProps<typeof PinnedThreadsProvider>, "children"> = {}
+) {
+  // Authentication scopes the API; storageKey independently scopes its cache.
+  activeScope = props.storageKey === undefined ? scope : props.storageKey;
+  return (
+    <QueryClientProvider client={client}>
+      <PinnedThreadsProvider storageKey={scope} {...props}>
+        {children}
+      </PinnedThreadsProvider>
+    </QueryClientProvider>
+  );
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity },
+      mutations: { retry: false },
+    },
+  });
+  activeScope = scope;
+  serverPins = new Map();
+  vi.spyOn(conversationService, "getWorkbenchPins").mockImplementation(
+    async () => ({
+      items: [...(serverPins.get(activeScope!) ?? [])],
+    })
+  );
+  vi.spyOn(conversationService, "setWorkbenchPin").mockImplementation(
+    async (id, pinned) => {
+      const items = (serverPins.get(activeScope!) ?? []).filter(
+        (item) => item.conversation_id !== id
+      );
+      if (pinned) items.unshift(pin(id));
+      serverPins.set(activeScope!, items);
+      return { items: [...items] };
+    }
+  );
+});
+
+afterEach(() => {
+  cleanup();
+  client.clear();
+});
 
 function OrderedPins() {
   const pins = usePinnedThreads()!;
@@ -57,7 +129,11 @@ function OrderedPins() {
     <>
       <output data-testid="pin-order">{order}</output>
       {threads.map((thread) => (
-        <button key={thread.id} onClick={() => pins.togglePin(thread)}>
+        <button
+          key={thread.id}
+          disabled={!pins.canPin(thread)}
+          onClick={() => pins.togglePin(thread)}
+        >
           {thread.remoteId}
         </button>
       ))}
@@ -65,27 +141,45 @@ function OrderedPins() {
   );
 }
 
-it("latest pin and repin appear first and retain their order after reload", () => {
-  const view = () => (
-    <PinnedThreadsProvider storageKey={scope} persistedConversationIds>
-      <OrderedPins />
-    </PinnedThreadsProvider>
-  );
-  const first = render(view());
-  fireEvent.click(screen.getByText("42"));
-  fireEvent.click(screen.getByText("43"));
-  expect(screen.getByTestId("pin-order")).toHaveTextContent("43,42");
+it("latest server pin and repin appear first and retain their order after a fresh-cache reload", async () => {
+  localStorage.setItem(scope, '["999"]');
+  const toggle = async (id: string, order: string) => {
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: id })).toBeEnabled()
+    );
+    fireEvent.click(screen.getByRole("button", { name: id }));
+    await waitFor(() =>
+      expect(screen.getByTestId("pin-order").textContent).toBe(order)
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: id })).toBeEnabled()
+    );
+  };
+  const first = render(view(<OrderedPins />));
+  await toggle("42", "42");
+  await toggle("43", "43,42");
   first.unmount();
-  const second = render(view());
-  expect(screen.getByTestId("pin-order")).toHaveTextContent("43,42");
-  fireEvent.click(screen.getByText("42"));
-  expect(screen.getByTestId("pin-order")).toHaveTextContent("43");
-  fireEvent.click(screen.getByText("42"));
-  expect(screen.getByTestId("pin-order")).toHaveTextContent("42,43");
-  expect(localStorage.getItem(scope)).toBe('["43","42"]');
+  client.clear();
+  const second = render(view(<OrderedPins />));
+  await waitFor(() =>
+    expect(screen.getByTestId("pin-order")).toHaveTextContent("43,42")
+  );
+  await toggle("42", "43");
+  await toggle("42", "42,43");
+  expect(localStorage.getItem(scope)).toBe('["999"]');
   second.unmount();
-  render(view());
-  expect(screen.getByTestId("pin-order")).toHaveTextContent("42,43");
+  client.clear();
+  render(view(<OrderedPins />));
+  await waitFor(() =>
+    expect(screen.getByTestId("pin-order")).toHaveTextContent("42,43")
+  );
+  expect(conversationService.getWorkbenchPins).toHaveBeenCalledTimes(3);
+  expect(vi.mocked(conversationService.setWorkbenchPin).mock.calls).toEqual([
+    [42, true],
+    [43, true],
+    [42, false],
+    [42, true],
+  ]);
 });
 
 it("pin insertion order overrides history age while ordinary recency stays intact", () => {
@@ -129,114 +223,158 @@ it("pin insertion order overrides history age while ordinary recency stays intac
   ).toEqual(["recent", "older"]);
 });
 
-it("persists server identity through reload and local-ID changes", () => {
-  const first = render(
-    <PinnedThreadsProvider storageKey={scope} persistedConversationIds>
-      <Probe />
-    </PinnedThreadsProvider>
-  );
+it("persists server identity through a fresh cache and local-ID changes", async () => {
+  const first = render(view(<Probe />));
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
   fireEvent.click(screen.getByText("Toggle"));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
-  expect(JSON.parse(localStorage.getItem(scope)!)).toEqual(["42"]);
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
+  );
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
   first.unmount();
-  render(
-    <PinnedThreadsProvider storageKey={scope} persistedConversationIds>
-      <Probe thread={{ id: "new-local-id", remoteId: "42" }} />
-    </PinnedThreadsProvider>
+  client.clear();
+  render(view(<Probe thread={{ id: "new-local-id", remoteId: "42" }} />));
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
   );
-  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
   fireEvent.click(screen.getByText("Toggle"));
-  expect(JSON.parse(localStorage.getItem(scope)!)).toEqual([]);
-});
-
-it("resets user and tenant scopes without carrying pin state across identities", () => {
-  localStorage.setItem(scope, '["42"]');
-  const view = (key: string | null) => (
-    <PinnedThreadsProvider storageKey={key} persistedConversationIds>
-      <Probe />
-    </PinnedThreadsProvider>
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("false")
   );
-  const { rerender } = render(view(scope));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
-  rerender(view(getWorkbenchPinStorageKey("user-b", "tenant-a")));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
-  rerender(view(getWorkbenchPinStorageKey("user-a", "tenant-b")));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
-  rerender(view(null));
-  expect(screen.getByText("Toggle")).toBeDisabled();
-  rerender(view(scope));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
+  expect(vi.mocked(conversationService.setWorkbenchPin).mock.calls).toEqual([
+    [42, true],
+    [42, false],
+  ]);
+  expect(serverPins.get(scope)).toEqual([]);
 });
 
-it("uses the persisted mapping for an initialized draft and blocks unsent drafts", () => {
+it("isolates user and tenant scopes and disables pinning without an identity", async () => {
+  serverPins.set(scope, [pin(42)]);
+  const { rerender } = render(view(<Probe />));
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
+  );
+  for (const key of [
+    getWorkbenchPinStorageKey("user-b", "tenant-a"),
+    getWorkbenchPinStorageKey("user-a", "tenant-b"),
+  ]) {
+    rerender(view(<Probe />, { storageKey: key }));
+    expect(screen.getByTestId("pinned")).toHaveTextContent("false");
+    await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
+    expect(screen.getByTestId("pinned")).toHaveTextContent("false");
+  }
+  const reads = vi.mocked(conversationService.getWorkbenchPins).mock.calls
+    .length;
+  rerender(view(<Probe />, { storageKey: null }));
+  expect(screen.getByText("Toggle")).toBeDisabled();
+  fireEvent.click(screen.getByText("Toggle"));
+  expect(conversationService.getWorkbenchPins).toHaveBeenCalledTimes(reads);
+  expect(conversationService.setWorkbenchPin).not.toHaveBeenCalled();
+  rerender(view(<Probe />));
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
+  );
+});
+
+it("uses the persisted mapping for an initialized draft and blocks unsent drafts", async () => {
   const draft = { id: "draft", remoteId: "workbench-draft:draft" };
-  const { rerender } = render(
-    <PinnedThreadsProvider storageKey={scope} persistedConversationIds>
-      <Probe thread={draft} />
-    </PinnedThreadsProvider>
+  const { rerender } = render(view(<Probe thread={draft} />));
+  await waitFor(() =>
+    expect(conversationService.getWorkbenchPins).toHaveBeenCalledTimes(1)
   );
   expect(screen.getByText("Toggle")).toBeDisabled();
-  rerender(
-    <PinnedThreadsProvider
-      storageKey={scope}
-      persistedConversationIds
-      serverConversationIds={new Map([["draft", "51"]])}
-    >
-      <Probe thread={draft} />
-    </PinnedThreadsProvider>
-  );
-  expect(screen.getByText("Toggle")).toBeEnabled();
   fireEvent.click(screen.getByText("Toggle"));
-  expect(JSON.parse(localStorage.getItem(scope)!)).toEqual(["51"]);
+  expect(conversationService.setWorkbenchPin).not.toHaveBeenCalled();
+  rerender(
+    view(<Probe thread={draft} />, {
+      serverConversationIds: new Map([["draft", "51"]]),
+    })
+  );
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
+  fireEvent.click(screen.getByText("Toggle"));
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
+  );
+  expect(conversationService.setWorkbenchPin).toHaveBeenCalledExactlyOnceWith(
+    51,
+    true
+  );
 });
 
-it("retains the Agent-chat storage key and local identity contract", () => {
+it("filters server pins by conversation type and ignores legacy local identities", async () => {
   localStorage.setItem("chat.pinnedThreadIds", '["local-a"]');
-  localStorage.setItem(scope, '["99"]');
-  render(
-    <PinnedThreadsProvider>
-      <Probe />
-    </PinnedThreadsProvider>
+  serverPins.set(scope, [pin(42), pin(43, "agent_chat")]);
+  const thread = { id: "local-a", remoteId: "43" };
+  const { rerender } = render(
+    view(<Probe thread={thread} />, { conversationType: "agent_chat" })
   );
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
+  );
+  rerender(view(<Probe thread={saved} />, { conversationType: "agent_chat" }));
+  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
+  rerender(view(<Probe thread={thread} />, { conversationType: "workbench" }));
+  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
+  rerender(view(<Probe thread={saved} />));
+  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
+  expect(localStorage.getItem("chat.pinnedThreadIds")).toBe('["local-a"]');
+  expect(conversationService.setWorkbenchPin).not.toHaveBeenCalled();
+});
+
+it("ignores a duplicate toggle while a save is pending and permits unpin after acknowledgment", async () => {
+  let finish!: (value: WorkbenchPins) => void;
+  const save = vi
+    .mocked(conversationService.setWorkbenchPin)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+  render(view(<Probe />));
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
+  fireEvent.click(screen.getByText("Toggle twice"));
+  await waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith(42, true));
+  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
+  expect(screen.getByText("Toggle")).toBeDisabled();
+  serverPins.set(scope, [pin(42)]);
+  await act(async () => finish({ items: [pin(42)] }));
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
   expect(screen.getByTestId("pinned")).toHaveTextContent("true");
   fireEvent.click(screen.getByText("Toggle"));
-  expect(localStorage.getItem("chat.pinnedThreadIds")).toBe("[]");
-  expect(localStorage.getItem(scope)).toBe('["99"]');
-});
-
-it("handles two toggles before rerender without losing the second update", () => {
-  render(
-    <PinnedThreadsProvider storageKey={scope} persistedConversationIds>
-      <Probe />
-    </PinnedThreadsProvider>
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("false")
   );
-  fireEvent.click(screen.getByText("Toggle twice"));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
-  expect(localStorage.getItem(scope)).toBe("[]");
+  expect(save).toHaveBeenNthCalledWith(2, 42, false);
+  expect(save).toHaveBeenCalledTimes(2);
 });
 
-it("keeps pin/unpin usable when browser storage cannot be read or written", () => {
-  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+it("keeps server pin/unpin usable without reading or writing browser storage", async () => {
+  const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
     throw new Error("Storage unavailable");
   });
-  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+  const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new Error("Quota exceeded");
   });
   const warning = vi.fn();
-  render(
-    <PinnedThreadsProvider
-      storageKey={scope}
-      persistedConversationIds
-      onStorageError={warning}
-    >
-      <Probe />
-    </PinnedThreadsProvider>
+  render(view(<Probe />, { onStorageError: warning }));
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
+  fireEvent.click(screen.getByText("Toggle"));
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("true")
   );
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
   fireEvent.click(screen.getByText("Toggle"));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("true");
-  fireEvent.click(screen.getByText("Toggle"));
-  expect(screen.getByTestId("pinned")).toHaveTextContent("false");
-  expect(warning).toHaveBeenCalledTimes(2);
+  await waitFor(() =>
+    expect(screen.getByTestId("pinned")).toHaveTextContent("false")
+  );
+  expect(vi.mocked(conversationService.setWorkbenchPin).mock.calls).toEqual([
+    [42, true],
+    [42, false],
+  ]);
+  expect(get).not.toHaveBeenCalled();
+  expect(set).not.toHaveBeenCalled();
+  expect(warning).not.toHaveBeenCalled();
 });
 
 it.each([

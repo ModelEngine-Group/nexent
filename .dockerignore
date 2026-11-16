@@ -63,3 +63,11 @@ assets/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Local dependency/build verification artifacts and untracked resolver state
+.task-evidence/
+backend/uv.lock
+sdk/uv.lock
+
+# CI toolchain is not application source.
+.ci-python/

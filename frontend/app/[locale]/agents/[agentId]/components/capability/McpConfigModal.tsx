@@ -842,7 +842,7 @@ export default function McpConfigModal({
                 padding: 12,
                 backgroundColor: "#f6ffed",
                 border: "1px solid #b7eb8f",
-                borderRadius: 6,
+                borderRadius: "var(--radius-control)",
                 display: "flex",
                 alignItems: "center",
               }}

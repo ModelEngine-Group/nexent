@@ -17,7 +17,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
 from services.nl2agent_service import (
@@ -53,6 +53,23 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
 )
 from infrastructure.http.client import create_httpx_client
+
+
+@pytest.fixture(autouse=True)
+def shared_creator_definition(mocker):
+    """Keep external release persistence isolated from creator runtime unit tests."""
+    from contracts.agent import SystemAgentRef
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from management.services.agent.creation import build_nl2agent_system_prompt
+
+    mocker.patch(
+        'services.nl2agent_service.system_agent_provider.get_nl2agent_main_ref',
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, 'nl2agent_main', 77, 0),
+    )
+    mocker.patch('services.nl2agent_service.search_agent_info_by_agent_id', return_value={
+        'agent_id': 77, 'version_no': 0, 'agent_origin': 'SYSTEM', 'max_steps': 8,
+        'prompt': json.dumps({lang: build_nl2agent_system_prompt(lang) for lang in ('zh', 'en')}),
+    })
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -1678,7 +1695,9 @@ async def test_build_run_info_is_ephemeral(mocker, query, clarification_required
     request = NL2AgentRunRequest(query=query, agent_id=42, history=[HistoryItem(role='user', content='Build an agent that summarizes weather risks.'), HistoryItem(role='assistant', content='I found matching weather tools.')])
     run_info = await build_nl2agent_run_info(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     assert run_info.query == 'final query'
-    assert run_info.agent_config.name == '__nl2agent_runtime__'
+    assert run_info.agent_config.name == 'nl2agent_main'
+    assert run_info.agent_config.agent_id == 77
+    assert run_info.agent_config.version_no == 0
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
     assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
     assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
@@ -1697,7 +1716,7 @@ async def test_build_run_info_is_ephemeral(mocker, query, clarification_required
     assert history_item.type.value == 'conversation_turn'
     assert history_item.content == {'user_message': 'Build an agent that summarizes weather risks.', 'assistant_final_answer': 'I found matching weather tools.', 'attachments': [], 'user_message_id': -1, 'assistant_message_id': -2}
     assert history_item.metadata == {'layout_order': 0}
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': NEXENT_MCP_INTERNAL_TOKEN}}]
     assert run_info.sandbox_config is None
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
@@ -1768,7 +1787,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     assert prompt_context.type == ContextItemType.SYSTEM
     assert '### Role' in prompt_context.content['text']
     assert run_info.context_input.items[1] == verified_context
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': NEXENT_MCP_INTERNAL_TOKEN}}]
 
 
 @pytest.mark.asyncio
@@ -1789,7 +1808,7 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     request = NL2AgentRunRequest(query='Build a weather agent', agent_id=42)
     stream = await create_nl2agent_stream(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'), system_ref=None)
     assert chunks == ['data: {"type": "tool", "content": "call"}\n\n', 'data: {"type": "nl2a", "content": "{\\"status\\": \\"success\\", \\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n']
     run_info.stop_event.set.assert_called_once_with()
 

@@ -73,7 +73,7 @@ export async function prepareWorkbench(page: Page, resourceCount = 1, options: {
     }
     else if (/^\/api\/conversation\/\d+$/.test(pathname) && options.histories) {
       const history = options.histories.find(item => String(item.conversation_id) === pathname.split("/").at(-1));
-      result = { code: 0, data: history ? [{ ...history, message: [], workbench_config: { schema_version: 3, mode: "generic_chat", generation_config: { deep_thinking: false }, agent_mounts: [], skill_mounts: [] } }] : [] };
+      result = { code: 0, data: history ? [{ ...history, message: [], workbench_config: { schema_version: 4, mode: "generic_chat", agent_mounts: [], skill_mounts: [] } }] : [] };
     }
     else if (pathname.includes("conversation") || pathname.includes("tool")) result = { code: 0, data: [], conversations: [], tools: [] };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(result) });

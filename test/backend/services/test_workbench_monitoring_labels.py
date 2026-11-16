@@ -2,11 +2,11 @@
 """Localize the built-in runtime identity without rewriting published snapshots."""
 
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 
-from contracts.agent import WorkbenchSessionConfig
+from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
 
 
@@ -16,7 +16,7 @@ def test_workbench_runtime_has_chinese_label_and_preserves_published_snapshot(mo
     before = deepcopy(snapshot)
     mocker.patch.object(
         workbench_service.system_agent_provider, "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value=snapshot)
     mocker.patch.object(workbench_service.skill_db, "search_skills_for_agent", return_value=[])

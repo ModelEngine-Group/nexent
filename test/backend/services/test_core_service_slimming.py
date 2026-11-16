@@ -230,6 +230,7 @@ def model_resolver(monkeypatch):
     dependency(
         monkeypatch, "management.db.model.repository",
         get_model_by_model_id=lambda *args: None, get_model_records=lambda *args: [],
+        get_model_records_by_ids=lambda ids: {},
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
     )
@@ -290,6 +291,7 @@ def agent_reader(monkeypatch, model_resolver):
     dependency(
         monkeypatch, "management.db.tool.repository", search_tools_for_sub_agent=lambda **kwargs: [],
         check_tool_is_available=lambda ids: [True] * len(ids),
+        query_agent_tools_for_list=lambda agent_ids, tenant_id: ([], {}),
     )
     load_source(monkeypatch, "backend/contracts/constants/constants.py", "contracts.constants.constants")
     return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")
@@ -311,9 +313,9 @@ def test_ac007_projection_keeps_distinct_legacy_name_rules(agent_reader, monkeyp
     assert listed.deleted_model_ids == detail.deleted_model_ids == frozenset({9})
 
 
-def test_ac007_projection_filters_unavailable_models(agent_reader, monkeypatch, model_resolver):
+def test_ac007_projection_filters_deleted_models(agent_reader, monkeypatch, model_resolver):
     records = {
-        7: {"display_name": "Unavailable", "connect_status": "unavailable"},
+        7: {"display_name": "Unavailable", "connect_status": "unavailable", "delete_flag": "Y"},
         8: {"display_name": "Available", "connect_status": "available"},
     }
     monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda mid, *args: records[mid])
@@ -401,7 +403,8 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
 @pytest.mark.parametrize("configured,available", [(False, False), (True, False), (True, True)])
 def test_ac007_availability_uses_real_shared_model_predicate(agent_reader, model_resolver, monkeypatch, configured, available):
     monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda *args: {
-        "connect_status": "available" if available else "unavailable"
+        "connect_status": "available" if available else "unavailable",
+        "delete_flag": "N" if available else "Y",
     })
     ok, reasons = agent_reader.check_agent_availability(
         1, "tenant", {"agent_id": 1, "model_ids": [7] if configured else []}
@@ -494,3 +497,13 @@ def test_ac017_repository_has_no_flat_management_service_references():
                     stale_references.append(f"{path.relative_to(ROOT)}: {stale_prefix}")
 
     assert stale_references == []
+
+
+@pytest.mark.parametrize("status", ["available", "unavailable", "unknown", None])
+def test_agent_configured_model_remains_selectable_independently_of_probe(agent_reader, model_resolver, monkeypatch, status):
+    monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda *_args: {
+        "display_name": "Configured", "connect_status": status, "delete_flag": "N", "model_type": "llm",
+    })
+    projected = agent_reader.project_agent_models({"model_ids": [7]}, "tenant", {})
+    assert projected.fields["model_ids"] == [7]
+    assert agent_reader.check_agent_availability(1, "tenant", {"agent_id": 1, "model_ids": [7]}) == (True, [])

@@ -1,6 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+
+import { getRoleColor } from "@/lib/auth";
+import log from "@/lib/logger";
+import { roleLabelKey } from "@/lib/roles";
+import { ApiError } from "@/services/api";
+import {
+  getAssignableRoles,
+  type AssignableRoles,
+} from "@/services/userService";
 
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
@@ -41,17 +49,34 @@ import {
 } from "@/services/groupService";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
+const ROLE_CONFLICT_KEYS = new Map([
+  [
+    "Cannot remove your own ADMIN role",
+    "tenantResources.users.ownAdminRoleLocked",
+  ],
+  [
+    "Cannot remove the last active tenant administrator",
+    "tenantResources.users.lastAdminRoleLocked",
+  ],
+  [
+    "Tenant administrator limit reached",
+    "tenantResources.users.adminLimitReached",
+  ],
+]);
+
 export default function UserList({
   tenantId,
+  readOnly = false,
   refreshKey,
 }: {
   tenantId: string | null;
+  readOnly?: boolean;
   refreshKey?: number;
 }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const displayName = useUserDisplayName();
-  const { user } = useAuthorizationContext();
+  const { user, refetch: refreshAuthorization } = useAuthorizationContext();
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -98,6 +123,7 @@ export default function UserList({
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const editingUserRef = useRef(editingUser);
   editingUserRef.current = editingUser;
+  const [roleOptions, setRoleOptions] = useState<AssignableRoles | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
 
@@ -109,14 +135,39 @@ export default function UserList({
     setCreateGroupModalVisible(true);
   };
 
-  const openEdit = (u: User) => {
+  const showUserError = (error: unknown, fallbackKey: string) => {
+    log.warn("User management request failed", error);
+    const limitMessage = getTenantResourceLimitMessage(error, t);
+    if (limitMessage) {
+      message.error(limitMessage);
+      return;
+    }
+    if (error instanceof ApiError && Number(error.code) === 403) {
+      message.error(t("errorCode.000201"));
+      return;
+    }
+    const conflictKey =
+      error instanceof ApiError && Number(error.code) === 409
+        ? ROLE_CONFLICT_KEYS.get(error.message)
+        : undefined;
+    message.error(t(conflictKey ?? fallbackKey));
+  };
+
+  const openEdit = async (u: User) => {
+    setRoleOptions(null);
+    try {
+      setRoleOptions(await getAssignableRoles(u.id));
+    } catch (error) {
+      showUserError(error, "tenantResources.users.loadRolesFailed");
+      return;
+    }
     setEditingUser(u);
     const currentGroupIds = groupsRef.current
       .filter((g) => u.group_names?.includes(g.group_name))
       .map((g) => g.group_id);
     form.setFieldsValue({
       username: u.username,
-      role: u.role,
+      roles: u.roles ?? [u.role],
       group_ids: currentGroupIds,
     });
     setModalVisible(true);
@@ -127,29 +178,26 @@ export default function UserList({
       await deleteUser(id.toString());
       message.success(t("tenantResources.users.deleted"));
       refetch();
-    } catch (err: any) {
-      const limitMessage = getTenantResourceLimitMessage(err, t);
-      if (limitMessage) {
-        message.error(limitMessage);
-      } else if (err?.message) {
-        message.error(err.message);
-      } else {
-        message.error(t("common.unknownError"));
-      }
+    } catch (error) {
+      showUserError(error, "tenantResources.users.deleteFailed");
     }
   };
 
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (!tenantId) throw new Error("No tenant selected");
+      if (!tenantId) {
+        message.error(t("common.noTenantSelected"));
+        return;
+      }
 
       if (editingUserRef.current) {
         const eu = editingUserRef.current;
         const updateData: UpdateUserRequest = {
-          role: values.role,
+          roles: values.roles,
         };
         await updateUser(eu.id.toString(), updateData);
+        if (eu.id === user?.id) await refreshAuthorization();
 
         // Sync group membership changes
         const selectedGroupIds: number[] = values.group_ids || [];
@@ -175,11 +223,12 @@ export default function UserList({
       form.resetFields();
       refetch();
     } catch (err: any) {
-      message.error(
-        getTenantResourceLimitMessage(err, t) ||
-          err?.message ||
-          err?.response?.data?.message ||
-          t("common.unknownError")
+      if (err?.errorFields) return;
+      showUserError(
+        err,
+        err instanceof ApiError && Number(err.code) === 409
+          ? "tenantResources.users.roleConflict"
+          : "tenantResources.users.updateFailed"
       );
     }
   };
@@ -227,31 +276,18 @@ export default function UserList({
         width: "30%",
       },
       {
-        title: t("common.type"),
+        title: t("tenantResources.users.role"),
         dataIndex: "role",
         key: "role",
-        render: (role: string) => {
-          const roleLabels: Record<string, string> = {
-            SUPER_ADMIN: t("user.role.superAdmin"),
-            ADMIN: t("user.role.admin"),
-            DEV: t("user.role.dev"),
-            USER: t("user.role.user"),
-            ASSET_OWNER: t("user.role.assetOwner"),
-          };
-          const color =
-            role === "SUPER_ADMIN"
-              ? "magenta"
-              : role === "ADMIN"
-                ? "purple"
-                : role === "DEV"
-                  ? "cyan"
-                  : role === "USER"
-                    ? "blue"
-                    : role === "ASSET_OWNER"
-                      ? "gold"
-                      : "gray";
-          return <Tag color={color}>{roleLabels[role] || role}</Tag>;
-        },
+        render: (role: string, record: User) => (
+          <div className="flex flex-wrap gap-1">
+            {(record.roles ?? [role]).map((value) => (
+              <Tag key={value} color={getRoleColor(value)}>
+                {t(roleLabelKey(value))}
+              </Tag>
+            ))}
+          </div>
+        ),
         width: "20%",
       },
       {
@@ -282,7 +318,11 @@ export default function UserList({
             <Tooltip title={t("tenantResources.users.editUser")}>
               <Button
                 type="text"
+                aria-label={t("tenantResources.users.editUser")}
                 icon={<Edit className="h-4 w-4" />}
+                disabled={(record.roles ?? [record.role]).some((role) =>
+                  ["SU", "ASSET_OWNER"].includes(role)
+                )}
                 onClick={() => openEdit(record)}
                 size="small"
               />
@@ -291,6 +331,13 @@ export default function UserList({
               <Button
                 type="text"
                 danger
+                aria-label={t("tenantResources.users.deleteUser")}
+                disabled={
+                  record.id === user?.id ||
+                  (record.roles ?? [record.role]).some((role) =>
+                    ["SU", "ASSET_OWNER"].includes(role)
+                  )
+                }
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
                 onClick={() =>
@@ -311,8 +358,11 @@ export default function UserList({
         width: "30%",
       },
     ],
-    [displayName]
+    [displayName, t, user?.id]
   );
+  const visibleColumns = readOnly
+    ? columns.filter((column) => column.key !== "actions")
+    : columns;
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
     setPage(newPage);
@@ -352,6 +402,7 @@ export default function UserList({
             { label: t("user.role.admin"), value: "ADMIN" },
             { label: t("user.role.dev"), value: "DEV" },
             { label: t("user.role.user"), value: "USER" },
+            { label: t("user.role.ops"), value: "OPS" },
             { label: t("user.role.assetOwner"), value: "ASSET_OWNER" },
           ]}
           placeholder={t("tenantResources.users.filterRole")}
@@ -382,7 +433,7 @@ export default function UserList({
       </div>
       <Table
         dataSource={users}
-        columns={columns}
+        columns={visibleColumns}
         rowKey={(r) => String(r.id)}
         loading={isLoading}
         pagination={{
@@ -411,16 +462,28 @@ export default function UserList({
             />
           </Form.Item>
           <Form.Item
-            name="role"
-            label={t("common.type")}
-            rules={[{ required: true }]}
+            name="roles"
+            label={t("tenantResources.users.role")}
+            rules={[
+              {
+                required: true,
+                type: "array",
+                message: t("tenantResources.users.roleRequired"),
+              },
+            ]}
+            extra={
+              roleOptions?.locked_roles.includes("ADMIN")
+                ? t("tenantResources.users.ownAdminRoleLocked")
+                : undefined
+            }
           >
             <Select
-              options={[
-                { label: t("user.role.admin"), value: "ADMIN" },
-                { label: t("user.role.dev"), value: "DEV" },
-                { label: t("user.role.user"), value: "USER" },
-              ]}
+              mode="multiple"
+              options={(roleOptions?.grantable_roles ?? []).map((value) => ({
+                value,
+                label: t(roleLabelKey(value)),
+                disabled: roleOptions?.locked_roles.includes(value),
+              }))}
             />
           </Form.Item>
           <Form.Item

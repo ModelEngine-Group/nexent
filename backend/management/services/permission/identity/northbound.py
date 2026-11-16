@@ -8,6 +8,8 @@ import uuid
 from http import HTTPStatus
 from typing import Dict, Optional, Tuple
 
+from fastapi import HTTPException, Request
+
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
@@ -16,11 +18,16 @@ from contracts.authentication import (
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.errors.exceptions import (
     LimitExceededError,
+    SignatureValidationError,
     TokenExpiredError,
     UnauthorizedError,
 )
 from fastapi import HTTPException, Request
-from management.services.permission.identity.session import extract_bearer_token, require_active_account
+from contracts.roles import roles_from_record
+from management.services.permission.identity.credentials import (
+    extract_bearer_token,
+    require_active_account,
+)
 from gateway.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
@@ -84,7 +91,6 @@ def validate_aksk_authentication(
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from contracts.errors.exceptions import SignatureValidationError
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)
@@ -146,14 +152,14 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     return {"user_id": user_id, "tenant_id": membership["tenant_id"], "token_id": record.get("token_id")}
 
 
-
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:
     from management.services.permission.identity.session import _gateway_identity
 
     identity = _gateway_identity("api_key")
     if identity is not None:
         return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
-                                     role=identity.get("role", ""), language=identity.get("language", "zh"),
+                                     role=identity.get("role", ""), roles=roles_from_record(identity),
+                                     language=identity.get("language", "zh"),
                                      token_id=identity.get("token_id"), kind=CredentialKind.API_KEY)
     try:
         resolved = get_user_and_tenant_by_access_key(extract_bearer_token(authorization))

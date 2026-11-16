@@ -17,7 +17,6 @@ import { useAuiState } from "@assistant-ui/react";
 import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import remarkGfm from "remark-gfm";
 import { defaultUrlTransform, type UrlTransform } from "react-markdown";
 
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -27,6 +26,11 @@ import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
+import {
+  chatRemarkPlugins,
+  chatRehypePlugins,
+  preprocessChatMarkdown,
+} from "./markdown-plugins";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
 import {
@@ -247,9 +251,11 @@ const MarkdownTextImpl = () => {
   return (
     <div data-citation-index-map={citationIndexMapAttribute}>
       <MarkdownTextPrimitive
-        remarkPlugins={[remarkGfm, remarkCite]}
+        remarkPlugins={[...chatRemarkPlugins, remarkCite]}
+        rehypePlugins={chatRehypePlugins}
+        preprocess={preprocessChatMarkdown}
         urlTransform={markdownUrlTransform}
-        className="aui-md"
+        className="aui-md [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"
         components={defaultComponents}
         componentsByLanguage={{
           mermaid: {

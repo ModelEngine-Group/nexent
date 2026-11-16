@@ -60,10 +60,11 @@ def test_invalid_composition_does_not_stop_the_legacy_service():
     COMPOSE_DIR=fixture
     COMPOSE_FILE_SUFFIX=.yml
     """ + function("retire_legacy_northbound_container") + "\n" + function("deploy_core_services") + "\ndeploy_core_services"
+    script = function("prepare_core_service_deployment") + "\n" + script
     result = subprocess.run([executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=10)
     assert result.returncode == 1 and "config --quiet" in result.stderr
     assert "unexpected docker mutation" not in result.stderr
-    assert "legacy container was left unchanged" in result.stdout
+    assert "existing business services remain running" in result.stderr
 
 
 @pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])

@@ -50,6 +50,10 @@ def bootstrap_test_env() -> Dict[str, Any]:
     consts_module = _create_module("consts", const=mock_const)
     sys.modules["contracts.constants.environment"] = mock_const
     install_business_constant_stubs(mock_const)
+    # Real default for the A2A invocation timeout so backend modules doing
+    # `from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS`
+    # bind a numeric value instead of an auto-created MagicMock attribute.
+    mock_const.A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = 900.0
 
     boto3_mock = MagicMock()
     sys.modules.setdefault("boto3", boto3_mock)

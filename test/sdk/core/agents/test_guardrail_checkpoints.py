@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Deterministic scenarios for guardrail checkpoints ② (tool output) and ③ (tool input).
 
 Checkpoint ① intercepts a keyword the user types this turn, so ②/③ only fire when the
@@ -376,7 +377,7 @@ def test_fault_injected_model_outputs_silently_repair_then_execute_explicit_fina
     rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "solve this")])
     responses = []
-    for content in ("<UNKNOWN/>", "bare answer", "<final_answer>42</final_answer>"):
+    for content in ("<tool_call>{}</tool_call>", "bare answer", "<final_answer>42</final_answer>"):
         response = MagicMock()
         response.content = content
         response.token_usage = None
@@ -721,3 +722,14 @@ def test_append_verification_feedback_sets_observations_when_empty():
     agent._append_verification_feedback(action_step, result)
     assert action_step.observations  # set to a non-empty feedback string
     assert "fix it" in action_step.observations
+
+
+def test_execution_history_deduplicates_printed_return_and_preserves_mask():
+    rule = GuardrailRule(name="unmatched", pattern="never-match", severity="mask")
+    agent = _make_step_agent(rule, messages=[_msg("user", "hello")], model_output="<code>print(1)</code>")
+    agent.python_executor.return_value = types.SimpleNamespace(output="actual result", logs="actual result\n", is_final_answer=False)
+    agent.verification_controller.config.step_verification_enabled = False
+    action_step = types.SimpleNamespace(step_number=1)
+    list(agent._step_stream(action_step))
+    assert action_step.execution_fields == {"OUTPUT": "actual result\n"}
+    assert action_step.action_output == "actual result"

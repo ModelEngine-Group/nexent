@@ -1,0 +1,36 @@
+schema_version: '1.0'
+stage: D3
+module: MODEL-MANAGEMENT
+case:
+  case_id: MODEL-PROBE-D3-001
+  feature_id: V5-PW-MODEL-01
+  business_rule_ids: [V5-PW-MODEL-01-RULE-02]
+  title: Abandoned outlet validation reaps its actual HTTP probe
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the service owns cancellation across ModelService and a blocked loopback HTTP request, with only persistence and identity-loading boundaries controlled.
+  preconditions: [Product backend and SDK dependencies installed, Loopback TCP available]
+  test_data:
+    configuration: Synthetic saved profile and key; owned stalled HTTP server; disconnect, checker error and caller cancellation variants.
+  steps:
+  - order: 1
+    action: Start validation through the actual probe and shared HTTP transport; wait until the provider has received its request, then disconnect or raise in the disconnect checker or cancel the caller.
+    expected: The expected cancellation or checker error propagates and the child probe is awaited.
+  - order: 2
+    action: Inspect connectivity writes, concurrency ownership and child tasks; release and close the owned provider and join its thread.
+    expected: No status write occurs, no named probe task or concurrency lease remains, and the server thread terminates.
+  expected_results:
+  - All three abandonment variants propagate their expected failure after the HTTP boundary was reached.
+  - No persisted status, orphan probe, lease or server thread remains.
+  forbidden_side_effects: [No external provider or database write, No synthetic credential in retained evidence]
+  integration_boundary: [Validation service through actual ModelService and HTTP sender to an owned loopback server]
+  observations: [Provider request receipt, Task and lease lifecycle, Persistence spies]
+  cleanup: [Release handler gate, Close server and join thread]
+  acceptance:
+  - id: AC-CANCEL
+    description: Abandonment owns and reaps the real outbound operation without persisting success.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1, 2]

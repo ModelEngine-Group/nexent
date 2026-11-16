@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: AUTOMATION-PR-UT-20261028
+  change_type: test-fix
+  title: Align automation PR unit tests with background execution ownership
+  description: >-
+    Include the new background module in the exact architecture inventory,
+    retain projection ownership and both await-path assertions, and give the
+    changed background execution test its own run manager mock.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-126]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Only three traditional UT files change; production behavior, dependency
+    versions, formal scripts and acceptance contracts remain unchanged.
+    Existing background outcome and persistence tests provide adjacent regression.
+    No new D1 or formal Case execution is required for this test-only repair.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The architecture inventory exactly includes the new automation background owner.
+    - Assistant persistence is delegated and awaited on ordinary and background paths.
+    - Background stream consumption uses a fresh run-manager mock and releases its own reservation.
+    reason: >-
+      Same-version develop/HEAD comparison identified two newly stale architecture
+      assertions and one background test exposed to prior shared-mock deletion.
+      Preserve all behavioral assertions and repair only these PR-related tests.
+    test_selectors:
+    - test/backend/management/test_service_directory_architecture.py
+    - test/backend/management/test_agent_runtime_boundaries.py::test_assistant_projection_is_a_separate_responsibility
+    - test/backend/services/test_agent_service.py::test_run_agent_background_consumes_stream_and_returns_assistant_message
+    - test/backend/services/test_agent_background_outcomes.py
+    - test/backend/services/test_agent_background_finalization.py
+  notes: >-
+    Baseline 319c3aa on djb/bugfix-aotumation-sql-check. The user explicitly
+    narrowed scope to this PR; all broader edits were withdrawn. Do not change
+    toolchain pins, SQLite drivers, old module imports, name validation or other
+    existing failures. Full CI remains affected by those recorded baseline and
+    environment problems; do not claim all UT pass. Existing design/evidence:
+    nexent-doc/nexent/chat-automation-activity-and-quota/design.md and local
+    outputs/pr4242-ut-fix-20261028. No commit, push or remote CI rerun.

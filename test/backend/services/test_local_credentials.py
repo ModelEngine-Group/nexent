@@ -117,31 +117,3 @@ def test_source_validation_errors_do_not_expose_credentials(field, value):
         map_source_user(row)
     assert "secret-plaintext" not in str(error.value)
     assert row.get("encrypted_password", "") not in str(error.value)
-
-
-def test_migration_cli_rejects_missing_password_without_connecting(monkeypatch, mocker, capsys):
-    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
-
-    mocker.patch.object(migrate, "load_settings", return_value={})
-    monkeypatch.setattr("sys.argv", ["migrate_docker.py"])
-    connect = mocker.patch("psycopg2.connect")
-    assert migrate.main() == 1
-    connect.assert_not_called()
-    assert "NEXENT_POSTGRES_PASSWORD" in capsys.readouterr().err
-
-
-def test_migration_cli_hides_database_connection_details(monkeypatch, mocker, capsys):
-    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
-
-    secret = "private-source-dsn-marker"
-    mocker.patch.object(migrate, "load_settings", return_value={
-        "SUPABASE_POSTGRES_HOST": secret,
-        "SUPABASE_POSTGRES_PASSWORD": "source-secret",
-        "NEXENT_POSTGRES_PASSWORD": "target-secret",
-    })
-    monkeypatch.setattr("sys.argv", ["migrate_docker.py", "--apply"])
-    mocker.patch("psycopg2.connect", side_effect=RuntimeError(secret))
-    assert migrate.main() == 1
-    output = capsys.readouterr()
-    assert "RuntimeError" in output.err
-    assert secret not in output.out + output.err

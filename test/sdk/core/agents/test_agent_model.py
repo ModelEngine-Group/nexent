@@ -927,7 +927,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
         assert config.raw_card is None
 
     def test_external_a2a_agent_config_with_all_fields(self):
@@ -963,7 +963,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
 
     def test_external_a2a_agent_config_custom_headers_default(self):
         """Test custom_headers defaults to None."""

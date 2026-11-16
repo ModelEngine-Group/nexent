@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: WB-CREATION-INTENT-D4-001
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: WB-CREATION-INTENT-D4-001
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01: [WB-CREATION-INTENT-D4-001]
+  AC-02: [WB-CREATION-INTENT-D4-001]
+  AC-03: [WB-CREATION-INTENT-D4-001]
+  AC-04: [WB-CREATION-INTENT-D4-001]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP forwarding from northbound APIs to the runtime service."""
 
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 import httpx
 from fastapi.responses import StreamingResponse
@@ -11,6 +11,7 @@ from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServi
 from contracts.agent import AgentRequest
 from infrastructure.service_identity.internal_tokens import generate_internal_runtime_jwt
 from infrastructure.http.client import create_httpx_client
+from nexent.monitor.monitoring import get_monitoring_manager
 
 
 _HOP_BY_HOP_HEADERS = {
@@ -49,7 +50,7 @@ def _authorization_headers(user_id: str, tenant_id: str) -> dict[str, str]:
         raise RuntimeServiceUnavailableError(
             "Internal runtime authentication is not configured"
         ) from exc
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token}", **get_monitoring_manager().get_trace_headers()}
 
 
 def dispatch_agent_evaluation_run(
@@ -155,11 +156,13 @@ async def forward_agent_run(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
+    final_answer_mode: Literal["complete", "delta"] = "delta",
 ) -> StreamingResponse:
     """Start a runtime agent run and proxy its response without buffering."""
     return await _forward_runtime_stream(
         "POST", "/agent/internal/northbound/run", user_id, tenant_id,
         payload=agent_request.model_dump(mode="json"),
+        params={"final_answer_mode": final_answer_mode},
     )
 
 

@@ -5,12 +5,13 @@
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 
-NL2SKILL_NAME = "__skill_creator__"
+NL2SKILL_NAME = "nl2skill_main"
 
 
 def create_nl2skill_agent_config(
     system_prompt: str,
     model_name: str,
+    system_ref=None,
 ) -> AgentConfig:
     """Create one request-scoped skill creator without persistent state."""
 
@@ -18,6 +19,10 @@ def create_nl2skill_agent_config(
         raise ValueError("Skill creation system prompt must not be empty")
 
     return AgentConfig(
+        agent_id=system_ref.agent_id if system_ref else None,
+        version_no=0 if system_ref else None,
+        runtime_ref=f"agent:{system_ref.agent_id}:v0" if system_ref else None,
+        origin="SYSTEM",
         name=NL2SKILL_NAME,
         display_name="技能创建助手",
         description="Ephemeral natural-language skill builder",

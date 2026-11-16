@@ -6,24 +6,25 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
-from contracts.clarification import ClarificationResponse
-from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import HistoryItem
-from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
-from contracts.skill import SkillResolution, SkillZipEntry
-from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     PrivateAttr,
-    StrictBool,
     StrictInt,
     field_validator,
     model_validator,
 )
+
+from contracts.clarification import ClarificationResponse
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.conversation import ConversationTarget, HistoryItem, MessageAnnotationItem
+from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
+from contracts.skill import SkillResolution, SkillZipEntry
+from contracts.tool import ToolParamsRequest
+from infrastructure.agent_prompt import normalize_imported_agent_bundle
 
 
 @dataclass(frozen=True)
@@ -120,23 +121,6 @@ class RuntimeSkillMount(BaseModel):
     config_values: Dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkbenchGenerationConfig(BaseModel):
-    """Provider-neutral generation settings persisted with the conversation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    deep_thinking: bool = False
-    thinking_effort: Literal[
-        "auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"
-    ] = "low"
-    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
-    temperature: Optional[float] = Field(
-        default=None, ge=0, le=2, strict=True, allow_inf_nan=False
-    )
-    top_p: Optional[float] = Field(
-        default=None, ge=0, le=1, strict=True, allow_inf_nan=False
-    )
-    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
 
 
 class WorkbenchSessionConfig(BaseModel):
@@ -144,12 +128,9 @@ class WorkbenchSessionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     mode: WorkbenchMode
-    model_id: Optional[int] = Field(default=None, gt=0)
-    generation_config: WorkbenchGenerationConfig = Field(
-        default_factory=WorkbenchGenerationConfig
-    )
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     agent_mounts: List[RuntimeAgentMount] = Field(default_factory=list, max_length=8)
     skill_mounts: List[RuntimeSkillMount] = Field(default_factory=list, max_length=20)
     knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
@@ -213,30 +194,17 @@ class AgentRequest(BaseModel):
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this turn's user
+    # message; persisted as a structured unit and merged into the model-facing
+    # text at request time.
+    annotations: Optional[List[MessageAnnotationItem]] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
-    model_id: Optional[int] = None
-    generation_config: Optional[WorkbenchGenerationConfig] = None
-    reasoning_effort: Optional[
-        Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
-    ] = Field(
-        default=None,
-        description=(
-            "Optional per-run reasoning effort. None inherits the selected model "
-            "or Agent default."
-        ),
-    )
-    reasoning_budget_tokens: Optional[int] = Field(
-        default=None,
-        gt=0,
-        description=(
-            "Optional per-run reasoning token budget. None inherits the selected "
-            "model or Agent default."
-        ),
-    )
+    model_id: Optional[StrictInt] = Field(default=None, gt=0)
+    model_parameter_preferences: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
@@ -262,7 +230,7 @@ class AgentRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def reject_legacy_execution_controls(cls, value):
-        return reject_legacy_agent_fields(value)
+        return reject_temporary_model_controls(reject_legacy_agent_fields(value))
 
     @field_validator("context_policy")
     @classmethod
@@ -291,131 +259,46 @@ class AgentRequest(BaseModel):
     )
 
 
-class RuntimeGenerationOverrides(BaseModel):
-    """Partial generation intent; absent fields never materialize defaults."""
-
-    model_config = ConfigDict(extra="forbid")
-    deep_thinking: Optional[StrictBool] = None
-    thinking_effort: Optional[
-        Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
-    ] = None
-    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
-    temperature: Optional[float] = Field(
-        default=None, ge=0, le=2, strict=True, allow_inf_nan=False
-    )
-    top_p: Optional[float] = Field(
-        default=None, ge=0, le=1, strict=True, allow_inf_nan=False
-    )
-
-    @field_validator(
-        "deep_thinking", "thinking_effort", "reasoning_budget_tokens", mode="before"
-    )
-    @classmethod
-    def reject_explicit_null(cls, value):
-        if value is None:
-            raise ValueError("A reasoning override cannot be null; omit it to inherit")
-        return value
 
 
 class NL2ModelControlsRequest(BaseModel):
-    """Shared optional controls for direct and Workbench creator turns."""
+    """The same per-model preferences used by every Agent conversation."""
 
     model_id: Optional[StrictInt] = Field(default=None, gt=0)
-    generation_config: Optional[RuntimeGenerationOverrides] = None
-    reasoning_effort: Optional[
-        Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
-    ] = None
-    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+    model_parameter_preferences: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
-    def reconcile_model_controls(cls, value):
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        overlay = value.get("generation_config")
-        if isinstance(overlay, BaseModel):
-            overlay = overlay.model_dump(exclude_unset=True)
-        if overlay is not None and not isinstance(overlay, dict):
-            return value
-        overlay = dict(overlay or {})
-        snapshot = value.get("workbench_config")
-        if isinstance(snapshot, dict):
-            snapshot_model = snapshot.get("model_id")
-            if snapshot_model is not None:
-                if (
-                    value.get("model_id") is not None
-                    and value["model_id"] != snapshot_model
-                ):
-                    raise ValueError(
-                        "model_controls_invalid: conflicting model snapshot"
-                    )
-                value["model_id"] = snapshot_model
-            saved = snapshot.get("generation_config")
-            if isinstance(saved, dict):
-                for key in (
-                    "deep_thinking",
-                    "thinking_effort",
-                    "reasoning_budget_tokens",
-                    "temperature",
-                    "top_p",
-                ):
-                    if (
-                        key in ("temperature", "top_p")
-                        and key in saved
-                        and saved[key] is None
-                    ):
-                        if overlay.get(key) is not None:
-                            raise ValueError(
-                                "model_controls_invalid: conflicting sampling snapshot"
-                            )
-                        continue
-                    if key not in saved or saved[key] is None:
-                        continue
-                    if key in overlay and overlay[key] != saved[key]:
-                        raise ValueError(
-                            "model_controls_invalid: conflicting generation snapshot"
-                        )
-                    overlay[key] = saved[key]
-        for legacy, canonical in (
-            ("reasoning_effort", "thinking_effort"),
-            ("reasoning_budget_tokens", "reasoning_budget_tokens"),
-        ):
-            if value.get(legacy) is not None:
-                if canonical in overlay and overlay[canonical] != value[legacy]:
-                    raise ValueError(
-                        "model_controls_invalid: conflicting reasoning override"
-                    )
-                overlay[canonical] = value[legacy]
-        if overlay or value.get("generation_config") is not None:
-            value["generation_config"] = overlay
-        return value
+    def reject_removed_controls(cls, value):
+        return reject_temporary_model_controls(value)
 
 
 class NL2AgentRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Agent turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
-    agent_id: int = Field(gt=0)
+    agent_id: Optional[int] = Field(default=None, gt=0)
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
 
 
 class NL2SkillRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Skill turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     language: Optional[Literal["zh", "en"]] = None
@@ -534,6 +417,8 @@ class AgentInfoRequest(BaseModel):
     # NULL means inherit model defaults.
     model_params_override: Optional[Dict[str, Any]] = None
     allow_chat_metadata: Optional[bool] = None
+    # Phase 1 northbound MCP header passthrough per-agent switch (opt-in).
+    allow_mcp_header_passthrough: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -543,13 +428,7 @@ class AgentInfoRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        # Imported lazily: contracts must not require the SDK package at import
-        # time, because several unit suites stub ``nexent.core`` wholesale.
-        from nexent.core.agent_names import validate_agent_name
-
-        return validate_agent_name(value)
+        return validate_agent_name(value) if value is not None else None
 
     @field_validator("verification_config", mode="before")
     @classmethod
@@ -580,6 +459,7 @@ class ExportAndImportAgentInfo(BaseModel):
     is_main_agent: bool = True
     provide_run_summary: bool
     allow_chat_metadata: bool = False
+    allow_mcp_header_passthrough: bool = False
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
@@ -1046,3 +926,13 @@ class AgentUnavailableReason:
     def is_valid_reason(cls, reason: str) -> bool:
         """Check if a reason string is a valid reason code."""
         return reason in cls.all_reasons()
+
+
+def reject_temporary_model_controls(value):
+    """Reject the removed parallel contract instead of silently dropping intent."""
+    if isinstance(value, dict) and {"generation_config", "reasoning_effort", "reasoning_budget_tokens"}.intersection(value):
+        raise ValueError("Use model_parameter_preferences for conversation model parameters")
+    if (isinstance(value, dict) and value.get("conversation_id") is not None
+            and value.get("model_parameter_preferences") and value.get("is_debug") is not True):
+        raise ValueError("Save existing conversation parameters through the preference endpoint")
+    return value

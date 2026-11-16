@@ -9,7 +9,8 @@ from smolagents import CodeAgent
 
 import services.nl2skill_service as nl2skill_service
 from management.services.skill.creation import create_nl2skill_agent_config
-from contracts.agent import NL2SkillRunRequest
+from contracts.agent import NL2SkillRunRequest, SystemAgentRef
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.skill.prompt import get_nl2skill_prompt_template
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 
@@ -103,6 +104,10 @@ def test_skill_creator_context_and_templates_are_request_scoped():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("language", "expected_language"), [("zh", "zh"), ("en", "en"), ("unknown", "zh")])
 async def test_skill_run_info_keeps_selected_language_system_prompt(mocker, language, expected_language):
+    mocker.patch.object(
+        nl2skill_service.system_agent_provider, "get_nl2skill_main_ref",
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "nl2skill_main", 77, 0),
+    )
     mocker.patch.object(
         nl2skill_service, "create_model_config_list",
         return_value=[{"cite_name": "main_model", "model_name": "primary", "url": "https://model.test/v1"}],

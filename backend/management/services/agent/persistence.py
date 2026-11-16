@@ -25,6 +25,7 @@ async def finalize_assistant_projection(
     user_id,
     tenant_id,
     final_answer_content,
+    final_answer_override=None,
     run_outcome,
     persist_batch,
     mark_failed,
@@ -44,6 +45,11 @@ async def finalize_assistant_projection(
                 ),
                 "",
             )
+            if final_answer_override:
+                # Complete answer mode: the caller has already recomputed the
+                # canonical root answer from the buffered fragments; the
+                # single-unit reconstruction above is only the delta fallback.
+                final_answer_content = final_answer_override
             logger.info(
                 "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                 conversation_id,

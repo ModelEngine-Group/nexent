@@ -1,16 +1,15 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ConfigProvider } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { Bot, Inbox, ShieldCheck, User } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -24,16 +23,12 @@ enum AgentRepositoryTab {
   REVIEW = "review",
 }
 
-const agentRepositoryTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
-};
-
 export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = hasRole(user, "ADMIN");
   const [tab, setTab] = useState<AgentRepositoryTab>(() => {
     const backTab = searchParams.get("back_tab");
     if (backTab === "mine") return AgentRepositoryTab.MINE;
@@ -84,7 +79,7 @@ export default function AgentRepositoryPage() {
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
 
   return (
-    <ConfigProvider theme={agentRepositoryTheme}>
+    <>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
@@ -182,6 +177,6 @@ export default function AgentRepositoryPage() {
           </motion.div>
         </div>
       </div>
-    </ConfigProvider>
+    </>
   );
 }

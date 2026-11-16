@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-PARAMETER-STORAGE-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-PARAMETER-STORAGE-20261013
+  title: Preserve single-location outlet parameter values
+  description: Add strict saved-value validation and dedicated-column parameter split/restore without default application or TOML reads.
+  affected_features:
+    existing: []
+    added: [SDK-MODEL-OUTLET-STORAGE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve omission, false, zero and explicit null without defaults or input mutation.
+    - Reject invalid saved schemas, dependencies, required or fixed values, duplicate storage and null markers.
+    - Enforce dedicated boolean, string length, finite number and INT4 column limits without exposing values in errors.
+    reason: Existing parameter tests cover configuration creation, not storage presence or strict snapshot loading. Pure codec proof belongs in UT; no duplicate D1 is created.
+    test_selectors: [test/sdk/core/model_service/test_outlet_parameters.py]
+  no_case_change_reason: No database, transport or user journey is connected. Preserve all existing formal Cases; design real database/deployment proof before implementing those boundaries.
+  notes: Only a storage prerequisite, not a complete ResolvedModelProfile or migration delivery. Documented in TECHNICAL-DESIGN before product implementation.

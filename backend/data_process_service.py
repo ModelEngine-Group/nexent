@@ -66,7 +66,7 @@ class ServiceManager:
             logger.info(f"✅ Redis connection successful: {redis_url}")
             return True
         except ImportError:
-            logger.error("❌ Redis Python client not available. Please install: pip install redis")
+            logger.error("❌ Redis Python client not available. Please install: uv pip install redis")
             return False
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e!s}")
@@ -475,7 +475,7 @@ except Exception as e_exec:
             return True
 
         except FileNotFoundError:
-            logger.error("❌ Flower not found. Please install: pip install flower")
+            logger.error("❌ Flower not found. Please install: uv pip install flower")
             logger.error("   Note: Use 'python -m flower' instead of 'flower' command")
             return False
         except Exception as e:

@@ -38,7 +38,7 @@ export function AgentDebugWelcome({
       className="flex min-h-full shrink-0 flex-col"
     >
       <AgentWelcome
-        className="h-auto flex-1 shrink-0"
+        className="h-auto flex-1 shrink-0 justify-evenly gap-8 py-8 [&>div]:shrink-0"
         title={agent.display_name || agent.name}
         greeting={agent.greeting_message || agent.description}
         icon={

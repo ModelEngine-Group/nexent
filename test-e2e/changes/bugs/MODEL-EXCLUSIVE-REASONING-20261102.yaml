@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-EXCLUSIVE-REASONING-20261102
+  change_type: bugfix
+  bug_id: MODEL-EXCLUSIVE-REASONING-20261102
+  title: Enforce declared Qwen Max exclusive thinking controls
+  description: Honor the exact provider source contract using existing parameter conditions and preserve disable-thinking inheritance.
+  observed_behavior: Qwen3.8 Max accepts effort and budget together although the pinned source forbids the combination.
+  expected_behavior: New compositions and conflicting conversation values are rejected; either control alone retains its wire mapping; disabling thinking drops inherited values but rejects explicit contradictory values.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Generic condition and catalog tests did not assert this exact provider combination or composite-condition inheritance.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reject conflicting exact-provider composition, saved values and conversation overlays.
+    - Preserve each legal control wire mapping and disabling-thinking inheritance under composite conditions.
+    - Remove transitively dependent inherited values in compiled order while retaining explicitly contradictory submissions.
+    reason: Finite local declaration and evaluator regressions are sufficient UT proof; no duplicate formal D1 is introduced. Existing higher-layer composition cases are reused when validating the final integrated stack.
+    test_selectors:
+    - test/sdk/core/model_service/test_reasoning_exclusion.py
+    - test/sdk/core/model_service/test_parameter_rules.py
+    - test/sdk/core/model_service/test_profile_submission.py
+  notes: Fresh private review of merged4118; smallest open-layer forward fix belongs to4083. Source files remain byte-for-byte unchanged; only the Nexent supplement and its manifest digest change. Frozen existing snapshots are not automatically recomposed, preserving the approved compatibility boundary. No new configuration or generic policy system. A fresh second review exposed transitive conditions; the final correction reuses the existing compiled dependency order and updates the effective view after removal.

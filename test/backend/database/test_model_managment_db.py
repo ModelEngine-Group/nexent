@@ -230,7 +230,7 @@ def test_update_model_record(monkeypatch):
 
 
 def test_fail_detecting_models_on_startup(monkeypatch):
-    """Interrupted checks reuse the existing unavailable state."""
+    """Interrupted checks return to unknown, not a fabricated failed result."""
     mock_result = MagicMock(rowcount=3)
     mock_stmt = MagicMock()
     mock_stmt.where.return_value = mock_stmt
@@ -248,7 +248,7 @@ def test_fail_detecting_models_on_startup(monkeypatch):
     )
 
     assert model_mgmt_db.fail_detecting_models_on_startup() == 3
-    assert mock_stmt.values.call_args.kwargs["connect_status"] == "unavailable"
+    assert mock_stmt.values.call_args.kwargs["connect_status"] == "not_detected"
     session.execute.assert_called_once_with(mock_stmt)
 
 

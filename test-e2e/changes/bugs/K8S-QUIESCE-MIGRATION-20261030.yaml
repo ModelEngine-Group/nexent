@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-QUIESCE-MIGRATION-20261030
+  change_type: bugfix
+  bug_id: K8S-QUIESCE-MIGRATION-20261030
+  title: Stop old K8s business writers before shared Agent migration
+  description: Pause business Deployments, run SQL and Workbench bootstrap in a new-image Job, activate only after success.
+  observed_behavior: Helm rolls out business workloads before initialization/publication in the Ready config pod; old writers may still run during SQL migration.
+  expected_behavior: Old business Pods disappear before migration, infrastructure remains available, and Job failure prevents business activation.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Deployment checks did not assert old-writer shutdown, zero replicas during bootstrap, or failure before activation.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/deploy/test_workbench_publication.py
+      - test/backend/deploy/test_k8s_bootstrap.py
+    behaviors:
+      - Validate paused and active manifests before scaling only existing business Deployments, waiting for old Pods to disappear.
+      - Render six business Deployments at zero replicas during bootstrap while infrastructure retains replicas.
+      - Use the new config image, environment and resource mounts in a Job for local, dynamic and existing storage.
+      - Synchronize verified official Skill ZIPs before releasing the SQL, initialization and publication command gate.
+      - SQL or initialization failure short-circuits subsequent commands; Job failure or timeout prevents activation.
+      - First installation, partial component deployment, upgrade and retry preserve their intended boundaries.
+    reason: Real Bash orchestration and Helm rendering with controlled external commands prove ordering; no live cluster or database is mutated.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, K8s quiescence follow-up.
+    Existing SYS-AGENT-D5-001 proves PostgreSQL migration and release transactions, not Kubernetes Pod termination, and is unaffected.
+    No new D1 duplicates orchestration UT. No live Kubernetes rollout/shutdown acceptance is claimed.
+    Additional deployment checks outside the traditional UT selector schema:
+    test/deploy/test_k8s_helm.py, test_k8s_bootstrap_render.py and test_k8s_bootstrap_deploy.py.
+    No SQL, creator-history behavior, release idempotency or infrastructure lifecycle changes.

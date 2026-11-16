@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-VALIDATION-SCOPE-20261030
+  change_type: test-fix
+  title: Keep local test-asset failures from aborting unrelated Daily Cases
+  description: >-
+    Reuse the ConversationResumeBranch UT already restored on develop without
+    weakening branch restoration assertions. Keep strict implementation validation
+    as the default. Daily uses typed findings, accounts for locally blocked Cases,
+    records missing traditional UT and derived-view warnings separately, and stops
+    on unknown/global problems. Never rewrite tracked generated views during Daily.
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-DETAIL-D4-001]
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Framework orchestration only; preserve all
+    formal Case contracts and acceptance assertions. CHAT-DETAIL-D4-001 remains the
+    browser boundary regression and has not been executed by these offline checks.
+  traditional_ut:
+    decision: reuse
+    reason: >-
+      Reuse the previously authored frontend branch resume regression; add
+      offline framework tests for validation classification and execution accounting.
+    behaviors:
+    - Resume the correct user branch with retries and saved partial content.
+    - Continue unrelated Cases while reporting blocked identities and coverage gaps.
+    - Reject unknown/global errors and shortened Daily plans before deployment.
+    test_selectors:
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+  notes: >-
+    Offline framework regressions live under infra/tools/tests/test_daily_validation.py.
+    Traditional UT remains separate from formal D1-D5 execution. No workflow,
+    product behavior, deployment config, Runner, notification or GitHub mutations.

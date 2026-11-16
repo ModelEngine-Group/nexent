@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
-from ...consts.mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import (
+    classify_mcp_failure,
+    find_mcp_server_url,
+    is_mcp_timeout_error,
+    mcp_failure_message,
+)
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..model_errors import ModelInvocationTerminalError
 from ..models.openai_llm import OpenAIModel
@@ -324,6 +329,8 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
+        if model_config.resolved_profile is not None:
+            return self._create_resolved_model(model_config)
         model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
@@ -363,6 +370,24 @@ class NexentAgent:
         model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
+
+    def _create_resolved_model(self, model_config):
+        """Use the supplied outlet snapshot and the run's existing cancellation owner."""
+        from ..concurrency.cancellation import RunCancellationScope
+        from ..model_service.compatibility.legacy_chat_model import LegacyChatModel
+
+        profile = model_config.resolved_profile
+        if (
+            profile.identity.tenant_id != self.tenant_id
+            or profile.identity.request_model_id != model_config.model_name
+            or profile.connection.base_url != model_config.url
+        ):
+            raise ValueError("Model configuration does not match its outlet snapshot")
+        scope = self.cancellation_scope if self.cancellation_scope is not None else RunCancellationScope(self.stop_event)
+        return LegacyChatModel.from_profile(
+            profile, model_config.api_key, http_headers=model_config.http_headers,
+            observer=self.observer, cancellation_scope=scope,
+        )
 
 
     def create_local_tool(self, tool_config: ToolConfig):
@@ -680,36 +705,33 @@ class NexentAgent:
         """create a tool instance according to the tool config"""
         if not isinstance(tool_config, ToolConfig):
             raise TypeError("tool_config must be a ToolConfig object")
-        try:
-            class_name = tool_config.class_name
-            source = tool_config.source
+        class_name = tool_config.class_name
+        source = tool_config.source
 
-            if source == "local":
-                tool_obj = self.create_local_tool(tool_config)
-            elif source == "mcp":
-                tool_obj = self.create_mcp_tool(class_name)
-                tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
-            elif source == "langchain":
-                tool_obj = self.create_langchain_tool(tool_config)
-            elif source == "builtin":
-                tool_obj = self.create_builtin_tool(tool_config)
-            else:
-                raise ValueError(f"unsupported tool source: {source}")
-            mapping = getattr(self, "workspace_mapping", None)
-            if mapping is not None and class_name in {
-                "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
-            }:
-                tool_obj.workspace_mapping = mapping
-                if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
-                    tool_obj.init_path = str(mapping.host_root / "outputs")
-            if source in {"local", "builtin", "mcp"}:
-                try:
-                    setattr(tool_obj, "_nexent_execute_on_host", True)
-                except (AttributeError, TypeError):
-                    pass
-            return tool_obj
-        except Exception as e:
-            raise ValueError(f"Error in creating tool: {e}")
+        if source == "local":
+            tool_obj = self.create_local_tool(tool_config)
+        elif source == "mcp":
+            tool_obj = self.create_mcp_tool(class_name)
+            tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+        elif source == "langchain":
+            tool_obj = self.create_langchain_tool(tool_config)
+        elif source == "builtin":
+            tool_obj = self.create_builtin_tool(tool_config)
+        else:
+            raise ValueError(f"unsupported tool source: {source}")
+        mapping = getattr(self, "workspace_mapping", None)
+        if mapping is not None and class_name in {
+            "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
+        }:
+            tool_obj.workspace_mapping = mapping
+            if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
+                tool_obj.init_path = str(mapping.host_root / "outputs")
+        if source in {"local", "builtin", "mcp"}:
+            try:
+                setattr(tool_obj, "_nexent_execute_on_host", True)
+            except (AttributeError, TypeError):
+                pass
+        return tool_obj
 
     def _wrap_subagent(
         self,
@@ -1060,6 +1082,7 @@ class NexentAgent:
                     script_runner = None
                     with _sandbox_tree_context["initialization_lock"]:
                         try:
+                            from .context.execution_history import ExecutionHistory
                             from .sandbox import build_python_executor
                             self._check_sandbox_cancelled()
                             if deferred and self.workspace_path:
@@ -1075,7 +1098,7 @@ class NexentAgent:
                                 host_tools_exist=_has_host_tools([
                                     *tool_list,
                                     *worker_agents_list,
-                                ]),
+                                ]) or isinstance(getattr(self.observer, "execution_history", None), ExecutionHistory),
                                 session_container_group=_sandbox_tree_context.get(
                                     "session_container_group"
                                 ),
@@ -1570,6 +1593,30 @@ class NexentAgent:
                 except Exception as e:
                     if is_mcp_timeout_error(e):
                         raise
+                    category, leaf = classify_mcp_failure(e)
+                    if category:
+                        # Keep the ReAct loop alive: the model receives the
+                        # friendly text and can switch tools or tell the user.
+                        content = mcp_failure_message(
+                            category,
+                            getattr(observer, "lang", "en"),
+                            server=find_mcp_server_url(e),
+                            leaf=leaf,
+                        )
+                        logger.error(
+                            "event=agent_step_mcp_failure agent=%s category=%s",
+                            self.agent.agent_name,
+                            category,
+                            exc_info=True,
+                        )
+                        observer.add_message(
+                            agent_name=self.agent.agent_name,
+                            process_type=ProcessType.ERROR,
+                            content=content,
+                            error_code=f"mcp_{category}",
+                            retryable=True,
+                        )
+                        raise ValueError(f"Error in interaction: {content}")
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

@@ -33,14 +33,18 @@ case:
       a tool.
     expected: No skill effect or completed/committed raw protocol final is emitted or stored. Provisional final deltas must
       roll back in their exact attempts before the terminal error.
+  - order: 4
+    action: Return a legal skill action followed by model final-answer text in one response, then a separate response after the real result.
+    expected: Original model answer fragments stream normally before tool execution; the accepted skill still executes once, real evidence reaches the next model request and the ordinary loop completes.
   expected_results:
   - Runtime executes the skill read.
   - History matches committed stream.
   - Every rejected exhaustion is bounded to three generations and reports an error, with no skill effect or completed/committed
     SSE final. Provisional final deltas are allowed only when their exact attempts explicitly roll back; history contains
     only strictly empty compatibility final placeholders.
+  - Mixed-response streaming preserves model text without terminating the accepted action or hiding its real result.
   forbidden_side_effects:
-  - No unexecuted action final.
+  - No run terminates as completed before executing its accepted action.
   - No duplicate tool effects.
   integration_boundary:
   - Provider to classifier
@@ -80,6 +84,16 @@ case:
     - 3
     expected_results:
     - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+
+  - id: AC-03
+    description: Mixed action/final text streams without the removed observer gate; actual skill execution and real-result continuation remain intact.
+    steps:
+    - 4
+    expected_results:
+    - 4
     forbidden_side_effects:
     - 1
     - 2

@@ -1942,12 +1942,16 @@ async def test_manage_provider_create_success(client, auth_header, user_credenti
     assert len(data["data"]) == 2
     mock_create.assert_called_once_with(
         "target_tenant",
-        {"provider": "silicon", "model_type": "llm", "api_key": "test_api_key", "base_url": ""}
+        {"provider": "silicon", "model_type": "llm", "api_key": "test_api_key", "base_url": "", "ssl_verify": True, "timeout_seconds": 120, "http_headers": {}}
     )
 
 
 @pytest.mark.asyncio
-async def test_manage_provider_create_with_base_url(client, auth_header, user_credentials, mocker):
+@pytest.mark.parametrize("transport", [
+    {},
+    {"ssl_verify": False, "timeout_seconds": 37, "http_headers": {"X-Test-Gateway": "fixture"}},
+])
+async def test_manage_provider_create_with_base_url(client, auth_header, user_credentials, mocker, transport):
     """Test provider model creation with base URL for modelengine provider."""
     mocker.patch('management.api.model.model_managment.get_current_user_id', return_value=user_credentials)
 
@@ -1971,12 +1975,13 @@ async def test_manage_provider_create_with_base_url(client, auth_header, user_cr
         "api_key": "test_api_key",
         "base_url": "https://api.modelengine.example.com"
     }
+    request_data.update(transport)
     response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     mock_create.assert_called_once_with(
         "target_tenant",
-        {"provider": "modelengine", "model_type": "llm", "api_key": "test_api_key", "base_url": "https://api.modelengine.example.com"}
+        {"provider": "modelengine", "model_type": "llm", "api_key": "test_api_key", "base_url": "https://api.modelengine.example.com", "ssl_verify": True, "timeout_seconds": 120, "http_headers": {}, **transport}
     )
 
 

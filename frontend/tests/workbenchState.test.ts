@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -42,7 +44,7 @@ test("UT-FE-WB-009 creation actions clear incompatible resources", () => {
   assert.equal(creation.config.mode, "agent_create");
   assert.deepEqual(creation.config.agent_mounts, []);
   assert.deepEqual(creation.config.skill_mounts, []);
-  assert.equal(creation.config.model_id, undefined);
+  assert.equal("model_id" in creation.config, false);
 });
 
 test("UT-FE-WB-006 locks Agent version without mounting its Skill defaults on the Workbench root", () => {

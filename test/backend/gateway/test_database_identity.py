@@ -27,6 +27,26 @@ def snapshot(role="USER", tenant="t1", version=3, active=True):
 
 
 @pytest.mark.asyncio
+async def test_authoritative_role_array_survives_gateway_identity():
+    record = snapshot(role="SU")
+    record["account"]["user_roles"] = ["OPS", "DEV"]
+    provider = DatabaseIdentityProvider(SimpleNamespace(snapshot=AsyncMock(return_value=record)))
+    result = await provider({"kind": "session", "token_version": 3})
+    assert result["roles"] == ["DEV", "OPS"]
+    assert result["role"] == "DEV"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roles", [[], ["SPEED"], ["SU", "OPS"], "ADMIN", [None]])
+async def test_invalid_authoritative_roles_cannot_fall_back_to_scalar(roles):
+    record = snapshot(role="SU")
+    record["account"]["user_roles"] = roles
+    provider = DatabaseIdentityProvider(SimpleNamespace(snapshot=AsyncMock(return_value=record)))
+    with pytest.raises(IdentityError):
+        await provider({"kind": "session", "token_version": 3})
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind,role,tenant,expected", [
     ("session", "USER", "t1", "t1"), ("api_key", "ADMIN", "t1", "t1"),
     ("session", "SU", "", "tenant_id"), ("session", "ASSET_OWNER", "", "asset_owner_tenant_id"),
