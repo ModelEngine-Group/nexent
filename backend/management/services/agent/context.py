@@ -159,15 +159,10 @@ def strip_current_time_prefix(query: str | None) -> str | None:
 def build_agent_run_context(
     request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
 ):
-    """Preview memory once and bind the metadata shared by both consumers."""
-    from management.services.configuration.user.memory import build_memory_context
+    """Bind shared monitoring metadata before the compiler resolves memory policy."""
     from infrastructure.observability.bootstrap import monitoring_manager
     from management.services.monitor.identity import resolve_monitoring_user_email
 
-    memory = build_memory_context(
-        user_id, tenant_id, request.agent_id, skip_query=request.is_debug
-    )
-    enabled = memory.user_config.memory_switch
     metadata = monitoring_manager.bind_agent_context(
         AgentRunMetadata(
             agent_id=request.agent_id,
@@ -178,15 +173,10 @@ def build_agent_run_context(
             query=request.query,
             is_debug=request.is_debug,
             language=language,
-            memory_enabled=enabled,
+            memory_enabled=False if request.is_debug else None,
             history_count=len(request.history) if request.history else 0,
             minio_files_count=len(request.minio_files) if request.minio_files else 0,
-            extra_metadata={
-                "agent_share_option": getattr(
-                    memory.user_config, "agent_share_option", "unknown"
-                ),
-                **extra_metadata,
-            },
+            extra_metadata=extra_metadata,
         )
     )
-    return AgentRunContext(metadata, enabled and not request.is_debug)
+    return AgentRunContext(metadata, not request.is_debug)

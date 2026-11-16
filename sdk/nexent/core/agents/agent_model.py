@@ -369,6 +369,7 @@ class AgentConfig(BaseModel):
     prompt_tool_policy_snapshot: Optional[Dict[str, Any]] = Field(
         description="Immutable versioned tool policy values injected for this Agent run", default=None
     )
+    automatic_memory_enabled: bool = Field(default=True, exclude=True)
     pre_run_tool_events: List[Dict[str, Any]] = Field(
         description=(
             "Structured tool and result events completed before the model loop "

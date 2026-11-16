@@ -2,6 +2,7 @@
 
 """Compile the current Nexent configuration from Management-owned resources."""
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,8 @@ from management.services.agent.prompt import (
 from management.services.agent.resource_resolver import _get_skills_for_template
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.configuration.user.memory import build_memory_context
+from management.services.memory.access import tenant_memory_enabled
+from management.services.memory.runtime_io import memory_deadline, optional_memory_io
 from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
@@ -61,7 +64,8 @@ from nexent.core.agents.context import (
 )
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
-from nexent.core.concurrency import run_blocking
+from nexent.core.concurrency import ManagedTaskSpec
+from infrastructure.concurrency import runtime_thread_manager
 from nexent.memory import models as memory_models
 
 logger = logging.getLogger("create_agent_info")
@@ -92,11 +96,22 @@ async def create_agent_config(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
+    memory_query_deadline: float | None = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
+
+    if memory_query_deadline is None:
+        memory_query_deadline = memory_deadline()
+    memory_context = None
+    if allow_memory_search and agent_info.get("enable_memory") is not False:
+        memory_context = await optional_memory_io(
+            "memory-policy", _load_authorized_memory_context, user_id, tenant_id, agent_id,
+            deadline=memory_query_deadline,
+        )
+    allow_memory_search = memory_context is not None
 
     # create sub agent
     child_tool_params = normalized_tool_params
@@ -136,6 +151,7 @@ async def create_agent_config(
             language=language,
             last_user_query=last_user_query,
             allow_memory_search=allow_memory_search,
+            memory_query_deadline=memory_query_deadline,
             version_no=sub_agent_version_no,
             override_model_id=None,
             tool_params=child_tool_params,
@@ -172,6 +188,7 @@ async def create_agent_config(
             language=language,
             last_user_query=last_user_query,
             allow_memory_search=allow_memory_search,
+            memory_query_deadline=memory_query_deadline,
             version_no=sub_agent_version_no,
             override_model_id=None,
             tool_params=child_tool_params,
@@ -218,7 +235,11 @@ async def create_agent_config(
         language=language,
     )
     memory_tool_names = {"store_memory", "search_memory"}
-    tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
+    tool_list = [
+        tool for tool in tool_list
+        if tool.name not in memory_tool_names
+        and tool.class_name not in {"StoreMemoryTool", "SearchMemoryTool"}
+    ]
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
@@ -260,283 +281,73 @@ async def create_agent_config(
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
-    # Memory list population: in the new Memory system this is performed by
-    # the backend's ``memory_context_service`` via the
-    # ``MemoryService.search_memory`` facade. The legacy
-    # ``search_memory_in_levels`` multi-level fan-out has been removed; the
-    # streaming layer and tool wiring below remain in place.
-    memory_list: list = []
-    long_term_memory_items: list[dict[str, Any]] = []
-    pre_run_tool_events: list[dict[str, Any]] = []
-    memory_context = build_memory_context(
-        user_id, tenant_id, agent_id, skip_query=not allow_memory_search
-    )
+    memory_list = []
+    long_term_memory_items = []
+    pre_run_tool_events = []
+    if memory_context is not None:
+        from management.services.memory.provider import build_memory_service_for_agent
 
-    # The memory capability switch controls tenant, user, and agent memory.
-    if memory_context.user_config.memory_switch:
-        try:
-            from management.services.memory.records import (
-                _resolve_tenant_embedding_model_info,
-            )
-
-            embedding_configured = (
-                _resolve_tenant_embedding_model_info(
-                    str(memory_context.tenant_id or "")
-                )
-                is not None
-            )
-            memory_metadata = {
-                "memory_user_config": memory_context.user_config,
-                "tenant_id": memory_context.tenant_id,
-                "user_id": memory_context.user_id,
-                "agent_id": memory_context.agent_id,
-                "conversation_id": (
-                    str(conversation_id) if conversation_id is not None else ""
-                ),
-                "embedding_configured": embedding_configured,
-            }
-
-            # Wire the SDK ``MemoryService`` facade to the
-            # backend services via the adapter. The facade handles policy
-            # enforcement, embedding lookup, and idempotency on its own
-            # and dispatches persistence/retrieval to
-            # ``management.services.memory.records`` /
-            # ``management.services.memory.retrieval``.
-            memory_service = None
-            try:
-                from management.services.memory.provider import (
-                    build_memory_service_for_agent,
-                )
-
-                memory_service = build_memory_service_for_agent(
-                    tenant_id=memory_context.tenant_id,
-                    user_id=memory_context.user_id,
-                    agent_id=str(memory_context.agent_id or ""),
-                )
-                if memory_service is None:
-                    raise RuntimeError("MemoryService builder returned no service")
-                memory_metadata["memory_service"] = memory_service
-            except Exception as exc:
-                logger.warning(
-                    "event=memory_service_init_failed tenant_id=%s user_id=%s "
-                    "agent_id=%s error_type=%s",
-                    tenant_id,
-                    user_id,
-                    agent_id,
-                    type(exc).__name__,
-                )
-
-            memory_context_service = None
-            try:
-                from management.services.memory.context import (
-                    get_memory_context_service,
-                )
-
-                memory_context_service = get_memory_context_service()
-                if memory_context_service is None:
-                    raise RuntimeError(
-                        "MemoryContextService provider returned no service"
-                    )
-                memory_metadata["memory_context_service"] = memory_context_service
-            except Exception as exc:
-                logger.warning(
-                    "event=memory_context_service_init_failed tenant_id=%s "
-                    "user_id=%s agent_id=%s error_type=%s",
-                    tenant_id,
-                    user_id,
-                    agent_id,
-                    type(exc).__name__,
-                )
-
-            if memory_context_service is not None:
-                try:
-                    external_results = None
-                    try:
-                        provider_service = _get_external_provider_service_for_search()
-                        if provider_service is not None:
-                            top_k = memory_context.user_config.external_provider_top_k
-                            logger.info(
-                                "event=external_provider_search_started tenant_id=%s "
-                                "agent_id=%s top_k=%d",
-                                tenant_id,
-                                agent_id,
-                                top_k,
-                            )
-
-                            search_request = memory_models.MemorySearchRequest(
-                                query=last_user_query or "",
-                                tenant_id=str(memory_context.tenant_id or ""),
-                                user_id=str(memory_context.user_id or ""),
-                                agent_id=str(memory_context.agent_id or "") or None,
-                                conversation_id=(
-                                    str(conversation_id)
-                                    if conversation_id is not None
-                                    else None
-                                ),
-                                top_k=top_k,
-                            )
-
-                            ext_search_results = (
-                                await provider_service.search_all_enabled(
-                                    tenant_id=str(memory_context.tenant_id or ""),
-                                    request=search_request,
-                                    limit=top_k,
-                                )
-                            )
-
-                            if ext_search_results:
-                                external_results = [
-                                    memory_models.ExternalMemoryItem(
-                                        id=str(r.memory_id or r.external_id or ""),
-                                        content=r.content,
-                                        score=r.score,
-                                        provider=r.source or "external",
-                                        metadata=r.metadata or {},
-                                        created_at=None,
-                                    )
-                                    for r in ext_search_results
-                                ]
-                            logger.info(
-                                "event=external_provider_search_completed tenant_id=%s "
-                                "agent_id=%s results_count=%d",
-                                tenant_id,
-                                agent_id,
-                                len(external_results or []),
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "event=external_provider_search_failed tenant_id=%s user_id=%s "
-                            "agent_id=%s error_type=%s",
-                            tenant_id,
-                            user_id,
-                            agent_id,
-                            type(exc).__name__,
-                        )
-
-                    long_term_search_context = (
-                        await memory_context_service.build_context(
-                            tenant_id=str(memory_context.tenant_id or ""),
-                            user_id=str(memory_context.user_id or ""),
-                            agent_id=str(memory_context.agent_id or "") or None,
-                            conversation_id=(
-                                str(conversation_id)
-                                if conversation_id is not None
-                                else None
-                            ),
-                            query=None,
-                            layers=["tenant", "user"],
-                            external_results=external_results,
-                        )
-                    )
-                    long_term_memory_items = _build_long_term_memory_items(
-                        long_term_search_context
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "event=long_term_memory_load_failed tenant_id=%s user_id=%s "
-                        "agent_id=%s error_type=%s",
-                        tenant_id,
-                        user_id,
-                        agent_id,
-                        type(exc).__name__,
-                    )
-
-            if memory_service is not None:
-                store_tool_config = ToolConfig(
-                    class_name="StoreMemoryTool",
-                    name="store_memory",
-                    description=(
-                        "Store one model-selected and summarized short-term memory extracted only "
-                        "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to process-level observations made during intermediate "
-                        "action steps: user preferences, task goals, action plans and latest progress, "
-                        "or reflections on user feedback and errors. Do not store whole conversations, "
-                        "transient calculations, unverified guesses, duplicates, secrets, or information "
-                        "the user asks to forget. Call this tool only during intermediate action steps, "
-                        "not when generating the final answer."
-                    ),
-                    inputs=json.dumps(
-                        {
-                            "content": {
-                                "type": "string",
-                                "description": (
-                                    "One concise, reusable short-term memory entry already judged, "
-                                    "summarized, and deduplicated by the model"
-                                ),
-                                "description_zh": (
-                                    "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                                ),
-                            }
-                        },
-                        ensure_ascii=False,
-                    ),
-                    output_type="string",
-                    params={},
-                    source="local",
-                    usage=None,
-                    metadata=memory_metadata,
-                )
-                tool_list.append(store_tool_config)
-
-            if memory_context_service is not None:
-                fixed_search_tool = _create_fixed_search_memory_tool()
-                fixed_search_tool.memory_context_service = memory_context_service
-                fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
-                fixed_search_tool.user_id = str(memory_context.user_id or "")
-                fixed_search_tool.agent_id = str(memory_context.agent_id or "")
-                fixed_search_tool.conversation_id = (
-                    str(conversation_id) if conversation_id is not None else ""
-                )
-                fixed_search_tool.embedding_configured = embedding_configured
-                fixed_search_tool.external_results = external_results
-                fixed_search_result = await run_blocking(
-                    "memory-presearch",
-                    fixed_search_tool.forward,
-                    last_user_query or "",
-                    5,
-                    lane="model-tool-io",
-                    owner="runtime",
-                )
-            else:
-                fixed_search_result = (
-                    "Memory search unavailable: retrieval pipeline is not configured. "
-                    "Continuing without memory results."
-                )
-                logger.warning(
-                    "event=memory_presearch_skipped tenant_id=%s user_id=%s "
-                    "agent_id=%s conversation_id=%s "
-                    "reason=context_service_unavailable",
-                    tenant_id,
-                    user_id,
-                    agent_id,
-                    conversation_id,
-                )
-            pre_run_tool_events.extend(
-                [
-                    {
-                        "type": "tool",
-                        "content": "",
-                        "tool_name": "search_memory",
-                        "tool_arguments": {
-                            "query": last_user_query or "",
-                            "top_k": 5,
-                        },
-                    },
-                    {
-                        "type": "execution_logs",
-                        "content": fixed_search_result,
-                    },
-                ]
-            )
-            if fixed_search_result.startswith("Found "):
-                memory_list.append(
-                    {
-                        "memory": fixed_search_result,
-                        "memory_level": "agent",
+        memory_metadata = {
+            "memory_user_config": memory_context.user_config,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "agent_id": str(agent_id),
+            "conversation_id": str(conversation_id) if conversation_id is not None else "",
+            # The bounded store hook resolves model readiness at invocation.
+            "embedding_configured": True,
+            "memory_service": build_memory_service_for_agent(
+                tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id), version_no=version_no,
+            ),
+        }
+        store_tool_config = ToolConfig(
+            class_name="StoreMemoryTool",
+            name="store_memory",
+            description=(
+                "Store one model-selected and summarized short-term memory extracted only "
+                "from the conversation between the user and the current agent. Eligible "
+                "information is limited to process-level observations made during intermediate "
+                "action steps: user preferences, task goals, action plans and latest progress, "
+                "or reflections on user feedback and errors. Do not store whole conversations, "
+                "transient calculations, unverified guesses, duplicates, secrets, or information "
+                "the user asks to forget. Call this tool only during intermediate action steps, "
+                "not when generating the final answer."
+            ),
+            inputs=json.dumps(
+                {
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "One concise, reusable short-term memory entry already judged, "
+                            "summarized, and deduplicated by the model"
+                        ),
+                        "description_zh": (
+                            "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                        ),
                     }
-                )
-        except Exception as e:
-            logger.error(f"Failed to load memory tools: {e}", exc_info=True)
+                },
+                ensure_ascii=False,
+            ),
+            output_type="string",
+            params={},
+            source="local",
+            usage=None,
+            metadata=memory_metadata,
+        )
+        tool_list.append(store_tool_config)
+        long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
+            tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
+            conversation_id=str(conversation_id) if conversation_id is not None else None,
+            query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
+            deadline=memory_query_deadline,
+        )
+        if fixed_search_result:
+            pre_run_tool_events = [
+                {"type": "tool", "content": "", "tool_name": "search_memory",
+                 "tool_arguments": {"query": last_user_query or "", "top_k": 5}},
+                {"type": "execution_logs", "content": fixed_search_result},
+            ]
+            if fixed_search_result.startswith("Found "):
+                memory_list.append({"memory": fixed_search_result, "memory_level": "agent"})
 
     # The final tool params already contain the conversation selection and ACL
     # intersection. Summaries therefore restore semantic routing without
@@ -741,6 +552,7 @@ async def create_agent_config(
         context_items=context_items,
         prompt_tool_policy_snapshot=prompt_tool_policy_snapshot,
         pre_run_tool_events=pre_run_tool_events,
+        automatic_memory_enabled=allow_memory_search,
         capacity_snapshot=capacity_snapshot,
         context_budget_snapshot=context_budget_snapshot,
         verification_config=verification_config,
@@ -776,6 +588,100 @@ def _resolve_prompt_runtime_flags(
     )
     is_local_python_executor = NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() == "local"
     return verification_config, is_local_python_executor
+
+
+def _load_authorized_memory_context(user_id, tenant_id, agent_id):
+    context = build_memory_context(user_id, tenant_id, agent_id)
+    settings = context.user_config
+    if (
+        not settings.memory_switch
+        or str(agent_id) in settings.disable_agent_ids
+        or str(agent_id) in settings.disable_user_agent_ids
+        or not tenant_memory_enabled(tenant_id)
+    ):
+        return None
+    return context
+
+
+async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline):
+    from management.services.memory.context import get_memory_context_service
+    from management.services.memory.records import _resolve_tenant_embedding_model_info
+    from management.services.memory.runtime_embedding import compute_runtime_embedding
+
+    try:
+        service = get_memory_context_service()
+    except Exception as exc:
+        logger.warning("event=memory_context_service_init_failed error_type=%s", type(exc).__name__)
+        return [], None
+    scope = dict(tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, conversation_id=conversation_id)
+    request = memory_models.MemorySearchRequest(
+        **scope, query=query, top_k=5, layers=[memory_models.MemoryLayer.AGENT],
+    )
+
+    def load_long_term():
+        return asyncio.run(service.build_context(**scope, layers=["tenant", "user"], external_results=[]))
+
+    async def search_vectors():
+        if not query:
+            return []
+        model = _resolve_tenant_embedding_model_info(tenant_id)
+        if model is None:
+            return None
+        vector = await compute_runtime_embedding(query, model, tenant_id=tenant_id, deadline=deadline)
+        if vector is None:
+            return None
+        return await service.retrieval_service.search(
+            request.model_copy(update={"embedding": vector}), embedding_model_info=model, write_hits=False,
+            deadline=deadline,
+        )
+
+    def search_external():
+        provider = _get_external_provider_service_for_search()
+        if provider is None or not query:
+            return []
+        ext_request = request.model_copy(update={"top_k": external_top_k})
+        results = asyncio.run(provider.search_all_enabled(
+            tenant_id=tenant_id, request=ext_request, limit=external_top_k, deadline=deadline - 0.05,
+        ))
+        return [
+            memory_models.ExternalMemoryItem(
+                id=str(result.memory_id or result.external_id or ""), content=result.content,
+                score=result.score, provider=result.source or "external", metadata=result.metadata or {},
+                created_at=None,
+            )
+            for result in results
+        ]
+
+    long_term, local, external = await asyncio.gather(
+        optional_memory_io("memory-long-term", load_long_term, deadline=deadline),
+        optional_memory_io("memory-vector-search", lambda: asyncio.run(search_vectors()), deadline=deadline),
+        optional_memory_io("memory-external-search", search_external, deadline=deadline),
+    )
+    long_term_items = _build_long_term_memory_items(long_term) if long_term else []
+
+    if not local and not external:
+        if local is None:
+            return long_term_items, "Vector memory unavailable. Continuing with other available context."
+        return long_term_items, "No relevant memories found."
+    try:
+        context = service.pipeline.run(
+            internal_results=local or [], query=query, external_results=external or [],
+        ).into_memory_search_context()
+        # Keep source hits only for local results that survived context selection.
+        selected_ids = {item.memory_id for item in context.agent_short_term if not item.is_external}
+        selected_hits = [item for item in local or () if item.memory_id in selected_ids]
+        if selected_hits:
+            try:
+                runtime_thread_manager.submit(
+                    "memory-write", ManagedTaskSpec(task_name="memory-recall-hits", owner="memory"),
+                    service.retrieval_service._record_hits, request=request, results=selected_hits,
+                )
+            except Exception as exc:
+                logger.warning("event=memory_recall_hits_skipped error_type=%s", type(exc).__name__)
+        return long_term_items, _create_fixed_search_memory_tool()._format_context(context)
+    except Exception as exc:
+        logger.warning("event=memory_context_selection_failed error_type=%s", type(exc).__name__)
+        return long_term_items, None
 
 
 def _create_fixed_search_memory_tool():

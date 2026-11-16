@@ -11,6 +11,14 @@ from management.services.memory.dreaming.service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_automatic_memory_policy(monkeypatch):
+    package = "management.services.memory.dreaming.service"
+    monkeypatch.setattr(f"{package}.dreaming_allowed", lambda *_: True)
+    monkeypatch.setattr(f"{package}.source_agent_allows_memory", lambda *_: True)
+    monkeypatch.setattr(f"{package}.get_user_configs", lambda *_: {"MEMORY_SWITCH": "Y"})
+
+
 @contextmanager
 def lock(value):
     yield value
@@ -169,6 +177,10 @@ def test_ac008_failure_is_audited(monkeypatch):
         lambda *_: lock(True),
     )
     monkeypatch.setattr(
+        "management.services.memory.dreaming.service.memory_record_db.list_memory_records",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
         MagicMock(side_effect=ValueError("bad data")),
     )
@@ -271,3 +283,40 @@ def test_get_memory_dreaming_service_singleton(monkeypatch):
     assert isinstance(svc1, MemoryDreamingService)
 
     monkeypatch.setattr(mod, "_service", None)
+
+
+def test_expired_window_evidence_does_not_count_toward_promotion(monkeypatch):
+    from management.services.memory.dreaming import service as dreaming
+
+    monkeypatch.setattr(dreaming.memory_record_db, "update_memory_record", MagicMock())
+    monkeypatch.setattr(dreaming.memory_record_db, "apply_dreaming_phase", MagicMock())
+    record = {
+        "memory_id": 1, "tenant_id": "t", "user_id": "u", "agent_id": "1",
+        "content": "Use this durable release policy",
+        "recall_count": 30, "daily_count": 3, "grounded_count": 3,
+        "query_hashes": ["old1", "old2", "old3"], "recall_days": ["2026-08-01"],
+    }
+    candidate, = MemoryDreamingService(record_service=MagicMock())._run_rem("t", [record], {})
+    assert candidate.recall_count == 0
+    assert candidate.daily_count == 0
+    assert candidate.query_hashes == []
+    assert candidate.last_recalled_at is None
+
+
+def test_queued_dreaming_checks_current_policy(monkeypatch):
+    from management.services.memory.dreaming import service as dreaming
+
+    monkeypatch.setattr(dreaming, "dreaming_allowed", lambda *_: False)
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "update_audit", MagicMock())
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "try_scope_lock", lambda *_: lock(True))
+    finish = MagicMock()
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "finish_audit", finish)
+    service = MemoryDreamingService(record_service=MagicMock())
+    read_sources = MagicMock()
+    monkeypatch.setattr(service, "_eligible_source_records", read_sources)
+
+    assert service.run(tenant_id="t", user_id="u", agent_id="__user__", run_id=9) == {
+        "run_id": 9, "status": "skipped", "reason": "memory_disabled",
+    }
+    read_sources.assert_not_called()
+    finish.assert_called_once_with(9, status="skipped", reason="memory_disabled")

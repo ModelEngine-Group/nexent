@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: MEMORY-CONTROLS-20261116
+  change_type: requirement
+  requirement_id: MEMORY-CONTROLS-20261116
+  title: Memory controls, Dreaming and failure isolation
+  description: Apply tenant, user and Agent memory policy, restore semantic Dreaming and limit optional memory waits.
+  affected_features:
+    existing: [F-119, F-120, F-122, F-123, F-178]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-049, AGT-050, AGT-051]
+    added: []
+    modified: [AGT-071]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_memory_runtime_isolation.py
+    - test/backend/services/test_memory_dreaming_service.py
+    - test/backend/apps/test_memory_dreaming_app.py
+    - test/backend/apps/test_memory_tenant_config_app.py
+    - test/backend/services/test_memory_external_provider_service.py
+    - test/backend/services/test_agent_service.py
+    - test/sdk/core/models/test_openai_memory_observer.py
+    - test/sdk/core/gateway/modality/test_embedding_adapter.py
+    behaviors:
+    - Preserve explicit disabled settings and enforce all three scopes at execution and write boundaries.
+    - Verify semantic observer, current window evidence, and absent-version reasons.
+    - Keep independent results on timeout and verify circuit open, skip, and probe across sessions.
+    - Treat invalid embeddings and failed indexing as degraded automatic writes.
+    reason: Unit tests cover policy, windows, and deterministic failure boundaries. Existing D3 scenarios cover Dreaming, memory context, and external fault isolation. Additional live timing, UI policy, and shared circuit verification are tracked in the SPEC.
