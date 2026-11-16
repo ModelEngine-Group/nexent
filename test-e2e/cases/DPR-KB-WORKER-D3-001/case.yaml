@@ -28,12 +28,15 @@ case:
     action: Deliver the same completed job again and inspect both the new vector index and a preexisting legacy sentinel index.
     expected: Model invocation and physical chunk counts stay unchanged; the legacy sentinel remains intact.
   - order: 4
-    action: Admit a version-zero deletion, let lifespan discover it, then inspect real vector keys for the deleted generation, a newer version, another file and another tenant.
-    expected: The covered version is physically absent and the job confirms cleanup; newer and other scope vectors remain, and no model is called for deletion or completed redelivery.
+    action: Search through the signed Runtime HTTP endpoint in accurate, semantic and hybrid modes, use Model.invoke rerank, and submit wrong-user, wrong-tenant and tampered requests.
+    expected: Only the visible authorized generation is returned; rerank receives its content and rejected calls do not invoke models.
   - order: 5
+    action: Admit a version-zero deletion, let lifespan discover it, then inspect real vector keys for the deleted generation, a newer version, another file and another tenant.
+    expected: The covered version is physically absent and the job confirms cleanup; newer and other scope vectors remain, and no model is called for deletion or completed redelivery. A subsequent signed search returns no deleted or unpublished generation.
+  - order: 6
     action: Revoke membership after the controlled embedding returns but before its vector checkpoint, then query the running health server.
     expected: No new vector is written or version published; the failed attempt confirms writer closure without replaying the model. The dispatch task exits once, readiness returns 503 and liveness stays 200.
-  - order: 6
+  - order: 7
     action: Stop the server, drain managed workers, close ports and remove owned containers and anonymous volumes.
     expected: No owned resource remains; application data, unrelated indexes and real model providers were not accessed.
   expected_results:
@@ -42,11 +45,12 @@ case:
   - Completed duplicate delivery does not rerun inference or multiply vectors, and legacy data is preserved.
   - Revocation prevents the next storage side effect and owner resources close.
   - Physical cleanup removes only the authorized file versions without depending on model configuration.
+  - Signed text search and rerank preserve current KB scope and return only authoritative visible generations before and after deletion.
   forbidden_side_effects:
   - No application storage, external model provider, data-process service, fallback query or automatic retry is used.
   integration_boundary:
   - Actual PostgreSQL, MinIO, Elasticsearch, Management signed HTTP authorization, Runtime job/worker/ingestor and ModelService with controlled parser and embedding adapter.
-  - Final application images, real provider inference, search/rerank and Management source/artifact cleanup are not proved.
+  - Final application images, real provider inference, legacy title/highlight/image/citation parity and Management source/artifact cleanup are not proved.
   observations:
   - Actual vector keys/count/generation, record visibility, artifact revisions, invocation count and retained legacy sentinel.
   cleanup:
@@ -64,16 +68,21 @@ case:
     forbidden_side_effects: [1]
   - id: AC-03
     description: Revocation blocks vector publication and owned resources close.
-    steps: [5, 6]
+    steps: [6, 7]
     expected_results: [4]
     forbidden_side_effects: [1]
   - id: AC-04
     description: Lifespan discovers fresh queued uploads and unstarted eligible deletes, owns shutdown and exposes dispatch termination through local readiness without retry or restart.
-    steps: [2, 4, 5, 6]
+    steps: [2, 5, 6, 7]
     expected_results: [2, 4]
     forbidden_side_effects: [1]
   - id: AC-05
     description: One persisted delete attempt confirms actual vector absence and preserves newer and other scope data without model calls.
-    steps: [4]
+    steps: [5]
     expected_results: [5]
+    forbidden_side_effects: [1]
+  - id: AC-06
+    description: Signed Runtime search and Management grants enforce scope and visibility while embedding/rerank use Model.invoke and deleted generations remain absent.
+    steps: [4, 5]
+    expected_results: [6]
     forbidden_side_effects: [1]

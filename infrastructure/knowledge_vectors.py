@@ -25,7 +25,7 @@ def knowledge_index(tenant_id, collection):
     return "si-kb-" + hashlib.sha256(identity.encode()).hexdigest()
 
 
-def vector_binding(tenant_id, collection, dimensions):
+def vector_binding(tenant_id, collection, dimensions, *, writable=True):
     fields = tuple(
         FieldDefinition(name, kind)
         for name, kind in (
@@ -46,7 +46,7 @@ def vector_binding(tenant_id, collection, dimensions):
         knowledge_index(tenant_id, collection),
         dimensions,
         fields,
-        writable=True,
+        writable=writable,
     )
 
 
@@ -66,10 +66,10 @@ def _configured_client(remaining):
     )
 
 
-def bind_knowledge_vectors(actor, collection, dimensions):
+def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True):
     scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {collection})
     return ElasticsearchVectorStore(
         scope,
-        (vector_binding(actor.tenant_id, collection, dimensions),),
+        (vector_binding(actor.tenant_id, collection, dimensions, writable=writable),),
         _configured_client,
     )

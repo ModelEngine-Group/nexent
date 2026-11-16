@@ -142,13 +142,8 @@ class KnowledgeJobState(KnowledgeJobLookup):
     physical_cleanup_complete: bool = False
 
 
-class KnowledgeSearch(Contract):
-    knowledge_ids: list[int] = Field(min_length=1)
-    query: str = Field(min_length=1)
-    top_k: int = Field(default=10, ge=1, le=100)
-    embedding_model: ModelVersion
-    rerank_model: ModelVersion | None = None
-    file_ids: list[str] = Field(default_factory=list)
+class KnowledgeSearchAuthorization(Contract):
+    knowledge_ids: list[int] = Field(min_length=1, max_length=100)
 
     @field_validator("knowledge_ids")
     @classmethod
@@ -156,6 +151,26 @@ class KnowledgeSearch(Contract):
         if any(v <= 0 for v in values) or len(values) != len(set(values)):
             raise ValueError("Expected distinct positive knowledge IDs")
         return values
+
+
+class KnowledgeBaseGrant(Contract):
+    knowledge_id: int = Field(gt=0)
+    collection: str = Field(min_length=1, max_length=100)
+    embedding_model_id: int = Field(gt=0)
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgeSearchGrant(Contract):
+    knowledge_bases: list[KnowledgeBaseGrant] = Field(min_length=1, max_length=100)
+
+
+class KnowledgeSearch(KnowledgeSearchAuthorization):
+    query: str = Field(min_length=1)
+    search_mode: Literal["accurate", "semantic", "hybrid"] = "semantic"
+    top_k: int = Field(default=10, ge=1, le=100)
+    embedding_model: ModelVersion
+    rerank_model: ModelVersion | None = None
+    file_ids: list[str] = Field(default_factory=list, max_length=1000)
 
     @field_validator("file_ids")
     @classmethod
@@ -171,6 +186,7 @@ class KnowledgeSearch(Contract):
 class KnowledgeSearchHit(KnowledgeFileReference):
     chunk_id: str = Field(min_length=1, max_length=1024)
     content: str
+    filename: str = Field(default="", max_length=1024)
     score: float
     score_kind: str = Field(min_length=1, max_length=64)
     location: dict[str, JsonValue] = Field(default_factory=dict)

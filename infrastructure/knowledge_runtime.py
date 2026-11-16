@@ -62,3 +62,15 @@ def knowledge_deletion_ports(actor, grant, *, context):
         yield vectors
     finally:
         close_owned(context, [vectors.close])
+
+
+@contextmanager
+def knowledge_search_ports(actor, grant, dimensions, *, context):
+    vectors = {}
+    try:
+        with knowledge_runtime_ports(actor, context=context) as records:
+            for resource in grant.knowledge_bases:
+                vectors[resource.collection] = bind_knowledge_vectors(actor, resource.collection, dimensions, writable=False)
+            yield records, vectors
+    finally:
+        close_owned(context, [port.close for port in vectors.values()])

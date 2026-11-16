@@ -47,6 +47,17 @@ def cleanse_dispatch_ports(*, context):
         close_owned(context, callbacks)
 
 
+@contextmanager
+def knowledge_resource_ports(tenant_id, user_id, *, context):
+    engine, resources = record_engine(context), None
+    try:
+        namespaces = set(TABLES) - {"cleanse_files", "knowledge_file_history"}
+        resources = bind_cleanse_resources(StorageScope("management", tenant_id, user_id, namespaces), engine)
+        yield resources
+    finally:
+        close_owned(context, ([resources.close] if resources is not None else []) + [engine.dispose])
+
+
 def queue_environment():
     from contracts.constants import environment
 

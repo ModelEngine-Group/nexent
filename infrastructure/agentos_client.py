@@ -38,6 +38,8 @@ from contracts.agentos_knowledge import (
     KnowledgeFileGrant,
     KnowledgeJobState,
     KnowledgeOperation,
+    KnowledgeSearchGrant,
+    KnowledgeSearchResult,
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import (
@@ -60,6 +62,7 @@ _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _MODEL_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
 _KNOWLEDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
 _KNOWLEDGE_DEADLINE_SECONDS = 10.0
+_KNOWLEDGE_SEARCH_DEADLINE_SECONDS = 180.0
 logger = logging.getLogger(__name__)
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -79,6 +82,19 @@ class AgentOSClient:
 
     async def authorize_knowledge(self, payload, user_id, tenant_id):
         return await self._knowledge_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
+
+    async def authorize_knowledge_search(self, payload, user_id, tenant_id):
+        return await self._knowledge_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
+
+    async def search_knowledge(self, payload, user_id, tenant_id):
+        try:
+            async with asyncio.timeout(_KNOWLEDGE_SEARCH_DEADLINE_SECONDS):
+                result = await self._post_json(KnowledgeOperation.SEARCH, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
+                return self._validate_result(KnowledgeSearchResult, result)
+        except (TimeoutError, RuntimeServiceTimeoutError) as error:
+            logger.warning("agentos_knowledge_search_timeout phase=request threshold_seconds=%s exception_type=%s",
+                           _KNOWLEDGE_SEARCH_DEADLINE_SECONDS, type(error).__name__)
+            raise RuntimeServiceTimeoutError("AgentOS knowledge search timed out") from error
 
     async def upload_knowledge_file(self, payload, user_id, tenant_id):
         return await self._knowledge_json(KnowledgeOperation.UPLOAD, payload, user_id, tenant_id, KnowledgeJobState)

@@ -17,6 +17,7 @@ from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.composition import knowledge_jobs, require_knowledge_grant
+from runtime.knowledge_base.search import KnowledgeSearchService
 
 from infrastructure.agent_model_config import normalize_model_revision
 
@@ -47,6 +48,9 @@ class KnowledgeService:
 
     async def delete(self, payload, actor, *, context=None):
         return await self._dispatch(payload, actor, "delete", context)
+
+    async def search(self, payload, actor, *, context=None):
+        return await KnowledgeSearchService(self.client, self.models).search(payload, actor, context=context)
 
     async def _dispatch(self, payload, actor, action, context):
         schema = {

@@ -11,6 +11,8 @@ from contracts.agentos_knowledge import (
     KnowledgeJobLookup,
     KnowledgeJobState,
     KnowledgeOperation,
+    KnowledgeSearch,
+    KnowledgeSearchResult,
 )
 from contracts.constants import environment
 from fastapi import FastAPI
@@ -37,6 +39,7 @@ def setup(monkeypatch):
         inspect=AsyncMock(return_value=state),
         upload=AsyncMock(return_value=state),
         delete=AsyncMock(return_value=state),
+        search=AsyncMock(),
     )
     app = FastAPI(root_path="/api")
     app.add_middleware(AgentOSMiddleware)
@@ -69,6 +72,18 @@ async def test_tampered_body_cannot_reach_service(setup):
     response = await send(app, KnowledgeOperation.INSPECT, lookup, tamper=True)
     assert response.status_code == 401
     service.inspect.assert_not_awaited()
+
+
+async def test_search_requires_signature_and_preserves_model_scope(setup):
+    app, service, _ = setup
+    request = KnowledgeSearch(knowledge_ids=[1], query="worker", embedding_model={"model_id": 2, "revision": "v1"})
+    service.search.return_value = KnowledgeSearchResult(hits=[], embedding_model=request.embedding_model)
+    response = await send(app, KnowledgeOperation.SEARCH, request)
+    assert response.status_code == 200 and response.json()["hits"] == []
+    service.search.assert_awaited_once_with(request, ServicePrincipal("user", "tenant"))
+    tampered = await send(app, KnowledgeOperation.SEARCH, request, tamper=True)
+    assert tampered.status_code == 401
+    service.search.assert_awaited_once()
 
 
 async def test_deletion_reports_accepted_without_claiming_physical_completion(setup):

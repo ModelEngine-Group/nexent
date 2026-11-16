@@ -61,7 +61,7 @@ def resources(monkeypatch):
                 "created_by": "user-a",
                 "group_ids": "[10]",
                 "ingroup_permission": "EDIT",
-                "knowledge_sources": "upload",
+                "knowledge_sources": "elasticsearch",
                 "delete_flag": "N",
             }
         ],

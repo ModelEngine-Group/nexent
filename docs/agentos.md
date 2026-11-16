@@ -117,7 +117,7 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ### KnowledgeBase 文件生命周期
 
-Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，完整检索、图片及 Management 对象清理仍在迁移，当前公开入库流程尚未切换。
+Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，文本检索及 rerank 已有标准接口。图片及 Management 对象清理仍在迁移，当前公开入库和旧 SDK 检索尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |
 | --- | --- | --- |
@@ -125,10 +125,28 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 | 查询原用户、租户及文件版本的任务 | `/internal/agentos/v1/knowledge/files/inspect` | `inspect_knowledge_file(KnowledgeJobLookup, user_id, tenant_id)`，HTTP 200 |
 | 提交逻辑删除及清理义务 | `/internal/agentos/v1/knowledge/files/delete` | `delete_knowledge_file(KnowledgeFileDelete, user_id, tenant_id)`，HTTP 202 |
 | Runtime 查询 Management 的实时资源授权 | `/internal/agentos/v1/knowledge/authorize` | `authorize_knowledge(KnowledgeAuthorizationRequest, user_id, tenant_id)`，返回 `KnowledgeFileGrant` |
+| 文本检索与重排 | `/internal/agentos/v1/knowledge/search` | `search_knowledge(KnowledgeSearch, user_id, tenant_id)`，返回 `KnowledgeSearchResult`，HTTP 200 |
+| Runtime 查询 Management 的 KB 读权限 | `/internal/agentos/v1/knowledge/authorize-search` | `authorize_knowledge_search(KnowledgeSearchAuthorization, user_id, tenant_id)`，返回 `KnowledgeSearchGrant` |
 
-前三项发往 Runtime，最后一项发往 Management，均复用 `AgentOSClient` 的方向隔离签名。Management 校验当前 DAC、源代次与已完成清洗任务，返回固定对象引用、文件名、逻辑集合及 KB 模型 ID。Runtime 校验 grant 和实际模型 revision 后接纳，不读取 Management 业务表。上传要求已有确认产物；新建幂等键不能绕过版本或删除墓碑。
+文件生命周期和 search 发往 Runtime，两种授权查询发往 Management，均复用 `AgentOSClient` 的方向隔离签名。Management 校验当前 DAC、源代次与已完成清洗任务，返回固定对象引用、文件名、逻辑集合及 KB 模型 ID。Runtime 校验 grant 和实际模型 revision 后接纳，不读取 Management 业务表。上传要求已有确认产物；新建幂等键不能绕过版本或删除墓碑。
 
-KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
+KB 文件生命周期及授权客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
+
+文本 search 的客户端与 Runtime 各有 180 秒总截止，包含授权、embedding、存储、rerank 和最终可见性检查。`search_mode` 支持 accurate、semantic、hybrid，默认 semantic；指定 `rerank_model` 才执行重排，使用既有十倍候选常量。所有模型调用进入 `ModelService.invoke`，非法重排结果直接报错。Runtime 在重排前及返回前核对权威 generation，不能返回已删除或未发布的向量。
+
+```python
+result = await runtime.search_knowledge(
+    KnowledgeSearch(
+        knowledge_ids=[knowledge_id], query=query, top_k=3,
+        search_mode="hybrid",
+        embedding_model={"model_id": embedding_id, "revision": embedding_revision},
+        rerank_model={"model_id": rerank_id, "revision": rerank_revision},
+        file_ids=[],
+    ), user_id, tenant_id,
+)
+```
+
+同一请求的 KB 必须绑定同一 embedding ID；不同模型由 Management 分组调用。新接口当前面向原租户的本地 Elasticsearch KB，accurate 采用内容 BM25。旧标题加权、高亮、图片及引用卡片仍需随消费者和历史数据迁移完成对照，不能把文本接口验证视为旧 SDK 已切换。
 
 `KnowledgeUploadWorker.process(lookup, actor, owner_id=...)` 执行已接纳的任务。装配方显式提供源与产物大小上限，并安装 Runtime 的 `ThreadManager`。worker 经 Management 实时授权后领取 attempt，读取固定版本对象，再通过 `ModelService.invoke` 写入显式向量；每批写前复查授权和 owner。只有全部写入确认并仍持有有效 attempt 时才发布可见 generation，已完成任务再次投递不会调用模型。在途或 unknown 写入保留清理义务，不自动重跑。
 
@@ -150,6 +168,6 @@ Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按�
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-KnowledgeBase.search、Management 源/产物清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
+Management 源/产物清理、图片处理、旧检索语义对照及消费者切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

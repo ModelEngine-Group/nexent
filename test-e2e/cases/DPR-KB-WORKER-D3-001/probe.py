@@ -48,12 +48,15 @@ from nexent.storage.models import (
     StorageScope,
     VectorKey,
 )
+from runtime.agentos.knowledge import create_knowledge_router
+from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
 from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.knowledge_base.jobs import KnowledgeJobs
 from runtime.knowledge_base.service import KnowledgeService
 from runtime.knowledge_base.worker import KnowledgeUploadWorker
 from runtime.model.service import ModelService
+from search_probe import prove_deleted_search, prove_search
 from stores import Stores
 
 from backend.http.server.health import install_health_contract
@@ -131,6 +134,7 @@ def main(run_id):
                     knowledge_id=1,
                     index_name="kb-worker",
                     embedding_model_id=2,
+                    knowledge_sources="elasticsearch",
                     tenant_id="tenant-a",
                     created_by="user-a",
                     delete_flag="N",
@@ -223,20 +227,30 @@ def main(run_id):
             document={"content": "legacy remains"},
             refresh="wait_for",
         )
-        calls = []
+        calls, searches = [], []
 
         def load_record(model_id, tenant_id):
-            assert model_id == 2 and tenant_id == "tenant-a"
+            assert model_id in {2, 3} and tenant_id == "tenant-a"
             return {
                 "tenant_id": tenant_id,
                 "delete_flag": "N",
-                "model_type": "embedding",
+                "model_type": "embedding" if model_id == 2 else "rerank",
                 "max_tokens": 2,
                 "update_time": "v1",
             }
 
         class Adapter:
+            def __init__(self, modality):
+                self.modality = modality
+
             async def invoke(self, request):
+                if self.modality == "rerank":
+                    searches.append("rerank")
+                    assert request.documents == [content.decode()]
+                    return [{"index": 0, "relevance_score": 0.98}]
+                if request.inputs == ["worker"]:
+                    searches.append("embedding")
+                    return [[1.0, 0.5]]
                 calls.append(request.inputs)
                 if len(calls) == 2:
                     with engine.begin() as connection:
@@ -246,8 +260,8 @@ def main(run_id):
                 return [[1.0, 0.5] for _ in request.inputs]
 
         def build_adapter(record, modality, slot, tenant_id):
-            assert modality == slot == "embedding" and tenant_id == "tenant-a"
-            return Adapter()
+            assert modality == slot and modality in {"embedding", "rerank"} and tenant_id == "tenant-a"
+            return Adapter(modality)
 
         models = ModelService(load_record, build_adapter)
         app = FastAPI(root_path="/api")
@@ -294,13 +308,16 @@ def main(run_id):
             )
             server.capture_signals = lambda: nullcontext()
             serving = asyncio.create_task(server.serve(sockets=[listener]))
-            health_app = FastAPI(lifespan=lambda app: knowledge_lifespan(app, workers=workers))
+            health_app = FastAPI(root_path="/api", lifespan=lambda app: knowledge_lifespan(app, workers=workers))
+            health_app.add_middleware(AgentOSMiddleware)
+            health_app.include_router(create_knowledge_router(api))
             install_health_contract(health_app)
             health_socket = socket.socket()
             health_socket.bind(("127.0.0.1", 0))
             health_socket.listen(128)
             health_socket.setblocking(False)
             health_url = "http://127.0.0.1:" + str(health_socket.getsockname()[1])
+            public = AgentOSClient(health_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
             health_server = uvicorn.Server(uvicorn.Config(
                 health_app, log_config=None, access_log=False, lifespan="on",
                 timeout_graceful_shutdown=3,
@@ -374,9 +391,11 @@ def main(run_id):
                 assert vector.generation == Revision(row["attempt_id"])
                 assert vector.payload["content"] == content.decode()
                 assert vector.payload["embedding_revision"] == "v1"
+                evidence.update(await prove_search(public, actor, request, content.decode(), searches))
                 evidence.update(await prove_deletion(
                     api, actor, request, vectors, vector, workers, db, owned, calls,
                 ))
+                evidence.update(await prove_deleted_search(public, actor, request, searches))
                 rejected = await api.upload(
                     request.model_copy(update={"file_id": "b" * 32}), actor
                 )
@@ -443,16 +462,24 @@ def main(run_id):
                 path: hashlib.sha256((root / path).read_bytes()).hexdigest()
                 for path in (
                     "backend/runtime/knowledge_base/worker.py",
+                    "backend/runtime/knowledge_base/search.py",
+                    "backend/management/services/knowledge_base/search_authorization.py",
+                    "backend/management/services/knowledge_base/file_authorization.py",
+                    "backend/contracts/agentos_knowledge.py",
+                    "backend/runtime/agentos/knowledge.py",
+                    "backend/management/api/knowledge_base/agentos_authorization.py",
+                    "infrastructure/agentos_client.py",
                     "backend/runtime/knowledge_base/dispatch.py",
                     "backend/runtime/knowledge_base/deletion.py",
                     "backend/runtime/knowledge_base/jobs.py",
                     "backend/runtime/knowledge_base/ingestion.py",
                     "backend/runtime/api/application.py",
-                    "backend/http/server/health.py",
+                    "infrastructure/knowledge_cleanse.py",
                     "infrastructure/knowledge_objects.py",
                     "infrastructure/knowledge_vectors.py",
                     "infrastructure/knowledge_runtime.py",
                     "infrastructure/rdb/knowledge_dispatch.py",
+                    "infrastructure/rdb/cleanse_resources.py",
                     "infrastructure/vdb/vector_schema.py",
                     "infrastructure/vdb/vector_store.py",
                 )

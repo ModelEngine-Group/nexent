@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Read-only, credential-free resource catalogs for Management cleansing authorization."""
 
+from nexent.storage.errors import ScopeDenied
 from sqlalchemy import select
 
 from infrastructure.rdb.account_record import (
@@ -70,8 +71,11 @@ INTEGER_FIELDS = {
 
 
 def bind_cleanse_resources(scope, engine):
+    if not scope.namespaces <= set(TABLES):
+        raise ScopeDenied()
+    tables = {name: table for name, table in TABLES.items() if name in scope.namespaces}
     definitions = []
-    for name, table in TABLES.items():
+    for name, table in tables.items():
         fields = tuple(
             FieldDefinition(
                 field,
@@ -101,5 +105,5 @@ def bind_cleanse_resources(scope, engine):
             )
         )
     return SQLRecordStore(
-        scope, DatasetCatalog(tuple(definitions)), TABLES, engine, revision_fields={}
+        scope, DatasetCatalog(tuple(definitions)), tables, engine, revision_fields={}
     )

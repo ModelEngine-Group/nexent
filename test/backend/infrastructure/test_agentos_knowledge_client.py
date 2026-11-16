@@ -71,3 +71,25 @@ async def test_callback_uses_reverse_body_bound_signature_and_validates_response
     with pytest.raises(RuntimeServiceUnavailableError):
         await AgentOSClient("http://management", create).authorize_knowledge(request(), "user", "tenant")
     assert len(clients) == 1 and clients[0].is_closed
+
+
+async def test_search_total_deadline_closes_the_only_client(monkeypatch):
+    from contracts.agentos_knowledge import KnowledgeSearch
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-search-client-key")
+    monkeypatch.setattr("infrastructure.agentos_client._KNOWLEDGE_SEARCH_DEADLINE_SECONDS", 0.05)
+    clients, requests = [], []
+
+    async def wait(message):
+        requests.append(message)
+        await asyncio.Event().wait()
+
+    def create(**kwargs):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(wait), **kwargs)
+        clients.append(client)
+        return client
+
+    with pytest.raises(RuntimeServiceTimeoutError):
+        await AgentOSClient("http://runtime", create).search_knowledge(
+            KnowledgeSearch(knowledge_ids=[1], query="private query", embedding_model={"model_id": 2, "revision": "v1"}), "user", "tenant")
+    assert len(requests) == len(clients) == 1 and clients[0].is_closed

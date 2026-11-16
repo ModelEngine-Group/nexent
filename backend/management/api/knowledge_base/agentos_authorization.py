@@ -7,10 +7,16 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.agentos import ManagementOperation
-from contracts.agentos_knowledge import KnowledgeAuthorizationRequest
+from contracts.agentos_knowledge import (
+    KnowledgeAuthorizationRequest,
+    KnowledgeSearchAuthorization,
+)
 from fastapi import APIRouter, HTTPException, Request
 from management.api.agentos_request import read_agentos_callback
 from management.services.knowledge_base.authorization import authorize_knowledge
+from management.services.knowledge_base.search_authorization import (
+    authorize_knowledge_search,
+)
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded
 from nexent.storage.models import OperationContext
@@ -20,23 +26,22 @@ from backend.http.server.knowledge_errors import knowledge_error
 logger = logging.getLogger(__name__)
 
 
-def create_knowledge_authorization_router(service=authorize_knowledge):
+def create_knowledge_authorization_router(service=authorize_knowledge, search_service=authorize_knowledge_search):
     router = APIRouter()
 
-    @router.post(ManagementOperation.KNOWLEDGE_AUTHORIZE.value, include_in_schema=False)
-    async def authorize(request: Request):
+    async def dispatch(request, operation, schema, action):
         context = OperationContext("knowledge-grant-" + uuid4().hex, monotonic() + 10)
         try:
             async with asyncio.timeout(context.remaining()):
                 payload, actor = await read_agentos_callback(
                     request,
-                    ManagementOperation.KNOWLEDGE_AUTHORIZE,
-                    KnowledgeAuthorizationRequest,
+                    operation,
+                    schema,
                     max_bytes=16384,
                 )
                 return await run_blocking(
                     "agentos-knowledge-authorization",
-                    service,
+                    action,
                     payload,
                     actor,
                     context=context,
@@ -53,5 +58,13 @@ def create_knowledge_authorization_router(service=authorize_knowledge):
             return knowledge_error(DeadlineExceeded(operation_id=context.operation_id))
         except Exception as error:  # noqa: BLE001 - The HTTP boundary must redact unexpected failures.
             return knowledge_error(error)
+
+    @router.post(ManagementOperation.KNOWLEDGE_AUTHORIZE.value, include_in_schema=False)
+    async def authorize(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_AUTHORIZE, KnowledgeAuthorizationRequest, service)
+
+    @router.post(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE.value, include_in_schema=False)
+    async def authorize_search(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, KnowledgeSearchAuthorization, search_service)
 
     return router

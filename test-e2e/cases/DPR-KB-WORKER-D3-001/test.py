@@ -57,6 +57,10 @@ def test_runtime_knowledge_upload(record_property):
         "newer_version_preserved",
         "other_scope_preserved",
         "delete_without_model",
+        "signed_search",
+        "visible_rerank",
+        "search_scope_denial",
+        "deleted_search_absent",
         "owned_cleanup",
     ):
         assert evidence[name] is True, name

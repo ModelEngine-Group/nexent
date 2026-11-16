@@ -85,7 +85,7 @@ def _read(objects, reference, limit, context):
     return content
 
 
-def _embeddings(output, count, dimensions):
+def embedding_vectors(output, count, dimensions):
     if not isinstance(output, list) or len(output) != count:
         raise InvalidInput()
     vectors = []
@@ -308,7 +308,7 @@ class KnowledgeIngestor:
                 expected.revision
             ):
                 raise Conflict()
-            embeddings = _embeddings(result.output, len(batch), info.dimensions)
+            embeddings = embedding_vectors(result.output, len(batch), info.dimensions)
             if checkpoint is not None:
                 await checkpoint()
             rows = tuple(

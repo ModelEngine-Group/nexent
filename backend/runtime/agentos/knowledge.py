@@ -7,6 +7,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileUpload,
     KnowledgeJobLookup,
     KnowledgeOperation,
+    KnowledgeSearch,
 )
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
@@ -68,5 +69,9 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.DELETE.value, include_in_schema=False)
     async def delete(request: Request):
         return await dispatch(request, KnowledgeFileDelete, service.delete, 202)
+
+    @router.post(KnowledgeOperation.SEARCH.value, include_in_schema=False)
+    async def search(request: Request):
+        return await dispatch(request, KnowledgeSearch, service.search, 200)
 
     return router
