@@ -285,55 +285,12 @@ async def create_agent_config(
     long_term_memory_items = []
     pre_run_tool_events = []
     if memory_context is not None:
-        from management.services.memory.provider import build_memory_service_for_agent
-
-        memory_metadata = {
-            "memory_user_config": memory_context.user_config,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "agent_id": str(agent_id),
-            "conversation_id": str(conversation_id) if conversation_id is not None else "",
-            # The bounded store hook resolves model readiness at invocation.
-            "embedding_configured": True,
-            "memory_service": build_memory_service_for_agent(
-                tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id), version_no=version_no,
-            ),
-        }
-        store_tool_config = ToolConfig(
-            class_name="StoreMemoryTool",
-            name="store_memory",
-            description=(
-                "Store one model-selected and summarized short-term memory extracted only "
-                "from the conversation between the user and the current agent. Eligible "
-                "information is limited to process-level observations made during intermediate "
-                "action steps: user preferences, task goals, action plans and latest progress, "
-                "or reflections on user feedback and errors. Do not store whole conversations, "
-                "transient calculations, unverified guesses, duplicates, secrets, or information "
-                "the user asks to forget. Call this tool only during intermediate action steps, "
-                "not when generating the final answer."
-            ),
-            inputs=json.dumps(
-                {
-                    "content": {
-                        "type": "string",
-                        "description": (
-                            "One concise, reusable short-term memory entry already judged, "
-                            "summarized, and deduplicated by the model"
-                        ),
-                        "description_zh": (
-                            "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                        ),
-                    }
-                },
-                ensure_ascii=False,
-            ),
-            output_type="string",
-            params={},
-            source="local",
-            usage=None,
-            metadata=memory_metadata,
+        store_tool = _build_runtime_store_tool(
+            memory_context, tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id),
+            version_no=version_no, conversation_id=conversation_id,
         )
-        tool_list.append(store_tool_config)
+        if store_tool is not None:
+            tool_list.append(store_tool)
         long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
             tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
             conversation_id=str(conversation_id) if conversation_id is not None else None,
@@ -603,16 +560,75 @@ def _load_authorized_memory_context(user_id, tenant_id, agent_id):
     return context
 
 
+def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, version_no, conversation_id):
+    try:
+        from management.services.memory.provider import build_memory_service_for_agent
+
+        memory_service = build_memory_service_for_agent(
+            tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, version_no=version_no,
+        )
+    except Exception as exc:
+        logger.warning("event=memory_service_init_failed error_type=%s", type(exc).__name__)
+        return None
+    if memory_service is None:
+        return None
+
+    memory_metadata = {
+        "memory_user_config": memory_context.user_config,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "agent_id": agent_id,
+        "conversation_id": str(conversation_id) if conversation_id is not None else "",
+        # The bounded store hook resolves model readiness at invocation.
+        "embedding_configured": True,
+        "memory_service": memory_service,
+    }
+    return ToolConfig(
+        class_name="StoreMemoryTool",
+        name="store_memory",
+        description=(
+            "Store one model-selected and summarized short-term memory extracted only "
+            "from the conversation between the user and the current agent. Eligible "
+            "information is limited to process-level observations made during intermediate "
+            "action steps: user preferences, task goals, action plans and latest progress, "
+            "or reflections on user feedback and errors. Do not store whole conversations, "
+            "transient calculations, unverified guesses, duplicates, secrets, or information "
+            "the user asks to forget. Call this tool only during intermediate action steps, "
+            "not when generating the final answer."
+        ),
+        inputs=json.dumps(
+            {
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "One concise, reusable short-term memory entry already judged, "
+                        "summarized, and deduplicated by the model"
+                    ),
+                    "description_zh": (
+                        "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                    ),
+                }
+            },
+            ensure_ascii=False,
+        ),
+        output_type="string",
+        params={},
+        source="local",
+        usage=None,
+        metadata=memory_metadata,
+    )
+
+
 async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline):
     from management.services.memory.context import get_memory_context_service
     from management.services.memory.records import _resolve_tenant_embedding_model_info
     from management.services.memory.runtime_embedding import compute_runtime_embedding
 
-    try:
-        service = get_memory_context_service()
-    except Exception as exc:
-        logger.warning("event=memory_context_service_init_failed error_type=%s", type(exc).__name__)
-        return [], None
+    service = await optional_memory_io(
+        "memory-context-service", get_memory_context_service, deadline=deadline,
+    )
+    if service is None:
+        return [], "Memory search unavailable: retrieval pipeline is not configured. Continuing without memory results."
     scope = dict(tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, conversation_id=conversation_id)
     request = memory_models.MemorySearchRequest(
         **scope, query=query, top_k=5, layers=[memory_models.MemoryLayer.AGENT],
