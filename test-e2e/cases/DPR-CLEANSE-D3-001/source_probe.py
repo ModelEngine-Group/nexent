@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import time
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.config import Config
@@ -13,6 +14,7 @@ from contracts.constants import environment
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.source_publish import SourcePublisher
+from management.services.file.source_recovery import reconcile_sources
 from management.services.file.source_upload import upload_knowledge_source
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.storage.errors import OutcomeUnknown
@@ -54,7 +56,11 @@ def check_source_publication(engine, port, context):
         client.create_bucket(Bucket="source-proof")
     table = KnowledgeFileLifecycle.__table__
     with engine.begin() as conn:
-        for file_id, key in (("c" * 32, "source.txt"), ("d" * 32, "lost.txt")):
+        for file_id, key in (
+            ("c" * 32, "source.txt"),
+            ("d" * 32, "lost.txt"),
+            ("f" * 32, "recover.txt"),
+        ):
             conn.execute(
                 table.insert().values(
                     file_id=file_id,
@@ -70,6 +76,7 @@ def check_source_publication(engine, port, context):
                     delete_flag="N",
                     created_by="user-a",
                     updated_by="user-a",
+                    upload_owner_service="nexent-config",
                 )
             )
     records = bind_source_records(
@@ -83,7 +90,7 @@ def check_source_publication(engine, port, context):
             "",
             {"management"},
             writable=True,
-            exact_keys=frozenset({"source.txt", "lost.txt"}),
+            exact_keys=frozenset({"source.txt", "lost.txt", "recover.txt"}),
         ),
         client_factory,
     )
@@ -224,6 +231,39 @@ def check_source_publication(engine, port, context):
             for key, value in settings.items():
                 setattr(environment, key, value)
             asyncio.run(managed())
+            # A separate lost reply is recovered by the production discovery root.
+            try:
+                uncertain.publish(
+                    "f" * 32,
+                    data,
+                    content_type="text/plain",
+                    expected_version=0,
+                    context=context(),
+                )
+            except OutcomeUnknown:
+                pass
+            else:
+                raise AssertionError("lost reply did not preserve an uncertain intent")
+            with engine.begin() as conn:
+                conn.execute(
+                    table.update()
+                    .where(table.c.file_id == "f" * 32)
+                    .values(
+                        source_upload_started_at=datetime.now(timezone.utc)
+                        - timedelta(minutes=10),
+                    )
+                )
+            assert reconcile_sources("nexent-config", context=context()) == {
+                "confirmed": 1
+            }
+            row = records.get(DATASET, "f" * 32, context=context())
+            assert row["status"] == "UPLOADING" and row["stage"] == "SOURCE_CONFIRMED"
+            assert row["updated_by"] == "source-reconciliation"
+            assert (
+                row["source_revision"] is not None
+                and row["source_sha256"] == source.sha256
+            )
+            assert lost.writes == 2
         finally:
             for key, value in previous.items():
                 setattr(environment, key, value)

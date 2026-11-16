@@ -44,6 +44,11 @@ async def recover_northbound_tasks_on_startup(cleanup_tasks=None):
         task = await schedule_interrupted_upload_cleanup(owner, thread_manager=config_thread_manager)
         if cleanup_tasks is not None and isinstance(task, asyncio.Task):
             cleanup_tasks.append(task)
+        if cleanup_tasks is not None:
+            from management.services.file.source_recovery import schedule_source_reconciliation
+
+            task = await schedule_source_reconciliation(owner, thread_manager=config_thread_manager)
+            cleanup_tasks.append(task)
 
 
 @asynccontextmanager

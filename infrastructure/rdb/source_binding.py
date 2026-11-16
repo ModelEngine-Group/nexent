@@ -30,6 +30,11 @@ def bind_source_records(scope, engine):
         "bucket_name",
         "object_name",
         "source_upload_sha256",
+        "source_upload_started_at",
+        "source_reconcile_after",
+        "upload_owner_service",
+        "error_code",
+        "error_stage",
         "source_generation",
         "source_space",
         "source_key",
@@ -64,7 +69,13 @@ def bind_source_records(scope, engine):
         revision_fields={DATASET: "version"},
         audit_mappings={
             DATASET: RecordAudit(
-                "create_time", "update_time", "created_by", "updated_by"
+                "create_time",
+                "update_time",
+                "created_by",
+                "updated_by",
+                extra_dates=frozenset(
+                    {"source_upload_started_at", "source_reconcile_after"}
+                ),
             )
         },
     )

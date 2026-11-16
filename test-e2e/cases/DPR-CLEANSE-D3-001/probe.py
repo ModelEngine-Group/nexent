@@ -389,14 +389,18 @@ try:
         "lease_guard_renewal_and_cancel": True,
         "live_resource_authorization": True,
         "source_publication_and_reconciliation": True,
+        "automatic_source_identity_reconciliation": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
                 "backend/management/services/file/source_publish.py",
+                "backend/management/services/file/source_reconcile.py",
+                "backend/management/services/file/source_recovery.py",
                 "backend/management/services/file/source_upload.py",
                 "backend/management/services/file/service.py",
                 "infrastructure/source_upload.py",
                 "infrastructure/rdb/source_binding.py",
+                "infrastructure/rdb/source_candidates.py",
                 "infrastructure/object_storage/composition.py",
             )
         },

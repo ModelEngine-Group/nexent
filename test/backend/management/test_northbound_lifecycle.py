@@ -29,13 +29,15 @@ def lifecycle(monkeypatch):
     )
     state = MagicMock()
     recovery = SimpleNamespace(recover_northbound_tasks=MagicMock(),
-                               schedule_interrupted_upload_cleanup=AsyncMock())
+                               schedule_interrupted_upload_cleanup=AsyncMock(),
+                               schedule_source_reconciliation=AsyncMock())
     monkeypatch.setitem(sys.modules, "management.thread_management", SimpleNamespace(config_thread_manager=manager))
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
     monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(runtime_state_service=state))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))
     monkeypatch.setitem(sys.modules, "backend.http.server.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)
+    monkeypatch.setitem(sys.modules, "management.services.file.source_recovery", recovery)
     path = Path(__file__).resolve().parents[3] / "backend/management/api/northbound_application.py"
     spec = importlib.util.spec_from_file_location("isolated_management_northbound", path)
     module = importlib.util.module_from_spec(spec)
@@ -55,6 +57,7 @@ async def test_management_owns_recovery_and_releases_cleanup_tasks(lifecycle):
         return task
 
     recovery.schedule_interrupted_upload_cleanup.side_effect = schedule
+    recovery.schedule_source_reconciliation.side_effect = schedule
     async with module.northbound_lifespan(None):
         manager.start.assert_called_once_with()
         state.set_thread_manager.assert_called_once_with(manager)
@@ -62,7 +65,9 @@ async def test_management_owns_recovery_and_releases_cleanup_tasks(lifecycle):
         assert [call.args[0] for call in recovery.schedule_interrupted_upload_cleanup.await_args_list] == [
             "nexent-config", "nexent-northbound"]
         assert manager.run.await_args.args[1].owner == "management.api.northbound_application"
-    assert all(task.cancelled() for task in tasks)
+    assert [call.args[0] for call in recovery.schedule_source_reconciliation.await_args_list] == [
+        "nexent-config", "nexent-northbound"]
+    assert len(tasks) == 4 and all(task.cancelled() for task in tasks)
     manager.shutdown.assert_awaited_once_with(timeout=module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
     concurrency.clear_default_thread_manager.assert_called_once_with(manager)
     assert state.set_thread_manager.call_args.args == (None,)
@@ -82,6 +87,7 @@ async def test_startup_or_request_failure_always_closes_management_manager(lifec
         return task
 
     recovery.schedule_interrupted_upload_cleanup.side_effect = schedule
+    recovery.schedule_source_reconciliation.side_effect = schedule
     if failure == "recovery":
         recovery.recover_northbound_tasks.side_effect = RuntimeError("recovery failed")
     with pytest.raises(RuntimeError):

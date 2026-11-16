@@ -46,6 +46,15 @@ class KnowledgeFileLifecycle(TableBase):
             postgresql_where=text("delete_flag = 'N' AND status = 'UPLOADING'"),
         ),
         Index(
+            "idx_knowledge_source_reconcile",
+            "upload_owner_service",
+            "source_reconcile_after",
+            "source_upload_started_at",
+            postgresql_where=text(
+                "delete_flag = 'N' AND status = 'UPLOADING' AND stage = 'SOURCE_UPLOAD'"
+            ),
+        ),
+        Index(
             "uq_knowledge_file_lifecycle_active_identity",
             "tenant_id",
             "index_name",
@@ -125,6 +134,16 @@ class KnowledgeFileLifecycle(TableBase):
         String(64),
         nullable=True,
         comment="Expected source SHA256 persisted before upload; null for legacy intents.",
+    )
+    source_upload_started_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC start of the durable source upload intent, independent of legacy audit timezone.",
+    )
+    source_reconcile_after = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC earliest next source reconciliation attempt; null means immediately eligible.",
     )
     source_generation = Column(
         Integer,

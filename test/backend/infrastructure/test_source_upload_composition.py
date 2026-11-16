@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Source grants are finite and composition closes every resource after failures."""
 
+from io import BytesIO
 from time import monotonic
 
 import pytest
@@ -36,6 +37,34 @@ def test_incomplete_config_never_falls_back_to_default_cloud(monkeypatch):
         composition.bind_source_objects("tenant-a", "user-a", "source.txt", "files")
 
 
+def test_recovery_object_grant_denies_mutations_before_client_creation(
+    monkeypatch, mocker
+):
+    for name, value in {
+        "MINIO_ENDPOINT": "http://fixture",
+        "MINIO_ACCESS_KEY": "fixture-user",
+        "MINIO_SECRET_KEY": "fixture-password",
+        "MINIO_DEFAULT_BUCKET": "files",
+    }.items():
+        monkeypatch.setattr(environment, name, value)
+    factory = mocker.patch.object(composition, "_configured_client")
+    store = composition.bind_source_objects(
+        "tenant-a", "source-reconciliation", "source.txt", "files", writable=False
+    )
+    ctx = OperationContext("recovery", monotonic() + 5)
+    with pytest.raises(ScopeDenied):
+        store.put(
+            ObjectRef("files", "source.txt"),
+            BytesIO(b"x"),
+            size=1,
+            content_type="text/plain",
+            context=ctx,
+        )
+    with pytest.raises(ScopeDenied):
+        store.delete(ObjectRef("files", "source.txt"), context=ctx)
+    factory.assert_not_called()
+
+
 def test_all_ports_close_even_if_one_close_fails(mocker, monkeypatch):
     monkeypatch.setattr(environment, "POSTGRES_PORT", "5432")
     engine = mocker.patch.object(source_upload, "create_engine").return_value
@@ -48,8 +77,11 @@ def test_all_ports_close_even_if_one_close_fails(mocker, monkeypatch):
         "object_name": "source.txt",
         "bucket_name": "files",
     }
-    with pytest.raises(OutcomeUnknown), source_upload.source_upload_ports(
-        record, context=OperationContext("cleanup", monotonic() + 5)
+    with (
+        pytest.raises(OutcomeUnknown),
+        source_upload.source_upload_ports(
+            record, context=OperationContext("cleanup", monotonic() + 5)
+        ),
     ):
         pass
     records.close.assert_called_once()

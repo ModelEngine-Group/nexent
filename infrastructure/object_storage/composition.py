@@ -47,11 +47,15 @@ def _configured_client(remaining):
     )
 
 
-def bind_source_objects(tenant_id, actor_id, object_name, bucket):
+def bind_source_objects(tenant_id, actor_id, object_name, bucket, *, writable=True):
     """Grant one preallocated KB source key without changing its physical legacy path."""
     environment = _configured_environment()
 
-    if not bucket or bucket != environment.MINIO_DEFAULT_BUCKET:
+    if (
+        type(writable) is not bool
+        or not bucket
+        or bucket != environment.MINIO_DEFAULT_BUCKET
+    ):
         raise InvalidInput()
     scope = StorageScope("management", tenant_id, actor_id, frozenset({"files"}))
     return S3ObjectStore(
@@ -61,7 +65,7 @@ def bind_source_objects(tenant_id, actor_id, object_name, bucket):
             bucket,
             "",
             frozenset({"management"}),
-            writable=True,
+            writable=writable,
             exact_keys=frozenset({object_name}),
         ),
         _configured_client,

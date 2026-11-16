@@ -166,6 +166,7 @@ def test_new_source_intents_are_not_deleted_by_legacy_recovery(monkeypatch):
                     list_uploading_files_created_before=MagicMock(return_value=[
                         {"file_id": "pending", "stage": "SOURCE_UPLOAD"},
                         {"file_id": "pinned", "source_revision": "etag:known"},
+                        {"file_id": "review", "stage": "SOURCE_REVIEW", "source_upload_sha256": "1" * 64},
                     ]), transition_file_record=transition)
     assert startup_recovery_service.fail_interrupted_uploads(MagicMock(), "management") == 0
     transition.assert_not_called()

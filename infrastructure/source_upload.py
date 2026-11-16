@@ -14,36 +14,18 @@ from infrastructure.rdb.source_binding import DATASET, bind_source_records
 
 
 @contextmanager
-def source_upload_ports(record, *, context):
-    from contracts.constants import environment
-
-    remaining = context.remaining()
-    engine = create_engine(
-        URL.create(
-            "postgresql+psycopg2",
-            username=environment.POSTGRES_USER,
-            password=environment.NEXENT_POSTGRES_PASSWORD,
-            host=environment.POSTGRES_HOST,
-            port=int(environment.POSTGRES_PORT),
-            database=environment.POSTGRES_DB,
-        ),
-        connect_args={"connect_timeout": max(1, ceil(min(5, remaining)))},
-        pool_size=1,
-        max_overflow=0,
-        pool_timeout=min(5, remaining),
-        hide_parameters=True,
-    )
+def _source_ports(record, *, actor_id, writable, context):
+    engine = source_engine(context)
     records = objects = None
     try:
-        scope = StorageScope(
-            "management", record["tenant_id"], record["created_by"], {DATASET}
-        )
+        scope = StorageScope("management", record["tenant_id"], actor_id, {DATASET})
         records = bind_source_records(scope, engine)
         objects = bind_source_objects(
             record["tenant_id"],
-            record["created_by"],
+            actor_id,
             record["object_name"],
             record["bucket_name"],
+            writable=writable,
         )
         yield records, objects
     finally:
@@ -63,3 +45,36 @@ def source_upload_ports(record, *, context):
                 )
         if failed:
             raise OutcomeUnknown(operation_id=context.operation_id) from None
+
+
+def source_upload_ports(record, *, context):
+    return _source_ports(
+        record, actor_id=record["created_by"], writable=True, context=context
+    )
+
+
+def source_recovery_ports(record, *, context):
+    return _source_ports(
+        record, actor_id="source-reconciliation", writable=False, context=context
+    )
+
+
+def source_engine(context):
+    from contracts.constants import environment
+
+    remaining = context.remaining()
+    return create_engine(
+        URL.create(
+            "postgresql+psycopg2",
+            username=environment.POSTGRES_USER,
+            password=environment.NEXENT_POSTGRES_PASSWORD,
+            host=environment.POSTGRES_HOST,
+            port=int(environment.POSTGRES_PORT),
+            database=environment.POSTGRES_DB,
+        ),
+        connect_args={"connect_timeout": max(1, ceil(min(5, remaining)))},
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=min(5, remaining),
+        hide_parameters=True,
+    )

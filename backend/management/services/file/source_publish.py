@@ -4,6 +4,7 @@
 import hashlib
 import io
 import re
+from datetime import datetime, timezone
 
 from contracts.agentos_knowledge import ObjectReference
 from nexent.storage.errors import (
@@ -18,17 +19,49 @@ from nexent.storage.models import FieldPatch, ObjectRef, Revision
 DATASET = "knowledge_source_bindings"
 
 
+def validate_scope(records, objects):
+    if (
+        records.scope.tenant_id != objects.scope.tenant_id
+        or records.scope.actor_id != objects.scope.actor_id
+        or records.scope.service_role != "management"
+        or objects.scope.service_role != "management"
+        or records.scope.system
+        or objects.scope.system
+    ):
+        raise ScopeDenied()
+
+
+def binding_values(source):
+    return {
+        "source_space": source.space,
+        "source_key": source.key,
+        "source_revision": source.version,
+        "source_sha256": source.sha256,
+    }
+
+
+def confirmed_reference(metadata, target, digest, size):
+    if (
+        metadata.ref.space != target.space
+        or metadata.ref.key != target.key
+        or metadata.ref.version is None
+        or metadata.sha256 != digest
+        or metadata.size != size
+        or target.version is not None
+        and metadata.ref.version != target.version
+    ):
+        raise OutcomeUnknown()
+    return ObjectReference(
+        space=target.space,
+        key=target.key,
+        version=metadata.ref.version.value,
+        sha256=digest,
+    )
+
+
 class SourcePublisher:
     def __init__(self, records, objects):
-        if (
-            records.scope.tenant_id != objects.scope.tenant_id
-            or records.scope.actor_id != objects.scope.actor_id
-            or records.scope.service_role != "management"
-            or objects.scope.service_role != "management"
-            or records.scope.system
-            or objects.scope.system
-        ):
-            raise ScopeDenied()
+        validate_scope(records, objects)
         self.records = records
         self.objects = objects
 
@@ -100,6 +133,9 @@ class SourcePublisher:
                         "stage": "SOURCE_UPLOAD",
                         "source_upload_sha256": digest,
                         "file_size": len(content),
+                        "source_upload_started_at": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
                     }
                 ),
                 expected=Revision(str(expected_version)),
@@ -116,36 +152,27 @@ class SourcePublisher:
                 context=context,
             )
         try:
-            if (
-                metadata.ref.space != target.space
-                or metadata.ref.key != target.key
-                or metadata.ref.version is None
-                or metadata.sha256 != digest
-                or metadata.size != len(content)
-            ):
-                raise OutcomeUnknown()
-            source = ObjectReference(
-                space=target.space,
-                key=target.key,
-                version=metadata.ref.version.value,
-                sha256=digest,
-            )
+            source = confirmed_reference(metadata, target, digest, len(content))
             receipt = self.records.patch(
                 DATASET,
                 file_id,
-                FieldPatch(
-                    set_values={
-                        "source_space": source.space,
-                        "source_key": source.key,
-                        "source_revision": source.version,
-                        "source_sha256": source.sha256,
-                    }
-                ),
+                FieldPatch(set_values=binding_values(source)),
                 expected=Revision(str(binding_version)),
                 context=context,
             )
             if not receipt.matched:
-                raise OutcomeUnknown()
+                current = self.records.get(DATASET, file_id, context=context)
+                if (
+                    not current
+                    or current["status"] not in {"UPLOADING", "UPLOADED"}
+                    or current["source_generation"] != row["source_generation"]
+                    or current["created_by"] != row["created_by"]
+                    or any(
+                        current[name] != value
+                        for name, value in binding_values(source).items()
+                    )
+                ):
+                    raise OutcomeUnknown()
             return source
         except (StorageError, ValueError):
             # The object can already exist; retain the UPLOADING intent for reconciliation.

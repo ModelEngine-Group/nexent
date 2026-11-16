@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-SOURCE-RECONCILE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Reconcile uncertain source identity in owned Management tasks
+  description: >-
+    Discover aged durable source intents using a fixed-owner readonly catalog,
+    rebind tenant-scoped record and readonly object ports and CAS-confirm matching identity.
+    Missing objects back off; mismatched objects require review. Keep UPLOADING until accounting finalizes.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Confirm identity without reupload, object deletion or accounting publication.
+    - Refuse foreign owners, stale versions, young intents and concurrent cancellation.
+    - Back off missing objects, quarantine mismatches and preserve intent on transport failure.
+    - Converge identical source bindings when upload and recovery race.
+    - Own finite managed scheduling and cancel all recovery tasks on startup failure or shutdown.
+    reason: Existing explicit upload retries do not prove automatic discovery or bounded lifecycle ownership. UT is sufficient for fault variants; extend the existing real-storage D3 rather than adding duplicate D1.
+    test_selectors:
+    - test/backend/services/test_source_reconcile.py
+    - test/backend/services/test_source_recovery.py
+    - test/backend/infrastructure/test_source_upload_composition.py
+    - test/backend/management/test_northbound_lifecycle.py
+    - test/backend/services/test_startup_recovery_service.py
+  notes: >-
+    Responsibility inherits the existing Feature owner. D3 preparation remains self-contained:
+    create test-labeled PostgreSQL, Redis and MinIO containers on ephemeral loopback ports;
+    close ports/engines/managed workers and delete owned container IDs and anonymous volumes,
+    including the wrapper cleanup on probe failure. No application deployment or model is used.
+    Step 10 executes the production discovery and per-tenant composition after an actual lost reply,
+    with only intent age advanced as controlled test data. Status remains UPLOADING and the distinct
+    source-reconciliation actor is checked. Scheduler cancellation/failure variants remain UT proof.
