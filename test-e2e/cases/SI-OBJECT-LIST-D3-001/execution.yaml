@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: SI-OBJECT-LIST-D3-001
+timeout_seconds: 150
+preparation:
+  anchors: false
+  families: []
+notes: The case owns an isolated MinIO bucket, internal Docker network and disposable containers; no product assets or model profiles are required.
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_scoped_object_list_protocol
+acceptance_bindings:
+  AC-01: [test_scoped_object_list_protocol]
+  AC-02: [test_scoped_object_list_protocol]
+  AC-03: [test_scoped_object_list_protocol]

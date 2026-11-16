@@ -133,6 +133,8 @@ class S3ObjectStore:
         self._scope = scope
         self._binding = binding
         self._factory = client_factory
+        if binding.exact_keys is None:
+            self.capabilities = CapabilitySet(self.capabilities.supported | {"object.list"})
 
     @property
     def scope(self):
@@ -337,7 +339,9 @@ class S3ObjectStore:
         return DeleteReceipt(context.operation_id, True)
 
     def list(self, prefix, page, *, context):
-        raise CapabilityUnsupported(operation_id=context.operation_id)
+        from infrastructure.object_storage.listing import list_objects
+
+        return list_objects(self, prefix, page, context=context)
 
     def close(self):
         pass

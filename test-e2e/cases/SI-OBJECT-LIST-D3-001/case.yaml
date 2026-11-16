@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D3
+module: INFRA-STORAGE
+case:
+  case_id: SI-OBJECT-LIST-D3-001
+  feature_id: SI-STORAGE
+  requirement_ids: [SI-REQ-003]
+  business_rule_ids: [SI-STORAGE-RULE-02, SI-STORAGE-RULE-04]
+  title: Scoped ObjectStore listing through real MinIO pagination
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove scoped bounded listing over the actual object protocol.
+  preconditions:
+  - Docker and the locally available MinIO reference image are available.
+  - The current Management image supplies the Python dependencies; current source is mounted read-only.
+  test_data:
+    objects: Synthetic bytes in two tenant namespaces and two resource scopes in a dedicated bucket.
+  steps:
+  - order: 1
+    action: Write synthetic objects using real scoped ObjectStore handles and list one item per page.
+    expected: All matching logical keys appear once in order, with size and an opaque revision.
+  - order: 2
+    action: List a tenant/resource scope containing neighbours outside that scope and reuse a cursor under another tenant or prefix.
+    expected: Neighbour objects are absent and incompatible cursors fail before provider access.
+  - order: 3
+    action: Attempt enumeration from a finite exact-key legacy grant, then clean up owned containers and network.
+    expected: Enumeration is refused and no test containers survive.
+  expected_results:
+  - Bounded pagination returns logical keys with neutral size/revision metadata.
+  - Tenant and resource restrictions hold on the real object protocol.
+  - Exact-key grants cannot enumerate and all owned runtime resources are removed.
+  forbidden_side_effects:
+  - No existing application containers, volumes, credentials or objects are used or modified.
+  integration_boundary:
+  - Current S3ObjectStore, boto3 HTTP and an isolated real MinIO server; no model or business job is involved.
+  observations:
+  - Logical page keys, tenant/resource separation, cursor rejection and owned container cleanup.
+  cleanup:
+  - Remove only this test's container IDs and its uniquely named internal network.
+  acceptance:
+  - id: AC-01
+    description: Actual MinIO pagination yields bounded neutral object metadata.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Tenant, resource and cursor scope restrictions hold.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Finite grants refuse enumeration and owned runtime resources are reclaimed.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

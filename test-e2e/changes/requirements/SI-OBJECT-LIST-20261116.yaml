@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: SI-OBJECT-LIST-20261116
+  change_type: requirement
+  requirement_id: SI-REQ-003
+  title: Scoped bounded ObjectStore listing
+  description: >-
+    Implement current-object listing with neutral metadata, tenant/resource
+    prefix enforcement and query-bound continuation cursors. Exact-key legacy
+    grants cannot enumerate the bucket. Multipart and application cleanup jobs
+    remain separate batches.
+  affected_features:
+    existing: [SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [SI-OBJECT-LIST-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Bound provider requests and hide physical bucket, tenant and resource paths.
+    - Bind cursors to scope, physical binding, logical prefix and page size.
+    - Refuse invalid prefixes, malformed cursors and exact-key enumeration before I/O.
+    - Sanitize provider errors and close clients on failure or cancellation.
+    - Reject malformed or out-of-scope provider responses.
+    reason: Existing ObjectStore UT covers point operations but not list or cursor behavior.
+    test_selectors:
+    - test/backend/infrastructure/test_object_listing.py
+    - test/backend/infrastructure/test_object_store.py
