@@ -900,9 +900,11 @@ const ThreadView: FC<ThreadViewProps> = ({
   // Question the viewport is currently scrolled to; highlights the matching
   // directory row so long conversations show "where am I" at a glance.
   const activeQuestionId = useActiveQuestionId(questionDirectory);
+  const contentThreadId = useAuiState((state) => state.threads.mainThreadId);
 
   return (
     <ThreadPrimitive.Root
+      data-conversation-content={contentThreadId}
       className={cn(
         "flex h-full flex-row bg-background",
         newChatDesign && newChatStyles.font,
