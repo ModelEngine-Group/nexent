@@ -15,8 +15,19 @@ agent_run = base.agent_subscription
 _request = base._request
 
 
+@pytest.fixture(autouse=True)
+def isolated_run_manager(monkeypatch):
+    # Legacy module mocks otherwise retain deleted attributes between tests.
+    monkeypatch.setattr(agent_run, "agent_run_manager", MagicMock())
+
+
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
-    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
+    from management.services.conversation import model_preferences
+    monkeypatch.setattr(
+        model_preferences, "read_model_preferences",
+        MagicMock(return_value={"selected_model_id": None, "model_parameter_preferences": {}}),
+    )
+    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
@@ -32,7 +43,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     monkeypatch.setattr(
         conversation_preparation,
         "apply_workbench_runtime_plan",
-        lambda request, *_args: request.__dict__.update({"agent_id": 99, "version_no": 5}),
+        lambda request, *_args, **_kwargs: request.__dict__.update({"agent_id": 99, "version_no": 5}),
     )
     monkeypatch.setattr(conversation_preparation, "update_conversation_chat_mode_service", MagicMock())
     return SimpleNamespace(admit=AsyncMock(side_effect=RuntimeCapacityExceededError()))

@@ -133,11 +133,14 @@ consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 permissions_mock = types.ModuleType("permissions")
 permissions_depends_mock = types.ModuleType("permissions.depends")
 permissions_models_mock = types.ModuleType("permissions.models")
+permissions_resource_access_mock = types.ModuleType("permissions.resource_access")
+permissions_resource_access_mock.resource_read_tenant = lambda request, *, shared=False: None
 permissions_depends_mock.require = lambda _permission: (lambda: None)
 permissions_models_mock.CurrentUser = object
 sys.modules["permissions"] = permissions_mock
 sys.modules["permissions.depends"] = permissions_depends_mock
 sys.modules["permissions.models"] = permissions_models_mock
+sys.modules["permissions.resource_access"] = permissions_resource_access_mock
 
 class SkillException(Exception):
     pass
@@ -331,6 +334,13 @@ nexent_storage_minio_config_mock.MinIOStorageConfig = MockMinIOStorageConfig
 # Skip redundant patches - mocks are already set up via sys.modules
 # These patches would fail because the modules are already mocked
 
+# The HTTP suite controls orchestration; persistence is exercised in creator service UT and D5.
+creator_execution_mock = types.ModuleType("management.services.conversation.creator_execution")
+async def start_creation_turn_boundary(request, *, stream_factory, **kwargs):
+    return await stream_factory(request, None), 42
+creator_execution_mock.start_creation_turn = start_creation_turn_boundary
+sys.modules["management.services.conversation.creator_execution"] = creator_execution_mock
+
 # Now import the app module
 from management.api.skill import skill as skill_app
 from contracts.constants import constants as skill_app_management_skill_skill
@@ -362,6 +372,21 @@ class TestListSkillsEndpoint:
                 data = response.json()
                 assert "skills" in data
                 assert len(data["skills"]) == 2
+
+    def test_operations_list_exposes_skill_metadata_without_config(self, mocker):
+        mocker.patch.object(skill_app, "get_current_user_id", return_value=("actor", "tenant"))
+        mocker.patch.object(skill_app, "resource_read_tenant", return_value="tenant")
+        service = mocker.patch.object(skill_app, "SkillService").return_value
+        service.list_skills.return_value = [{"skill_id": 1, "name": "Example", "config_values": {"key": "hidden"}}]
+        app = FastAPI()
+        app.include_router(skill_app.router)
+
+        response = TestClient(app).get("/skills", params={"tenant_id": "tenant"})
+
+        assert response.status_code == 200
+        item = response.json()["skills"][0]
+        assert item["name"] == "Example" and "config_values" not in item
+        service.list_visible_skills.assert_not_called()
 
     def test_list_skills_empty(self, mocker):
         """Test listing skills when none exist."""
@@ -428,6 +453,7 @@ class TestListSkillsEndpoint:
                 mock_service.list_visible_skills.assert_called_once_with(
                     tenant_id="target_tenant",
                     user_id="super_user",
+                    include_content=False,
                 )
 
 

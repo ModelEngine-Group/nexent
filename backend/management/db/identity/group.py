@@ -397,6 +397,19 @@ def check_user_in_group(user_id: str, group_id: int) -> bool:
         return result is not None
 
 
+def count_users_by_group_ids(group_ids: List[int]) -> Dict[int, int]:
+    """Count active membership rows for a page of groups in one query."""
+    if not group_ids:
+        return {}
+    from sqlalchemy import func
+
+    with get_db_session() as session:
+        rows = session.query(TenantGroupUser.group_id, func.count()).filter(
+            TenantGroupUser.group_id.in_(group_ids), TenantGroupUser.delete_flag == "N"
+        ).group_by(TenantGroupUser.group_id).all()
+        return {group_id: count for group_id, count in rows}
+
+
 def count_group_users(group_id: int) -> int:
     """
     Count users in a group

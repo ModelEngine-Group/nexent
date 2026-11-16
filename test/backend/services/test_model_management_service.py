@@ -382,6 +382,15 @@ db_mm_mod.get_model_by_display_name = _noop
 db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
 db_mm_mod.get_models_by_display_name = _get_models_by_display_name
 db_mm_mod.get_model_records = _get_model_records
+db_mm_mod.get_capacity_model_records = lambda model_types, tenant_id: []
+
+
+def _get_model_records_page(filters, tenant_id, page, page_size):
+    records = sys.modules["management.services.model.management"].get_model_records(filters, tenant_id)
+    return records[(page - 1) * page_size:page * page_size], len(records)
+
+
+db_mm_mod.get_model_records_page = _get_model_records_page
 db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
 
 
@@ -450,6 +459,7 @@ def _update_config_by_tenant_config_id(*args, **kwargs):
 
 db_tenant_cfg_mod.delete_config_by_tenant_config_id = _delete_config_by_tenant_config_id
 db_tenant_cfg_mod.get_all_configs_by_tenant_id = _get_all_configs_by_tenant_id
+db_tenant_cfg_mod.get_configs_by_tenant_id_and_keys = lambda tenant_id, keys: {}
 db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
 db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
@@ -512,7 +522,7 @@ def isolate_embedding_probe():
         yield
 
 
-def import_svc(module="management"):
+def import_svc(module="management", *, isolate_storage=True):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
@@ -546,6 +556,14 @@ def import_svc(module="management"):
         svc = importlib.import_module(path)
         if module == "registry":
             svc.get_created_model_ids = db_mm_mod.get_created_model_ids
+    if not isolate_storage:
+        return svc
+    # These tests own legacy preprocessing/orchestration. The resolved storage
+    # translator has its own unit and database suites and is a collaborator here.
+    svc._create_model_configuration = lambda data, user, tenant: svc.create_model_record(data, user, tenant)
+    def update_configuration(model_id, changes, user, tenant, *, scope_update=False):
+        return svc.update_model_record(model_id, changes, user, tenant)
+    svc._update_model_configuration = update_configuration
     return svc
 
 
@@ -2327,7 +2345,7 @@ def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
         },
     ]
 
-    with mock.patch.object(svc, "get_model_records", return_value=records), \
+    with mock.patch.object(svc, "get_capacity_model_records", return_value=records), \
             mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
         result = svc.get_capacity_coverage("tenant-a")
 
@@ -2343,7 +2361,7 @@ def test_get_capacity_coverage_visibility_flag_off():
     svc = import_svc("capacity")
 
     with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
-            mock.patch.object(svc, "get_model_records") as mock_get_records:
+            mock.patch.object(svc, "get_capacity_model_records") as mock_get_records:
         result = svc.get_capacity_coverage("tenant-a")
 
     assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
@@ -2462,7 +2480,7 @@ def test_get_capacity_coverage_cross_tenant_isolation():
             return list(tenant_b_rows)
         return []
 
-    with mock.patch.object(svc, "get_model_records", side_effect=get_records_by_tenant), \
+    with mock.patch.object(svc, "get_capacity_model_records", side_effect=get_records_by_tenant), \
             mock.patch.object(svc, "_capacity_suggestion_available", return_value=False):
         result_a = svc.get_capacity_coverage("tenant-a")
         result_b = svc.get_capacity_coverage("tenant-b")
@@ -3191,3 +3209,21 @@ def test_backfill_swap_pool_never_resurrects_old_models():
     # does not beat the fresh occupant (256K): nothing changes.
     assert result == []
     assert updated == []
+
+
+def test_saved_outlet_enrichment_uses_projection_without_legacy_normalization(monkeypatch):
+    svc = import_svc("reasoning")
+    projection_module = types.ModuleType("infrastructure.model_adapter")
+    projection_module.project_saved_outlet = mock.Mock(return_value={
+        "extra_params": {"enable_thinking": False}, "migration_status": "migrated",
+        "migration_review_required": True})
+    monkeypatch.setitem(sys.modules, "infrastructure.model_adapter", projection_module)
+    model = {"model_type": "llm", "profile_schema_version": 1,
+             "extra_params": {"parameter_values": {}, "api_parameters": []}}
+    with mock.patch.object(svc, "resolve_reasoning_capability") as old_lookup, \
+            mock.patch.object(svc, "normalize_reasoning_params") as old_normalize:
+        svc._enrich_model_reasoning_capability(model)
+    old_lookup.assert_not_called()
+    old_normalize.assert_not_called()
+    assert model["extra_params"] == {"enable_thinking": False}
+    assert model["migration_review_required"] is True

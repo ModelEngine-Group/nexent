@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for config_app module.
 
@@ -49,11 +50,6 @@ from test.backend.app.test_app_factory import (
 
 class TestConfigAppIntegration:
     """Test class for config_app module integration with app_factory."""
-
-    def test_config_app_can_import_consts(self):
-        """Test that we can import from contracts.constants.environment."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        assert isinstance(IS_SPEED_MODE, bool)
 
     def test_config_app_can_import_app_factory(self):
         """Test that we can import create_app from app_factory."""
@@ -131,6 +127,12 @@ class TestConfigAppRouterConfiguration:
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
             "management.api.agent.conversation_run": {"router": APIRouter()},
+            "management.api.agent.creator": {"router": APIRouter()},
+            "management.api.skill.creation": {"skill_creator_router": APIRouter()},
+            "management.api.agent.nl2agent_callback": {"router": APIRouter()},
+            "management.api.agent.workbench_callback": {"router": APIRouter()},
+            "management.api.automation.agentos_callback": {"router": APIRouter()},
+            "management.api.memory.agentos_callback": {"router": APIRouter()},
             "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
@@ -147,9 +149,10 @@ class TestConfigAppRouterConfiguration:
             "management.api.conversation.conversation_share": {"router": APIRouter()},
             "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
-            "management.api.identity.mock_user_management": {"router": APIRouter()},
+            "ops.api.access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
+            "management.api.prompt.prompt": {"router": APIRouter()},
             "management.api.mcp.mcp_management": {"router": APIRouter()},
             "management.api.mcp.remote_mcp": {"router": APIRouter()},
             "management.api.skill.skill": {"router": APIRouter()},
@@ -190,14 +193,10 @@ class TestConfigAppRouterConfiguration:
                 setattr(module, attribute, value)
             monkeypatch.setitem(sys.modules, module_name, module)
 
-        retired_routers = {
-            "management.api.prompt.prompt_template": APIRouter(prefix="/prompt-template"),
-            "management.api.prompt.prompt": APIRouter(prefix="/prompt"),
-        }
-        for module_name, router in retired_routers.items():
-            retired_module = types.ModuleType(module_name)
-            retired_module.router = router
-            monkeypatch.setitem(sys.modules, module_name, retired_module)
+        retired_router = APIRouter(prefix="/prompt-template")
+        retired_module = types.ModuleType("management.api.prompt.prompt_template")
+        retired_module.router = retired_router
+        monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
 
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
@@ -230,8 +229,17 @@ class TestConfigAppRouterConfiguration:
                 return {"service_name": "config", "active_count": 0}
 
         concurrency_module = types.ModuleType("nexent.core.concurrency")
+        concurrency_module.__dict__.update(vars(importlib.import_module("nexent.core.concurrency")))
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
+
+        async def invoke_blocking(_name, operation, *args, **kwargs):
+            return operation(*args, **kwargs)
+
+        concurrency_module.run_blocking = AsyncMock(side_effect=invoke_blocking)
+        migration = types.ModuleType("management.services.model.outlet_migration")
+        migration.migrate_legacy_outlets = MagicMock(return_value={"migrated": 2, "failed": 1})
+        monkeypatch.setitem(sys.modules, migration.__name__, migration)
         concurrency_module.set_default_thread_manager = MagicMock()
         concurrency_module.clear_default_thread_manager = MagicMock()
         monkeypatch.setitem(
@@ -256,40 +264,8 @@ class TestConfigAppRouterConfiguration:
         component_spec.loader.exec_module(component)
         monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
 
-        module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
-        spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
-        config_app = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config_app)
-
-        assert all(
-            registered is not retired
-            for registered in config_app.app.included_routers
-            for retired in retired_routers.values()
-        )
-        assert api_key_router in config_app.app.included_routers
-        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
-        for router in router_modules["management.api.northbound"].values():
-            assert router in config_app.app.included_routers
-        assert {route.path for route in api_key_router.routes} == {
-            "/api-keys",
-            "/api-keys/refresh",
-        }
-        assert [route[0] for route in config_app.app.get_routes] == [
-            "/internal/thread-capacity"
-        ]
-        assert asyncio.run(config_app.thread_capacity()) == {
-            "service_name": "config",
-            "active_count": 0,
-        }
-
-        asyncio.run(config_app.validate_external_service_configuration())
-        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
-            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
-                asyncio.run(config_app.validate_external_service_configuration())
-
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
-        schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
             "management.recovery"
         )
@@ -297,9 +273,6 @@ class TestConfigAppRouterConfiguration:
         startup_recovery_module.recover_northbound_tasks = MagicMock()
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
-        )
-        startup_recovery_module.schedule_workbench_main_backfill = (
-            schedule_workbench_main_backfill
         )
         monkeypatch.setitem(
             sys.modules,
@@ -338,6 +311,52 @@ class TestConfigAppRouterConfiguration:
             agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
         ))
 
+        from contextlib import asynccontextmanager
+        prepared_events = []
+
+        @asynccontextmanager
+        async def prepared_lifespan():
+            prepared_events.append("start")
+            try:
+                yield
+            finally:
+                prepared_events.append("stop")
+
+        monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
+            prepared_turn_lifespan=prepared_lifespan,
+        ))
+
+        module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
+        spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
+        config_app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_app)
+
+        assert all(
+            registered is not retired
+            for registered in config_app.app.included_routers
+            for retired in (retired_router,)
+        )
+        assert api_key_router in config_app.app.included_routers
+        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
+        for router in router_modules["management.api.northbound"].values():
+            assert router in config_app.app.included_routers
+        assert {route.path for route in api_key_router.routes} == {
+            "/api-keys",
+            "/api-keys/refresh",
+        }
+        assert [route[0] for route in config_app.app.get_routes] == [
+            "/internal/thread-capacity"
+        ]
+        assert asyncio.run(config_app.thread_capacity()) == {
+            "service_name": "config",
+            "active_count": 0,
+        }
+
+        asyncio.run(config_app.validate_external_service_configuration())
+        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
+            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
+                asyncio.run(config_app.validate_external_service_configuration())
+
         validate_external = AsyncMock()
 
         async def exercise_lifespan():
@@ -348,17 +367,21 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "validate_external_service_configuration",
             new=validate_external,
-        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
+        ):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
+        assert prepared_events == ["start", "stop"]
+        migration.migrate_legacy_outlets.assert_called_once_with()
+        concurrency_module.run_blocking.assert_awaited_once_with(
+            "model-outlet-upgrade", migration.migrate_legacy_outlets
+        )
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with(
             config_app.config_thread_manager
         )
         assert [c.args[0] for c in schedule_upload_cleanup.await_args_list] == ["nexent-config", "nexent-northbound"]
         startup_recovery_module.recover_northbound_tasks.assert_called_once_with()
-        schedule_workbench_main_backfill.assert_called_once_with()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
@@ -484,27 +507,6 @@ class TestConfigAppMonitoring:
             with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None
-
-
-class TestConfigAppSpeedMode:
-    """Test class for speed mode configuration."""
-
-    def test_is_speed_mode_import(self):
-        """Test that IS_SPEED_MODE can be imported."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        assert isinstance(IS_SPEED_MODE, bool)
-
-    def test_speed_mode_conditional(self):
-        """Test speed mode conditional logic."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        from backend.http.server.app_factory import create_app
-
-        # App should work regardless of speed mode
-        app = create_app()
-        assert app is not None
-
-        # Conditional should be a boolean
-        assert IS_SPEED_MODE in [True, False]
 
 
 class TestConfigAppRouterTypes:

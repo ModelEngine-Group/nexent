@@ -1,31 +1,68 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+
+# Monitoring utilities: bind Agent metadata once at the request boundary.
+
+# Import monitoring utilities
+
+
+from management.services.agent.icon import read_icon_image, upload_icon_image, validate_icon_image
 import logging
 from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from contracts.agent import AgentUnavailableReason
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
-from contracts.constants.constants import LANGUAGE
-from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.agent import (
+    AgentInfoRequest,
+    AgentNameBatchCheckRequest,
+    AgentNameBatchRegenerateRequest,
+    AgentUnavailableReason,
+)
+from contracts.authentication import AuthenticatedIdentity
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    LANGUAGE,
+    MODEL_CONFIG_MAPPING,
+)
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
-from contracts.agent import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest
+from contracts.errors.exceptions import (
+    AgentNotFoundError,
+    AgentRelationValidationError,
+    AppException,
+    ForbiddenError,
+    TenantResourceLimitError,
+)
+from contracts.roles import has_any_role, roles_from_record
 from contracts.skill import SkillInstanceInfoRequest
 from contracts.tool import ToolInstanceInfoRequest
 from management.db.a2a import repository as a2a_agent_db
-from management.db.skill import repository as skill_db
 from management.db.a2a.repository import query_external_sub_agents
-from management.db.agent.repository import batch_search_agent_display_names, create_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, search_agent_info_by_agent_id, update_agent, update_agent_icon, update_related_agents
-from management.db.agent.version import batch_query_current_version_nos, batch_search_version_names, query_current_version_no
-from management.db.model.repository import get_model_by_model_id
-from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_enabled_tool_instances, query_tool_instances_by_agent_id, query_tool_instances_by_id, query_tools_by_ids, search_tools_for_sub_agent
+from management.db.agent.repository import (
+    batch_search_agent_display_names,
+    create_agent,
+    is_system_agent,
+    query_all_agent_info_by_tenant_id,
+    query_sub_agent_relations,
+    query_sub_agents_id_list,
+    search_agent_info_by_agent_id,
+    update_agent,
+    update_agent_icon,
+    update_related_agents,
+)
+from management.db.agent.version import (
+    batch_query_current_version_nos,
+    batch_search_version_names,
+    query_current_version_no,
+)
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.services.agent.icon import (
-    read_icon_image,
-    upload_icon_image,
-    validate_icon_image,
+from management.db.model.repository import get_model_by_model_id
+from management.db.skill import repository as skill_db
+from management.db.tool.repository import (
+    create_or_update_tool_by_tool_info,
+    query_all_enabled_tool_instances,
+    query_tool_instances_by_agent_id,
+    query_tools_by_ids,
+    search_tools_for_sub_agent,
 )
 from management.services.agent.naming import (
     check_agent_value_duplicate,
@@ -69,6 +106,11 @@ from management.services.agent.management import (
     list_agent_page_impl,
     list_all_agent_info_impl,
 )
+from management.services.agent.naming import (
+    check_agent_value_duplicate,
+    generate_unique_agent_value,
+    regenerate_agent_value,
+)
 from management.services.agent.policy import (
     build_sandbox_policy,
     get_sandbox_minio_client,
@@ -93,6 +135,23 @@ from management.services.agent.transfer import (
     import_agent_impl,
     import_agent_with_skills_impl,
 )
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.conversation.service import (
+    generate_conversation_title_service,  # noqa: F401 - compatibility patch point
+    save_message_unit,  # noqa: F401 - retained as a compatibility re-export
+    update_unit_status,  # noqa: F401 - retained as a compatibility re-export
+)
+from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.skill.service import SkillService
+from management.utils.serialization import (
+    convert_list_to_string,
+    convert_string_to_list,
+)
+from nexent.core.concurrency import run_blocking
+
+logger = logging.getLogger(__name__)
+
 
 __all__ = (
     "_get_user_group_ids",
@@ -313,8 +372,8 @@ async def get_agent_info_impl(
     if user_id is not None:
         try:
             user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-            user_role = str(user_tenant_record.get("user_role") or "").upper()
-            can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+            user_role = roles_from_record(user_tenant_record)
+            can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
 
             # Permission logic (same as agent list, including ASSET_OWNER read-only override)
             agent_info["permission"] = resolve_agent_list_permission(
@@ -521,51 +580,9 @@ async def get_agent_info_impl(
     return agent_info
 
 
-def _validate_requested_output_tokens_for_agent(
-    request: AgentInfoRequest,
-    tenant_id: str,
-) -> None:
-    requested_output_tokens = request.requested_output_tokens
-    if requested_output_tokens is None:
-        return
-
-    # Validate against every configured model — the user can switch models at
-    # chat time, so requested_output_tokens must not exceed any model's limit.
-    model_ids = list(request.model_ids or [])
-    if not model_ids and request.agent_id is not None:
-        try:
-            existing_agent = search_agent_info_by_agent_id(
-                agent_id=request.agent_id,
-                tenant_id=tenant_id,
-                version_no=request.version_no,
-            )
-            model_ids = list(existing_agent.get("model_ids") or [])
-        except Exception as exc:
-            logger.warning(
-                "Could not resolve existing agent models for requested_output_tokens validation: %s",
-                exc,
-            )
-
-    if not model_ids:
-        return
-
-    for model_id in model_ids:
-        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-        if (
-            max_output_tokens is not None
-            and requested_output_tokens > max_output_tokens
-        ):
-            model_display = (
-                model_info.get("display_name") if model_info else f"model_id={model_id}"
-            )
-            raise AppException(
-                ErrorCode.COMMON_PARAMETER_INVALID,
-                (
-                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
-                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
-                ),
-            )
+def _normalize_agent_output_reserve(request: AgentInfoRequest) -> None:
+    """Retire historical Agent reserves; output limits belong to saved outlets."""
+    request.requested_output_tokens = None
 
 
 def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
@@ -651,7 +668,7 @@ async def update_agent_info_impl(
             "example_questions cannot exceed 6 items",
         )
 
-    _validate_requested_output_tokens_for_agent(request, tenant_id)
+    _normalize_agent_output_reserve(request)
 
     existing_agent = None
     if request.agent_id is not None:
@@ -683,12 +700,12 @@ async def update_agent_info_impl(
     if agent_id is not None:
         agent_record = search_agent_info_by_agent_id(agent_id, tenant_id)
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        user_role = roles_from_record(user_tenant_record)
         permission = resolve_agent_list_permission(
             user_role=user_role,
             agent=agent_record,
             user_id=user_id,
-            can_edit_all=user_role in CAN_EDIT_ALL_USER_ROLES,
+            can_edit_all=has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES),
         )
         if permission != "EDIT":
             raise ForbiddenError("You do not have permission to edit this agent")
@@ -729,6 +746,9 @@ async def update_agent_info_impl(
                     "provide_run_summary": request.provide_run_summary,
                     "allow_chat_metadata": request.allow_chat_metadata
                     if request.allow_chat_metadata is not None
+                    else False,
+                    "allow_mcp_header_passthrough": request.allow_mcp_header_passthrough
+                    if request.allow_mcp_header_passthrough is not None
                     else False,
                     "enable_protocol_repair_retry": request.enable_protocol_repair_retry
                     if request.enable_protocol_repair_retry is not None

@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: SUITE-PREFLIGHT-ASSETS-20261028
+  change_type: test-fix
+  title: Restore online preparation and streaming branch regression assets
+  description: >-
+    Declare the existing callable D3 fixtures as self-contained without shared
+    preparation families, retaining account/model/service/Docker prerequisites.
+    Supply the missing ConversationResumeBranch UT referenced by the Agent-chat
+    change record; preserve its selector and verify actual history/resume wiring.
+  affected_features:
+    existing: [F-096, CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-DETAIL-D4-001, CHAT-ROUTE-D4-001]
+    added: []
+    modified: [AGENT-CALLABLE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Resume replaces only the running assistant and retains preceding turns and sibling retry answers.
+    - Resume attaches to the originating user and replays empty or partial saved output before the live stream.
+    reason: >-
+      Existing ConversationResume tests cover guards, cancellation and shared
+      reads but do not assert retained sibling edges and the imported head.
+      Add the missing referenced frontend UT with the real history adapter;
+      no product or Python behavior changes and no duplicate formal D1 is needed.
+    test_selectors:
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+  notes: >-
+    Baseline 884d3745a on djb/bugfix-aotumation-sql-check. Keep both original
+    active formal contracts and all gates; no skip, deployment or shared
+    configuration change. D3 setup ownership is verified from test.py and
+    runtime_probe.py; preparation families do not provision its real model or
+    Docker environment. The missing UT remains in CHAT-AGENT-DETAIL-20261026.
+    Existing SPECs: docs/Developing/management-agent-callable-names/design.md
+    and docs/Developing/chat-agent-history-detail/design.md in nexent-doc.

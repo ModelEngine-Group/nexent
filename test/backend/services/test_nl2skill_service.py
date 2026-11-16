@@ -25,10 +25,12 @@ from runtime.agentos import prepared_skill_creator as runtime
 from runtime.agentos.prepared_skill_creator import NL2SKILL_NAME, create_nl2skill_agent_config
 
 
+
+
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
-    assert config.name == "__skill_creator__"
+    assert config.name == "nl2skill_main"
     assert config.display_name == "技能创建助手"
     assert config.model_name == "model"
     assert config.instructions is None

@@ -27,7 +27,8 @@ import {
 async function renderSkillStream(
   events: SkillCreationEvent[],
   onNl2SkillEvent?: (event: SkillCreationEvent) => void,
-  messages?: unknown[]
+  messages?: unknown[],
+  custom?: Record<string, unknown>
 ) {
   runAgent.mockImplementationOnce(async () =>
     new ReadableStream<Uint8Array>({
@@ -51,7 +52,9 @@ async function renderSkillStream(
     ],
     abortSignal: new AbortController().signal,
     context: {},
-    runConfig: { custom: { runtimeMode: "nl2skill", onNl2SkillEvent } },
+    runConfig: {
+      custom: { runtimeMode: "nl2skill", onNl2SkillEvent, ...custom },
+    },
     unstable_threadId: "local-skill",
   } as unknown as ChatModelRunOptions;
   const run = remoteChatModelAdapter.run(input);
@@ -61,8 +64,30 @@ async function renderSkillStream(
   } else {
     results.push(await run);
   }
+  expect(runAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+    runtime_mode: "nl2skill",
+    persist_history: true,
+  });
   return results.at(-1)?.content ?? [];
 }
+
+it("resolves the latest Skill snapshot once at request time", async () => {
+  let files = [{ path: "SKILL.md", content: "old" }];
+  const getDraftSnapshot = vi.fn(() => ({ files }));
+  const custom = { getDraftSnapshot, draftSnapshot: { files: [] } };
+  files = [{ path: "SKILL.md", content: "latest" }];
+  await renderSkillStream([{ type: "done" }], undefined, undefined, custom);
+  expect(getDraftSnapshot).toHaveBeenCalledTimes(1);
+  expect(runAgent.mock.calls.at(-1)?.[0].draft_snapshot).toEqual({ files });
+});
+
+it("preserves static Skill snapshots for existing callers", async () => {
+  const draftSnapshot = { files: [{ path: "SKILL.md", content: "static" }] };
+  await renderSkillStream([{ type: "done" }], undefined, undefined, {
+    draftSnapshot,
+  });
+  expect(runAgent.mock.calls.at(-1)?.[0].draft_snapshot).toEqual(draftSnapshot);
+});
 
 it("does not create an empty Reasoning block for a Skill step marker", async () => {
   const content = await renderSkillStream([

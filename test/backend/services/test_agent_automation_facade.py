@@ -779,10 +779,20 @@ async def test_cancel_run_marks_running_run_canceled(monkeypatch, prepared):
     monkeypatch.setattr(facade_module.agent_automation_db, "update_task", lambda *_: operations.append("update"))
     monkeypatch.setattr("management.services.automation.runner.agent_automation_runner.cancel_runtime_run", fake_stop)
 
-    canceled = await AgentAutomationFacade().cancel_run(7, "tenant", "user")
+    from management.services.automation import runner
+    facade = AgentAutomationFacade()
+    monkeypatch.setattr(facade, "get_task", lambda *args: {"task_id": 88})
+
+    def transactional_cancel(active, task):
+        result = cancel(7, "tenant", "user", "Automation run was canceled by user.")
+        operations.append("update")
+        return result, True
+
+    monkeypatch.setattr(runner.agent_automation_runner, "cancel_run_by_user", transactional_cancel)
+    canceled = await facade.cancel_run(7, "tenant", "user")
 
     assert canceled["status"] == AutomationRunStatus.CANCELED.value
-    assert operations == (["cancel", "stop"] if prepared else ["stop", "cancel", "update"])
+    assert operations == (["cancel", "stop"] if prepared else ["cancel", "update", "stop"])
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):

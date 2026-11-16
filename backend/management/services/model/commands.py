@@ -94,8 +94,8 @@ async def list_provider_models_for_tenant(tenant_id, provider, model_type, *, us
     return await _command(Operation.LIST_PROVIDER, payload, user_id, tenant_id)
 
 
-async def check_model_connectivity(display_name, tenant_id, model_type=None, *, user_id):
-    payload = ModelHealthcheck(display_name=display_name, model_type=model_type)
+async def check_model_connectivity(display_name, tenant_id, model_type=None, *, user_id, persist_status=True):
+    payload = ModelHealthcheck(display_name=display_name, model_type=model_type, persist_status=persist_status)
     return await _command(Operation.HEALTHCHECK, payload, user_id, tenant_id)
 
 

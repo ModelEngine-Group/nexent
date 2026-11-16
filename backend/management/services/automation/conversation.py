@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 from contracts.conversation import HistoryItem, MessageRequest, MessageUnit
 from contracts.conversation import MessageSource
 from management.db.conversation.prepared_turn import PreparedTurnConflict, read_saved_user_turn_by_id
+from management.db.automation.messages import create_run_message
 from management.services.conversation.service import (
     get_conversation_history_service,
     save_message,
@@ -101,6 +102,8 @@ class AutomationConversationAdapter:
         prompt: str,
         user_id: str,
         tenant_id: str,
+        *,
+        run_id: Optional[int] = None,
     ) -> AutomationPromptTurn:
         """Append a new automation turn without regenerating an existing message."""
         history_payload = get_conversation_history_service(conversation_id, user_id)
@@ -123,6 +126,12 @@ class AutomationConversationAdapter:
             role="user",
             message=[MessageUnit(type="string", content=prompt)],
         )
+        if run_id is not None:
+            message_id = create_run_message(run_id, {
+                "conversation_id": conversation_id, "message_idx": next_message_index,
+                "role": "user", "content": prompt,
+            }, user_id, tenant_id)
+            return self.load_run_prompt(conversation_id, message_id, prompt, user_id, tenant_id)
         message_id = save_message(
             request, user_id, tenant_id, message_source=MessageSource.AUTOMATION,
         )
@@ -139,6 +148,15 @@ class AutomationConversationAdapter:
             "assistant_message_index": next_message_index + 1,
             "history": self._history_items(messages),
         }
+
+    def append_run_assistant(
+        self, request: MessageRequest, *, run_id: int, user_id: str, tenant_id: str,
+    ) -> int:
+        """Create the root assistant and bind it before generation starts."""
+        return create_run_message(run_id, {
+            "conversation_id": request.conversation_id, "message_idx": request.message_idx,
+            "role": "assistant", "content": "", "minio_files": request.minio_files,
+        }, user_id, tenant_id)
 
     def append_proposal_exchange(
         self,

@@ -22,7 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import { Alert, Button, Empty, Input, Modal, Spin, message } from "antd";
+import { Alert, Button, Empty, Input, Spin, message } from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -39,13 +39,6 @@ import { ResourceCard } from "@/features/workbench";
 import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
 import { RESOURCE_PAGE_SIZE } from "@/features/workbench/components/ResourcePagination";
-import { useToolList } from "@/hooks/agent/useToolList";
-import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
-import {
-  AIDP_NON_PERSISTED_PARAM_NAMES,
-  getSemanticToolName,
-} from "@/lib/managedKnowledgeTools";
-import type { ToolParam } from "@/types/agentConfig";
 import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
 
 interface ConversationKnowledgeScopeModalProps {
@@ -54,6 +47,9 @@ interface ConversationKnowledgeScopeModalProps {
   disabled?: boolean;
   value: ConversationKnowledgeScope | null;
   capabilities: KnowledgeCapabilities | null;
+  onRetryCapabilities?: () => void;
+  capabilitiesPending?: boolean;
+  capabilitiesUnavailable?: boolean;
   onCancel: () => void;
   onConfirm: (
     scope: ConversationKnowledgeScope,
@@ -65,7 +61,11 @@ const copyScope = (
   value: ConversationKnowledgeScope | null
 ): ConversationKnowledgeScope =>
   JSON.parse(
-    JSON.stringify(value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE)
+    JSON.stringify({
+      schema_version: 1,
+      local: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).local,
+      aidp: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).aidp,
+    })
   ) as ConversationKnowledgeScope;
 
 const normalizeScopeForSource = (
@@ -86,6 +86,7 @@ const normalizeScopeForSource = (
   }
   if (source === "aidp" && scope.aidp.mode === "inherit") {
     return {
+      ...scope,
       schema_version: 1,
       local: { mode: "disabled", knowledge_ids: [] },
       aidp: { mode: "inherit", kds_ids: [] },
@@ -116,6 +117,9 @@ export const ConversationKnowledgeScopeModal: FC<
   open,
   value,
   capabilities,
+  onRetryCapabilities,
+  capabilitiesPending = false,
+  capabilitiesUnavailable = false,
   onCancel,
   onConfirm,
   presentation = "modal",
@@ -125,7 +129,9 @@ export const ConversationKnowledgeScopeModal: FC<
   const router = useRouter();
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const { user } = useAuthorizationContext();
-  const { data: groupListData } = useGroupList(user?.tenantId ?? null);
+  const { data: groupListData } = useGroupList(
+    open ? (user?.tenantId ?? null) : null
+  );
   const groupNameById = useMemo(
     () =>
       new Map(
@@ -151,6 +157,7 @@ export const ConversationKnowledgeScopeModal: FC<
     []
   );
   const [listError, setListError] = useState(false);
+  const resourceError = listError || capabilitiesUnavailable;
   const [saving, setSaving] = useState(false);
   const [initialSelectedIds, setInitialSelectedIds] = useState<string[]>([]);
   const [initialSelectionWasFiltered, setInitialSelectionWasFiltered] =
@@ -159,23 +166,6 @@ export const ConversationKnowledgeScopeModal: FC<
   const [selectionTouched, setSelectionTouched] = useState(false);
   const [restoreDefaultClicked, setRestoreDefaultClicked] = useState(false);
   const [search, setSearch] = useState("");
-  const [retrievalOpen, setRetrievalOpen] = useState(false);
-  const [retrievalDraft, setRetrievalDraft] = useState<Record<string, unknown>>(
-    {}
-  );
-  const { availableTools, isLoading: toolsLoading } = useToolList({
-    enabled: open && retrievalOpen,
-  });
-  const retrievalTool = availableTools.find(
-    (tool) =>
-      getSemanticToolName(tool) ===
-      (enableAidpKnowledge ? "aidp_search" : "knowledge_base_search")
-  );
-  const retrievalParams = (retrievalTool?.initParams ?? []).filter(
-    (param: ToolParam) =>
-      !["index_names", "kds_list"].includes(param.name) &&
-      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
-  );
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
   const tags = useResourceTags(
@@ -198,8 +188,10 @@ export const ConversationKnowledgeScopeModal: FC<
   >(null);
   const loading =
     open &&
-    Boolean(configuredSource) &&
-    settledCatalogRequest !== catalogLoadRequest;
+    !capabilitiesUnavailable &&
+    (capabilitiesPending ||
+      (Boolean(configuredSource) &&
+        settledCatalogRequest !== catalogLoadRequest));
   const [previousInputs, setPreviousInputs] = useState({
     open,
     search,
@@ -236,7 +228,13 @@ export const ConversationKnowledgeScopeModal: FC<
   useEffect(() => {
     const { catalogRequest } = catalogLoadRequest;
     const configuredSource = catalogRequest.source;
-    if (!open || !configuredSource) return;
+    if (
+      !open ||
+      !configuredSource ||
+      capabilitiesPending ||
+      capabilitiesUnavailable
+    )
+      return;
     const { value, capabilities, t } = catalogRequest;
     const normalized = normalizeScopeForSource(value, configuredSource);
     let cancelled = false;
@@ -335,7 +333,7 @@ export const ConversationKnowledgeScopeModal: FC<
     return () => {
       cancelled = true;
     };
-  }, [open, catalogLoadRequest]);
+  }, [open, catalogLoadRequest, capabilitiesPending, capabilitiesUnavailable]);
 
   const localOptions = useMemo(
     () =>
@@ -491,7 +489,7 @@ export const ConversationKnowledgeScopeModal: FC<
   };
 
   const handleConfirm = async () => {
-    if (!configuredSource || loading || saving || listError) return;
+    if (!configuredSource || loading || saving || resourceError) return;
     const selectedIds =
       configuredSource === "local"
         ? draft.local.knowledge_ids
@@ -508,18 +506,6 @@ export const ConversationKnowledgeScopeModal: FC<
       nextScope = buildInheritScope(configuredSource);
     }
     if (!validateLocalEmbeddingModels()) return;
-    const incompatibleScope =
-      configuredSource === "aidp"
-        ? value?.local.mode === "override"
-        : value?.aidp.mode === "override";
-    const retrievalConfig = draft.retrieval_config || {};
-    if (
-      !restoreDefaultClicked &&
-      !incompatibleScope &&
-      Object.keys(retrievalConfig).length
-    )
-      nextScope.retrieval_config = structuredClone(retrievalConfig);
-    else delete nextScope.retrieval_config;
     const localNamesById = new Map(
       localOptions.map((option) => [String(option.value), String(option.label)])
     );
@@ -739,7 +725,7 @@ export const ConversationKnowledgeScopeModal: FC<
                 pageOnly={false}
                 allSelected={allSelected}
                 hasSelection={values.length > 0}
-                disabled={loading || saving || listError}
+                disabled={loading || saving || resourceError}
                 empty={selectableIds.length === 0}
                 onToggleAll={handleSelectAll}
                 onClear={() => updateSelectedValues(source, [])}
@@ -900,17 +886,8 @@ export const ConversationKnowledgeScopeModal: FC<
   );
   const drawerFooter = (
     <div className="flex items-center gap-3">
-      <Button
-        disabled={disabled || saving || loading}
-        onClick={() => {
-          setRetrievalDraft(structuredClone(draft.retrieval_config ?? {}));
-          setRetrievalOpen(true);
-        }}
-      >
-        {t("chat.knowledgeScope.retrievalSettings", "检索设置")}
-      </Button>
       <RestoreDefaultsButton
-        disabled={loading || listError || saving || !configuredSource}
+        disabled={loading || resourceError || saving || !configuredSource}
         onClick={() => {
           if (!configuredSource) return;
           setDraft(
@@ -953,7 +930,7 @@ export const ConversationKnowledgeScopeModal: FC<
       disabled={disabled}
       confirmDisabled={
         loading ||
-        listError ||
+        resourceError ||
         !source ||
         (!!tags.predicates.length && tags.loading)
       }
@@ -1002,24 +979,25 @@ export const ConversationKnowledgeScopeModal: FC<
         selectAllDisabled:
           loading ||
           saving ||
-          listError ||
+          resourceError ||
           !drawerSelection?.selectableIds.length,
         onRefresh: () => {
           if (loading || saving) return;
+          if (capabilitiesUnavailable) onRetryCapabilities?.();
           setListError(false);
           tags.retry?.();
           setRefreshRevision((value) => value + 1);
         },
         refreshDisabled: loading || saving || !source,
         controlsContent:
-          listError ||
+          resourceError ||
           capabilities?.legacy_prompt_warning?.detected ||
           (value &&
             ((value.local.mode === "override" && source === "aidp") ||
               (value.aidp.mode === "override" && source === "local"))) ? (
             <>
               {knowledgeWarnings}
-              {listError && (
+              {resourceError && (
                 <Alert
                   type="error"
                   title={t("chat.knowledgeScope.listLoadFailed")}
@@ -1061,7 +1039,7 @@ export const ConversationKnowledgeScopeModal: FC<
           okButtonProps={{
             disabled:
               loading ||
-              listError ||
+              resourceError ||
               !configuredSource ||
               (!!tags.predicates.length && tags.loading),
           }}
@@ -1103,44 +1081,6 @@ export const ConversationKnowledgeScopeModal: FC<
           </Spin>
         </ResourcePickerPresentation>
       )}
-      <Modal
-        open={retrievalOpen && open}
-        title={t("agent.knowledge.configModal.title")}
-        onCancel={() => setRetrievalOpen(false)}
-        okText={t("common.confirm", "确定")}
-        cancelText={t("common.cancel", "取消")}
-        okButtonProps={{ disabled: toolsLoading || disabled }}
-        onOk={() => {
-          if (disabled) return;
-          setDraft((current) => ({
-            ...current,
-            retrieval_config: { ...retrievalDraft },
-          }));
-          setRetrievalOpen(false);
-        }}
-      >
-        <KnowledgeRetrievalParamsForm
-          params={retrievalParams}
-          values={Object.fromEntries(
-            retrievalParams.map((param: ToolParam) => [
-              param.name,
-              retrievalDraft[param.name] ??
-                capabilities?.sources[configuredSource ?? "local"]
-                  .default_retrieval_config?.[param.name] ??
-                param.value ??
-                param.default,
-            ])
-          )}
-          onChange={(name, next) =>
-            setRetrievalDraft((current) => {
-              const value = { ...current };
-              if (next == null) delete value[name];
-              else value[name] = next;
-              return value;
-            })
-          }
-        />
-      </Modal>
     </>
   );
 };

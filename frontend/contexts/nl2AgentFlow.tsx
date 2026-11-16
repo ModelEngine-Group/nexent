@@ -111,6 +111,7 @@ function reducer(
         ...state,
         phase: "running",
         agentId: action.agentId,
+        activeCard: null,
         completionSyncFailed: false,
         isFormLocked: true,
       };
@@ -131,6 +132,7 @@ function reducer(
       };
     case "register_card":
       if (state.submittedCardKeys.has(action.card.key)) return state;
+      // Restoring a card does not start a generation run or acquire its edit lock.
       return {
         ...state,
         phase:
@@ -142,7 +144,6 @@ function reducer(
                 ? "binding"
                 : state.phase,
         activeCard: action.card,
-        isFormLocked: state.agentId !== null || state.isFormLocked,
       };
     case "submit_card": {
       const submittedCardKeys = new Set(state.submittedCardKeys);

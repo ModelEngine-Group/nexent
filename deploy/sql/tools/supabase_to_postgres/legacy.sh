@@ -26,12 +26,31 @@ run_recovery() {
     return
   fi
   export SUPABASE_DATA_DIR="${SUPABASE_DATA_DIR:-${ROOT_DIR:+$ROOT_DIR/volumes/db/data}}"
-  [ -n "$SUPABASE_DATA_DIR" ] && [ -f "$SUPABASE_DATA_DIR/PG_VERSION" ] || fail "Set ROOT_DIR or SUPABASE_DATA_DIR to original data containing PG_VERSION; refusing empty source initialization"
+  [ -n "$SUPABASE_DATA_DIR" ] && [ -s "$SUPABASE_DATA_DIR/PG_VERSION" ] &&
+    [ -s "$SUPABASE_DATA_DIR/global/pg_control" ] || fail "Set ROOT_DIR or SUPABASE_DATA_DIR to the original PostgreSQL data directory (PG_VERSION and global/pg_control required); refusing empty source initialization"
   SUPABASE_DATA_DIR="$(cd "$SUPABASE_DATA_DIR" && pwd)"
   export SUPABASE_LOG_DIR="${SUPABASE_LOG_DIR:-${ROOT_DIR:+$ROOT_DIR/volumes/logs}}"
   SUPABASE_LOG_DIR="${SUPABASE_LOG_DIR:-$(dirname "$SUPABASE_DATA_DIR")/logs}"
   source_name=""; get_source
-  export SUPABASE_POSTGRES_PASSWORD="$source_password"
+  export SUPABASE_POSTGRES_PASSWORD="$source_password" SUPABASE_POSTGRES_DB="$source_db" SUPABASE_POSTGRES_PORT="$source_port"
+  export SUPABASE_DB="${SUPABASE_DB:-supabase/postgres:15.8.1.060}"
+  export SUPABASE_PUBLISHED_PORT="${SUPABASE_PUBLISHED_PORT:-5436}"
+  export SUPABASE_MIGRATION_BIND_ADDRESS="${SUPABASE_MIGRATION_BIND_ADDRESS:-127.0.0.1}"
+  export SUPABASE_KONG="${SUPABASE_KONG:-kong:2.8.1}" SUPABASE_GOTRUE="${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}"
+  export SUPABASE_KONG_HTTP_PORT="${SUPABASE_KONG_HTTP_PORT:-8000}" SUPABASE_KONG_HTTPS_PORT="${SUPABASE_KONG_HTTPS_PORT:-8443}"
+  local site_url=http://localhost:3000
+  [ "$production" = false ] || site_url=http://nexent:3000
+  export API_EXTERNAL_URL="${API_EXTERNAL_URL:-http://localhost:8000}" SITE_URL="${SITE_URL:-$site_url}"
+  export JWT_SECRET="${JWT_SECRET:-}" SUPABASE_KEY="${SUPABASE_KEY:-}" SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY:-}"
+  export DASHBOARD_USERNAME="${DASHBOARD_USERNAME:-supabase}" DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD:-}"
+  export JWT_EXPIRY="${JWT_EXPIRY:-7200}" ADDITIONAL_REDIRECT_URLS="${ADDITIONAL_REDIRECT_URLS:-}"
+  export DISABLE_SIGNUP="${DISABLE_SIGNUP:-true}" ENABLE_EMAIL_SIGNUP="${ENABLE_EMAIL_SIGNUP:-true}"
+  export ENABLE_ANONYMOUS_USERS="${ENABLE_ANONYMOUS_USERS:-false}" ENABLE_EMAIL_AUTOCONFIRM="${ENABLE_EMAIL_AUTOCONFIRM:-true}"
+  export ENABLE_PHONE_SIGNUP="${ENABLE_PHONE_SIGNUP:-false}" ENABLE_PHONE_AUTOCONFIRM="${ENABLE_PHONE_AUTOCONFIRM:-false}"
+  export MAILER_URLPATHS_INVITE="${MAILER_URLPATHS_INVITE:-/auth/v1/verify}"
+  export MAILER_URLPATHS_CONFIRMATION="${MAILER_URLPATHS_CONFIRMATION:-/auth/v1/verify}"
+  export MAILER_URLPATHS_RECOVERY="${MAILER_URLPATHS_RECOVERY:-/auth/v1/verify}"
+  export MAILER_URLPATHS_EMAIL_CHANGE="${MAILER_URLPATHS_EMAIL_CHANGE:-/auth/v1/verify}"
   if [ "$with_auth" = true ]; then
     for name in JWT_SECRET SUPABASE_KEY SERVICE_ROLE_KEY DASHBOARD_PASSWORD; do [ -n "${!name:-}" ] || fail "Full legacy auth requires original signing keys and tokens"; done
   else
@@ -56,7 +75,7 @@ run_recovery() {
   local args=(compose --project-name "$SUPABASE_MIGRATION_PROJECT" --project-directory "$directory" -f "$directory/docker-compose-supabase.yml")
   [ "$production" = false ] || args+=(-f "$directory/docker-compose-supabase.prod.yml")
   [ "$with_auth" = false ] || args+=(--profile legacy-auth)
-  args+=(up -d db)
+  args+=(up -d --no-recreate db)
   [ "$with_auth" = false ] || args+=(auth kong)
-  platform "${args[@]}" >/dev/null
+  platform "${args[@]}" >/dev/null || fail "Cannot start Supabase from the original data directory"
 }

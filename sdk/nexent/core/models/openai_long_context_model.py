@@ -5,42 +5,28 @@ import logging
 import tiktoken
 from smolagents.models import ChatMessage
 
-from ..models import OpenAIModel
+from .openai_llm import OpenAIModel
 from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P
 from ..utils.observer import MessageObserver
 
 logger = logging.getLogger("openai_long_context_model")
 
 
-class OpenAILongContextModel(OpenAIModel):
+class LongTextPreparation:
     """
     Long context model class, used to process large text files
     Support automatic truncation of content exceeding context limits
     """
     
-    def __init__(self, observer: MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
-                 max_context_tokens=128000, truncation_strategy="start", ssl_verify: bool = True, *args, **kwargs):
-        """
-        Initialize the long context model
-        
-        Args:
-            observer: Message observer
-            temperature: Temperature parameter
-            top_p: top_p parameter
-            max_context_tokens: Maximum context token number, default is 128k
-            truncation_strategy: Truncation strategy
-                - "start": Only keep the beginning part
-                - "middle": Keep the beginning and end parts
-                - "end": Only keep the end part
-            *args, **kwargs: Other parameters
-        """
-        super().__init__(observer=observer, temperature=temperature, top_p=top_p, ssl_verify=ssl_verify, *args, **kwargs)
-        self.max_context_tokens = max_context_tokens
-        if truncation_strategy not in ["start", "middle", "end"]:
+    def initialize_long_text(self, max_context_tokens, truncation_strategy):
+        if type(max_context_tokens) is not int or max_context_tokens <= 0:
+            raise ValueError("Long-text context limit must be a positive integer")
+        if truncation_strategy not in ("start", "middle", "end"):
             raise ValueError("truncation_strategy must be 'start', 'middle' or 'end'")
+        self.max_context_tokens = max_context_tokens
         self.truncation_strategy = truncation_strategy
         self._tokenizer = None
-    
+
     def _get_tokenizer(self):
         """Get tokenizer, used to calculate token number"""
         if self._tokenizer is None:
@@ -220,3 +206,11 @@ class OpenAILongContextModel(OpenAIModel):
         except Exception as e:
             logger.error(f"Error during long text analysis: {str(e)}")
             raise
+
+class OpenAILongContextModel(LongTextPreparation, OpenAIModel):
+    """Keep the public model constructor over shared text preparation."""
+
+    def __init__(self, observer: MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+                 max_context_tokens=128000, truncation_strategy="start", ssl_verify=True, *args, **kwargs):
+        super().__init__(observer=observer, temperature=temperature, top_p=top_p, ssl_verify=ssl_verify, *args, **kwargs)
+        self.initialize_long_text(max_context_tokens, truncation_strategy)

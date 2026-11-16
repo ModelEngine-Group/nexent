@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: WORKBENCH-SCHEMA-CONTRACT-20261102
+  change_type: bugfix
+  bug_id: WORKBENCH-SCHEMA-CONTRACT-20261102
+  title: Keep Workbench replacement compatible with its persisted version3 contract
+  description: Restore schema3 topology checks until the contract and a reviewed persisted-data migration change together.
+  observed_behavior: Repository requires schema4 while service serialization and WorkbenchSessionConfig require schema3, rejecting valid persisted updates with409.
+  expected_behavior: Valid unchanged and changed schema3 configurations pass replacement; ownership, revision conflicts and locked creation topology remain enforced.
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: Repository tests manually constructed schema4 dictionaries instead of serializing the actual request contract.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Actual WorkbenchSessionConfig serialization roundtrips through both replacement functions for unchanged and changed data.
+    - Configuration and metadata version counters retain independent increments; existing ownership and topology rejections remain enforced.
+    reason: The exact contract mismatch is reproduced at the repository unit boundary; a final real HTTP PATCH checks deployed behavior. Existing drawer D4 mocks do not prove backend persistence and are not relabeled or weakened.
+    test_selectors:
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/services/test_workbench_service.py
+    - test/backend/services/test_workbench_service_coverage.py
+  notes: User-approved behavior is schema3; no schema4 contract or data migration is introduced. Existing formal D4 assets remain unchanged; final actual API proof and source revision are retained independently.

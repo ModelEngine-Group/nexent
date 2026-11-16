@@ -1,6 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import logging
+from runtime.model.configuration import (
+    create_model_configuration as _create_model_configuration,
+    update_model_configuration as _update_model_configuration,
+)
 from typing import Any, Dict, List, Optional
 
 from contracts.constants.constants import (
@@ -219,7 +223,7 @@ async def create_model_for_tenant(
 
         if is_multimodal:
             # Create multi_embedding record
-            create_model_record(model_data, user_id, tenant_id)
+            _create_model_configuration(model_data, user_id, tenant_id)
             logging.debug(
                 f"Multimodal embedding model {model_data['display_name']} created successfully"
             )
@@ -227,13 +231,13 @@ async def create_model_for_tenant(
             # Create embedding record variant
             embedding_data = model_data.copy()
             embedding_data["model_type"] = "embedding"
-            create_model_record(embedding_data, user_id, tenant_id)
+            _create_model_configuration(embedding_data, user_id, tenant_id)
             logging.debug(
                 f"Embedding model {embedding_data['display_name']} created successfully"
             )
         else:
             # Non-multimodal
-            create_model_record(model_data, user_id, tenant_id)
+            _create_model_configuration(model_data, user_id, tenant_id)
             logging.debug(f"Model {model_data['display_name']} created successfully")
 
         return sorted(get_created_model_ids(
@@ -425,7 +429,7 @@ async def batch_create_models_for_tenant(
                         if existing_model.get("capacity_source") != "operator":
                             update_data["capacity_source"] = "operator"
                     if update_data:
-                        update_model_record(
+                        _update_model_configuration(
                             existing_model["model_id"], update_data, user_id, tenant_id
                         )
                     continue
@@ -443,7 +447,7 @@ async def batch_create_models_for_tenant(
             # ============================================================
             apply_catalog_defaults(model_dict, provider)
             _apply_model_reasoning_default(model_dict, provider)
-            create_model_record(model_dict, user_id, tenant_id)
+            _create_model_configuration(model_dict, user_id, tenant_id)
             if model_dict.get("display_name"):
                 created_display_names.append(model_dict["display_name"])
             logging.debug(f"Model {model['id']} created successfully")
@@ -592,7 +596,7 @@ async def update_single_model_for_tenant(
                     for k, v in model_data.items()
                     if k not in ["model_id", "model_type"]
                 }
-                update_model_record(model["model_id"], update_data, user_id, tenant_id)
+                _update_model_configuration(model["model_id"], update_data, user_id, tenant_id)
             logging.debug(
                 f"Model {current_display_name} (embedding + multi_embedding) updated successfully"
             )
@@ -601,7 +605,7 @@ async def update_single_model_for_tenant(
             current_model = existing_models[0]
             current_model_id = current_model["model_id"]
             update_data = {k: v for k, v in model_data.items() if k != "model_id"}
-            update_model_record(current_model_id, update_data, user_id, tenant_id)
+            _update_model_configuration(current_model_id, update_data, user_id, tenant_id)
             logging.debug(f"Model {current_display_name} updated successfully")
     except LookupError:
         raise
@@ -628,7 +632,7 @@ async def batch_update_models_for_tenant(
 
             # Check if model_id is a numeric string (primary key)
             if model_id_or_name and model_id_or_name.isdigit():
-                update_model_record(
+                _update_model_configuration(
                     int(model_id_or_name), update_data, user_id, tenant_id
                 )
             else:
@@ -653,7 +657,7 @@ async def batch_update_models_for_tenant(
                     )
                     continue
 
-                update_model_record(
+                _update_model_configuration(
                     model_record["model_id"], update_data, user_id, tenant_id
                 )
 

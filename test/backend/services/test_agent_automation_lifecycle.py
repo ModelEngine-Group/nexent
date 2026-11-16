@@ -24,6 +24,8 @@ from management.services.automation.prompt import AutomationTaskContent
 @pytest.mark.asyncio
 async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(monkeypatch):
     """Exercise the service lifecycle without sending the schedule command to the Agent."""
+    from test.backend.services.automation_transaction_stub import stub_runner_transactions
+    stub_runner_transactions(monkeypatch, runner_module)
     messages = []
     proposals = {}
     tasks = {}
@@ -191,8 +193,9 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             assistant_message_id=messages[-1]["message_id"], chunks=1,
         )
 
-    def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id):
+    def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id, *, run_id):
         message_id = len(messages) + 1
+        runs[run_id].update(user_message_id=message_id, generated_prompt=prompt)
         messages.append({
             "message_id": message_id,
             "message_idx": len(messages),
@@ -210,14 +213,14 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         runs[21] = run
         return run
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, **kwargs):
         run = runs[run_id]
         if expected_statuses and run["status"] not in expected_statuses:
             return None
         run.update(values)
         return run
 
-    def fake_update_task(task_id, tenant_id, user_id, values):
+    def fake_update_task(task_id, tenant_id, user_id, values, **kwargs):
         tasks[task_id].update(values)
         return tasks[task_id]
 

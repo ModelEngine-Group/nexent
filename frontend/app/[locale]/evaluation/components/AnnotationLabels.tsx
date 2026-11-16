@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import { useState, useEffect } from "react";
 import {
@@ -16,6 +18,7 @@ import {
 } from "antd";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 
@@ -50,7 +53,9 @@ export default function AnnotationLabels({
 
   const fetchSchemas = () => {
     setLoading(true);
-    fetch("/api/evaluation-annotations/schemas", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationAnnotations.schemas, {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((d) => setSchemas(d.data || []))
       .finally(() => setLoading(false));
@@ -101,8 +106,8 @@ export default function AnnotationLabels({
       options,
     };
     const url = editing
-      ? `/api/evaluation-annotations/schemas/${editing.schema_id}`
-      : "/api/evaluation-annotations/schemas";
+      ? API_ENDPOINTS.evaluationAnnotations.schema(editing.schema_id)
+      : API_ENDPOINTS.evaluationAnnotations.schemas;
     const method = editing ? "PUT" : "POST";
     const res = await fetch(url, {
       method,
@@ -164,7 +169,7 @@ export default function AnnotationLabels({
             title={t("agentEvaluation.deleteLabelConfirm")}
             onConfirm={async () => {
               const res = await fetch(
-                `/api/evaluation-annotations/schemas/${r.schema_id}`,
+                API_ENDPOINTS.evaluationAnnotations.schema(r.schema_id),
                 { method: "DELETE", headers: getAuthHeaders() }
               );
               if (!res.ok) {

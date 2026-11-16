@@ -45,13 +45,16 @@ def _load_runner_with_stubs(monkeypatch):
         runner_module,
         "automation_conversation_adapter",
         types.SimpleNamespace(
-            append_run_prompt=lambda conversation_id, prompt, user_id, tenant_id: {
+            append_run_prompt=lambda conversation_id, prompt, user_id, tenant_id, **kwargs: {
                 "user_message_id": 101,
                 "assistant_message_index": 1,
                 "history": [],
             },
+            append_run_assistant=lambda *args, **kwargs: 456,
         ),
     )
+    from test.backend.services.automation_transaction_stub import stub_runner_transactions
+    stub_runner_transactions(monkeypatch, runner_module)
     return runner_module
 
 
@@ -142,11 +145,11 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
         },
     )
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None):
         updates["run"] = {"run_id": run_id, **values}
         return updates["run"]
 
-    def fake_update_task(task_id, tenant_id, user_id, values):
+    def fake_update_task(task_id, tenant_id, user_id, values, **kwargs):
         updates["task"] = {"task_id": task_id, **values}
         return updates["task"]
 
@@ -179,9 +182,10 @@ async def test_runner_skips_when_conversation_agent_is_running(monkeypatch):
         },
     )
 
+    monkeypatch.setattr(runner_module.agent_automation_db, "update_run", lambda run_id, values, *a, **k: {"run_id": run_id, **values})
     task_updates = {}
 
-    def fake_update_task(task_id, tenant_id, user_id, values):
+    def fake_update_task(task_id, tenant_id, user_id, values, **kwargs):
         task_updates.update(values)
         return {"task_id": task_id, **values}
 
@@ -229,12 +233,12 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
+        lambda task_id, tenant_id, user_id, values, **kwargs: {"task_id": task_id, **values},
     )
 
     task = {
@@ -279,7 +283,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         runs[run["run_id"]] = run
         return run
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None):
         run = runs[run_id]
         if expected_statuses and run["status"] not in expected_statuses:
             return None
@@ -295,12 +299,13 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
+        lambda task_id, tenant_id, user_id, values, **kwargs: {"task_id": task_id, **values},
     )
 
-    def fake_append_run_prompt(conversation_id, *args):
+    def fake_append_run_prompt(conversation_id, *args, run_id):
         prompt_conversation_ids.append(conversation_id)
         message_id = next(user_message_ids)
+        runs[run_id]["user_message_id"] = message_id
         return {
             "user_message_id": message_id,
             "assistant_message_index": (message_id - 100) * 2 - 1,
@@ -367,7 +372,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "create_run",
-        lambda values, user_id: {
+        lambda values, user_id, **kwargs: {
             "run_id": 18,
             "started_at": datetime.now(timezone.utc),
             **values,
@@ -376,12 +381,12 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
+        lambda task_id, tenant_id, user_id, values, **kwargs: {"task_id": task_id, **values},
     )
 
     task = {
@@ -423,17 +428,17 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "create_run",
-        lambda values, user_id: {"run_id": 15, **values},
+        lambda values, user_id, **kwargs: {"run_id": 15, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: updates.setdefault("task", values),
+        lambda task_id, tenant_id, user_id, values, **kwargs: updates.setdefault("task", values),
     )
     monkeypatch.setattr(
         runner_module,
@@ -501,7 +506,7 @@ def test_finish_run_preserves_task_paused_during_execution(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -511,7 +516,7 @@ def test_finish_run_preserves_task_paused_during_execution(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: captured.update(values),
+        lambda task_id, tenant_id, user_id, values, **kwargs: captured.update(values),
     )
 
     runner_module.AgentAutomationRunner()._finish_run(
@@ -531,13 +536,13 @@ def test_scheduled_failure_advances_to_next_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: captured.update(values),
+        lambda task_id, tenant_id, user_id, values, **kwargs: captured.update(values),
     )
     task = {
         **_base_task(),
@@ -570,13 +575,13 @@ def test_manual_run_does_not_consume_scheduled_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: captured.update(values),
+        lambda task_id, tenant_id, user_id, values, **kwargs: captured.update(values),
     )
     task = {
         **_base_task(),
@@ -603,10 +608,7 @@ def test_manual_run_does_not_consume_scheduled_occurrence(monkeypatch):
         {},
     )
 
-    assert captured["fire_count"] == 4
-    assert captured["next_fire_at"] == initial_next_fire
-    assert captured["status"] == "ACTIVE"
-    assert captured["consecutive_failures"] == 2
+    assert not {"fire_count", "next_fire_at", "status", "consecutive_failures"} & captured.keys()
 
 
 def test_datetime_helper_covers_fallback_inputs(monkeypatch):
@@ -627,7 +629,7 @@ async def test_execute_task_carries_lease_owner_into_active_run(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "create_run",
-        lambda values, user_id: {"run_id": 21, **values},
+        lambda values, user_id, **kwargs: {"run_id": 21, **values},
     )
 
     async def capture_active_run(run, task):
@@ -651,7 +653,7 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "create_run",
-        lambda values, user_id: {"run_id": 22, **values},
+        lambda values, user_id, **kwargs: {"run_id": 22, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -660,13 +662,19 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
     )
     monkeypatch.setattr(runner, "cancel_runtime_run", AsyncMock(side_effect=lambda *args: canceled.append(args)))
 
+    monkeypatch.setattr(runner_module.agent_automation_db, "update_run", lambda run_id, values, *a, **k: {"run_id": run_id, **values})
+    monkeypatch.setattr(runner_module.agent_automation_db, "update_task", lambda *a, **k: {})
+
     async def interrupt(*args):
         raise asyncio.CancelledError
 
     monkeypatch.setattr(runner, "_execute_active_run", interrupt)
     with pytest.raises(asyncio.CancelledError):
         await runner.execute_task(_base_task())
-    assert any(call and call[0] == 22 for call in canceled)
+    assert len(canceled) == 1
+    runtime_run_id, conversation_id, user_id, tenant_id = canceled[0]
+    assert len(runtime_run_id) == 32
+    assert (conversation_id, user_id, tenant_id) == (100, "user", "tenant")
 
     async def fail(*args):
         raise RuntimeError("agent failed")
@@ -704,13 +712,13 @@ def test_repeated_scheduled_failures_pause_task_and_stale_writes_are_discarded(m
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None, db_session=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_task",
-        lambda task_id, tenant_id, user_id, values: captured.update(values) or values,
+        lambda task_id, tenant_id, user_id, values, **kwargs: captured.update(values) or values,
     )
 
     runner._finish_run(

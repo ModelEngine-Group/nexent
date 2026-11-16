@@ -139,7 +139,10 @@ def prepare_agent_creator_run(payload: PreparedAgentCreatorRun, actor: ServicePr
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
     model = _materialize_model(payload.model, actor, None)
     query, _, _ = materialize_evaluation_input(payload.input, actor, payload.language)
-    agent = create_nl2agent_agent_config(payload.language, list(_callback_tools(payload, actor)))
+    from runtime.agentos.creator_definition import load_creator_definition
+
+    agent = create_nl2agent_agent_config(payload.language, list(_callback_tools(payload, actor)),
+                                       snapshot=load_creator_definition(payload))
     agent.model_name = model.cite_name
     agent.context_items.append(ContextItemInput(
         id="system:nl2agent_bound_resources", type=ContextItemType.SYSTEM, content={"text": payload.bound_resources},

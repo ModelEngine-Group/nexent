@@ -36,6 +36,7 @@ async def finalize_assistant_projection(
     user_id,
     tenant_id,
     final_answer_content,
+    final_answer_override=None,
     run_outcome,
     persist_batch,
     mark_failed,

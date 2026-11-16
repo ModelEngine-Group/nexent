@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-CATALOG-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-CATALOG-20261013
+  title: Package the pinned China-region model profile source inventory
+  description: Catalog source slice; no runtime consumer or support certification
+    is introduced.
+  affected_features:
+    existing: []
+    added:
+    - SDK-MODEL-PROFILE-CATALOG
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - The reviewed inventory has 21 model, 21 provider-model and 3 provider files,
+      all with verified manifest hashes.
+    - Every declared base_model dependency is in the selection; TOML parses without
+      requiring upstream TypeScript.
+    - SDK wheels retain the manifest, source files, README and complete upstream MIT
+      license.
+    - Controlled TOML reader rejects path escapes, invalid manifest versions, duplicates,
+      missing sources, digest mismatch and malformed TOML without returning a partial
+      inventory.
+    - Read source documents preserve exact source identity and deeply immutable nested
+      data; loading is not semantic normalization.
+    reason: Isolated source/package integrity checks; later reader, normalization
+      and composition steps need their own component verification.
+    test_selectors:
+    - test/sdk/core/model_service/test_catalog_inventory.py
+    - test/sdk/core/model_service/test_source_reader.py
+  no_case_change_reason: No API or runtime behavior is connected. Existing Cases remain
+    unchanged; installed-package inspection supplies artifact evidence, not Agent
+    acceptance.
+  notes: SPEC AC-01/16 subset. Source inventory is distinct from verified support;
+    live-model acceptance remains pending.

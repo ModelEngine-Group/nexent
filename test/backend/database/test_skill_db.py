@@ -1139,8 +1139,8 @@ class TestListSkills:
         monkeypatch.setattr(
             "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "management.db.skill.repository._get_tool_ids",
-            lambda s, skill_id: [1, 2] if skill_id == 1 else []
+            "management.db.skill.repository._get_tool_ids_by_skill_ids",
+            lambda s, skill_ids: {1: [1, 2], 2: []}
         )
 
         result = list_skills('tenant1')

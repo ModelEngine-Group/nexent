@@ -52,59 +52,39 @@ class AgentAutomationRunner:
         lease_owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         scheduled = scheduled_fire_at or _parse_dt(task.get("next_fire_at"))
-        active = agent_automation_db.has_active_run_for_conversation(
+        busy = agent_automation_db.has_active_run_for_conversation(
             task["conversation_id"], task["user_id"], task["tenant_id"],
         )
         inspection_error = None
-        if not active:
+        if not busy:
             try:
-                active = await forward_active_run(task["conversation_id"], task["user_id"], task["tenant_id"]) is not None
+                busy = await forward_active_run(task["conversation_id"], task["user_id"], task["tenant_id"]) is not None
             except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as exc:
                 inspection_error = exc
-        if active:
-            skipped_at = _utcnow()
-            run = agent_automation_db.create_run({
-                "task_id": task["task_id"],
-                "tenant_id": task["tenant_id"],
-                "user_id": task["user_id"],
-                "conversation_id": task["conversation_id"],
-                "scheduled_fire_at": scheduled,
-                "actual_fire_at": skipped_at,
-                "trigger_type": trigger_type,
-                "status": AutomationRunStatus.SKIPPED.value,
-                "started_at": skipped_at,
-                "finished_at": skipped_at,
-                "error_code": "AUTOMATION_RUN_ALREADY_ACTIVE",
-                "error_message": "Conversation already has an active automation run.",
-            }, task["user_id"])
-            fire_count, next_fire_at, task_status = self._advance_scheduled_task(task, skipped_at)
-            task_values = {
-                "status": task_status,
-                "last_fire_at": skipped_at,
-                "last_run_status": AutomationRunStatus.SKIPPED.value,
-                "last_error": "Conversation already has an active automation run.",
-                "fire_count": fire_count,
-                "next_fire_at": next_fire_at,
-                "lock_owner": None,
-                "lock_until": None,
-            }
-            self._update_task_state(task, task_values, trigger_type, lease_owner)
-            return run
-
-        run = agent_automation_db.create_run({
-            "task_id": task["task_id"],
-            "tenant_id": task["tenant_id"],
-            "user_id": task["user_id"],
-            "conversation_id": task["conversation_id"],
-            "scheduled_fire_at": scheduled,
-            "actual_fire_at": _utcnow(),
-            "trigger_type": trigger_type,
-            "status": AutomationRunStatus.RUNNING.value,
-            "runtime_run_id": uuid4().hex,
-            "started_at": _utcnow(),
-        }, task["user_id"])
+        values = {
+            "task_id": task["task_id"], "tenant_id": task["tenant_id"],
+            "user_id": task["user_id"], "conversation_id": task["conversation_id"],
+            "scheduled_fire_at": scheduled, "actual_fire_at": _utcnow(),
+            "trigger_type": trigger_type, "status": AutomationRunStatus.RUNNING.value,
+            "started_at": _utcnow(), "runtime_run_id": uuid4().hex,
+        }
+        if trigger_type == "SCHEDULED" and lease_owner:
+            with agent_automation_db.task_run_transaction(
+                task["task_id"], task["tenant_id"], task["user_id"],
+            ) as (session, current, _):
+                if not self._owns_occurrence(current, scheduled, lease_owner):
+                    return {}
+                task = current
+                run = agent_automation_db.create_run(values, task["user_id"], db_session=session)
+        else:
+            run = agent_automation_db.create_run(values, task["user_id"])
         if lease_owner:
             run["_lease_owner"] = lease_owner
+        if busy:
+            return self._finish_run(run, task, AutomationRunStatus.SKIPPED.value, {
+                "error_code": "AUTOMATION_RUN_ALREADY_ACTIVE",
+                "error_message": "Conversation already has an active automation run.",
+            })
 
         if inspection_error is not None:
             return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(inspection_error))
@@ -125,13 +105,19 @@ class AgentAutomationRunner:
         except asyncio.CancelledError:
             if run.get("projection_message_index") is not None or run.get("_background_outcome_unknown"):
                 raise
+            current = agent_automation_db.get_run(run["run_id"], task["tenant_id"], task["user_id"])
+            caller = asyncio.current_task()
+            # Only a durable user cancellation may become a normal domain result.
+            # Shutdown, lease loss and cancellation of the caller still propagate.
+            if (current and current.get("status") == "CANCELED"
+                    and current.get("error_code") == "AUTOMATION_RUN_CANCELED"
+                    and (caller is None or not caller.cancelling())):
+                return current
             await self.cancel_runtime_run(run.get("runtime_run_id"), task["conversation_id"], task["user_id"], task["tenant_id"])
-            agent_automation_db.cancel_run(
-                run["run_id"],
-                task["tenant_id"],
-                task["user_id"],
-                "Scheduler execution was interrupted before completion.",
-            )
+            self._finish_run(run, task, AutomationRunStatus.CANCELED.value, {
+                "error_code": "AUTOMATION_EXECUTION_INTERRUPTED",
+                "error_message": "Scheduler execution was interrupted before completion.",
+            })
             raise
         except Exception as exc:
             if run.get("projection_message_index") is not None or run.get("_background_outcome_unknown"):
@@ -182,6 +168,7 @@ class AgentAutomationRunner:
         if source_id is None:
             turn = automation_conversation_adapter.append_run_prompt(
                 task["conversation_id"], generated_prompt, task["user_id"], task["tenant_id"],
+                run_id=run["run_id"],
             )
         else:
             turn = await run_blocking(
@@ -370,6 +357,23 @@ class AgentAutomationRunner:
         except (TimeoutError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError):
             logger.warning("Unable to stop automation run_id=%s", run_id)
 
+    @staticmethod
+    def _owns_occurrence(task, scheduled, lease_owner, require_active=True):
+        return bool(task and (not require_active or task.get("status") == "ACTIVE")
+                    and task.get("next_fire_at") is not None
+                    and _parse_dt(task["next_fire_at"]) == _parse_dt(scheduled)
+                    and task.get("lock_owner") == lease_owner
+                    and task.get("lock_until") is not None
+                    and _parse_dt(task["lock_until"]) > _utcnow())
+
+    def cancel_run_by_user(self, run, task):
+        transitioned = []
+        result = self._finish_run(run, task, "CANCELED", {
+            "error_code": "AUTOMATION_RUN_CANCELED",
+            "error_message": "Automation run was canceled by user.",
+        }, user_cancel=True, transitioned=transitioned)
+        return result, bool(transitioned)
+
     def _fail_run(
         self,
         run: Dict[str, Any],
@@ -383,6 +387,63 @@ class AgentAutomationRunner:
         })
 
     def _finish_run(
+        self,
+        run: Dict[str, Any],
+        task: Dict[str, Any],
+        status: str,
+        extra: Dict[str, Any],
+        user_cancel: bool = False,
+        transitioned=None,
+    ) -> Dict[str, Any]:
+        if run.get("projection_message_index") is not None:
+            return self._finish_prepared_run_state(run, task, status, extra)
+        with agent_automation_db.task_run_transaction(
+            task["task_id"], task["tenant_id"], task["user_id"], run["run_id"],
+        ) as (session, current_task, current_run):
+            if not current_task or not current_run:
+                return run
+            if current_run["status"] not in {"QUEUED", "RUNNING"}:
+                return current_run
+            scheduled = current_run.get("trigger_type") == "SCHEDULED"
+            owner = run.get("_lease_owner")
+            owns_lease = not owner or self._owns_occurrence(
+                current_task, current_run["scheduled_fire_at"], owner, require_active=False,
+            )
+            now = _utcnow()
+            updated = agent_automation_db.update_run(run["run_id"], {
+                **extra, "status": status, "finished_at": now,
+                "duration_ms": max(0, int((now - _parse_dt(current_run.get("started_at"))).total_seconds() * 1000)),
+            }, task["user_id"], expected_statuses=["QUEUED", "RUNNING"], db_session=session)
+            if not updated:
+                return current_run
+            if scheduled and not owns_lease and not user_cancel:
+                # Losing a lease cannot rewrite a reclaimed or edited task.
+                return updated
+            values = {"last_fire_at": now, "last_run_status": status,
+                      "last_error": extra.get("error_message")}
+            # An edited/reclaimed schedule must not be advanced by an old run.
+            same_occurrence = (current_task.get("next_fire_at") is not None and
+                               _parse_dt(current_task["next_fire_at"]) == _parse_dt(current_run["scheduled_fire_at"]))
+            if scheduled and same_occurrence:
+                count, next_fire, task_status = self._advance_scheduled_task(current_task, now)
+                failures = int(current_task.get("consecutive_failures") or 0)
+                if status == "SUCCEEDED":
+                    failures = 0
+                elif status in {"FAILED", "TIMEOUT"}:
+                    failures += 1
+                    if failures >= 5 and next_fire is not None:
+                        task_status = "PAUSED_BY_SYSTEM"
+                if current_task.get("status") in {"PAUSED", "PAUSED_BY_SYSTEM"}:
+                    task_status = current_task["status"]
+                values.update(status=task_status, fire_count=count, next_fire_at=next_fire,
+                              consecutive_failures=failures, lock_owner=None, lock_until=None)
+            agent_automation_db.update_task(task["task_id"], task["tenant_id"], task["user_id"],
+                                            values, db_session=session)
+            if transitioned is not None:
+                transitioned.append(True)
+            return updated
+
+    def _finish_prepared_run_state(
         self,
         run: Dict[str, Any],
         task: Dict[str, Any],

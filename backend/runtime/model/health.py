@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
+from nexent.core.concurrency import run_blocking
 from typing import Optional
 
 import httpx
@@ -328,14 +330,55 @@ async def _perform_connectivity_check(
     return connectivity
 
 
-async def check_model_connectivity(
-    display_name: str, tenant_id: str, model_type: str = None
-) -> dict:
+async def check_model_connectivity(display_name: str, tenant_id: str, model_type: str = None, *, persist_status: bool = True) -> dict:
+    """Use one streamed LLM check; retain all other model checks unchanged."""
+    model = get_model_by_display_name(display_name, tenant_id=tenant_id, model_type=model_type)
+    if model and model.get("model_type") in {"llm", "chat"}:
+        from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
+        from nexent.core.model_service.registry import model_service_references
+        from infrastructure.rdb.outlets import update_model_outlet_connectivity
+        from runtime.model.profile_probe import probe_model_profile
+
+        profile = decode_resolved_model_profile(model, registered_references=model_service_references())
+        if profile.identity.tenant_id != tenant_id or profile.outlet_id != model["model_id"]:
+            raise ValueError("MODEL_OUTLET_NOT_AVAILABLE")
+        result = await probe_model_profile(profile, model.get("api_key"), http_headers=model.get("http_headers") or {})
+        if persist_status:
+            await run_blocking("runtime-outlet-connectivity-status", update_model_outlet_connectivity,
+                model["model_id"], tenant_id, profile.config_revision,
+                "available" if result["ok"] else "unavailable", lane="control-io", owner="runtime.model")
+        return {"connectivity": result["ok"], "model_name": model["model_name"],
+                **({"error": result["error"]["category"]} if result["error"] else {})}
+    if not model:
+        raise LookupError("MODEL_CONFIGURATION_NOT_FOUND")
+    if not persist_status:
+        return await _verify_non_llm_config_connectivity(model)
+    return await _check_non_llm_connectivity(display_name, tenant_id, model_type, _model=model)
+
+
+async def verify_model_config_connectivity(model_config: dict):
+    """Translate old LLM drafts without saving them or weakening TLS settings."""
+    if model_config.get("model_type") in {"llm", "chat"}:
+        from datetime import datetime, timezone
+
+        from configs.model_catalog_loader import resolve_reasoning_capability
+        from nexent.core.model_service.compatibility.legacy_outlet import build_legacy_outlet_snapshot
+        from runtime.model.profile_probe import probe_model_profile
+
+        name = model_config.get("model_name", "")
+        profile = build_legacy_outlet_snapshot({**model_config, "model_id": 1, "tenant_id": "connection-preview"},
+            legacy_capability=resolve_reasoning_capability(name, model_config.get("base_url"), model_config.get("model_factory")),
+            migrated_at=datetime.now(timezone.utc).isoformat())
+        result = await probe_model_profile(profile, model_config.get("api_key"), http_headers=model_config.get("http_headers") or {})
+        return {"connectivity": result["ok"], "model_name": name,
+                **({"error": result["error"]["category"]} if result["error"] else {})}
+    return await _verify_non_llm_config_connectivity(model_config)
+
+
+async def _check_non_llm_connectivity(display_name: str, tenant_id: str, model_type: str = None, *, _model=None) -> dict:
     try:
         # Query the database using display_name and tenant context from app layer
-        model = get_model_by_display_name(
-            display_name, tenant_id=tenant_id, model_type=model_type
-        )
+        model = _model if _model is not None else get_model_by_display_name(display_name, tenant_id=tenant_id, model_type=model_type)
         if not model:
             raise LookupError(f"Model configuration not found for {display_name}")
 
@@ -435,7 +478,9 @@ async def check_model_connectivity(
         raise e
 
 
-async def verify_model_config_connectivity(model_config: dict):
+
+
+async def _verify_non_llm_config_connectivity(model_config: dict):
     """
     Verify the connectivity of the model configuration, do not save to the database.
     """

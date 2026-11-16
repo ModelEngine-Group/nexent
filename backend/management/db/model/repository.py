@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from infrastructure.rdb.model_records import (
+    create_resolved_model_record, get_resolved_model_record, update_resolved_model_record,
+    get_capacity_model_records, get_model_records_by_ids, get_model_records_page,
     create_model_record as create_model_record,
     update_model_record as update_model_record,
     fail_detecting_models_on_startup as fail_detecting_models_on_startup,

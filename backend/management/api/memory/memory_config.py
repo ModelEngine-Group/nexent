@@ -44,8 +44,7 @@ from management.services.configuration.user.memory import (
 )
 from management.db.memory import dreaming as memory_dreaming_db
 from management.services.memory.records import (
-    get_tenant_memory_index_name,
-    is_tenant_embedding_configured,
+    get_tenant_embedding_status,
 )
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.session import get_current_user_id
@@ -76,10 +75,7 @@ def get_embedding_status(authorization: Optional[str] = Header(None)):
         _, tenant_id = get_current_user_id(authorization)
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={
-                "configured": is_tenant_embedding_configured(tenant_id),
-                "current_es_index_name": get_tenant_memory_index_name(tenant_id),
-            },
+            content=get_tenant_embedding_status(tenant_id),
         )
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))

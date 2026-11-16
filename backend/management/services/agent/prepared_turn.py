@@ -188,6 +188,11 @@ async def start_turn(
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
+        if initial_title is not None:
+            if request.model_id is not None:
+                creation["selected_model_id"] = request.model_id
+            if request.model_parameter_preferences:
+                creation["model_parameter_preferences"] = request.model_parameter_preferences
         if omitted_user:
             creation["omitted_user"] = True
         if saved_user is not None:
@@ -198,6 +203,8 @@ async def start_turn(
             "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if request.annotations is not None:
+            user_turn["annotations"] = [item.model_dump(mode="json") for item in request.annotations]
         if snapshot.memory_enabled:
             user_turn["memory_agent_id"] = snapshot.resource.agent_id
         if request.clarification_response is not None and not omitted_user:

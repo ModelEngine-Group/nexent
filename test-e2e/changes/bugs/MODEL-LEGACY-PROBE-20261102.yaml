@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-LEGACY-PROBE-20261102
+  change_type: bugfix
+  bug_id: MODEL-LEGACY-PROBE-20261102
+  title: Preserve Legacy speculative empty retry and reap disconnected validation probes
+  description: Complete the six preserved PR4083 review drafts with real HTTP integration proof.
+  observed_behavior: Uncommitted reasoning prevents one Legacy empty-stop retry; an abandoned validation request can leave its probe task running; receipt signing imports a Supabase secret removed by the upstream authentication migration.
+  expected_behavior: Legacy may roll back and retry once within the existing physical budget; cancellation awaits the owned probe and cannot issue a receipt or update connectivity; signing uses the current shared JWT secret.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing HTTP recovery case exercises the old OpenAI model, while isolated unit senders cannot prove HTTP cleanup of the new ModelService and validation probe.
+  feature_contract_changed: true
+  affected_features:
+    existing: [CMSR-005]
+    added: []
+    modified: [V5-PW-MODEL-01]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [MODEL-PROBE-D3-001]
+    modified: [MODEL-RECOVERY-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Retry uncommitted Legacy reasoning, whitespace and empty stop once without replaying committed content or changing Native retry policy.
+    - Disconnects, checker failures and caller cancellation await the owned probe task and cannot mutate status or issue receipts.
+    reason: Preserve the existing red regressions and prove their network boundary separately in D3.
+    test_selectors:
+    - test/sdk/core/model_service/test_model_service_boundaries.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/backend/services/test_model_outlet_validation_service.py
+  notes: The six original drafts were backed up and restored byte-for-byte before further edits; the discovered JWT compatibility fix extends the receipt implementation and tests. Source UT and D3 remain separate. Both cases own their loopback servers and close/join all resources; no external provider, persistent anchors or logical factories are used.

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +61,7 @@ const langMap = ["zh", "en"];
 
 for (const lang of langMap) {
   const customData = readLocaleConfig(lang);
+  customData.homeTitle ??= customData.tabTitle ?? "Nexent";
   customData["FILE_UPLOAD_SIZE_LIMIT"] = fileUploadSizeLimit;
   saveLocaleConfig(JSON.stringify(customData, null, 2), lang);
 }

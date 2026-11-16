@@ -25,6 +25,8 @@ class ConversationRecord(TableBase):
         comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
     )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
+    target = Column(JSONB, nullable=True,
+                    comment="Creator operation target: type agent or skill and positive resource id; NULL before creation")
     chat_mode = Column(
         String(16),
         nullable=False,
@@ -64,6 +66,10 @@ class ConversationRecord(TableBase):
         doc="Monotonic version of the canonical Workbench declaration",
     )
 
+    selected_model_id = Column(Integer, nullable=True, comment="Root model selected for this Agent conversation; NULL inherits the Agent default.")
+    model_parameter_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        comment="Explicit parameter preferences keyed by outlet ID; no credentials or default-value copies.")
+
 
 class ConversationMessage(TableBase):
     """
@@ -84,7 +90,6 @@ class ConversationMessage(TableBase):
         String(16), nullable=False, server_default=text("'CHAT'"),
         comment="Trusted message origin: CHAT consumes the ordinary user-turn quota; AUTOMATION is exempt",
     )
-    streaming_owner = Column(String(16), doc="Service responsible for terminal repair of the streaming assistant.")
     message_content = Column(String, doc="The complete content of the message")
     minio_files = Column(
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
@@ -93,6 +98,7 @@ class ConversationMessage(TableBase):
     status = Column(
         String(30), default='completed',
         doc="Lifecycle status: pending / streaming / completed / failed / stopped")
+    streaming_owner = Column(String(16), doc="Service responsible for terminal repair of the streaming assistant.")
 
 
 class ConversationMessageUnit(TableBase):

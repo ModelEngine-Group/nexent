@@ -2,7 +2,7 @@
 
 from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_ARCHIVED, STATUS_DISABLED, STATUS_RELEASED
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy import or_, select, insert, update, delete, func
 
 from infrastructure.rdb.client import get_db_session
@@ -94,6 +94,65 @@ def search_version_by_id(
             .first()
         )
         return as_dict(version) if version else None
+
+
+def query_version_labels(versions: Dict[int, int], tenant_id: str) -> dict:
+    """Read only current version labels for the existing optional list metadata."""
+    if not versions:
+        return {}
+    from sqlalchemy import tuple_
+
+    with get_db_session() as session:
+        rows = session.query(AgentVersion.agent_id, AgentVersion.version_name).filter(
+            tuple_(AgentVersion.agent_id, AgentVersion.version_no).in_(list(versions.items())),
+            AgentVersion.tenant_id == tenant_id, AgentVersion.delete_flag == "N",
+        ).all()
+        return dict(rows)
+
+
+def query_version_lists(agent_ids: List[int], tenant_id: str) -> Dict[int, List[dict]]:
+    """Read version metadata once for all visible published Agents."""
+    if not agent_ids:
+        return {}
+    with get_db_session() as session:
+        rows = session.query(AgentVersion).filter(
+            AgentVersion.agent_id.in_(agent_ids), AgentVersion.tenant_id == tenant_id,
+            AgentVersion.delete_flag == "N",
+        ).order_by(AgentVersion.version_no.desc()).all()
+        result = {}
+        for row in rows:
+            result.setdefault(row.agent_id, []).append(as_dict(row))
+        return result
+
+
+def query_agent_snapshots(versions: Dict[int, int], tenant_id: str) -> dict:
+    """Load selected Agent, tool and relation snapshots with the existing predicates."""
+    if not versions:
+        return {}
+    from sqlalchemy import tuple_
+
+    with get_db_session() as session:
+        agents = session.query(AgentInfo).filter(
+            tuple_(AgentInfo.agent_id, AgentInfo.version_no).in_(list(versions.items())),
+            AgentInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)), AgentInfo.delete_flag == "N",
+        ).all()
+        keys = [(row.agent_id, row.version_no, row.tenant_id) for row in agents]
+        result = {row.agent_id: (as_dict(row), [], []) for row in agents}
+        if not keys:
+            return result
+        tools = session.query(ToolInstance).filter(
+            tuple_(ToolInstance.agent_id, ToolInstance.version_no, ToolInstance.tenant_id).in_(keys),
+            ToolInstance.delete_flag == "N",
+        ).all()
+        relations = session.query(AgentRelation).filter(
+            tuple_(AgentRelation.parent_agent_id, AgentRelation.version_no, AgentRelation.tenant_id).in_(keys),
+            AgentRelation.delete_flag == "N",
+        ).all()
+        for row in tools:
+            result[row.agent_id][1].append(as_dict(row))
+        for row in relations:
+            result[row.parent_agent_id][2].append(as_dict(row))
+        return result
 
 
 def query_version_list(

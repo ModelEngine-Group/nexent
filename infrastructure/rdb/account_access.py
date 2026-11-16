@@ -5,6 +5,8 @@ from typing import List
 
 from infrastructure.rdb.account_record import TenantGroupInfo, TenantGroupUser, UserTenant
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from contracts.roles import roles_from_record
 
 
 def query_group_ids_by_user_in_tenant(user_id: str, tenant_id: str, *, session_factory=get_db_session) -> List[int]:
@@ -55,15 +57,15 @@ def filter_tenant_group_ids(group_ids: List[int], tenant_id: str, *, session_fac
     return [row[0] for row in rows]
 
 
-def get_user_role_by_tenant(user_id: str, tenant_id: str, *, session_factory=get_db_session) -> str:
-    """Return the user's role within the given tenant.
+def get_user_role_by_tenant(user_id: str, tenant_id: str, *, session_factory=get_db_session) -> tuple[str, ...]:
+    """Return the account roles within the given tenant.
 
     Joins ``user_tenant_t`` by ``(user_id, tenant_id)`` so the result is
-    strictly tenant-scoped. Returns the empty string when no active row
+    strictly tenant-scoped. Returns an empty tuple when no active row
     exists; callers should treat that as "no role".
     """
     if not user_id or not tenant_id:
-        return ""
+        return ()
     with session_factory() as session:
         result = (
             session.query(UserTenant)
@@ -77,4 +79,4 @@ def get_user_role_by_tenant(user_id: str, tenant_id: str, *, session_factory=get
         # Access ORM attributes INSIDE the session context — the session
         # closes on context-manager exit and lazy-loaded attributes are not
         # reachable after that (would raise DetachedInstanceError).
-        return (result.user_role or "") if result is not None else ""
+        return roles_from_record(as_dict(result)) if result is not None else ()

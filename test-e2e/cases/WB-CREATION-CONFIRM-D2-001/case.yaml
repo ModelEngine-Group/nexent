@@ -1,0 +1,46 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CREATION-CONFIRM-D2-001
+  feature_id: WB-CONTROLS
+  requirement_ids: [WB-CREATION-INTENT-20261103]
+  business_rule_ids: [WB-CONTROLS-RULE-002]
+  title: Record an owned AI creation-mode confirmation without running a model
+  type: CONTRACT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify HTTP identity propagation, strict response validation and domain-error mapping for confirmation-only persistence.
+  preconditions: [An in-process FastAPI test client with controlled authentication and persistence boundary.]
+  test_data:
+    profile: mock
+  steps:
+    - order: 1
+      action: POST a valid structured Agent or Skill confirmation with an authenticated identity.
+      expected: Return the stored message receipt and selected mode; pass the authenticated user and tenant to persistence without invoking a model.
+    - order: 2
+      action: Send malformed forms, unsupported actions, invalid conversation IDs and expired authentication; return inaccessible or stale-form domain errors.
+      expected: Reject before persistence for invalid input/authentication; map ownership and stale-form errors without exposing internal data.
+  expected_results: [Only a valid owned confirmation can produce a persistence receipt.]
+  forbidden_side_effects: [No generation or resource creation is invoked by confirmation persistence.]
+  contract:
+    protocol: HTTP JSON
+    endpoint: POST /conversation/{conversation_id}/creation_mode_responses
+    request_expectations: [Versioned ClarificationResponse with a strict workbench_creation_mode form and an allowlisted creation choice.]
+    response_expectations: [Success envelope with message_id and mode; 401 authentication, 404 ownership and 422 invalid or stale form.]
+  execution:
+    profiles:
+      - name: mock
+        required_services: []
+  acceptance:
+    - id: AC-01
+      description: Valid confirmation persists through the authenticated HTTP boundary without generation.
+      steps: [1]
+      expected_results: [1]
+      forbidden_side_effects: [1]
+    - id: AC-02
+      description: Invalid, inaccessible and expired requests are rejected with the documented error contract.
+      steps: [2]
+      expected_results: [1]
+      forbidden_side_effects: [1]

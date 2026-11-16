@@ -55,6 +55,7 @@ if "management.db.configuration.tenant" not in sys.modules:
     # Mock all functions that config_utils imports
     tenant_config_db_mod.delete_config_by_tenant_config_id = MagicMock()
     tenant_config_db_mod.get_all_configs_by_tenant_id = MagicMock()
+    tenant_config_db_mod.get_configs_by_tenant_id_and_keys = MagicMock(return_value={})
     tenant_config_db_mod.get_single_config_info = MagicMock()
     tenant_config_db_mod.insert_config = MagicMock()
     tenant_config_db_mod.update_config_by_tenant_config_id_and_data = MagicMock()

@@ -9,3 +9,9 @@ acceptance_bindings:
   AC-01: [test_management_office_object_protocol]
   AC-02: [test_management_office_object_protocol]
   AC-03: [test_management_office_object_protocol]
+preparation:
+  # The case owns its isolated Docker network, MinIO and probe containers and removes them in finally.
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from contracts.agent import NL2AgentRunRequest
+from contracts.agentos import AgentVersionReference
+from contracts.errors.exceptions import WorkbenchError
+from management.services.conversation.creator_execution import start_creation_turn
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.exceptions import AgentDraftEditError, RunModelControlsError, UnauthorizedError
 from infrastructure.agentos_identity import ServicePrincipal
@@ -33,50 +36,31 @@ async def nl2agent_run_api(
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
-    """Run NL2Agent; Workbench turns opt into conversation persistence."""
-    if (
-        nl2agent_request.persist_history or nl2agent_request.workbench_config is not None
-    ) and not ENABLE_AGENT_WORKBENCH:
+    """Run NL2Agent through its shared creator history and AgentOS execution."""
+    if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
         user_id, tenant_id, language = get_current_user_info(authorization, http_request)
         actor = ServicePrincipal(user_id, tenant_id)
-        if nl2agent_request.persist_history and nl2agent_request.conversation_id is not None:
-            if not await run_blocking(
-                "nl2agent-conversation-scope", conversation_belongs_to, nl2agent_request.conversation_id,
-                user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
-            ):
-                raise ValueError("Conversation is not an accessible creation session")
-        payload = await prepare_nl2agent_snapshot(nl2agent_request, actor, language)
-        stream = create_nl2agent_stream(payload, actor)
+        async def prepare_stream(effective, ref=None):
+            payload = await prepare_nl2agent_snapshot(effective, actor, language)
+            if ref is not None:
+                payload = payload.model_copy(update={"system_agent": AgentVersionReference(
+                    agent_id=ref.agent_id, version_no=ref.version_no,
+                )})
+            return create_nl2agent_stream(payload, actor)
+
         if nl2agent_request.persist_history:
-            conversation_id, assistant_index = await run_blocking(
-                "nl2agent-history", prepare_creation_history, lane="control-io", owner="management",
-                conversation_id=nl2agent_request.conversation_id,
-                mode="agent_create",
-                query=nl2agent_request.query,
-                minio_files=nl2agent_request.minio_files,
-                workbench_config=nl2agent_request.workbench_config,
-                agent_id=nl2agent_request.agent_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                retry_user_message_id=nl2agent_request.retry_user_message_id,
-                retry_message_index=nl2agent_request.retry_message_index,
+            stream, conversation_id = await start_creation_turn(
+                nl2agent_request, kind="agent", user_id=user_id, tenant_id=tenant_id,
+                stream_factory=prepare_stream,
             )
-            stream = persist_creation_stream(
-                stream,
-                conversation_id=conversation_id,
-                assistant_index=assistant_index,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={"conversation_id": str(conversation_id)},
-            )
-        return StreamingResponse(stream, media_type="text/event-stream")
+            return StreamingResponse(stream, media_type="text/event-stream",
+                                     headers={"conversation_id": str(conversation_id)})
+        return StreamingResponse(await prepare_stream(nl2agent_request), media_type="text/event-stream")
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,

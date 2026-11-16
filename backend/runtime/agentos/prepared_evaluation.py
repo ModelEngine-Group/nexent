@@ -297,6 +297,12 @@ def _materialize_model(binding, actor, resource):
         if patch is None or not compare_digest(provider_body_revision(scope, body), binding.provider_body_revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_MODEL_BODY_REVISION_MISMATCH"})
         updates["extra_body"] = body
+    if model.resolved_profile is not None:
+        from runtime.model.parameters import materialize_profile_parameters
+
+        model = materialize_profile_parameters(model, binding, actor, resource)
+    elif binding.agent_parameters is not None or binding.conversation_parameters is not None:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
     model = model.model_copy(update={"cite_name": binding.alias, **updates})
     try:
         return apply_run_model_generation(model, binding.alias, binding.root_generation, binding.turn_generation)

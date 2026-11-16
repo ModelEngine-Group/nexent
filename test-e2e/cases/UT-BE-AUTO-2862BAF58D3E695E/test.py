@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from infrastructure.redis import run_state as rss
+from infrastructure.redis.client import run_state as rss
 from infrastructure.redis.run_state import RuntimeStateService
 
 
@@ -233,7 +233,7 @@ async def _check_run_managed_routes_through_manager(service, fake_manager):
         call = fake_manager.calls[-1]
         assert call['lane'] == 'control-io'
         assert call['spec'].task_name == task_name
-        assert call['spec'].owner == 'management.services.agent.run_state'
+        assert call['spec'].owner == 'infrastructure.redis.run_state'
         assert call['fn'].__name__ == sync_name
         assert call['fn'].__self__ is service
         assert call['args'] == args

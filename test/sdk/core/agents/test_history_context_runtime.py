@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 
@@ -87,6 +88,17 @@ def _summary_and_turns():
             "attachments": [], "user_message_id": 21, "assistant_message_id": 22,
         }),
     ]
+
+
+def _bind_execution_history(manager, memory):
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    store = ExecutionHistory()
+    manager.config.execution_history = store
+    for index, action in enumerate(memory.steps):
+        if isinstance(action, ActionStep):
+            fields = manager._neutral_action_content(action, index)["execution_fields"]
+            action.execution_key = store.register("owner", fields)
+            store.bind(action.execution_key, 1, index)
 
 
 def test_passthrough_uses_checkpoint_without_creating_a_new_one(monkeypatch):
@@ -260,7 +272,7 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
         "CURRENT TASK", "CURRENT PLAN", "observation 1", "observation 2",
     )]
     assert positions == sorted(positions)
-    assert '<completed_action_history read_only="true">' in rendered
+    assert '<completed_action>' in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
@@ -284,7 +296,7 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     tool_call = ToolCall(name="python_interpreter", arguments="print('ok')", id="call_1")
     action = ActionStep(
         step_number=1, timing=Timing(start_time=0), tool_calls=[tool_call],
-        observations="ok", action_output="done", model_output="reasoning",
+        observations="ok", action_output="done", model_output="<code>print('ok')</code>",
     )
     memory = _Memory([TaskStep(task="current"), action])
     manager = ContextManager(ContextManagerConfig(
@@ -305,15 +317,15 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
     rendered = _rendered_text(result.messages)
-    assert "tool: python_interpreter" in rendered
-    assert "print('ok')" in rendered
+    assert "<code>" not in rendered
+    assert "print(" in rendered and "ok" in rendered
     assert "outcome:\nok" in rendered
     assert "recorded_result:\ndone" in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
     summary_rendered = _rendered_text(manager.render_memory_messages(memory))
-    assert "tool: python_interpreter" in summary_rendered
+    assert "<code>" not in summary_rendered
     assert "outcome:\nok" in summary_rendered
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
@@ -360,6 +372,7 @@ def test_current_action_compaction_does_not_mutate_agent_memory(monkeypatch):
         keep_recent_steps=4,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
+    _bind_execution_history(manager, memory)
     run = manager.prepare_run_context(memory, "", [])
     result = manager.assemble_final_context(
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
@@ -384,6 +397,7 @@ def test_compact_stages_old_actions_before_other_items(monkeypatch):
         keep_recent_steps=0,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
+    _bind_execution_history(manager, memory)
     run = manager.prepare_run_context(memory, "", [ContextItemInput(
         id="kb:large", type="knowledge_base",
         content={"text": "knowledge " * 3000},
@@ -425,6 +439,7 @@ def test_recent_actions_are_compacted_as_last_resort(monkeypatch):
         keep_recent_steps=4,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
+    _bind_execution_history(manager, memory)
     run = manager.prepare_run_context(memory, "", [])
 
     result = manager.assemble_final_context(

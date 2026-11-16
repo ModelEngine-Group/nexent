@@ -52,7 +52,13 @@ import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
 
-export default function McpList({ tenantId }: { tenantId: string | null }) {
+export default function McpList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
   const { message } = App.useApp();
@@ -77,7 +83,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     handleDeleteContainer,
     handleViewLogs,
     handleGetMcpRecord,
-  } = useMcpConfig({ enabled: true, tenantId });
+  } = useMcpConfig({ enabled: true, tenantId, readOnly });
 
   // Add Modal State
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -595,19 +601,23 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 />
               </span>
             </Tooltip>
-            <Tooltip title={t("mcpConfig.serverList.button.edit")}>
-              <Button
-                type="text"
-                icon={<Edit className="h-4 w-4" />}
-                onClick={() => onEditServer(record)}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
-                onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.service_name }), onOk: () => onDeleteServer(record) })} />
-            </Tooltip>
+            {!readOnly && (
+              <Tooltip title={t("mcpConfig.serverList.button.edit")}>
+                <Button
+                  type="text"
+                  icon={<Edit className="h-4 w-4" />}
+                  onClick={() => onEditServer(record)}
+                  size="small"
+                  disabled={actionsLocked}
+                />
+              </Tooltip>
+            )}
+            {!readOnly && (
+              <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+                <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                  onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.service_name }), onOk: () => onDeleteServer(record) })} />
+              </Tooltip>
+            )}
           </div>
         );
       },
@@ -685,10 +695,12 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               disabled={updatingTools}
             />
           </Tooltip>
-          <Tooltip title={t("mcpConfig.containerList.button.delete")}>
-            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
-              onClick={() => confirm({ title: t("mcpConfig.deleteContainer.confirmTitle"), content: t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id }), onOk: () => onDeleteContainer(record) })} />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("mcpConfig.containerList.button.delete")}>
+              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                onClick={() => confirm({ title: t("mcpConfig.deleteContainer.confirmTitle"), content: t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id }), onOk: () => onDeleteContainer(record) })} />
+            </Tooltip>
+          )}
         </div>
       ),
     },
@@ -717,10 +729,12 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "20%",
       render: (_: any, record: any) => (
         <div className="flex items-center space-x-2">
-          <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
-              onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name }), onOk: () => onDeleteOpenapiService(record) })} />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name }), onOk: () => onDeleteOpenapiService(record) })} />
+            </Tooltip>
+          )}
         </div>
       ),
     },
@@ -730,9 +744,11 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <div />
-        <Button type="primary" icon={<Plus size={16} />} onClick={() => setAddModalVisible(true)}>
-          {t("tenantResources.mcp.addService")}
-        </Button>
+        {!readOnly && (
+          <Button type="primary" icon={<Plus size={16} />} onClick={() => setAddModalVisible(true)}>
+            {t("tenantResources.mcp.addService")}
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-hidden">

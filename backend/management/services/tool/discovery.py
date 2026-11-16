@@ -410,7 +410,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 
 import jsonref
-from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 from contracts.errors.exceptions import MCPConnectionError
 from contracts.tool import ToolInfo, ToolSourceEnum
 from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url
@@ -451,7 +451,7 @@ async def get_tool_from_remote_mcp_server(
         custom_headers = {
             **(custom_headers or {}),
             "X-Tenant-ID": str(tenant_id),
-            "X-Nexent-Internal-Token": TOKEN,
+            "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
         }
 
     tools_info = []

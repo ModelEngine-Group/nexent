@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from pydantic_core import PydanticSerializationError
 
 from contracts.errors.exceptions import SnapshotCompilationError
+from contracts.conversation import format_annotations_for_llm
+from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from infrastructure.local_tool_execution import is_catalog_local_tool
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -160,16 +162,6 @@ async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: s
     )
 
 
-def _turn_model_generation(request: AgentRequest) -> TurnModelGeneration | None:
-    if any((
-        request.generation_config is not None and request.generation_config.model_fields_set,
-        request.reasoning_effort is not None, request.reasoning_budget_tokens is not None,
-    )):
-        return TurnModelGeneration(
-            settings=request.generation_config, reasoning_effort=request.reasoning_effort,
-            reasoning_budget_tokens=request.reasoning_budget_tokens,
-        )
-    return None
 
 
 @dataclass(frozen=True)
@@ -200,11 +192,11 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         is_debug=True, user_id=user_id, lane="control-io", owner="management",
     )
     root = plan.root.identity
-    generation = config.generation_config.model_dump(mode="json")
+    generation = None
     request = request.model_copy(update={
         "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
-        "model_id": config.model_id or request.model_id,
-        "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
+        "model_id": request.model_id,
+        "requested_output_tokens": config.requested_output_tokens or request.requested_output_tokens,
         "_runtime_generation_config": generation,
     })
     await run_blocking(
@@ -229,12 +221,12 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         }
     snapshot = await create_agent_run_info(
         agent_id=root.agent_id, minio_files=request.minio_files,
-        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=root.version_no, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
         requested_output_tokens=request.requested_output_tokens,
-        reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
+        model_parameter_preferences=request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}),
         context_policy=request.context_policy, enable_automation_tool=False,
         enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
         runtime_skill_snapshot=runtime_skill_snapshot(plan),
@@ -293,13 +285,14 @@ async def prepare_debug_snapshot(
         }
     snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
-        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=version, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
         requested_output_tokens=request.requested_output_tokens, context_policy=request.context_policy,
         enable_automation_tool=False, enable_planning=bool(request.enable_plan),
-        export_debug_planning=bool(request.enable_plan), turn_generation=_turn_model_generation(request),
+        export_debug_planning=bool(request.enable_plan),
+        model_parameter_preferences=request.model_parameter_preferences,
         **compile_options,
     )
     if snapshot is None:
@@ -419,11 +412,11 @@ async def prepare_conversation_snapshot(
 
         root = workbench.plan.root.identity
         config = workbench.config
-        generation = config.generation_config.model_dump(mode="json")
+        generation = None
         request = request.model_copy(update={
             "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
-            "model_id": config.model_id or request.model_id,
-            "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
+            "model_id": request.model_id,
+            "requested_output_tokens": config.requested_output_tokens or request.requested_output_tokens,
             "knowledge_scope": config.knowledge_scope,
             "_runtime_generation_config": generation,
         })
@@ -450,15 +443,19 @@ async def prepare_conversation_snapshot(
             authorized_knowledge_tools=native_knowledge.authorized_tools,
             runtime_knowledge_context={"scope": build_runtime_knowledge_resources(resolved)},
         )
+    from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+
+    saved_preferences = conversation.get("model_parameter_preferences") or {}
+    saved_preferences = {key: without_outlet_token_limits(value) if isinstance(value, dict) else value
+                         for key, value in saved_preferences.items()}
+    if request.model_id is None and conversation.get("selected_model_id") is not None:
+        request = request.model_copy(update={"model_id": conversation["selected_model_id"]})
+    request.__dict__["_runtime_model_parameter_preferences"] = saved_preferences
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
     if request.metadata is not None and workbench is None and not metadata_from_northbound:
         # Native requests check the specified version or the draft policy before compilation.
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": metadata_policy_version}), tenant_id)
-    if (workbench is None and (not preserve_shared_reasoning or (
-        request.generation_config is not None and request.generation_config.model_fields_set
-    )) and (generation := _turn_model_generation(request)) is not None):
-        compile_options["turn_generation"] = generation
     historical_context = None
     if current_user_message_id is not None or before_message_index is not None:
         boundary = {"before_message_index": before_message_index} if before_message_index is not None else {}
@@ -490,10 +487,10 @@ async def prepare_conversation_snapshot(
     )
     return await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
-        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=memory_enabled,
         override_version_no=request.version_no, override_model_id=request.model_id,
-        reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
+        model_parameter_preferences=request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}),
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
         conversation_id=reference.conversation_id, context_policy=request.context_policy,
         enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
@@ -804,8 +801,15 @@ def _export_resource(
 
 def _export_model(
     alias, models, tenant_id, resource, agent_model_overrides, *, root_generation=None, turn_generation=None,
-    source_alias=None, catalog_model_versions=None,
+    source_alias=None, catalog_model_versions=None, model_parameter_preferences=None,
 ):
+    selected = next((model for model in models if model.cite_name == alias), None)
+    if (selected is not None and isinstance(selected.resolved_profile, ResolvedModelProfile)
+            and root_generation is None and turn_generation is None):
+        from management.services.agent.preparation.model_bindings import export_resolved_model
+
+        return export_resolved_model(alias, selected, tenant_id, resource,
+                                     model_parameter_preferences, catalog_model_versions)
     record_alias = source_alias if root_generation is not None or turn_generation is not None else alias
     candidates = get_model_records({"display_name": record_alias, "model_type": "llm"}, tenant_id)
     effective = [model for model in models if model.cite_name == record_alias]
@@ -867,6 +871,7 @@ def compile_snapshot(
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
     allow_debug_planning=False, workbench_knowledge_tools=None, catalog_model_versions=None,
+    model_parameter_preferences=None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -889,6 +894,7 @@ def compile_snapshot(
                 root_generation=root_generation if alias == agent.model_name else None,
                 turn_generation=turn_generation if alias == agent.model_name else None, source_alias=source_model_alias,
                 catalog_model_versions=catalog_model_versions,
+                model_parameter_preferences=model_parameter_preferences if alias == agent.model_name else None,
             )
             for alias in aliases
         ]

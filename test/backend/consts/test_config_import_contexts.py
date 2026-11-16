@@ -37,7 +37,7 @@ def test_configuration_import_without_inherited_python_paths(directory, module):
 @pytest.mark.parametrize("variable,filename", [
     ("MODEL_CATALOG_JSON_PATH", "model_catalog.json"),
     ("MODELS_DEV_CATALOG_JSON_PATH", "models_dev_catalog.json"),
-    ("MODEL_REASONING_WIRE_PROFILES_PATH", "model_reasoning_wire_profiles.json"),
+    ("MODEL_REASONING_WIRE_PROFILES_PATH", None),
 ])
 def test_environment_catalog_defaults_need_no_legacy_const_directory(tmp_path, variable, filename):
     backend = tmp_path / "backend"
@@ -52,12 +52,15 @@ def test_environment_catalog_defaults_need_no_legacy_const_directory(tmp_path, v
     environment.pop(variable, None)
     program = (
         "import dotenv; dotenv.load_dotenv = lambda *a, **kw: None; "
-        f"from contracts.constants.environment import {variable}; print({variable})"
+        f"import contracts.constants.environment as env; print(getattr(env, {variable!r}, '__REMOVED__'))"
     )
     result = subprocess.run(
         [sys.executable, "-c", program], cwd=tmp_path, env=environment,
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert Path(result.stdout.strip()) == backend / "configs" / filename
+    if filename is None:
+        assert result.stdout.strip() == "__REMOVED__"
+    else:
+        assert Path(result.stdout.strip()) == backend / "configs" / filename
     assert not (backend / "consts").exists()

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Validate formal Nexent D1-D5 case documents."""
 
 from __future__ import annotations
@@ -6,6 +8,7 @@ import argparse
 from pathlib import Path
 
 from acceptance_integrity import contract_issues
+from case_naming import naming_issues
 from test_asset_lib import ValidationIssue, case_index, discover_documents, render_issues, repository_root, require_documents, validate_schema_documents
 
 
@@ -15,6 +18,8 @@ def validate(root: Path, allow_empty: bool = False):
     issues.extend(validate_schema_documents(root, "cases", documents))
     cases, semantic_issues = case_index(documents)
     issues.extend(semantic_issues)
+    if cases:
+        issues.extend(naming_issues(root, cases))
     for _, case, path in cases.values():
         issues.extend(ValidationIssue(path, "acceptance", problem) for problem in contract_issues(case))
     return issues

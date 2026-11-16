@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from contracts.constants.environment import NEXENT_POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER
 
 
-logger = logging.getLogger("management.db.client")
+logger = logging.getLogger("infrastructure.rdb.client")
 
 
 class PostgresClient:

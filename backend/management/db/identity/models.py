@@ -13,8 +13,7 @@ from sqlalchemy import (
 )
 
 
-from sqlalchemy.dialects.postgresql import JSONB
-
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from management.db.base import SCHEMA, SimpleTableBase, TableBase
 from infrastructure.rdb.account_record import (
@@ -57,6 +56,8 @@ class TenantInvitationCode(TableBase):
                        doc="Tenant ID, foreign key")
     invitation_code = Column(String(100), nullable=False,
                              unique=True, doc="Invitation code")
+    roles = Column(ARRAY(String(30)), nullable=False,
+                   comment="Immutable built-in roles granted when this invitation is consumed")
     group_ids = Column(String, doc="Associated group IDs list")
     capacity = Column(Integer, nullable=False, default=1,
                       doc="Invitation code capacity")

@@ -14,7 +14,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from management.db.tool.outer_api import query_available_openapi_services
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -22,9 +22,9 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from backend.mcp.thread_management import mcp_thread_manager
-from gateway.downstream.identity import enabled as gateway_identity_enabled, signing_key
-from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.downstream.identity import enabled as gateway_identity_enabled
 from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
+from gateway.mcp.credential_client import resolve_mcp_identity as _resolve_gateway_mcp_identity
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -456,18 +456,12 @@ def _legacy_mcp_identity(authorization):
     return get_current_user_id(authorization)
 
 
-async def _resolve_gateway_mcp_identity(scope, authorization):
-    from contracts.constants.environment import GATEWAY_SERVICE_URL
-
-    return await resolve_mcp_identity(scope, authorization, gateway_url=GATEWAY_SERVICE_URL, key=signing_key())
-
-
 class TenantMCPRouter(_TenantMCPRouter):
     """Bind the process registry and deployment trust policy to the MCP boundary."""
 
     def __init__(self):
         super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
-                         internal_token=TOKEN, gateway_required=gateway_identity_enabled(),
+                         internal_token=NEXENT_MCP_INTERNAL_TOKEN, gateway_required=gateway_identity_enabled(),
                          resolve_identity=_resolve_gateway_mcp_identity, legacy_identity=_legacy_mcp_identity)
 
 

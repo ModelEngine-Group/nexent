@@ -2,9 +2,8 @@
 """Compile the selected model and capacity policy for creator modes."""
 
 from contracts.agent import NL2ModelControlsRequest
-from contracts.agentos import RunModelBinding, TurnModelGeneration
+from contracts.agentos import RunModelBinding
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from contracts.model import WorkbenchGenerationConfig
 from infrastructure.agent_model_config import model_record_revision
 from management.db.model.repository import get_model_by_model_id, get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -23,8 +22,7 @@ def prepare_creator_model(request: NL2ModelControlsRequest, tenant_id: str) -> d
             if not records:
                 raise ValueError("No LLM model configured for tenant")
             record = records[0]
-    values = request.generation_config.model_dump(exclude_unset=True) if request.generation_config else {}
-    generation = TurnModelGeneration(settings=WorkbenchGenerationConfig(**values)) if values else None
+    preferences = request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {})
     input_budget, capacity, resolved = _resolve_input_budget(record)
     context = _resolve_context_budget(
         capacity_snapshot=resolved, tenant_id=tenant_id,
@@ -33,7 +31,7 @@ def prepare_creator_model(request: NL2ModelControlsRequest, tenant_id: str) -> d
     return dict(
         model=RunModelBinding(
             model_id=record["model_id"], alias=record["display_name"], revision=model_record_revision(record),
-            turn_generation=generation,
+            conversation_parameters=preferences.get(str(record["model_id"])),
         ),
         input_budget=input_budget, context_window_tokens=(resolved.context_window_tokens if resolved else None) or input_budget,
         capacity_snapshot=capacity, context_budget_snapshot=context.model_dump(mode="json") if context else None,
