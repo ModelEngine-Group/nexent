@@ -29,7 +29,7 @@ try:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry import trace, metrics
+    from opentelemetry import trace, metrics, propagate
     from opentelemetry.sdk.resources import Resource
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
@@ -730,6 +730,18 @@ class MonitoringManager:
     def tracer(self):
         """Get the tracer instance."""
         return self._tracer
+
+    def get_trace_headers(self) -> Dict[str, str]:
+        """Propagate only W3C trace context across internal HTTP boundaries."""
+        if not self.is_enabled:
+            return {}
+        carrier: Dict[str, str] = {}
+        try:
+            propagate.inject(carrier)
+        except Exception:
+            logger.debug("Unable to inject telemetry context", exc_info=True)
+            return {}
+        return {key: value for key, value in carrier.items() if key in {"traceparent", "tracestate"}}
 
     def setup_fastapi_app(self, app) -> bool:
         """Setup monitoring for a FastAPI application."""
