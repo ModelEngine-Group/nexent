@@ -117,7 +117,7 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ### KnowledgeBase 文件生命周期
 
-Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`；执行 worker、完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
+Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。单次上传 worker 已接通，队列发现、启动监督、完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |
 | --- | --- | --- |
@@ -129,6 +129,10 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 前三项发往 Runtime，最后一项发往 Management，均复用 `AgentOSClient` 的方向隔离签名。Management 校验当前 DAC、源代次与已完成清洗任务，返回固定对象引用、文件名、逻辑集合及 KB 模型 ID。Runtime 校验 grant 和实际模型 revision 后接纳，不读取 Management 业务表。上传要求已有确认产物；新建幂等键不能绕过版本或删除墓碑。
 
 KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
+
+`KnowledgeUploadWorker.process(lookup, actor, owner_id=...)` 执行已接纳的任务。装配方显式提供源与产物大小上限，并安装 Runtime 的 `ThreadManager`。worker 经 Management 实时授权后领取 attempt，读取固定版本对象，再通过 `ModelService.invoke` 写入显式向量；每批写前复查授权和 owner。只有全部写入确认并仍持有有效 attempt 时才发布可见 generation，已完成任务再次投递不会调用模型。在途或 unknown 写入保留清理义务，不自动重跑。
+
+新向量句柄把逻辑 collection 映射到固定 `si-kb-` 命名空间。旧索引会保留，历史数据迁移和核对仍是生产切换前置条件，当前不会自动回退查询旧索引。
 
 `AgentOSClient` 对 JSON body、operation、user_id、tenant_id 生成服务签名。双方用 JWT_SECRET 派生不同方向的 HMAC 密钥，token 有效期为 30 秒，绑定 issuer、audience、operation 和 body hash。客户端自动签名，业务代码不应自己拼 token。Gateway 外部用户 token 不直接替代 AgentOS 服务身份。
 
@@ -142,6 +146,6 @@ KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-KnowledgeBase.search、执行 worker、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
+KnowledgeBase.search、生产队列/lifespan、物理清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，单次上传 worker 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

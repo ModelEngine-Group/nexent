@@ -14,9 +14,9 @@ from contracts.agentos_knowledge import (
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
+from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput
 from nexent.storage.models import OperationContext
-from runtime.knowledge_base.composition import knowledge_jobs
+from runtime.knowledge_base.composition import knowledge_jobs, require_knowledge_grant
 
 from infrastructure.agent_model_config import normalize_model_revision
 
@@ -78,19 +78,8 @@ class KnowledgeService:
                 grant = await self.client.authorize_knowledge(
                     request, actor.user_id, actor.tenant_id
                 )
-                if grant.action != action or any(
-                    getattr(payload, name) != getattr(grant, name)
-                    for name in ("knowledge_id", "file_id", "file_version")
-                ):
-                    raise ScopeDenied()
+                require_knowledge_grant(payload, grant, action=action)
                 if action == "upload":
-                    if (
-                        grant.source is None
-                        or grant.artifact != payload.artifact
-                        or grant.parser_version != payload.parser_version
-                        or grant.embedding_model_id != payload.embedding_model.model_id
-                    ):
-                        raise ScopeDenied()
                     for binding, modalities in (
                         (payload.embedding_model, {"embedding", "multi_embedding"}),
                         (payload.rerank_model, {"rerank"}),

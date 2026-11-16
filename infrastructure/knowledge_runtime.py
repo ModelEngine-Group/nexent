@@ -5,6 +5,8 @@ from contextlib import contextmanager
 
 from nexent.storage.models import StorageScope
 
+from infrastructure.knowledge_objects import bind_knowledge_objects
+from infrastructure.knowledge_vectors import bind_knowledge_vectors
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.knowledge_jobs import FILES, JOBS, bind_knowledge_jobs
 
@@ -20,3 +22,17 @@ def knowledge_runtime_ports(actor, *, context):
         close_owned(
             context, ([records.close] if records is not None else []) + [engine.dispose]
         )
+
+
+@contextmanager
+def knowledge_execution_ports(actor, grant, dimensions, *, context):
+    objects = vectors = None
+    try:
+        objects = bind_knowledge_objects(actor, grant, context=context)
+        vectors = bind_knowledge_vectors(actor, grant.collection, dimensions)
+        yield objects, vectors
+    finally:
+        callbacks = ([objects.close] if objects is not None else []) + (
+            [vectors.close] if vectors is not None else []
+        )
+        close_owned(context, callbacks)

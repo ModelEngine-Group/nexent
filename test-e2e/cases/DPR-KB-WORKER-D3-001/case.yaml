@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-KB-WORKER-D3-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-002, DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02]
+  title: Execute a Runtime upload through signed authorization and real object/vector storage
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the owned upload worker reads pinned artifacts, invokes ModelService and publishes only confirmed vector generations.
+  preconditions:
+  - Docker and cached PostgreSQL 15, MinIO and Elasticsearch 8.17.2 images are available.
+  test_data:
+    resources: Three owned infrastructure containers and one Management authorization HTTP server.
+    fixtures: Synthetic source, actual Management artifact publication and completed cleanse record; parser and model adapters are controlled.
+  steps:
+  - order: 1
+    action: Prepare owned stores, publish a pinned source and cleanse artifact through production ports, and persist resource and cleansing records.
+    expected: Source and artifact versions and checksums are confirmed; no data-process endpoint is started.
+  - order: 2
+    action: Admit an upload and execute the Runtime worker using signed Management authorization, production composition and ModelService.
+    expected: Confirmed vectors carry the attempt generation and the job/manifest publish the same visible generation.
+  - order: 3
+    action: Deliver the same completed job again and inspect both the new vector index and a preexisting legacy sentinel index.
+    expected: Model invocation and physical chunk counts stay unchanged; the legacy sentinel remains intact.
+  - order: 4
+    action: Revoke membership after the controlled embedding returns but before its vector checkpoint.
+    expected: No new vector is written or version published; the failed attempt confirms writer closure without replaying the model.
+  - order: 5
+    action: Stop the server, drain managed workers, close ports and remove owned containers and anonymous volumes.
+    expected: No owned resource remains; application data, unrelated indexes and real model providers were not accessed.
+  expected_results:
+  - Exact source/artifact grants and actual storage protocols preserve actor, version and checksum.
+  - Only confirmed current writes publish an authoritative visible generation.
+  - Completed duplicate delivery does not rerun inference or multiply vectors, and legacy data is preserved.
+  - Revocation prevents the next storage side effect and owner resources close.
+  forbidden_side_effects:
+  - No application storage, external model provider, data-process service, fallback query or automatic retry is used.
+  integration_boundary:
+  - Actual PostgreSQL, MinIO, Elasticsearch, Management signed HTTP authorization, Runtime job/worker/ingestor and ModelService with controlled parser and embedding adapter.
+  - Queue discovery/lifespan, final images, real provider inference, search/rerank and physical file cleanup are not proved.
+  observations:
+  - Actual vector keys/count/generation, record visibility, artifact revisions, invocation count and retained legacy sentinel.
+  cleanup:
+  - Parent and probe remove only containers labeled with their generated run ID, including anonymous volumes; all ports, sockets and managed tasks close.
+  acceptance:
+  - id: AC-01
+    description: Real pinned artifact and vector writes produce one visible Runtime generation.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Duplicate completion does not rerun a model or overwrite legacy indexes.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Revocation blocks vector publication and owned resources close.
+    steps: [4, 5]
+    expected_results: [4]
+    forbidden_side_effects: [1]

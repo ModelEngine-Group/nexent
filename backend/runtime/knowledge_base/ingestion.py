@@ -6,6 +6,7 @@ import hashlib
 import logging
 import math
 from dataclasses import dataclass
+from threading import Lock
 
 from contracts.agentos import EmbeddingInvocation
 from contracts.agentos_knowledge import CleanseArtifact, KnowledgeFileUpload
@@ -15,6 +16,8 @@ from nexent.storage.errors import (
     Conflict,
     DeadlineExceeded,
     InvalidInput,
+    NotFound,
+    OperationCancelled,
     PartialFailure,
     ScopeDenied,
 )
@@ -123,6 +126,56 @@ class KnowledgeIngestor:
             max_artifact_bytes,
             max_source_bytes,
         )
+        self._write_lock = Lock()
+        self._writes_open = True
+        self._active_writes = 0
+        self._unknown_write = False
+
+    def stop_writes(self):
+        """Prevent delayed callbacks from writing; report whether all writes are settled."""
+        with self._write_lock:
+            self._writes_open = False
+            return not self._active_writes and not self._unknown_write
+
+    def _upsert(self, rows, *, context):
+        with self._write_lock:
+            if not self._writes_open:
+                raise OperationCancelled(operation_id=context.operation_id)
+            context.remaining()
+            self._active_writes += 1
+        try:
+            receipts = self.vectors.upsert(rows, context=context)
+            if len(receipts) != len(rows) or any(
+                receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.matched
+                for receipt in receipts
+            ):
+                raise PartialFailure(
+                    results=receipts, operation_id=context.operation_id
+                )
+            return receipts
+        except PartialFailure as error:
+            with self._write_lock:
+                self._unknown_write |= len(error.results) != len(rows) or any(
+                    receipt.outcome is WriteOutcome.UNKNOWN for receipt in error.results
+                )
+            raise
+        except (
+            InvalidInput,
+            ScopeDenied,
+            Conflict,
+            NotFound,
+            CapabilityUnsupported,
+            DeadlineExceeded,
+            OperationCancelled,
+        ):
+            raise
+        except BaseException:
+            with self._write_lock:
+                self._unknown_write = True
+            raise
+        finally:
+            with self._write_lock:
+                self._active_writes -= 1
 
     async def _blocking(self, action, *args, context, **kwargs):
         context.remaining()
@@ -167,6 +220,7 @@ class KnowledgeIngestor:
         max_characters=1536,
         new_after_n_chars=1024,
         batch_size=64,
+        checkpoint=None,
     ):
         if (
             not isinstance(request, KnowledgeFileUpload)
@@ -181,6 +235,9 @@ class KnowledgeIngestor:
             )
         ):
             raise InvalidInput()
+        with self._write_lock:
+            if not self._writes_open:
+                raise OperationCancelled(operation_id=context.operation_id)
         _scope(self.objects, actor, request.artifact.space)
         _scope(self.objects, actor, source.space)
         _scope(self.vectors, actor, collection)
@@ -234,6 +291,8 @@ class KnowledgeIngestor:
         documents = await self._blocking(chunks, context=context)
         keys = []
         for start in range(0, len(documents), batch_size):
+            if checkpoint is not None:
+                await checkpoint()
             batch = documents[start : start + batch_size]
             result = await self._model(
                 self.models.invoke,
@@ -250,6 +309,8 @@ class KnowledgeIngestor:
             ):
                 raise Conflict()
             embeddings = _embeddings(result.output, len(batch), info.dimensions)
+            if checkpoint is not None:
+                await checkpoint()
             rows = tuple(
                 VectorRecord(
                     VectorKey(
@@ -280,14 +341,7 @@ class KnowledgeIngestor:
                 )
                 for index, (item, embedding) in enumerate(zip(batch, embeddings))
             )
-            receipts = await self._blocking(self.vectors.upsert, rows, context=context)
-            if len(receipts) != len(rows) or any(
-                receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.matched
-                for receipt in receipts
-            ):
-                raise PartialFailure(
-                    results=receipts, operation_id=context.operation_id
-                )
+            await self._blocking(self._upsert, rows, context=context)
             keys.extend(row.key.key for row in rows)
         return IngestedChunks(tuple(keys), expected.revision)
 

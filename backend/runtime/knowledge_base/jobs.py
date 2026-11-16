@@ -37,7 +37,7 @@ def _all(*terms):
     return Junction("and", terms)
 
 
-def _state(row):
+def job_state(row):
     return KnowledgeJobState(
         **{
             name: row[name]
@@ -216,7 +216,7 @@ class KnowledgeJobs:
             existing = self._job(self.records, lookup, context)
             if existing["request_hash"] != digest:
                 raise Conflict()
-            return _state(existing)
+            return job_state(existing)
         with self.records.transaction(context=context) as tx:
             manifest = self._lock_file(tx, request, context, create=True)
             if operation == "upload":
@@ -284,11 +284,11 @@ class KnowledgeJobs:
                 context=context,
             )
             self._patch(tx, FILES, manifest, values, context)
-        return _state(row)
+        return job_state(row)
 
     def inspect(self, lookup, *, context):
         self.authorize(lookup, context=context)
-        return _state(self._job(self.records, lookup, context))
+        return job_state(self._job(self.records, lookup, context))
 
     @staticmethod
     def _current(manifest, job):
@@ -512,7 +512,7 @@ class KnowledgeJobs:
                     {"status": "deleted", "physical_cleanup_complete": True},
                     context,
                 )
-        return _state(row)
+        return job_state(row)
 
     def is_visible(self, reference, generation, *, context):
         # Search authorizes its knowledge scope before applying this authoritative final filter.

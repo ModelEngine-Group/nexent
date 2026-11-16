@@ -3,8 +3,6 @@
 
 from datetime import datetime
 
-from fastapi.encoders import jsonable_encoder
-
 from contracts.agentos import (
     ChatInvocation,
     EmbeddingInvocation,
@@ -12,13 +10,15 @@ from contracts.agentos import (
     ModelMetadata,
     ModelResult,
 )
-from infrastructure.agent_model_config import normalize_model_revision
-from infrastructure.agentos_identity import ServicePrincipal
+from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRequest
 from nexent.core.gateway.modality.llm.llm_adapter import LLMRequest
 from nexent.core.gateway.modality.rerank.rerank_adapter import RerankRequest
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+
+from infrastructure.agent_model_config import normalize_model_revision
+from infrastructure.agentos_identity import ServicePrincipal
 
 
 class ModelAccessError(Exception):
@@ -64,6 +64,17 @@ class ModelService:
     async def get(self, model_id: int, actor: ServicePrincipal) -> ModelMetadata:
         _, metadata = await self._load(model_id, actor)
         return metadata
+
+    async def embedding_dimensions(self, binding, actor: ServicePrincipal) -> int:
+        record, metadata = await self._load(binding.model_id, actor)
+        if normalize_model_revision(binding.revision) != normalize_model_revision(metadata.revision):
+            raise ModelAccessError(409, "MODEL_REVISION_MISMATCH")
+        if metadata.model_type not in _MODEL_TYPES["embedding"]:
+            raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
+        dimensions = record.get("max_tokens")
+        if type(dimensions) is not int or dimensions <= 0:
+            raise ModelAccessError(409, "MODEL_EMBEDDING_DIMENSIONS_MISSING")
+        return dimensions
 
     async def invoke(self, payload: ModelInvocation, actor: ServicePrincipal) -> ModelResult:
         record, metadata = await self._load(payload.model_id, actor)

@@ -10,15 +10,23 @@ from runtime.knowledge_base.jobs import KnowledgeJobs
 from infrastructure.knowledge_runtime import knowledge_runtime_ports
 
 
+def require_knowledge_grant(reference, grant, *, action):
+    if grant.action != action or any(
+        getattr(reference, name) != getattr(grant, name) for name in ("knowledge_id", "file_id", "file_version")
+    ):
+        raise ScopeDenied()
+    if isinstance(reference, KnowledgeFileUpload) and (
+        grant.source is None or grant.artifact != reference.artifact
+        or grant.parser_version != reference.parser_version or grant.embedding_model_id != reference.embedding_model.model_id
+    ):
+        raise ScopeDenied()
+
+
 @contextmanager
 def knowledge_jobs(actor, grant, *, context):
     def authorized(reference, *, context):
         context.remaining()
-        if any(
-            getattr(reference, name) != getattr(grant, name)
-            for name in ("knowledge_id", "file_id", "file_version")
-        ):
-            raise ScopeDenied()
+        require_knowledge_grant(reference, grant, action=grant.action)
         if isinstance(reference, KnowledgeFileUpload) and (
             grant.action not in {"upload", "execute"}
             or grant.source is None

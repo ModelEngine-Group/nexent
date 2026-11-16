@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DPR-KB-WORKER-D3-001
+timeout_seconds: 180
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_runtime_knowledge_upload
+acceptance_bindings:
+  AC-01: [test_runtime_knowledge_upload]
+  AC-02: [test_runtime_knowledge_upload]
+  AC-03: [test_runtime_knowledge_upload]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
