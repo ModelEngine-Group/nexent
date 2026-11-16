@@ -69,3 +69,22 @@ def test_factory_captures_credentials_before_configuration_object_changes(openai
     prepared = model.service._registry.resolve(profile.bindings.adapter).prepare_http_request(request, profile)
     sender = model.service._sender_factory(model.profile).freeze_credentials(prepared)
     assert sender._headers(prepared)['authorization'] == 'Bearer controlled-key'
+
+
+def test_agent_factory_applies_logprobs_to_resolved_model_request(openai_profile):
+    agent = agent_for(openai_profile)
+    agent.model_config_list[0].extra_body = {"logprobs": True}
+
+    model = agent.create_model("chosen")
+    request, _ = model._request(
+        [{"role": "user", "content": "hello"}], LegacyInvocationOptions({}), None
+    )
+    prepared = model.service._registry.resolve(model.profile.bindings.adapter).prepare_http_request(
+        request, model.profile
+    )
+
+    assert prepared.json_body["logprobs"] is True
+    assert all(
+        extra["path"] != "/logprobs"
+        for extra in openai_profile.extra_api_parameters
+    )

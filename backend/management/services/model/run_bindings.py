@@ -116,8 +116,15 @@ async def create_model_config_list(tenant_id):
         return model_list
     main_snapshot = restore_model_snapshot(main_model_config, tenant_id)
     if main_snapshot is not None:
-        model_list.extend(_resolved_model_config(main_model_config, main_snapshot, cite_name=alias)
-                          for alias in ("main_model", "sub_model"))
+        model_list.extend(
+            _resolved_model_config(
+                main_model_config,
+                main_snapshot,
+                cite_name=alias,
+                extra_body=extra_body,
+            )
+            for alias in ("main_model", "sub_model")
+        )
     else:
         main_prompt_cache = resolve_prompt_cache_profile(main_model_config.get("model_factory"))
         for alias in ("main_model", "sub_model"):
@@ -134,7 +141,7 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
-def _resolved_model_config(record, snapshot, cite_name=None):
+def _resolved_model_config(record, snapshot, cite_name=None, extra_body=None):
     """Map one frozen outlet into the existing Agent configuration contract."""
     from management.services.model.outlet_projection import project_saved_outlet
 
@@ -160,4 +167,5 @@ def _resolved_model_config(record, snapshot, cite_name=None):
         tokenizer_family=snapshot.context_configuration.tokenizer_family,
         capacity_source=snapshot.context_configuration.capacity_source,
         capability_profile_version=snapshot.context_configuration.capability_profile_version,
+        extra_body=extra_body,
     )

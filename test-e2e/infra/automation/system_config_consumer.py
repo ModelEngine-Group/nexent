@@ -79,7 +79,12 @@ def _northbound_probe():
 
 
 async def _runtime_probe():
+    from configuration.runtime import get_config_snapshot
     from management.services.agent.preparation import run as preparation
+    from management.services.agent.preparation.tools import (
+        _build_parallel_executor_tool_config,
+    )
+    from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
     agent_config = SimpleNamespace(
         model_name="model",
@@ -148,9 +153,14 @@ async def _runtime_probe():
             tenant_id="tenant-1",
             user_id="user-1",
         )
+    parallel_config = _build_parallel_executor_tool_config(
+        get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
+    )
+    parallel_tool = ParallelExecutorTool(**parallel_config.params)
     return {
         "mcp_request_timeout_seconds": prepared["mcp_request_timeout_seconds"],
         "mcp_tool_timeout_seconds": prepared["mcp_tool_timeout_seconds"],
+        "parallel_timeout_seconds": parallel_tool.default_timeout_seconds,
     }
 
 

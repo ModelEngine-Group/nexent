@@ -2484,7 +2484,8 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("protocol_repair", [False, True])
-    async def test_create_agent_config_basic(self, protocol_repair):
+    @pytest.mark.parametrize("parallel_timeout", [240, 0.25])
+    async def test_create_agent_config_basic(self, protocol_repair, parallel_timeout):
         """UT-BE-DPR-010: basic agent keeps parallel tool's bilingual metadata."""
         # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
@@ -2501,7 +2502,7 @@ class TestCreateAgentConfig:
                 patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
                 patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('management.services.agent.preparation.compiler.get_config_snapshot', return_value=system_config_snapshot(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS=240)):
+                patch('management.services.agent.preparation.compiler.get_config_snapshot', return_value=system_config_snapshot(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS=parallel_timeout)):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2568,8 +2569,8 @@ class TestCreateAgentConfig:
             assert pe_calls[0][1]["source"] == "local"
             assert pe_calls[0][1]["description_zh"] == _mock_parallel_executor_tool_cls.description_zh
             assert pe_calls[0][1]["description"] == _mock_parallel_executor_tool_cls.description
-            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": 240}
-            assert '"default": 240' in pe_calls[0][1]["inputs"]
+            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": parallel_timeout}
+            assert f'"default": {parallel_timeout}' in pe_calls[0][1]["inputs"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):

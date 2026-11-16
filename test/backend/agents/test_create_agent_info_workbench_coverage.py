@@ -99,6 +99,14 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
     agent_service = sys.modules["management.services.agent.service"]
     monkeypatch.setattr(agent_service, "build_sandbox_policy", MagicMock(return_value=None))
     monkeypatch.setattr(agent_service, "get_sandbox_minio_client", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        run_preparation,
+        "get_config_snapshot",
+        MagicMock(return_value={
+            "MCP_REQUEST_TIMEOUT_SECONDS": 10,
+            "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS": 60,
+        }),
+    )
 
     await run_preparation.create_agent_run_info(
         agent_id=7,

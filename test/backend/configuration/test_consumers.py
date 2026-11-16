@@ -168,3 +168,52 @@ async def test_new_model_bindings_capture_current_logprobs_flag(mocker):
     assert [item.extra_body for item in enabled] == [{"logprobs": True}] * 2
     assert [item.extra_body for item in disabled] == [None, None]
     assert getter.call_count == 2
+
+
+async def test_resolved_model_bindings_capture_current_logprobs_flag(mocker):
+    from management.services.model import run_bindings
+    from test.sdk.core.model_service.conftest import (
+        openai_profile as resolved_profile_fixture,
+    )
+
+    snapshot = resolved_profile_fixture.__wrapped__()
+    main_record = {
+        "model_id": 1,
+        "profile_schema_version": "v1",
+        "display_name": "model",
+        "api_key": "",
+        "http_headers": {},
+    }
+    mocker.patch.object(run_bindings, "get_model_records", return_value=[main_record])
+    mocker.patch.object(
+        run_bindings.tenant_config_manager,
+        "get_model_config",
+        return_value=main_record,
+    )
+    mocker.patch.object(run_bindings, "restore_model_snapshot", return_value=snapshot)
+    mocker.patch(
+        "management.services.model.outlet_projection.project_saved_outlet",
+        return_value={"reasoning_capability": None},
+    )
+    mocker.patch.object(
+        run_bindings,
+        "get_config_snapshot",
+        side_effect=[
+            _snapshot(LLM_INCLUDE_LOGPROBS=True),
+            _snapshot(LLM_INCLUDE_LOGPROBS=False),
+        ],
+    )
+
+    enabled = await run_bindings.create_model_config_list("tenant-1")
+    disabled = await run_bindings.create_model_config_list("tenant-1")
+
+    assert {item.cite_name: item.extra_body for item in enabled} == {
+        "model": None,
+        "main_model": {"logprobs": True},
+        "sub_model": {"logprobs": True},
+    }
+    assert {item.cite_name: item.extra_body for item in disabled} == {
+        "model": None,
+        "main_model": None,
+        "sub_model": None,
+    }

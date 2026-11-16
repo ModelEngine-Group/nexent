@@ -455,6 +455,7 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
         assert initial_run == {
             "mcp_request_timeout_seconds": 10,
             "mcp_tool_timeout_seconds": 60,
+            "parallel_timeout_seconds": 120,
         }
 
         _save_values(
@@ -465,6 +466,7 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
                 "MAX_CONVERSATIONS_PER_USER": 1,
                 "MCP_REQUEST_TIMEOUT_SECONDS": 17,
                 "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS": 23,
+                "RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS": 0.25,
             },
         )
         _wait_for_consumer_value(workers, "MCP_REQUEST_TIMEOUT_SECONDS", 17)
@@ -482,8 +484,10 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
         assert refreshed_run == {
             "mcp_request_timeout_seconds": 17,
             "mcp_tool_timeout_seconds": 23,
+            "parallel_timeout_seconds": 0.25,
         }
         assert initial_run == {
             "mcp_request_timeout_seconds": 10,
             "mcp_tool_timeout_seconds": 60,
+            "parallel_timeout_seconds": 120,
         }

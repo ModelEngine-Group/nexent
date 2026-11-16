@@ -31,11 +31,17 @@ change:
     - test/backend/app/test_evaluation_set_app.py
     - test/backend/services/test_skill_service.py
     - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_agent_outlet_run_snapshot.py
+    - test/backend/agents/test_create_agent_info_workbench_coverage.py
     - test/backend/services/test_tool_configuration_service.py
     - test/backend/services/test_remote_mcp_service.py
+    - test/sdk/core/tools/test_parallel_executor.py
+    - test/sdk/core/model_service/test_agent_model_construction.py
     - test/backend/database/test_group_db.py
     - test/backend/database/test_user_tenant_db.py
     - test/backend/database/test_remote_mcp_db.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_shared_creator_runtime.py
     - test/backend/deploy/test_ops_chart.py
     - frontend/tests/component/systemConfiguration.test.tsx
     - frontend/tests/apiProxyRouting.test.mjs
@@ -52,5 +58,5 @@ change:
     No new D1 is added: isolated catalog and refresh behavior belongs to traditional UT, while D2 proves the HTTP contract,
     D3 proves real PostgreSQL/Redis consumer behavior and D4 proves the browser journey. Recommendation resource rules are
     out of scope because the current catalog has no reliable rule; only the explicit unavailable response is covered.
-    SYS-CONFIG-HOT-REFRESH-D3-001 is BLOCKED by the missing isolated PostgreSQL/Redis runtime on this host.
-    Its assertions and acceptance obligations are unchanged; unit evidence is not promoted to D3 execution evidence.
+    The D3 runtime probe also constructs ParallelExecutorTool from a fractional database timeout, proving the complete
+    snapshot-to-SDK construction path. The direct fixed-script run uses an isolated database and Redis with owned cleanup.
