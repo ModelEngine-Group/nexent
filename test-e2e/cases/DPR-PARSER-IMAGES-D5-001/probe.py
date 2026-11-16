@@ -202,7 +202,8 @@ else:
         extraction_absent=True,
     )
     modules = ["runtime.knowledge_base.chunking", "nexent.multi_modal.image_filter",
-               "runtime.text_cleanse", "runtime.agentos.tools", "nexent.core.tools.analyze_text_file_tool"]
+               "runtime.text_cleanse", "runtime.knowledge_images", "runtime.agentos.tools",
+               "nexent.core.tools.analyze_text_file_tool", "nexent.core.tools.knowledge_base_search_tool"]
 
 if role == "management":
     modules.extend(["management.services.tool.text_validation", "management.services.file.image_content",

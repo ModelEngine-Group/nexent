@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-IMAGES-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Remove the last SDK data-process image consumer
+  description: Inject Runtime KB image filtering, preserve SDK search projection and retire old service image methods and route.
+  affected_features:
+    existing: [DPR-WEB-IMAGE]
+    added: []
+    modified: [DPR-WEB-IMAGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-WEB-IMAGE-D3-001, DPR-IMAGE-PROXY-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: [DPR-KB-IMAGES-D3-001]
+    modified: [DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve scope, document path filtering, citation numbering and original empty-filter image events.
+    - Install actor-bound local image capability and current run cancellation without SDK environment reads.
+    - Verify Runtime exact read-only object role, deadline, no unauthorized reads and source closure.
+    - Preserve web-only source scope and generic proxy encoding while sharing pure decoding.
+    - Remove no-caller service image route and methods without affecting remaining task APIs.
+    reason: Existing SDK UT already proves search and projection; replace old HTTP mocks with capability assertions. Real HTTP/MinIO D3 adds protocol and managed-worker evidence, not a duplicate D1. Case preparation owns its labelled MinIO, sockets and workers without shared factories. Historical KB ACL and presigned HTTP migration remain pending.
+    test_selectors:
+    - test/sdk/core/tools/test_knowledge_base_search_tool.py
+    - test/sdk/core/tools/test_knowledge_image_injection.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/multi_modal/test_image_codec.py
+    - test/sdk/multi_modal/test_image_filter.py
+    - test/backend/services/test_knowledge_image_filter.py
+    - test/backend/services/test_web_image_filter.py
+    - test/backend/services/test_image_sources.py
+    - test/backend/services/test_image_content.py
+    - test/backend/infrastructure/test_source_upload_composition.py
+    - test/backend/app/test_agentos_prepared_knowledge.py::test_knowledge_alias_shape_is_rejected_before_storage_access
+    - test/backend/app/test_agentos_prepared_knowledge.py::test_distinct_knowledge_catalog_aliases_keep_independent_sdk_configuration
+    - test/backend/app/test_data_process_app.py
+    - test/backend/services/test_data_process_service.py

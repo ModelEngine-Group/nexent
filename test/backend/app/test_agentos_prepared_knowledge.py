@@ -322,6 +322,9 @@ def test_distinct_knowledge_catalog_aliases_keep_independent_sdk_configuration(m
         sdk = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
         assert sdk.name == "knowledge_base_search"
         assert sdk._resolve_search_scope(None).used_scope == []
+        assert callable(config.metadata["image_filterer"])
+        assert sdk.image_filterer is config.metadata["image_filterer"]
+        assert sdk.image_filterer.actor == ServicePrincipal("user-a", "tenant-a")
     storage.assert_not_called()
     models.assert_not_called()
     vector.assert_not_called()

@@ -138,8 +138,6 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: str | Non
         )
 
 
-
-
 @router.get("")
 async def list_tasks():
     """Get a list of all tasks with their basic status information"""
@@ -190,32 +188,6 @@ async def get_task_details(task_id: str):
     if not task:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Task not found")
     return task
-
-
-@router.post("/filter_important_image")
-async def filter_important_image(
-    image_url: str = Form(...),
-    positive_prompt: str = Form("an important image"),
-    negative_prompt: str = Form("an unimportant image"),
-):
-    """
-    Check if an image is important
-
-    Uses AI to determine image importance based on provided prompts.
-    Returns importance score and confidence level.
-    """
-    try:
-        result = await service.filter_important_image(
-            image_url=image_url, positive_prompt=positive_prompt, negative_prompt=negative_prompt
-        )
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing image: {e!s}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing image: {e!s}")
-
-
 
 
 @router.post("/convert_state")

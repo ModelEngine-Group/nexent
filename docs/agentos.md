@@ -133,7 +133,9 @@ FileCleanse 的 submit、inspect、cancel、release 分别位于 `/internal/agen
 
 新镜像部署需要设置 `MANAGEMENT_FILE_CLEANSE_ENABLED=true`。新 `.env.example` 和 Helm `nexent-common.config.fileCleanse.enabled` 均已默认启用，升级已有 `.env` 时需同步该值；通过 `nexent-env` Secret注入同名变量时也需同步。本地backend未配置时仍默认关闭。维护窗口内先确认Management迁移与清洗root就绪，再部署Runtime并恢复流量。
 
-本批只迁移文本清洗执行链。通用SDK加载器原有MinIO调用、历史附件及共享知识库的旧URL权限策略仍需后续整改；本次没有扩大读取范围，不能据此声称StorageInterface全覆盖或data-process完整退役。
+文本清洗执行链已经迁移。通用SDK加载器原有MinIO调用、历史附件及共享知识库的旧URL权限策略仍需后续整改；当前没有扩大读取范围，不能据此声称StorageInterface全覆盖或data-process完整退役。
+
+KB 搜索图片由 Runtime 在知识工具绑定恢复后注入本地 image_filterer，并传入当前运行的取消 scope。尺寸与 CLIP 判定复用网页工具的 Runtime 实例，S3 使用 Runtime 角色的单键只读 ObjectStore。该过程在 Runtime 内执行，不增加 AgentOS HTTP 操作；索引和文档范围、引用编号及原有图片事件格式保持。SDK 的旧图片 HTTP 适配和旧服务图片路由均已删除。
 
 ## Memory 与反向回调
 
@@ -196,6 +198,6 @@ Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按�
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-Management 源/产物清理、图片处理、旧检索语义对照及消费者切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
+Management 源/产物清理、KB 多模态入库、旧检索语义对照及业务入口切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

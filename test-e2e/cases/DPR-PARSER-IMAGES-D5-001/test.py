@@ -25,6 +25,8 @@ def test_role_parser_images(record_property):
         "nexent.data_process.core": "sdk/nexent/data_process/core.py",
         "runtime.knowledge_base.chunking": "backend/runtime/knowledge_base/chunking.py",
         "runtime.text_cleanse": "backend/runtime/text_cleanse.py",
+        "runtime.knowledge_images": "backend/runtime/knowledge_images.py",
+        "nexent.core.tools.knowledge_base_search_tool": "sdk/nexent/core/tools/knowledge_base_search_tool.py",
         "runtime.agentos.tools": "backend/runtime/agentos/tools.py",
         "nexent.core.tools.analyze_text_file_tool": "sdk/nexent/core/tools/analyze_text_file_tool.py",
         "management.services.tool.text_validation": "backend/management/services/tool/text_validation.py",

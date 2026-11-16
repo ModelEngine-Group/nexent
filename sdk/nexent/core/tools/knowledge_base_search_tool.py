@@ -1,6 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
-import os
 from typing import List, Optional
 
 from pydantic import Field
@@ -136,7 +136,8 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
-        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.image_filterer = None
+        self.cancellation_scope = None
         self.display_name_to_index_map = display_name_to_index_map
         # `document_paths` is declared with `exclude=True` so smolagents passes the
         # raw FieldInfo default when no value is supplied. Unwrap it here so the
@@ -513,14 +514,14 @@ class KnowledgeBaseSearchTool(Tool):
             return
 
         filtered_images = images_list_url
-        image_filter = getattr(self, "_filter_images", None)
+        image_filter = self.image_filterer
         if callable(image_filter):
             try:
-                maybe_filtered = image_filter(images_list_url, query)
+                maybe_filtered = image_filter(images_list_url, query, cancellation_scope=self.cancellation_scope)
                 if maybe_filtered:
                     filtered_images = maybe_filtered
             except Exception as e:
-                logger.warning("Image filtering failed, using original list: %s", str(e))
+                logger.warning("knowledge_image_filter_failed exception_type=%s", type(e).__name__)
 
         if filtered_images:
             search_images_list_json = json.dumps(
@@ -610,77 +611,3 @@ class KnowledgeBaseSearchTool(Tool):
             }
         except Exception as e:
             raise Exception(f"Error during semantic search: {str(e)}")
-        
-    def _filter_images(self, images_list_url, query) -> list:
-        """
-        Execute image filtering operation directly using the data processing service
-        :param images_list_url: List of image URLs to filter
-        :param query: Search query, used to filter images related to the query
-        """
-        import asyncio
-        import aiohttp
-
-        final_filtered_images = []
-        try:
-            # Define positive and negative prompts
-            positive_prompt = query
-            negative_prompt = "logo or banner or background or advertisement or icon or avatar"
-
-            # Define the async function to perform the filtering
-            async def process_images():
-                # Maximum number of concurrent requests
-                semaphore = asyncio.Semaphore(10)  # Limit concurrent requests
-
-                # Create a ClientSession
-                connector = aiohttp.TCPConnector(limit=0)
-                timeout = aiohttp.ClientTimeout(total=2)
-
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                    # Create a function to process a single image
-                    async def process_single_image(img_url):
-                        async with semaphore:
-                            try:
-                                api_url = f"{self.data_process_service}/tasks/filter_important_image"
-                                data = {
-                                    'image_url': img_url,
-                                    'positive_prompt': positive_prompt,
-                                    'negative_prompt': negative_prompt
-                                }
-                                async with session.post(api_url, data=data) as response:
-                                    if response.status != 200:
-                                        logger.info(
-                                            f"API error for {img_url}: {response.status}")
-                                        return None
-                                    result = await response.json()
-                                    if result.get("is_important", False):
-                                        logger.info(
-                                            f"Important image: {img_url}")
-                                        return img_url
-                                    return None
-                            except Exception as e:
-                                logger.info(
-                                    f"Error processing image {img_url}: {str(e)}")
-                                return None
-                    tasks = [process_single_image(url)
-                             for url in images_list_url]
-                    results = await asyncio.gather(*tasks)
-                    filtered_images = [
-                        url for url in results if url is not None]
-
-                    # Return the filtered list from the inner async function
-                    return filtered_images
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Capture the return value from the async execution
-                final_filtered_images = loop.run_until_complete(
-                    process_images())
-            finally:
-                loop.close()
-        except Exception as e:
-            logger.info(f"Image filtering error: {str(e)}")
-            return []
-
-        # Return the final list to the caller
-        return final_filtered_images

@@ -73,7 +73,7 @@ def test_object_is_pinned_exact_and_closed(monkeypatch, failure):
     else:
         assert module.read_object_image("s3://files/attachments/u/a.png", user_id="u", tenant_id="t", context=ctx) == b"image"
         assert stream.closed
-    factory.assert_called_once_with("t", "u", "attachments/u/a.png", "files", writable=False)
+    factory.assert_called_once_with("t", "u", "attachments/u/a.png", "files", writable=False, role="management")
     store.open_read.assert_called_once_with(pinned, context=ctx)
     store.close.assert_called_once()
 

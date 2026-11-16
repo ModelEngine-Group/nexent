@@ -15,6 +15,7 @@ from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.vdb.client import create_elasticsearch_core
 from nexent.core.agents.agent_model import ToolConfig
 from permissions.dac import resolve_knowledge_permissions
+from runtime.knowledge_images import KnowledgeImageFilter
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,7 @@ def _materialize_knowledge_search_tool(binding, actor, catalog_name):
         **binding.description.model_dump(),
         params=binding.model_dump(include={"index_names", "top_k", "search_mode", "rerank", "rerank_model_name"}),
         metadata={
+            "image_filterer": KnowledgeImageFilter(actor),
             "allowed_index_names": allowed,
             "document_paths": binding.document_paths,
             "display_name_to_index_map": binding.display_name_to_index,

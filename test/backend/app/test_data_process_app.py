@@ -121,11 +121,6 @@ class _ServiceStub:
             return None
         return {"id": task_id, "ok": True}
 
-    async def filter_important_image(self, image_url: str, positive_prompt: str, negative_prompt: str):
-        if image_url == "err":
-            raise RuntimeError("bad")
-        return {"important": True, "score": 0.9}
-
 
     def convert_celery_states_to_custom(self, process_celery_state: str, forward_celery_state: str) -> str:
         if process_celery_state == "SUCCESS" and forward_celery_state == "SUCCESS":
@@ -389,29 +384,6 @@ def test_batch_tasks_http_exception(monkeypatch):
     assert resp.status_code == HTTPStatus.NOT_ACCEPTABLE
 
 
-
-
-
-
-def test_filter_important_image_http_exception(monkeypatch):
-    from data_process.api.tasks import routes as app_module
-
-    async def err_http(*args, **kwargs):
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail="bad image")
-
-    monkeypatch.setattr(app_module.service,
-                        "filter_important_image", err_http, raising=True)
-
-    app = _build_app()
-    client = TestClient(app)
-    resp = client.post(
-        "/tasks/filter_important_image",
-        data={"image_url": "u"},
-    )
-    assert resp.status_code == HTTPStatus.BAD_REQUEST
-
-
 def test_list_tasks():
     app = _build_app()
     client = TestClient(app)
@@ -437,25 +409,6 @@ def test_get_task_details_success_and_404():
     assert ok.status_code == 200 and ok.json()["ok"] is True
     nf = client.get("/tasks/missing/details")
     assert nf.status_code == 404
-
-
-def test_filter_important_image_success_and_error():
-    app = _build_app()
-    client = TestClient(app)
-    ok = client.post(
-        "/tasks/filter_important_image",
-        data={"image_url": "u", "positive_prompt": "p", "negative_prompt": "n"},
-    )
-    assert ok.status_code == 200 and ok.json()["important"] is True
-    err = client.post(
-        "/tasks/filter_important_image",
-        data={"image_url": "err", "positive_prompt": "p", "negative_prompt": "n"},
-    )
-    assert err.status_code == 500
-
-
-
-
 
 
 def test_convert_state_success_and_error(monkeypatch):
@@ -546,3 +499,8 @@ def test_retired_text_endpoint_is_not_exposed():
 def test_retired_load_image_route_is_absent():
     client = TestClient(_build_app())
     assert client.get("/tasks/load_image", params={"url": "u"}).status_code == 404
+
+
+def test_retired_filter_image_route_is_absent():
+    client = TestClient(_build_app())
+    assert client.post("/tasks/filter_important_image", data={"image_url": "unused"}).status_code == 404

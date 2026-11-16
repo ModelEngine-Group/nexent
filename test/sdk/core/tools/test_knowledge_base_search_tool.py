@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib.util
 import json
 import sys
@@ -642,7 +643,6 @@ class TestKnowledgeBaseSearchTool:
     def test_forward_adds_picture_web_for_images(self, knowledge_base_search_tool, monkeypatch):
         """Forward should add picture messages when image results are present."""
         monkeypatch.setenv("DATA_PROCESS_SERVICE", "https://data-process")
-        knowledge_base_search_tool.data_process_service = "https://data-process"
 
         mock_results = [
             {
@@ -661,7 +661,7 @@ class TestKnowledgeBaseSearchTool:
         ]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        with patch.object(knowledge_base_search_tool, "_filter_images", return_value=["s3://bucket/img.png"]):
+        with patch.object(knowledge_base_search_tool, "image_filterer", return_value=["s3://bucket/img.png"]):
             knowledge_base_search_tool.forward("find images")
 
         calls = knowledge_base_search_tool.observer.add_message.call_args_list
@@ -1129,12 +1129,12 @@ class TestKnowledgeBaseSearchToolMissingBranches:
         mock_observer.add_message.assert_called_once()
         mock_observer.add_message.reset_mock()
 
-        with patch.object(tool, "_filter_images", return_value=[]):
+        with patch.object(tool, "image_filterer", return_value=[]):
             tool._record_search_results(search_results, ["img1"], "query")
         assert any(call.args[1] == ProcessType.PICTURE_WEB for call in mock_observer.add_message.call_args_list)
         mock_observer.add_message.reset_mock()
 
-        with patch.object(tool, "_filter_images", side_effect=Exception("boom")):
+        with patch.object(tool, "image_filterer", side_effect=Exception("boom")):
             tool._record_search_results(search_results, ["img2"], "query")
         assert any(call.args[1] == ProcessType.PICTURE_WEB for call in mock_observer.add_message.call_args_list)
 
@@ -1157,66 +1157,6 @@ class TestKnowledgeBaseSearchToolMissingBranches:
         with pytest.raises(Exception, match="Error during semantic search"):
             tool.search_semantic("query", ["kb1"], top_k=1)
 
-    def test_filter_images_success_and_event_loop_failure(self, mock_observer, mock_vdb_core, mock_embedding_model, monkeypatch, mocker):
-        import asyncio
-
-        tool = KnowledgeBaseSearchTool(
-            index_names=["kb1"],
-            search_mode="hybrid",
-            vdb_core=mock_vdb_core,
-            embedding_model=mock_embedding_model,
-            observer=mock_observer,
-            display_name_to_index_map={},
-        )
-        tool.data_process_service = "https://data-process"
-
-        class FakeResponse:
-            def __init__(self, status, payload=None):
-                self.status = status
-                self._payload = payload or {}
-
-            async def json(self):
-                return self._payload
-
-        class FakePostContext:
-            def __init__(self, url):
-                self.url = url
-
-            async def __aenter__(self):
-                if self.url == "raise":
-                    raise RuntimeError("request boom")
-                if self.url == "bad":
-                    return FakeResponse(500, {})
-                if self.url == "skip":
-                    return FakeResponse(200, {"is_important": False})
-                return FakeResponse(200, {"is_important": True})
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        class FakeSession:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-            def post(self, api_url, data):
-                return FakePostContext(data["image_url"])
-
-        fake_aiohttp = types.ModuleType("aiohttp")
-        fake_aiohttp.TCPConnector = lambda limit=0: object()
-        fake_aiohttp.ClientTimeout = lambda total=0: object()
-        fake_aiohttp.ClientSession = FakeSession
-        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
-
-        assert tool._filter_images(["keep", "skip", "bad", "raise"], "query") == ["keep"]
-
-        mocker.patch("asyncio.new_event_loop", side_effect=RuntimeError("loop boom"))
-        assert tool._filter_images(["keep"], "query") == []
 
     def test_source_type_minio_converted_to_file(self, knowledge_base_search_tool, mock_vdb_core):
         """Test that source_type 'minio' is converted to 'file'."""

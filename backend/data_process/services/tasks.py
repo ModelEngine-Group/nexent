@@ -1,24 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
-import base64
 import concurrent.futures
-import io
 import logging
 import os
 import shutil
 import tempfile
 import threading
 import time
-import warnings
 from typing import Any
 
-import aiohttp
 import redis
 from celery import states
 from contracts.constants.constants import MAX_CONCURRENT_CONVERSIONS
 from contracts.constants.environment import (
-    CLIP_MODEL_PATH,
-    IMAGE_FILTER,
     REDIS_BACKEND_URL,
     REDIS_URL,
 )
@@ -41,8 +35,6 @@ from management.db.file.attachment import (
     upload_file,
 )
 from management.services.file.upload import convert_office_to_pdf
-from nexent.multi_modal.image_filter import ImageImportanceFilter
-from PIL import Image
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -61,11 +53,6 @@ class DataProcessService:
         # Initialize components in a modular way
         self._init_redis_client()
 
-        self.image_filter = ImageImportanceFilter(CLIP_MODEL_PATH)
-
-        # Suppress PIL warning about palette images
-        warnings.filterwarnings(
-            'ignore', category=UserWarning, module='PIL.Image')
 
         self._inspector = None
         self._inspector_last_time = 0
@@ -289,134 +276,6 @@ class DataProcessService:
         # May got multiple tasks for the same index
         return [task for task in task_list if task.get('index_name') == index_name]
 
-    async def load_image(self, image_url: str) -> Image.Image | None:
-        """Asynchronously load an image from URL, local file path, or base64 string
-
-        Args:
-            image_url: URL, file path, or base64 encoded image
-
-        Returns:
-            Optional[Image.Image]: PIL Image object if successful, None otherwise
-        """
-        connector = aiohttp.TCPConnector()
-        timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(connector=connector, trust_env=True, timeout=timeout) as session:
-            return await self._load_image(session, image_url)
-
-    async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Image.Image | None:
-        """Internal method to load an image from various sources"""
-        try:
-            if path.startswith('s3://'):
-                # Fetch from MinIO using s3://bucket/key
-                file_stream = get_file_stream(object_name=path)
-                if file_stream is None:
-                    raise FileNotFoundError(
-                        f"Unable to fetch file from URL: {path}")
-                file_data = file_stream.read()
-                image_based64_str = base64.b64encode(
-                    file_data).decode('utf-8')
-                path = f"data:image/jpeg;base64,{image_based64_str}"
-
-            # Check if input is base64 encoded
-            if path.startswith('data:image'):
-                # Extract the base64 data after the comma
-                base64_data = path.split(',')[1]
-                image_data = base64.b64decode(base64_data)
-                image = Image.open(io.BytesIO(image_data))
-
-                # Convert RGBA to RGB if necessary
-                if image.mode == 'RGBA':
-                    background = Image.new('RGB', image.size, (255, 255, 255))
-                    background.paste(image, mask=image.split()[3])
-                    image = background
-                elif image.mode != 'RGB':
-                    image = image.convert('RGB')
-
-                return image
-
-            # Check if the path is a local file
-            if os.path.isfile(path):
-                try:
-                    image = Image.open(path)
-
-                    # Convert RGBA to RGB if necessary
-                    if image.mode == 'RGBA':
-                        background = Image.new(
-                            'RGB', image.size, (255, 255, 255))
-                        background.paste(image, mask=image.split()[3])
-                        image = background
-                    elif image.mode != 'RGB':
-                        image = image.convert('RGB')
-
-                    return image
-                except Exception as e:
-                    logger.info(f"Failed to load local image: {e!s}")
-                    return None
-
-            # If not a local file or base64, treat as URL
-            # If the file ends in SVG, filter it.
-            if path.lower().endswith('.svg'):
-                return None
-
-            async with session.get(path) as response:
-                if response.status != 200:
-                    return None
-
-                image_data = await response.read()
-
-                try:
-                    # For other formats, try direct loading
-                    image = Image.open(io.BytesIO(image_data))
-
-                    # Convert RGBA to RGB if necessary
-                    if image.mode == 'RGBA':
-                        background = Image.new(
-                            'RGB', image.size, (255, 255, 255))
-                        background.paste(image, mask=image.split()[3])
-                        image = background
-                    elif image.mode != 'RGB':
-                        image = image.convert('RGB')
-
-                    return image
-                except Exception:
-                    # If direct loading fails, try downloading to a temporary file first
-                    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(path)[1], delete=False) as temp_file:
-                        temp_file.write(image_data)
-                        temp_file.flush()
-                        try:
-                            image = Image.open(temp_file.name)
-
-                            if image.mode == 'RGBA':
-                                background = Image.new(
-                                    'RGB', image.size, (255, 255, 255))
-                                background.paste(image, mask=image.split()[3])
-                                image = background
-                            elif image.mode != 'RGB':
-                                image = image.convert('RGB')
-                            return image
-                        finally:
-                            os.unlink(temp_file.name)
-
-        except Exception:
-            logger.exception("Error loading image")
-            return None
-
-    async def filter_important_image(self, image_url: str, positive_prompt: str = "an important image",
-                                     negative_prompt: str = "an unimportant image") -> dict[str, Any]:
-        """Load the legacy image input and delegate its decision to the SDK."""
-        image = None
-        try:
-            image = await self.load_image(image_url)
-            return self.image_filter.filter(
-                image, enabled=IMAGE_FILTER,
-                positive_prompt=positive_prompt, negative_prompt=negative_prompt,
-            )
-        except Exception as error:
-            logger.error("image_filter_failed exception_type=%s", type(error).__name__)
-            raise Exception(f"Error processing image: {error!s}") from error
-        finally:
-            if image is not None:
-                image.close()
 
     async def create_batch_tasks_impl(self, authorization: str | None, request: BatchTaskRequest):
         task_ids = []
@@ -532,7 +391,6 @@ class DataProcessService:
             "submitted_count": len(task_ids),
             "failed_count": failed_count,
         }
-
 
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:

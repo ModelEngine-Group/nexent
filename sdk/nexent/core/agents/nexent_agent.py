@@ -411,6 +411,8 @@ class NexentAgent:
                 # Set excluded parameters directly as attributes after instantiation
                 # This bypasses smolagents wrapper restrictions
                 tools_obj.observer = self.observer
+                tools_obj.image_filterer = (tool_config.metadata or {}).get("image_filterer")
+                tools_obj.cancellation_scope = getattr(self, "cancellation_scope", None)
                 tools_obj.vdb_core = tool_config.metadata.get(
                     "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = tool_config.metadata.get(

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-KB-IMAGES-D3-001
+timeout_seconds: 120
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_knowledge_images
+acceptance_bindings:
+  AC-01: [test_knowledge_images]
+  AC-02: [test_knowledge_images]
+  AC-03: [test_knowledge_images]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+# The script owns the source listener, MinIO container and both worker lanes.

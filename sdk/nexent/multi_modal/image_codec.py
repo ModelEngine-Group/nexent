@@ -7,10 +7,21 @@ from io import BytesIO
 from PIL import Image
 
 
+def decode_image_bytes(data: bytes) -> Image.Image:
+    """Return one fully loaded image; the caller owns its lifetime."""
+    with BytesIO(data) as source:
+        image = Image.open(source)
+        try:
+            image.load()
+        except BaseException:
+            image.close()
+            raise
+        return image
+
+
 def encode_image_bytes(data: bytes) -> dict:
     """Preserve RGB source format and the established white-matte JPEG projection."""
-    with BytesIO(data) as source, Image.open(source) as original:
-        original.load()
+    with decode_image_bytes(data) as original:
         image = original
         try:
             if original.mode == "RGBA":

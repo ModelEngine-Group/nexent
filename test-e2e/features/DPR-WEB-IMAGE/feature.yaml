@@ -4,12 +4,14 @@ module:
   name: Agent runtime tools
 feature:
   feature_id: DPR-WEB-IMAGE
-  name: Runtime web image filtering without data-process
+  name: Runtime search image filtering without data-process
   status: active
-  description: External search image consumers use an injected local Runtime filter with bounded HTTP ownership.
+  description: Web and KB search image consumers use injected local Runtime filtering with bounded HTTP and scoped object ownership.
   business_rules:
   - rule_id: DPR-WEB-IMAGE-RULE-01
     description: Exa, Tavily and Linkup emit the existing image event without a data-process address or extra requests.
   - rule_id: DPR-WEB-IMAGE-RULE-02
     description: Runtime owns bounded image reads and decisions in the current managed tool worker and closes resources.
+  - rule_id: DPR-WEB-IMAGE-RULE-03
+    description: KB search preserves scope, references and existing empty-filter events while using Runtime-owned scoped S3 and inline sources without the old task HTTP adapter.
   required_test_stages: [D3]

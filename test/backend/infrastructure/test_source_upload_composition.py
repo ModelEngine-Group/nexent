@@ -37,6 +37,26 @@ def test_incomplete_config_never_falls_back_to_default_cloud(monkeypatch):
         composition.bind_source_objects("tenant-a", "user-a", "source.txt", "files")
 
 
+def test_runtime_image_grant_is_exact_and_read_only(monkeypatch, mocker):
+    for name, value in {"MINIO_ENDPOINT": "http://fixture", "MINIO_ACCESS_KEY": "fixture-user",
+                        "MINIO_SECRET_KEY": "fixture-password", "MINIO_DEFAULT_BUCKET": "files"}.items():
+        monkeypatch.setattr(environment, name, value)
+    factory = mocker.patch.object(composition, "_configured_client")
+    objects = composition.bind_source_objects("tenant", "owner", "attachments/owner/a.png", "files",
+                                               writable=False, role="runtime")
+    assert objects.scope.service_role == "runtime"
+    assert objects.scope.tenant_id == "tenant" and objects.scope.actor_id == "owner"
+    ctx = OperationContext("image-grant", monotonic() + 5)
+    with pytest.raises(ScopeDenied):
+        objects.stat(ObjectRef("files", "attachments/owner/other.png"), context=ctx)
+    with pytest.raises(ScopeDenied):
+        objects.delete(ObjectRef("files", "attachments/owner/a.png"), context=ctx)
+    with pytest.raises(InvalidInput):
+        composition.bind_source_objects("tenant", "owner", "attachments/owner/a.png", "files", role="runtime")
+    factory.assert_not_called()
+    objects.close()
+
+
 def test_recovery_object_grant_denies_mutations_before_client_creation(
     monkeypatch, mocker
 ):

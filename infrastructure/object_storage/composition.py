@@ -47,24 +47,26 @@ def _configured_client(remaining):
     )
 
 
-def bind_source_objects(tenant_id, actor_id, object_name, bucket, *, writable=True):
-    """Grant one preallocated KB source key without changing its physical legacy path."""
+def bind_source_objects(tenant_id, actor_id, object_name, bucket, *, writable=True, role="management"):
+    """Grant one selected source key; Runtime may only receive read access."""
     environment = _configured_environment()
 
     if (
         type(writable) is not bool
         or not bucket
         or bucket != environment.MINIO_DEFAULT_BUCKET
+        or role not in {"management", "runtime"}
+        or role == "runtime" and writable
     ):
         raise InvalidInput()
-    scope = StorageScope("management", tenant_id, actor_id, frozenset({"files"}))
+    scope = StorageScope(role, tenant_id, actor_id, frozenset({"files"}))
     return S3ObjectStore(
         scope,
         ObjectBinding(
             "files",
             bucket,
             "",
-            frozenset({"management"}),
+            frozenset({role}),
             writable=writable,
             exact_keys=frozenset({object_name}),
         ),

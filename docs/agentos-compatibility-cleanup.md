@@ -17,6 +17,8 @@
 
 文本工具已移除 SDK 的 data_process_service_url 构造参数、process_text_file HTTP 方法，以及旧服务的 /tasks/process_text_file 路由、process_uploaded_text_file 和无调用方 extract_uploaded_text。Management 试跑改用签名 Agent.tools.invoke，普通运行从真实上下文注入清洗能力，benchmark 必须显式注入。其他 data-process 功能仍有调用方，镜像及剩余模块继续等待迁移。
 
+KB 搜索工具的图片筛选也已改为 Runtime 注入的本地 image_filterer，沿用当前运行的取消 scope。SDK 不再读取 DATA_PROCESS_SERVICE，也不再提供私有 _filter_images HTTP 适配。旧服务的 filter_important_image 路由、图片加载器和 CLIP 初始化已删除；现有图片事件及空筛选时保留原列表的行为保持。S3 通过单键只读 ObjectStore 读取，历史 KB 读取权限和预签名 HTTP 对象直链仍待 StorageInterface 整改，不能据此认定整个镜像已退役。
+
 没有增加旧模块别名、弃用包装器或 import 回退。两个服务目录之间不允许直接源码导入。
 
 ## 仍有用途的历史处理

@@ -27,12 +27,12 @@ async def read_inline_or_web_image(url, *, context):
         return await response.read()
 
 
-def read_object_image(url, *, user_id, tenant_id, context):
+def read_object_image(url, *, user_id, tenant_id, context, role="management"):
     """The caller authorizes the key; this port grants no sibling reads or writes."""
     bucket, key = parse_s3_url(url)
     if bucket != environment.MINIO_DEFAULT_BUCKET:
         raise InvalidInput()
-    objects = bind_source_objects(tenant_id, user_id, key, bucket, writable=False)
+    objects = bind_source_objects(tenant_id, user_id, key, bucket, writable=False, role=role)
     try:
         metadata = objects.stat(ObjectRef("files", key), context=context)
         with objects.open_read(metadata.ref, context=context) as stream:

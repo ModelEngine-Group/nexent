@@ -31,7 +31,8 @@ class WebImageFilter:
         # SDK search tools are synchronous and already execute on a managed worker.
         return asyncio.run(self._filter(urls, query))
 
-    async def _filter(self, urls, query):
+    async def _filter(self, urls, query, *, image_loader=None, event_prefix="web_image"):
+        loader = load_web_image if image_loader is None else image_loader
         semaphore = asyncio.Semaphore(10)
         timeout = aiohttp.ClientTimeout(total=self.image_seconds)
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
@@ -41,7 +42,7 @@ class WebImageFilter:
                     deadline = monotonic() + self.image_seconds
                     try:
                         async with asyncio.timeout(self.image_seconds):
-                            image = await load_web_image(session, url)
+                            image = await loader(session, url)
                             if image is None:
                                 return None
                             remaining = deadline - monotonic()
@@ -59,10 +60,10 @@ class WebImageFilter:
                                 raise TimeoutError()
                             return url if result["is_important"] else None
                     except TimeoutError:
-                        logger.warning("web_image_timeout phase=filter threshold_seconds=%s", self.image_seconds)
+                        logger.warning("%s_timeout phase=filter threshold_seconds=%s", event_prefix, self.image_seconds)
                         return None
                     except (aiohttp.ClientError, OSError, ValueError, TypeError) as error:
-                        logger.info("web_image_failed exception_type=%s", type(error).__name__)
+                        logger.info("%s_failed exception_type=%s", event_prefix, type(error).__name__)
                         return None
                     finally:
                         if image is not None:
