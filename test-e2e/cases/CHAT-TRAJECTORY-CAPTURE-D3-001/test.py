@@ -7,9 +7,11 @@ import threading
 from typing import ClassVar
 
 import pytest
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig, ToolConfig
 from opentelemetry import trace
 from smolagents import Tool
+
+from nexent.core.agents.agent_model import AgentConfig, ModelConfig, ToolConfig
+
 
 pytestmark = [pytest.mark.case_id('CHAT-TRAJECTORY-CAPTURE-D3-001'), pytest.mark.stage('D3')]
 
@@ -85,6 +87,11 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
         assert len([n for n in result['nodes'] if n['kind'] == 'model']) == 2
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['display_trace_id'] == '123' and root['model_call_count'] == 2
+        indexed = {n['id']: n for n in result['nodes']}
+        for physical, expected in zip(models, ('failed-partial', '<final_answer>completed-answer</final_answer>')):
+            body = json.loads(indexed[attrs(physical)['nexent.record_id']]['output']['text'])
+            assert body['choices'][0]['delta']['content'] == expected
+            assert not {'content_parts', 'provider_metadata', 'complete', 'message_id'} & body.keys()
         assert client.get('/trajectory/conversations/123', headers={'Authorization': 'user'}).status_code == 403
 
 
@@ -172,6 +179,8 @@ def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
     assert len(models) == 1
     assert attrs(models[0])['nexent.business_status'] == 'cancelled'
     assert 'partial-before-cancellation' in attrs(models[0])['output.value']
+    provider_body = json.loads(attrs(models[0])['nexent.provider.response.value'])
+    assert provider_body['choices'][0]['delta']['content'] == 'partial-before-cancellation'
 
 
 def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
@@ -219,6 +228,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     saved = runtime.spans()
     children = [span for span in saved if span['name'] == 'agent.subagent.child']
     assert len(children) == 2
+    assert {attrs(span)['input.value'] for span in children} == {'left', 'right'}
     assert len({attrs(span)['subagent.invocation_id'] for span in children}) == 2
     root_invocation = attrs(next(span for span in saved if span['name'] == 'agent.run'))['nexent.invocation_id']
     child_invocations = {attrs(span)['nexent.record_id']: attrs(span)['subagent.invocation_id'] for span in children}
@@ -458,10 +468,11 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
     from contracts.agent import NL2AgentRunRequest, SystemAgentRef
     from contracts.authentication import AuthenticatedIdentity
     from management.services.conversation import creation_history, creator_execution
+    from services import nl2agent_service
+
     from nexent.core.agents.agent_model import AgentRunInfo
     from nexent.core.utils.observer import MessageObserver
     from nexent.monitor import get_agent_monitoring_context
-    from services import nl2agent_service
 
     history = {'agent_id': 77, 'target': {'type': 'agent', 'id': 201}, 'message_records': []}
     saved, run_infos = [], []
@@ -603,3 +614,91 @@ def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runt
         assert root["usage"]["total"] == 13 and result["coverage"]["complete"]
         assert "controlled preference" in nodes["memory.presearch"]["output"]["text"]
         assert "agent.sandbox.initialize" in nodes
+
+
+@pytest.mark.parametrize('query', ['用户问题', '用户问题🙂\n' * 5000], ids=['short', 'chunked-unicode'])
+def test_capture_agent_query_matches_preview_and_cold_content(runtime, query):
+    def reply(request, number, emit):
+        emit('<final_answer>done</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base, query=query)
+        assert info.attempt_outcome == 'completed'
+        assert len(requests) == 1
+    saved = runtime.spans()
+    root = next(span for span in saved if span['name'] == 'agent.run')
+    assert attrs(root)['input.value'] == query
+    execution = json.loads(attrs(root)['nexent.run.snapshot'])
+    assert execution['effective_config']['agent_config']['name'] == 'root'
+    assert 'query' not in execution
+    model = next(span for span in saved if attrs(span).get('openinference.span.kind') == 'LLM')
+    assert json.loads(attrs(model)['nexent.raw.value'])['request'] == requests[0]
+    assert json.loads(attrs(model)['input.value']) == requests[0]
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+        node = next(n for n in result['nodes'] if n['parent_id'] is None)
+        body = node['input']
+        assert query.startswith(body['text'])
+        assert body['byte_count'] == len(query.encode())
+        assert body['char_count'] == len(query)
+        assert body['complete'] == (body['text'] == query)
+        chunks, offset = [], 0
+        for _ in range(100):
+            chunk = data(client.get('/trajectory/conversations/123/contents/' + body['content_id'],
+                                    params={'offset': offset, 'limit': 8192}, headers={'Authorization': 'admin'}))
+            chunks.append(chunk['text'])
+            assert chunk['next_offset'] == offset + len(chunk['text'].encode())
+            offset = chunk['next_offset']
+            if chunk['complete']:
+                break
+        else:
+            pytest.fail('Input did not finish within the bounded chunk count')
+        assert ''.join(chunks) == query
+        assert node['model_call_count'] == 1
+
+
+@pytest.mark.parametrize('answer', ['最终回答', '最终回答🙂' * 3000], ids=['short', 'chunked-unicode'])
+def test_capture_model_display_uses_provider_bodies_and_cold_content(runtime, answer):
+    def reply(request, number, emit):
+        emit(reasoning='分析')
+        emit(reasoning='完成')
+        emit('<final_answer>')
+        emit(answer)
+        emit('</final_answer>')
+        emit(usage={'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13})
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base)
+        assert info.attempt_outcome == 'completed' and len(requests) == 1
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+        model = next(n for n in result['nodes'] if n['kind'] == 'model')
+
+        def body(reference):
+            parts, offset = [], 0
+            for _ in range(100):
+                chunk = data(client.get('/trajectory/conversations/123/contents/' + reference['content_id'],
+                                        params={'offset': offset, 'limit': 8192},
+                                        headers={'Authorization': 'admin'}))
+                parts.append(chunk['text'])
+                offset = chunk['next_offset']
+                if chunk['complete']:
+                    break
+            else:
+                pytest.fail('Model body did not finish within the bounded chunk count')
+            text = ''.join(parts)
+            assert text.startswith(reference['text'])
+            assert len(text.encode()) == reference['byte_count']
+            return json.loads(text)
+
+        assert body(model['input']) == requests[0]
+        assert body(model['output']) == {
+            'id': 'fixture', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'model',
+            'choices': [{'index': 0, 'delta': {'reasoning_content': '分析完成',
+                                             'content': '<final_answer>' + answer + '</final_answer>'},
+                         'finish_reason': None}],
+            'usage': {'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13},
+        }
+        assert model['usage']['total'] == 13 and model['ttft_ms'] >= 0

@@ -6,9 +6,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from opentelemetry import trace
+
 from nexent.core.agents.nexent_agent import _wrap_tool_with_monitoring
 from nexent.core.utils.observer import MessageObserver
-from opentelemetry import trace
 
 
 def test_local_tool_schema_and_call_identity_are_captured(spans, monkeypatch):
@@ -37,3 +38,22 @@ def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, ex
     root = next(span for span in spans.exporter.get_finished_spans() if span.name == 'agent.run')
     assert root.attributes['nexent.business_status'] == expected
     assert root.attributes['nexent.cancelled'] == (expected == 'cancelled')
+
+
+@pytest.mark.parametrize("request_query", ["原始用户问题", "", None])
+def test_worker_input_uses_original_request_query_with_prepared_fallback(spans, monkeypatch, request_query):
+    from nexent.monitor import AgentRunMetadata, agent_monitoring_context
+
+    module = importlib.import_module('nexent.core.agents.run_agent')
+    monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
+    info = SimpleNamespace(agent_config=None, query='prepared question with attachment and time',
+                           model_config_list=[], history=[], attempt_outcome='completed')
+    captured = []
+    monkeypatch.setattr(module, '_agent_run_thread',
+                        lambda run: captured.append(dict(trace.get_current_span().attributes)))
+    with agent_monitoring_context(AgentRunMetadata(query=request_query)):
+        module.agent_run_thread(info)
+    root = next(span for span in spans.exporter.get_finished_spans() if span.name == 'agent.run')
+    expected = request_query if request_query is not None else info.query
+    assert captured[0]['nexent.local.input.value'] == expected
+    assert root.attributes.get('input.preview', '') == expected

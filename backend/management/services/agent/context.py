@@ -176,7 +176,8 @@ def trajectory_source_message_id(request, user_id, tenant_id):
 
 
 def build_agent_run_context(
-    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
+    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict,
+    user_query: str | None = None,
 ):
     """Preview memory once and bind the metadata shared by both consumers."""
     from infrastructure.observability.bootstrap import monitoring_manager
@@ -202,7 +203,7 @@ def build_agent_run_context(
             user_id=user_id,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
-            query=request.query,
+            query=user_query if user_query is not None else request.query,
             is_debug=request.is_debug,
             language=language,
             memory_enabled=enabled,

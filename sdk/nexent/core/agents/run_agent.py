@@ -422,7 +422,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         emit_preparation(agent_run_info)
         if local_capture_enabled(manager):
             capture_run_input(
-                manager, span, query=agent_run_info.query, agent_config=agent_run_info.agent_config,
+                manager, span, query=metadata.query, agent_config=agent_run_info.agent_config,
                 model_configs=agent_run_info.model_config_list, history=_get_authorized_history(agent_run_info),
                 context_items=_get_authorized_context_items(agent_run_info),
                 attachments=getattr(agent_run_info, "minio_files", None),

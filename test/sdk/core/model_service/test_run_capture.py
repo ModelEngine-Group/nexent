@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from nexent.monitor.run_capture import capture_run_input, capture_run_result
 
@@ -17,7 +18,7 @@ def manager(sink="local_file"):
     )
 
 
-def test_root_input_captures_authorized_context_and_detaches_configuration():
+def test_root_input_keeps_query_separate_from_authorized_snapshot():
     span = Mock()
     agent = AgentConfig(
         name="root",
@@ -46,13 +47,14 @@ def test_root_input_captures_authorized_context_and_detaches_configuration():
         attachments=[],
     )
     values = span.set_attributes.call_args.args[0]
-    body = json.loads(values["nexent.local.input.value"])
+    assert values["nexent.local.input.value"] == "question"
+    body = json.loads(values["nexent.local.nexent.run.snapshot"])
     assert body["effective_config"]["agent_config"]["max_steps"] == 3
     assert body["effective_config"]["agent_config"]["version_no"] == 0
     assert body["context"]["history"][0]["content"] == "authorized history"
-    assert "完整提示词" in values["nexent.local.input.value"]
-    assert "credential" not in values["nexent.local.input.value"]
-    assert "provider.invalid" not in values["nexent.local.input.value"]
+    assert "完整提示词" in values["nexent.local.nexent.run.snapshot"]
+    assert "credential" not in values["nexent.local.nexent.run.snapshot"]
+    assert "provider.invalid" not in values["nexent.local.nexent.run.snapshot"]
     agent.max_steps = 9
     assert body["effective_config"]["agent_config"]["max_steps"] == 3
     assert len(values["nexent.config_fingerprint"]) == 64
@@ -117,7 +119,7 @@ def test_runtime_collaborators_and_profile_provenance_do_not_replace_safe_fields
             }
         ],
     )
-    body = json.loads(span.set_attributes.call_args.args[0]["nexent.local.input.value"])
+    body = json.loads(span.set_attributes.call_args.args[0]["nexent.local.nexent.run.snapshot"])
     assert body["effective_config"]["model_configs"][0]["resolved_profile"][
         "parameter_values"
     ] == {"temperature": 0.2}
@@ -150,12 +152,13 @@ def test_broken_capture_exporter_does_not_retry_or_fail_context_assembly(monkeyp
 def test_context_duration_keeps_business_result_and_unknown_clock(
     monkeypatch, elapsed, failed
 ):
-    from nexent.monitor.run_capture import capture_context_assembly
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,
     )
+
+    from nexent.monitor.run_capture import capture_context_assembly
 
     @dataclass
     class Evidence:
@@ -195,3 +198,16 @@ def test_context_duration_keeps_business_result_and_unknown_clock(
             assert span.attributes["nexent.business_status"] == "failed"
     finally:
         provider.shutdown()
+
+
+@pytest.mark.parametrize("query", ["", "中文问题\n第二行", '{"query": "用户提供的JSON", "messages": []}', "中文🙂" * 20000],
+                         ids=["empty", "unicode", "user-json", "long-unicode"])
+def test_agent_input_preserves_query_without_unwrapping_user_json(query):
+    span = Mock()
+    capture_run_input(manager(), span, query=query, agent_config={}, model_configs=[],
+                      history=[{"role": "user", "content": "old question"}])
+    values = span.set_attributes.call_args.args[0]
+    assert values["nexent.local.input.value"] == query
+    snapshot = json.loads(values["nexent.local.nexent.run.snapshot"])
+    assert "query" not in snapshot
+    assert snapshot["context"]["history"][0]["content"] == "old question"

@@ -16,6 +16,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .duration import duration_attributes
 from .local_content import local_capture_enabled, safe_local_content
+from .provider_response import ProviderResponse
 
 
 def _isolated(method):
@@ -99,6 +100,7 @@ class ModelAttemptSession:
             'nexent.attempt_no': self.attempt_no, 'nexent.max_attempts': self.max_attempts,
             'nexent.output_complete': False, 'nexent.business_status': 'running',
             'nexent.config_fingerprint_version': 1,
+            'nexent.provider.response.format': 'provider_json',
         }
         if provider:
             values['model.provider'] = provider
@@ -114,14 +116,14 @@ class ModelAttemptSession:
         self._terminal, self._sensitive = False, ()
         self._reset_buffer()
         self._remaining, self._exhausted = self._budget, False
+        self._provider_response = ProviderResponse(self._reserve_provider)
         # Local projection collapses this wrapper; the remote logical span stays unchanged.
         self.tracker = self.manager.create_token_tracker(self.model, self.span)
         safe_body = _safe(body)
         if self._take(safe_body, 'raw.request'):
             self._raw['request'] = safe_body
-        safe_input = _safe(semantic) if semantic is not None else safe_body
-        if self._take(safe_input, 'input'):
-            self._put('input.value', safe_input)
+        if self._take(safe_body, 'input'):
+            self._put('input.value', safe_body)
         self.span.set_attribute('nexent.request_fingerprint', hashlib.sha256(_encoded(safe_body).encode()).hexdigest())
         if config is not None:
             safe_config = _safe(config)
@@ -151,6 +153,15 @@ class ModelAttemptSession:
         self._calls = {}
         self._buffered_bytes = 0
         self._usage_value = None
+
+    def _reserve_provider(self, size):
+        if self._exhausted or size > self._remaining:
+            self._exhausted = True
+            self.span.set_attribute('nexent.trajectory.gap', True)
+            self.span.set_attribute('nexent.availability.output', 'not_captured')
+            return False
+        self._remaining -= size
+        return True
 
     def _reserve_buffer(self, size):
         if self._exhausted:
@@ -221,13 +232,19 @@ class ModelAttemptSession:
         except (ValueError, UnicodeError):
             body = response.body.decode('utf-8', errors='replace')
         value = {'status_code': response.status_code, 'body': _safe(body, self._sensitive)}
+        self._provider_response.response(value['body'])
         if self._take(value, 'raw.response'):
             self._raw['response'] = value
 
     @_isolated
     def frame(self, frame):
-        # Frames remain transport data; retain credentials only for final redaction.
+        # Persist only merged provider fields; individual transport frames stay transient.
         self._sensitive = tuple(dict.fromkeys((*self._sensitive, *frame.sensitive_values)))
+        try:
+            body = json.loads(frame.data)
+        except (ValueError, UnicodeError):
+            return
+        self._provider_response.frame(body)
 
     def frames(self, frames):
         for frame in frames:
@@ -263,6 +280,7 @@ class ModelAttemptSession:
         if self.span is None or self._terminal:
             return
         value = chunk.model_dump(mode='json')
+        self._provider_response.frame(chunk.model_dump(mode='json', exclude_unset=True))
         for choice in value.get('choices', []):
             delta = choice.get('delta') or {}
             self._append_text(self._text['content'], delta.get('content'))
@@ -363,6 +381,14 @@ class ModelAttemptSession:
             span.set_attributes(duration_attributes(self._started, time.perf_counter()))
             span.set_attribute('nexent.raw.value', _encoded(self._raw))
             span.set_attribute('output.value', _encoded(self._output))
+            if self._provider_response.seen and not self._provider_response.failed:
+                span.set_attribute('nexent.provider.response.value', _encoded(
+                    _safe(self._provider_response.value(), self._sensitive),
+                ))
+            elif self._provider_response.failed:
+                span.set_attribute('nexent.availability.output', 'not_captured')
+            else:
+                span.set_attribute('nexent.availability.output', 'not_returned')
             if self._output.get('reasoning_parts'):
                 span.set_attribute('nexent.reasoning.value', _encoded(self._output['reasoning_parts']))
             # Mirror observed metrics without recording a second histogram sample.
@@ -374,4 +400,5 @@ class ModelAttemptSession:
                     self.logical_span.add_event(event.name, event.attributes, timestamp=event.timestamp)
         finally:
             self.previous_attempt_id = self.attempt_id
+            self._provider_response = None
             span.end()

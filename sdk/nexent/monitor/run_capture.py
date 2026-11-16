@@ -55,7 +55,7 @@ def _configuration(value, availability, path='effective_config'):
 
 def capture_run_input(manager, span, *, query, agent_config, model_configs, history=None,
                       context_items=None, attachments=None, app_version=None):
-    """Capture only the authorized snapshots supplied by the worker's existing callers."""
+    """Keep the user query separate from authorized execution snapshots."""
     if not local_capture_enabled(manager) or span is None:
         return
     try:
@@ -63,12 +63,13 @@ def capture_run_input(manager, span, *, query, agent_config, model_configs, hist
         configuration = _configuration({'agent_config': agent_config, 'model_configs': model_configs}, availability)
         safe_config = json.loads(safe_local_content(configuration))
         canonical = json.dumps(safe_config, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
-        body = {'query': _dto(query), 'effective_config': safe_config,
+        body = {'effective_config': safe_config,
                 'context': {'history': _dto(history), 'context_items': _dto(context_items)},
                 'attachments': _dto(attachments)}
         body['availability'] = availability
         attributes = {
-            'nexent.local.input.value': safe_local_content(body),
+            'nexent.local.input.value': safe_local_content(query),
+            'nexent.local.nexent.run.snapshot': safe_local_content(body),
             'nexent.config_fingerprint_version': 1,
             'nexent.config_fingerprint': hashlib.sha256(canonical.encode()).hexdigest(),
             'nexent.core_type': 'smolagents',

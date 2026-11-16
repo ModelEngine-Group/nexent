@@ -105,7 +105,6 @@ class _Call:
         )
         tracker = self.capture.begin(
             json.loads(prepared.body_bytes),
-            semantic=self.request.model_dump(mode="json"),
             config={
                 "identity": self.profile.identity.model_dump(mode="json"),
                 "bindings": self.profile.bindings.model_dump(mode="json"),

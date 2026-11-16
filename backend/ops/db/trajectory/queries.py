@@ -5,11 +5,14 @@ from datetime import UTC
 
 from sqlalchemy import bindparam, text
 
+
 # isort: split
 from contracts.errors.trajectory import QueryError
+from management.db.agent.models import AgentInfo
 from management.db.trajectory.models import TrajectoryStatistics
 from management.db.trajectory.repository import scope_uuid
 from ops.db.trajectory.catalog import _session
+
 
 READABLE = "('success','error','partial')"
 BASE = """
@@ -261,7 +264,7 @@ class ExecutionCatalog:
 
             params["shared"] = ASSET_OWNER_TENANT_ID
             sql = f"""SELECT tenant_id,id,(SELECT coalesce(a.display_name,a.name)
-              FROM nexent.agent_info_t a WHERE a.agent_id=CAST(options.id AS integer)
+              FROM {AgentInfo.__table__.fullname} a WHERE a.agent_id=CAST(options.id AS integer)
               AND a.version_no=0 AND a.delete_flag='N' AND a.tenant_id IN (options.tenant_id,:shared)
               ORDER BY CASE WHEN a.tenant_id=options.tenant_id THEN 0 ELSE 1 END LIMIT 1) AS name
               FROM ({sql}) options"""

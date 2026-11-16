@@ -8,9 +8,11 @@ from datetime import UTC, datetime
 
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
 from infrastructure.observability.trajectory_reader import Text
+
 from nexent.monitor.agent_version import valid_agent_version
 
 from .primitives import finite_number
+
 
 BODY_FIELDS = {
     "input": "input.value",
@@ -202,6 +204,11 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                     for slot, field in BODY_FIELDS.items():
                         if field not in attrs and field in event_attrs:
                             bodies[slot] = event_attrs[field]
+        if kind == "model" and attrs.get("nexent.provider.response.format"):
+            # Preview and content references must share the provider's original JSON source.
+            bodies.pop("output", None)
+            if "nexent.provider.response.value" in attrs:
+                bodies["output"] = attrs["nexent.provider.response.value"]
         usage = {
             name: finite_number(attrs.get(field), integer=True)
             for name, field in (
