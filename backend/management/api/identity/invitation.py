@@ -4,7 +4,7 @@ Invitation management API endpoints
 """
 
 from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError, ForbiddenError
 import logging
 from typing import Optional
 
@@ -12,8 +12,6 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
-from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.invitations import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
@@ -63,6 +61,8 @@ async def list_invitations_endpoint(
             status_code=HTTPStatus.OK, content={"message": "Invitation codes retrieved successfully", "data": result}
         )
 
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation list access attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
@@ -145,6 +145,8 @@ async def create_invitation_endpoint(
     except NotFoundException as exc:
         logger.warning(f"User not found during invitation creation: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation creation attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
@@ -217,6 +219,8 @@ async def update_invitation_endpoint(
     except ValidationError as exc:
         logger.warning(f"Invitation update validation error: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation update attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
@@ -336,6 +340,8 @@ async def delete_invitation_endpoint(
     except ValidationError as exc:
         logger.warning(f"Invitation deletion validation error: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation deletion attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
@@ -413,6 +419,8 @@ async def use_invitation_endpoint(
     except NotFoundException as exc:
         logger.warning(f"Invitation code not available: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation usage attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
