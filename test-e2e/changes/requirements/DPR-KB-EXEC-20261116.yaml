@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-EXEC-20261116
+  change_type: requirement
+  requirement_id: DPR-002
+  title: Execute Runtime text ingestion through Model.invoke and scoped storage ports
+  description: >-
+    Runtime reads pinned checksummed artifacts, performs final chunking and invokes the local
+    ModelService for embedding before writing deterministic vectors through StorageInterface.
+    This execution component does not admit jobs, authorize resources or publish visible versions.
+    Partial and unknown results stop execution without replay or fallback.
+  affected_features:
+    existing: [SI-STORAGE]
+    added: []
+    modified: [SI-STORAGE]
+    retired: []
+  affected_cases:
+    existing: [SI-VECTOR-D3-001]
+    added: []
+    modified: [SI-VECTOR-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Validate scope and model revision before artifact access and vector writes.
+    - Check pinned object size, checksum, parser and source while closing reads.
+    - Validate model output count and dimensions before each batch write, preserve stable keys and stop on unconfirmed writes.
+    - Bound model requests and stop on cancellation without retries.
+    reason: >-
+      Isolated UT covers validation and failure behavior. Existing actual vector protocol D3 gains
+      real Runtime ingestor, ModelService and managed-thread collaboration with controlled object
+      bytes and model adapter. No duplicate D1 or claim of actual provider inference is added.
+    test_selectors:
+    - test/backend/services/test_knowledge_ingestion.py
+    - test/backend/services/test_knowledge_chunking.py
+  notes: >-
+    Existing vector assertions and self-owned preparation/cleanup remain. Aggregate DPR acceptance
+    still needs durable jobs, authorized AgentOS transport, real provider inference and visibility/deletion.

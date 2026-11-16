@@ -4,14 +4,14 @@ module: INFRA-STORAGE
 case:
   case_id: SI-VECTOR-D3-001
   feature_id: SI-STORAGE
-  requirement_ids: [SI-REQ-003, DPR-001]
+  requirement_ids: [SI-REQ-003, DPR-001, DPR-002]
   business_rule_ids: [SI-STORAGE-RULE-02, SI-STORAGE-RULE-05]
   title: Scoped explicit-vector storage through real Elasticsearch
   type: INTEGRATION
   priority: P1
   status: active
   automation: automated
-  objective: Verify collection compatibility, tenant isolation, search and bounded snapshot deletion without inference or service code.
+  objective: Verify collection compatibility, tenant isolation, search, snapshot deletion and Runtime ingestion through real vector storage with controlled model and artifact inputs.
   preconditions:
   - Docker and the pinned Elasticsearch 8.17.2 image are available locally.
   test_data:
@@ -28,6 +28,9 @@ case:
     action: Delete more than one snapshot page, then update one candidate after snapshot selection and before its CAS delete.
     expected: Every stable candidate is removed with an ordered receipt; the concurrent replacement survives and its conflict is reported as partial failure.
   - order: 4
+    action: Execute the Runtime ingestor twice through real ModelService and a managed lane, with controlled model adapter and artifact bytes, then inspect actual Elasticsearch records.
+    expected: Both executions use Model.invoke with the pinned revision and the same chunk key; one physical vector remains retrievable with the original content and attempt generation.
+  - order: 5
     action: Close ports and remove the owned container and anonymous volumes.
     expected: The closed port refuses access and the owned container no longer exists.
   expected_results:
@@ -35,10 +38,12 @@ case:
   - Explicit-vector CRUD and dense/text search enforce both tenant and collection scope.
   - Snapshot pagination and per-document CAS preserve deletion results and concurrent replacement.
   - Owned ports, containers and volumes are closed or removed.
+  - Runtime ingestion validates the artifact and writes deterministic physical vectors without publishing job visibility.
   forbidden_side_effects:
   - No application storage, credentials, model endpoints or data-process service is used.
   integration_boundary:
   - Actual Elasticsearch protocol and Infrastructure VectorStore; fixed supplied vectors, controlled concurrent write and disposable infrastructure.
+  - Actual Runtime ingestor, ModelService and ThreadManager; controlled model adapter and in-memory ObjectStore input. No actual provider inference, AgentOS HTTP, persistent job or visibility publication is proved.
   observations:
   - Collection dimensions, neutral records, scoped counts, scores, per-item receipts and preserved replacement generation.
   cleanup:
@@ -61,6 +66,11 @@ case:
     forbidden_side_effects: [1]
   - id: AC-04
     description: Owned resources are closed and reclaimed.
-    steps: [4]
+    steps: [5]
     expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: Runtime ingestion uses Model.invoke and stable physical chunk keys through the real VectorStore.
+    steps: [4]
+    expected_results: [5]
     forbidden_side_effects: [1]

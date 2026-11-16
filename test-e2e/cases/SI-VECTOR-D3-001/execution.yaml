@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_scoped_vectors]
   AC-03: [test_scoped_vectors]
   AC-04: [test_scoped_vectors]
+  AC-05: [test_scoped_vectors]
 preparation:
   families: []
   anchors: false

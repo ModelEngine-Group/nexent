@@ -16,8 +16,14 @@ import pytest
 @pytest.mark.case_id("SI-VECTOR-D3-001")
 def test_scoped_vectors(record_property):
     root = Path(__file__).resolve().parents[3]
-    sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
+    sys.path[:0] = [
+        str(root),
+        str(root / "backend"),
+        str(root / "sdk"),
+        str(Path(__file__).parent),
+    ]
     from elasticsearch import Elasticsearch
+    from ingestion_probe import probe_ingestion
     from nexent.storage.errors import Conflict, PartialFailure, ScopeDenied
     from nexent.storage.models import (
         Comparison,
@@ -103,7 +109,11 @@ def test_scoped_vectors(record_property):
         ):
             result = ElasticsearchVectorStore(
                 StorageScope("runtime", tenant, "vector-proof", {collection}),
-                (VectorBinding(collection, "vector-proof", dimensions, fields, writable=True),),
+                (
+                    VectorBinding(
+                        collection, "vector-proof", dimensions, fields, writable=True
+                    ),
+                ),
                 factory,
             )
             ports.append(result)
@@ -197,6 +207,7 @@ def test_scoped_vectors(record_property):
         assert primary.delete(
             "kb", Comparison("file_id", "eq", "race"), context=context()
         )[0].deleted
+        ingestion = probe_ingestion(client_factory, ports, context)
         primary.close()
         with pytest.raises(ScopeDenied):
             primary.count("kb", None, context=context())
@@ -205,16 +216,18 @@ def test_scoped_vectors(record_property):
             json.dumps(
                 {
                     "collection_compatibility": True,
-                "dependency_image_id": image_id,
+                    "dependency_image_id": image_id,
                     "tenant_and_collection_isolation": True,
                     "dense_and_text": True,
                     "snapshot_pages_and_cas": True,
+                    "runtime_ingestion": ingestion,
                     "source_hashes": {
                         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
                         for path in (
                             "infrastructure/vdb/vector_store.py",
                             "infrastructure/vdb/vector_delete.py",
                             "infrastructure/vdb/vector_schema.py",
+                            "backend/runtime/knowledge_base/ingestion.py",
                         )
                     },
                 }
