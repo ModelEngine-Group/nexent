@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Process-local structural cleansing, composed with a scoped object capability."""
 
+from contracts.agentos_knowledge import FileCleanseLookup, FileCleanseRequest
 from management.services.file.cleanse import cleanse_object
 
 
@@ -24,6 +25,11 @@ class CleanseExecutor:
         context.remaining()
         if row["parser_version"] != self.parser_version:
             raise ValueError("Parser version does not match the admitted job")
+        run = None
+        if isinstance(request, FileCleanseRequest):
+            if row["run_id"] != request.run_id:
+                raise ValueError("Run does not match the admitted job")
+            run = FileCleanseLookup(run_id=row["run_id"], job_id=row["job_id"])
         self.warmup(context=context)
         return cleanse_object(
             request.source,
@@ -32,4 +38,5 @@ class CleanseExecutor:
             parser=self.runtime,
             objects=self.objects,
             context=context,
+            run=run,
         )

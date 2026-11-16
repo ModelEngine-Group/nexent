@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-RUN-ARTIFACTS-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Isolate temporary run cleansing objects by admitted run and job
+  description: >-
+    Publish run artifacts and images under a tenant-partitioned run/job prefix.
+    Preserve existing KB keys and immutable sources; add no retry or cleanup loop.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Identical sources in different runs or jobs produce disjoint artifact and image keys.
+    - Object capabilities reject cross-job writes, invalid prefixes and unpinned reads before provider I/O.
+    - The production child factory and executor derive the same admitted scope, including debug runs.
+    - Knowledge cleansing retains its existing output keys and revision/hash validation.
+    reason: >-
+      Existing UT covers source checksums and tenant outputs but lacks per-run output
+      ownership. Strengthen it and the existing actual storage D3 instead of adding D1.
+    test_selectors:
+    - test/backend/services/test_file_cleanse_objects.py
+    - test/backend/services/test_cleanse_executor.py
+    - test/backend/services/test_knowledge_cleanse_worker.py
+    - test/backend/infrastructure/test_cleanse_objects.py
+  notes: >-
+    Existing D3 owns disposable PG/Redis/MinIO containers and controlled parsing.
+    AC-14 proves output ownership, not the pending Runtime text tool cutover or release.

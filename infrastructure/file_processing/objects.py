@@ -3,7 +3,7 @@
 
 import re
 
-from contracts.agentos_knowledge import ObjectReference
+from contracts.agentos_knowledge import ObjectReference, cleanse_output_prefix
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
 
@@ -19,14 +19,15 @@ from infrastructure.rdb.composition import close_owned
 class CleanseObjects:
     """The parser receives only pinned read and content-addressed put operations."""
 
-    def __init__(self, source, inputs, outputs, *, context):
+    def __init__(self, source, inputs, outputs, *, context, run=None):
         self.source = source
         self._inputs = inputs
         self._outputs = outputs
         self.context = context
         self._closed = False
+        prefix = re.escape(cleanse_output_prefix(run))
         self._output = re.compile(
-            rf"(?:artifacts/{source.sha256}/[0-9a-f]{{64}}\.json|"
+            rf"{prefix}(?:artifacts/{source.sha256}/[0-9a-f]{{64}}\.json|"
             rf"images/{source.sha256}/[0-9a-f]{{64}}\.(?:png|jpg|jpeg|gif|webp|bmp|tiff))"
         )
 
@@ -66,9 +67,10 @@ class CleanseObjects:
             close_owned(self.context, [self._inputs.close, self._outputs.close])
 
 
-def bind_cleanse_objects(tenant_id, user_id, source, *, context):
+def bind_cleanse_objects(tenant_id, user_id, source, *, context, run=None):
     if not isinstance(source, ObjectReference) or source.space != "files":
         raise ScopeDenied()
+    cleanse_output_prefix(run)
     environment = _configured_environment()
     scope = StorageScope("management", tenant_id, user_id, {"files"})
     inputs = bind_source_objects(
@@ -86,7 +88,7 @@ def bind_cleanse_objects(tenant_id, user_id, source, *, context):
             ),
             _configured_client,
         )
-        return CleanseObjects(source, inputs, outputs, context=context)
+        return CleanseObjects(source, inputs, outputs, context=context, run=run)
     except BaseException:
         inputs.close()
         raise

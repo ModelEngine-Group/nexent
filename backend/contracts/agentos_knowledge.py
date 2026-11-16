@@ -211,6 +211,16 @@ class FileCleanseLookup(Contract):
     job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
+def cleanse_output_prefix(run: FileCleanseLookup | None = None) -> str:
+    """Keep durable KB keys and give temporary run outputs an admitted identity."""
+    if run is None:
+        return ""
+    if not isinstance(run, FileCleanseLookup):
+        raise TypeError("Expected a run cleansing lookup")
+    checked = FileCleanseLookup.model_validate(run.model_dump())
+    return f"run-cleanse/{checked.run_id}/{checked.job_id}/"
+
+
 class CleanseResult(Contract):
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     artifact: ObjectReference | None = None

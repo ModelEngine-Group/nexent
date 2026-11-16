@@ -20,4 +20,6 @@ feature:
     description: Management preserves structure and Runtime performs final text/table chunking with the established format algorithms.
   - rule_id: DPR-CLEANSE-RULE-06
     description: Reverse FileCleanse admission verifies the signed actor, current membership and source ownership, and preserves run/job isolation.
+  - rule_id: DPR-CLEANSE-RULE-07
+    description: Temporary run artifacts and images belong to the admitted run/job; KB object keys remain unchanged.
   required_test_stages: [D3]

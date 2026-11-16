@@ -103,6 +103,7 @@ def check_execution(queue, row, context):
         lookup, tenant_id="tenant-a", user_id="user-a", context=context()
     )
     assert completed.status == "completed" and completed.artifact == calls[0]
+    assert completed.artifact.key.startswith("artifacts/")
     queue.enqueue(task, context=context())
     assert consume_cleanse_once(
         queue,

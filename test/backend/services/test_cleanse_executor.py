@@ -12,6 +12,7 @@ from nexent.storage.errors import DeadlineExceeded
 from nexent.storage.models import OperationContext
 
 from test.backend.services.test_file_cleanse_objects import Store, source
+from test.backend.services.test_run_cleanse_service import request as run_request
 
 
 def test_executor_preserves_structure_and_pinned_version():
@@ -19,7 +20,9 @@ def test_executor_preserves_structure_and_pinned_version():
     core = SimpleNamespace(
         file_structure=Mock(return_value=([{"content": "parsed"}], []))
     )
-    runtime = SimpleNamespace(file_structure=core.file_structure, ensure_initialized=Mock())
+    runtime = SimpleNamespace(
+        file_structure=core.file_structure, ensure_initialized=Mock()
+    )
     executor = CleanseExecutor(
         runtime=runtime, objects=store, parser_version="parser-v1"
     )
@@ -75,4 +78,34 @@ def test_deadline_expired_during_warmup_does_not_read_source():
     with pytest.raises(DeadlineExceeded):
         executor({"parser_version": "parser-v1"}, Mock(), context=context)
     runtime.ensure_initialized.assert_called_once()
+    objects.stat.assert_not_called()
+
+
+def test_run_executor_uses_the_admitted_job_directory():
+    store = Store()
+    request = run_request().model_copy(update={"source": source()})
+    parser = SimpleNamespace(
+        ensure_initialized=Mock(),
+        file_structure=Mock(return_value=([{"content": "parsed"}], [])),
+    )
+    executor = CleanseExecutor(runtime=parser, objects=store, parser_version="v1")
+    result = executor(
+        {"parser_version": "v1", "run_id": request.run_id, "job_id": "2" * 32},
+        request,
+        context=OperationContext("test", monotonic() + 5),
+    )
+    assert result.key.startswith(f"run-cleanse/{request.run_id}/{'2' * 32}/artifacts/")
+
+
+@pytest.mark.parametrize("run_id,job_id", [("b" * 32, "2" * 32), ("a" * 32, "../job")])
+def test_invalid_admitted_scope_never_initializes_parser(run_id, job_id):
+    runtime, objects = Mock(), Mock()
+    executor = CleanseExecutor(runtime=runtime, objects=objects, parser_version="v1")
+    with pytest.raises(ValueError):
+        executor(
+            {"parser_version": "v1", "run_id": run_id, "job_id": job_id},
+            run_request(),
+            context=OperationContext("test", monotonic() + 5),
+        )
+    runtime.ensure_initialized.assert_not_called()
     objects.stat.assert_not_called()

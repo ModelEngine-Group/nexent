@@ -397,6 +397,7 @@ try:
         "ledger_access_snapshot_and_release": True,
         "knowledge_worker_and_partitioned_artifact": True,
         "dispatch_root_stop_and_crash_fence": True,
+        "run_artifacts_isolated": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
@@ -406,6 +407,9 @@ try:
                 "infrastructure/rdb/cleanse_dispatch.py",
                 "infrastructure/knowledge_cleanse.py",
                 "backend/management/services/file/cleanse_execution.py",
+                "backend/management/services/file/cleanse_executor.py",
+                "backend/management/services/file/cleanse.py",
+                "backend/contracts/agentos_knowledge.py",
                 "infrastructure/file_processing/objects.py",
                 "backend/management/services/file/knowledge_cleanse_service.py",
                 "infrastructure/knowledge_cleanse.py",

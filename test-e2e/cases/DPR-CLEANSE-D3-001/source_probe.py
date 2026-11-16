@@ -21,6 +21,7 @@ from management.services.file.source_upload import upload_knowledge_source
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.storage.errors import OutcomeUnknown
 from nexent.storage.models import ObjectRef, RecordQuery, StorageScope
+from run_artifacts_probe import check_run_outputs
 
 from infrastructure.object_storage.port import ObjectBinding, S3ObjectStore
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
@@ -287,6 +288,7 @@ def check_source_publication(engine, port, context, queue, redis_url):
             )
             assert lost.writes == 2
             check_execution(queue, row, context)
+            check_run_outputs(queue, context)
             with engine.begin() as conn:
                 conn.execute(
                     TenantConfig.__table__.insert().values(

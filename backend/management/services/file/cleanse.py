@@ -5,7 +5,12 @@ import hashlib
 import io
 import time
 
-from contracts.agentos_knowledge import CleanseArtifact, CleanseBlock, ObjectReference
+from contracts.agentos_knowledge import (
+    CleanseArtifact,
+    CleanseBlock,
+    ObjectReference,
+    cleanse_output_prefix,
+)
 from nexent.storage.models import ObjectRef, OperationContext, Revision
 
 
@@ -18,8 +23,10 @@ def prepare_artifact(
     parser,
     objects=None,
     context: OperationContext | None = None,
+    run=None,
 ):
     """Extract structure and publish image blocks through the caller's scoped port."""
+    prefix = cleanse_output_prefix(run)
     if hashlib.sha256(file_content).hexdigest() != source.sha256:
         raise ValueError("Source checksum does not match")
     chunks, images = parser.file_structure(file_data=file_content, filename=filename)
@@ -54,7 +61,9 @@ def prepare_artifact(
         digest = hashlib.sha256(content).hexdigest()
         mime = "image/jpeg" if image_format == "jpg" else "image/" + image_format
         metadata = objects.put(
-            ObjectRef(source.space, f"images/{source.sha256}/{digest}.{image_format}"),
+            ObjectRef(
+                source.space, f"{prefix}images/{source.sha256}/{digest}.{image_format}"
+            ),
             io.BytesIO(content),
             content_type=mime,
             size=len(content),
@@ -85,10 +94,13 @@ def _object_reference(metadata):
     )
 
 
-def cleanse_object(source, filename, parser_version, *, parser, objects, context):
+def cleanse_object(
+    source, filename, parser_version, *, parser, objects, context, run=None
+):
     """Read an immutable source and publish the cross-service artifact by reference."""
     from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES
 
+    prefix = cleanse_output_prefix(run)
     ref = ObjectRef(source.space, source.key, Revision(source.version))
     metadata = objects.stat(ref, context=context)
     if (
@@ -117,12 +129,13 @@ def cleanse_object(source, filename, parser_version, *, parser, objects, context
         parser=parser,
         objects=objects,
         context=context,
+        run=run,
     )
     context.remaining()
     serialized = artifact.model_dump_json().encode("utf-8")
     digest = hashlib.sha256(serialized).hexdigest()
     published = objects.put(
-        ObjectRef(source.space, f"artifacts/{source.sha256}/{digest}.json"),
+        ObjectRef(source.space, f"{prefix}artifacts/{source.sha256}/{digest}.json"),
         io.BytesIO(serialized),
         content_type="application/json",
         size=len(serialized),

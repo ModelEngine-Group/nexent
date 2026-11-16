@@ -9,7 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from contracts.agentos_knowledge import CleanseArtifact, ObjectReference
+from contracts.agentos_knowledge import (
+    CleanseArtifact,
+    FileCleanseLookup,
+    ObjectReference,
+)
 from management.services.file.cleanse import cleanse_object
 from nexent.storage.models import ObjectMetadata, ObjectRef, OperationContext, Revision
 
@@ -94,7 +98,9 @@ def test_images_and_text_are_published_by_reference():
     assert image.sha256 == hashlib.sha256(b"image").hexdigest()
     assert result.sha256 == hashlib.sha256(store.data[result.key]).hexdigest()
     assert all(stream.closed for stream in store.readers)
-    parser.file_structure.assert_called_once_with(file_data=b"source", filename="source.txt")
+    parser.file_structure.assert_called_once_with(
+        file_data=b"source", filename="source.txt"
+    )
     assert result.key.startswith("artifacts/")
 
 
@@ -176,3 +182,40 @@ def test_unconfirmed_artifact_is_rejected(mocker):
     )
     with pytest.raises(ValueError, match="not confirmed"):
         run(store, parser)
+
+
+def test_same_source_has_disjoint_run_and_job_outputs():
+    store = Store()
+    parser = SimpleNamespace(
+        file_structure=Mock(
+            return_value=(
+                [{"content": "text"}],
+                [{"image_bytes": b"image", "image_format": "png"}],
+            )
+        )
+    )
+    manifests, images = [], []
+    for run_id, job_id in [
+        ("1" * 32, "2" * 32),
+        ("1" * 32, "3" * 32),
+        ("debug-" + "4" * 32, "2" * 32),
+    ]:
+        lookup = FileCleanseLookup(run_id=run_id, job_id=job_id)
+        result = cleanse_object(
+            source(),
+            "source.txt",
+            "v1",
+            parser=parser,
+            objects=store,
+            context=OperationContext("test", monotonic() + 5),
+            run=lookup,
+        )
+        artifact = CleanseArtifact.model_validate_json(store.data[result.key])
+        prefix = f"run-cleanse/{run_id}/{job_id}/"
+        assert result.key.startswith(prefix + "artifacts/")
+        assert artifact.blocks[1].object_ref.key.startswith(prefix + "images/")
+        assert artifact.source == source()
+        manifests.append(result.key)
+        images.append(artifact.blocks[1].object_ref.key)
+    assert len(set(manifests)) == len(set(images)) == 3
+    assert store.data["source.txt"] == b"source"

@@ -137,11 +137,16 @@ def test_cancel_during_execution_is_observed_by_parent_tick(prepared, mocker):
     queue.ack.assert_called_once()
 
 
-def test_default_parser_factory_defers_all_handles_until_child(mocker):
+@pytest.mark.parametrize("kind", ["knowledge", "run"])
+def test_default_parser_factory_defers_all_handles_until_child(mocker, kind):
     objects = mocker.patch.object(worker, "bind_cleanse_objects")
     isolate = mocker.patch.object(worker, "ProcessCleanseExecutor")
     snapshot = {"tenant_id": "tenant-a", "user_id": "user-a", "parser_version": "v1"}
-    request = knowledge_request()
+    request = knowledge_request() if kind == "knowledge" else run_request()
+    run = None
+    if kind == "run":
+        snapshot.update(run_id=request.run_id, job_id="1" * 32)
+        run = FileCleanseLookup(run_id=request.run_id, job_id=snapshot["job_id"])
     ctx = context()
     tick = Mock()
     worker.execute_cleanse(snapshot, request, tick=tick, context=ctx)
@@ -150,7 +155,7 @@ def test_default_parser_factory_defers_all_handles_until_child(mocker):
     objects.assert_not_called()
     child = isolate.call_args.args[0](context=ctx)
     assert not child.runtime.initialized
-    objects.assert_called_once_with("tenant-a", "user-a", request.source, context=ctx)
+    objects.assert_called_once_with("tenant-a", "user-a", request.source, context=ctx, run=run)
     assert child.parser_version == "v1"
     child.close()
     objects.return_value.close.assert_called_once()

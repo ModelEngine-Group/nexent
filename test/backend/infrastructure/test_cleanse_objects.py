@@ -5,6 +5,7 @@ from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
+from contracts.agentos_knowledge import FileCleanseLookup
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
 from nexent.storage.models import ObjectRef, Revision
 
@@ -81,3 +82,42 @@ def test_closed_store_cannot_read_or_write(ports):
             ObjectRef(source.space, source.key, Revision(source.version)),
             context=context(),
         )
+
+
+def test_run_output_capability_rejects_global_and_foreign_job_keys():
+    source = request().source
+    lookup = FileCleanseLookup(run_id="1" * 32, job_id="2" * 32)
+    inputs, outputs = Mock(), Mock()
+    store = CleanseObjects(source, inputs, outputs, context=context(), run=lookup)
+    suffix = f"images/{source.sha256}/{'3' * 64}.png"
+    own = f"run-cleanse/{lookup.run_id}/{lookup.job_id}/{suffix}"
+    store.put(
+        ObjectRef(source.space, own),
+        BytesIO(b"image"),
+        size=5,
+        content_type="image/png",
+        context=context(),
+    )
+    for key in (
+        suffix,
+        own.replace("2" * 32, "4" * 32),
+        own.replace("1" * 32, "5" * 32),
+    ):
+        with pytest.raises(ScopeDenied):
+            store.put(
+                ObjectRef(source.space, key),
+                BytesIO(b"image"),
+                size=5,
+                content_type="image/png",
+                context=context(),
+            )
+    outputs.put.assert_called_once()
+    inputs.stat.assert_not_called()
+
+
+def test_invalid_run_scope_is_rejected_before_provider_io():
+    inputs, outputs = Mock(), Mock()
+    scope = FileCleanseLookup.model_construct(run_id="../other", job_id="2" * 32)
+    with pytest.raises(ValueError):
+        CleanseObjects(request().source, inputs, outputs, context=context(), run=scope)
+    assert not inputs.mock_calls and not outputs.mock_calls

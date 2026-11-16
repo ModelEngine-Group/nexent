@@ -5,7 +5,7 @@ case:
   case_id: DPR-CLEANSE-D3-001
   feature_id: DPR-CLEANSE
   requirement_ids: [DPR-001]
-  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-02, DPR-CLEANSE-RULE-03]
+  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-02, DPR-CLEANSE-RULE-03, DPR-CLEANSE-RULE-07]
   title: Durable cleansing admission and fenced dispatch over PostgreSQL and Redis
   type: INTEGRATION
   priority: P1
@@ -18,7 +18,7 @@ case:
   - Backend Python dependencies are installed.
   test_data:
     resources: Disposable databases and synthetic user/tenant/object references.
-    execution: Controlled parser-result reference; no model or object provider is invoked.
+    execution: Controlled parser callbacks and results; actual owned object storage is used, with no external model provider.
   steps:
   - order: 1
     action: Submit run and knowledge-file requests twice; attempt inspection and cancellation from foreign users, tenants and knowledge/file/version contexts.
@@ -65,6 +65,9 @@ case:
   - order: 15
     action: Run the production discovery loop and fixed tenant queue factory with controlled parsing, stop after a completed dispatch, then lose a root after execution admission and expire its lease.
     expected: The loop closes discovery before execution and stops with durable completion; an execution-admitted job retains its persisted reconciliation obligation and a replacement root cannot enqueue or execute it after lease expiry.
+  - order: 16
+    action: Execute three run jobs over identical pinned source bytes, including two jobs in one run, using production worker/object composition and controlled text/image parsing.
+    expected: Each completed manifest and image has its own admitted run/job prefix and confirmed hash/revision; another job cannot write that prefix and the source remains unchanged.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -81,6 +84,7 @@ case:
   - Production ledger queries and release use scoped ports with snapshot consistency and audited idempotence.
   - Production KB worker composition preserves ownership, durable completion, deduplication and tenant-partitioned cleansing artifacts.
   - Production root discovery and tenant queue composition stop cleanly and fence crashed execution until reconciliation.
+  - Identical sources produce disjoint run/job artifact and image keys without changing KB output paths.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
@@ -90,6 +94,11 @@ case:
   cleanup:
   - Delete only test-owned containers by their returned IDs including anonymous volumes.
   acceptance:
+  - id: AC-14
+    description: Actual run cleansing retains immutable sources and isolates temporary artifact/image writes by admitted run and job.
+    steps: [16]
+    expected_results: [16]
+    forbidden_side_effects: [1]
   - id: AC-13
     description: The production dispatch loop uses scoped queue factories, stops after durable completion and never blindly replays an execution-admitted job after root loss.
     steps: [15]

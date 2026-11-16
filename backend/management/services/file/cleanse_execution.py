@@ -34,6 +34,11 @@ def execute_cleanse(row, request, *, tick, context):
     def factory(*, context):
         from contracts.constants import environment
 
+        run = (
+            FileCleanseLookup(run_id=row["run_id"], job_id=row["job_id"])
+            if isinstance(request, FileCleanseRequest)
+            else None
+        )
         runtime = DocumentParserRuntime(
             environment.DP_PARSE_THREADS_PER_PROCESS,
             [
@@ -49,7 +54,7 @@ def execute_cleanse(row, request, *, tick, context):
         return CleanseExecutor(
             runtime=runtime,
             objects=bind_cleanse_objects(
-                row["tenant_id"], row["user_id"], request.source, context=context
+                row["tenant_id"], row["user_id"], request.source, context=context, run=run
             ),
             parser_version=row["parser_version"],
         )
