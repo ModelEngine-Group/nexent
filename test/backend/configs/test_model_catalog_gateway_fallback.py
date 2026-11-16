@@ -205,3 +205,13 @@ def test_resolved_gateway_controls_build_generic_sdk_parameters(catalog, enabled
         "extra_body": {"enable_thinking": enabled},
         **({"reasoning_effort": "xhigh"} if enabled else {}),
     }
+
+
+def test_legacy_migration_keeps_pre_gateway_matching_boundary(catalog):
+    assert loader.resolve_reasoning_capability(
+        "qwen3.8-max", GATEWAY, "custom", allow_gateway_fallback=False,
+    ) is None
+    assert loader.resolve_reasoning_capability(
+        "qwen3.8-max", OFFICIAL, "alibaba-cn", allow_gateway_fallback=False,
+    )["provider_id"] == "alibaba-cn"
+    assert resolve() is not None  # Current gateway behavior remains enabled.

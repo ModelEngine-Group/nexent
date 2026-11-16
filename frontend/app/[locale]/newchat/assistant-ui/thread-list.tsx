@@ -656,6 +656,10 @@ export const ThreadList: FC<ThreadListProps> = ({
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const [settledHasMore, setSettledHasMore] = useState(hasMore);
+  if (!isLoading && settledHasMore !== hasMore) setSettledHasMore(hasMore);
+  // A same-adapter reload retains rows but temporarily clears its page cursor.
+  const showLoadMore = isLoading ? settledHasMore : hasMore;
   const threadIds = useAuiState((state) => state.threads.threadIds);
   const threadItems = useAuiState((state) => state.threads.threadItems);
   const visibleThreadIds = getVisibleThreadIds(
@@ -676,7 +680,13 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, []);
 
   return (
-    <div className={cn("flex flex-col p-2", newChatDesign && "min-h-0 flex-1")}>
+    <div
+      className={cn(
+        "flex flex-col p-2",
+        !newChatDesign && "[overflow-anchor:none]",
+        newChatDesign && "min-h-0 flex-1"
+      )}
+    >
       <div
         className={cn(
           "mb-1 flex h-8 items-center justify-between py-1",
@@ -712,7 +722,11 @@ export const ThreadList: FC<ThreadListProps> = ({
         </AgentHistoryViewport>
       ) : (
         <>
-          <AuiIf condition={(s) => s.threads.isLoading}>
+          <AuiIf
+            condition={(s) =>
+              s.threads.isLoading && visibleThreadIds.length === 0
+            }
+          >
             <ThreadListSkeleton />
           </AuiIf>
           <AuiIf
@@ -722,11 +736,7 @@ export const ThreadList: FC<ThreadListProps> = ({
           >
             <ThreadListEmpty />
           </AuiIf>
-          <AuiIf
-            condition={(s) =>
-              !s.threads.isLoading && visibleThreadIds.length > 0
-            }
-          >
+          <AuiIf condition={() => visibleThreadIds.length > 0}>
             <ThreadListItems
               activeThreadId={activeThreadId}
               visibleThreadIds={visibleThreadIds}
@@ -741,9 +751,9 @@ export const ThreadList: FC<ThreadListProps> = ({
               onToggleAgentExpanded={toggleAgentExpanded}
             />
           </AuiIf>
-          {hasMore && !isLoading && (
+          {showLoadMore && visibleThreadIds.length > 0 && (
             <ThreadListPrimitive.LoadMore
-              disabled={isLoadingMore}
+              disabled={isLoading || isLoadingMore}
               className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}

@@ -82,7 +82,7 @@ class IdentityRepository:
         if not isinstance(user_id, str) or not user_id:
             raise IdentityRejected("Missing identity")
         account = self._one(await connection.fetch(
-            "SELECT user_id, user_email, user_role, token_version FROM nexent.user_account_t "
+            "SELECT user_id, user_email, user_roles, token_version FROM nexent.user_account_t "
             "WHERE user_id=$1 AND delete_flag='N' LIMIT 2", user_id))
         membership = self._one(await connection.fetch(
             "SELECT tenant_id FROM nexent.user_tenant_t "

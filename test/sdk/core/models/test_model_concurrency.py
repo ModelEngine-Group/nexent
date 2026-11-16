@@ -1,11 +1,21 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import threading
 
 import pytest
-from nexent.core.models.model_concurrency import (
+from nexent.core.model_service.concurrency import (
     ModelConcurrencyExceeded,
     ModelConcurrencyLimiter,
 )
 from nexent.core.models.retry import get_retry_after_seconds
+
+
+def test_legacy_model_and_model_service_share_one_global_limiter():
+    from nexent.core.model_service import concurrency, service
+    from nexent.core.models import openai_llm
+
+    assert service.model_concurrency_limiter is concurrency.model_concurrency_limiter
+    assert openai_llm.model_concurrency_limiter is concurrency.model_concurrency_limiter
 
 
 def test_ut_sdk_tlm_028_same_model_key_has_hard_concurrency_limit():

@@ -1,0 +1,24 @@
+schema_version: '1.0'
+case_id: AUTO-RUN-D3-001
+implementations:
+- framework: pytest
+  file: test_outcomes.py
+  selector: test_
+timeout_seconds: 120
+acceptance_bindings:
+  AC-01:
+  - test_stream_result_and_own_message_identity
+  - test_failed_commit_cannot_be_reported_as_success
+  AC-02:
+  - test_timeout_and_cancel_preserve_links_and_settle_output
+  - test_stream_result_and_own_message_identity
+  AC-03:
+  - test_next_turn_clears_old_cancel_but_rejects_delayed_stop
+  - test_user_cancel_returns_http_result_and_preparation_cancel_survives
+  - test_actual_caller_cancellation_still_propagates
+  - test_regression_detects_missing_background_reset
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

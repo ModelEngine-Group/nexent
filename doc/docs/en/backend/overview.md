@@ -223,7 +223,6 @@ sequenceDiagram
 ```bash
 cd backend
 uv sync --extra data-process --extra test
-uv pip install -e "../sdk[dev]"
 ```
 
 ### Service Startup

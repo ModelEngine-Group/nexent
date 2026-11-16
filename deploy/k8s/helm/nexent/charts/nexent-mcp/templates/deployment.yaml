@@ -13,7 +13,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "20"
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
   selector:
     matchLabels:
       app: nexent-mcp

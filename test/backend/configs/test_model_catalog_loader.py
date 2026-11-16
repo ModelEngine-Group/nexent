@@ -690,34 +690,3 @@ class TestModelsDevReasoningResolution:
         assert profile.reasoning_capability.levels == ["low", "high", "max"]
         assert profile.reasoning_capability.source == "models_dev"
 
-
-def test_explicit_gateway_wire_profile_is_exact_scoped_and_non_mutating(tmp_path):
-    import configs.model_catalog_loader as loader
-    profile = {"status": "supported", "provider_id": "compatible", "levels": ["low", "high"], "toggle_wire_format": None}
-    path = tmp_path / "wire.json"
-    path.write_text(json.dumps({"profiles": [{"base_url": "https://gateway.example/v1", "model_id": "verified-model", "toggle_wire_format": "thinking_object"}]}))
-    with mock.patch.object(loader, "MODEL_REASONING_WIRE_PROFILES_PATH", str(path)), mock.patch.object(loader, "_resolve_base_reasoning_capability", return_value=profile):
-        selected = loader.resolve_reasoning_capability("verified-model", "https://gateway.example/v1/")
-        assert selected["toggle_wire_format"] == "thinking_object"
-        assert selected["levels"] == profile["levels"]
-        assert loader.resolve_reasoning_capability("other", "https://gateway.example/v1") == profile
-        assert loader.resolve_reasoning_capability("verified-model", "https://gateway.example/other") == profile
-        assert loader.resolve_reasoning_capability("verified-model", "https://gateway.example/v1?key=secret") == profile
-    assert profile["toggle_wire_format"] is None
-
-
-@pytest.mark.parametrize("document", [
-    "invalid-json", [], {"profiles": {}},
-    {"profiles": [{"base_url": "https://gateway.example/v1", "model_id": "m",
-                   "toggle_wire_format": []}]},
-    {"profiles": [{"base_url": "https://gateway.example/v1", "model_id": "m",
-                   "toggle_wire_format": "thinking_object"}] * 2},
-])
-def test_invalid_or_ambiguous_wire_profiles_preserve_base_capability(tmp_path, document):
-    import configs.model_catalog_loader as loader
-    path = tmp_path / "wire.json"
-    path.write_text(document if isinstance(document, str) else json.dumps(document))
-    capability = {"status": "supported", "toggle_wire_format": None}
-    with mock.patch.object(loader, "MODEL_REASONING_WIRE_PROFILES_PATH", str(path)), \
-            mock.patch.object(loader, "_resolve_base_reasoning_capability", return_value=capability):
-        assert loader.resolve_reasoning_capability("m", "https://gateway.example/v1") == capability

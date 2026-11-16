@@ -4,6 +4,10 @@ implementations:
 - framework: playwright
   file: test.spec.ts
   selector: PW-EVAL-RUN-01
+acceptance_bindings:
+  AC-PREPARATION: [PW-EVAL-RUN-01]
+  AC-RUN-RESULTS: [PW-EVAL-RUN-01]
+  AC-AGENT-NAME: [PW-EVAL-RUN-01]
 notes: V5 source binding migrated; runtime parity is not yet certified.
 preparation:
   families: []

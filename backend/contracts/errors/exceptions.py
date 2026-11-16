@@ -137,6 +137,10 @@ class TokenExpiredError(UnauthorizedError):
     pass
 
 
+class RoleAssignmentConflict(ValueError):
+    """An otherwise valid role change violates a membership invariant."""
+
+
 class ForbiddenError(Exception):
     """Raised when an authenticated user lacks permission."""
 
@@ -550,6 +554,38 @@ class RuntimeCapacityExceededError(RuntimeError):
     """Raised when Runtime agent worker and queue capacity is full."""
 
     retry_after_seconds = 1
+
+
+class ModelOutletConflictError(ValueError):
+    """An absent, stale or unavailable outlet cannot be overwritten."""
+
+    def __init__(self):
+        super().__init__("MODEL_OUTLET_VERSION_CONFLICT")
+
+
+class ModelOutletValidationError(ValueError):
+    """Invalid storage input without parameter or credential details."""
+
+    def __init__(self, category="MODEL_OUTLET_INVALID", path=""):
+        super().__init__("MODEL_OUTLET_INVALID")
+        self.category = category
+        self.path = path
+
+
+class ModelOutletDatabaseError(RuntimeError):
+    """Safe database diagnostic excluding SQL bound values."""
+
+    def __init__(self):
+        super().__init__("MODEL_OUTLET_DATABASE_ERROR")
+
+
+class ManagementReadBusyError(RuntimeError):
+    """A bounded Management read cannot be admitted or started in time."""
+
+    def __init__(self, *, queue_timeout_seconds: float | None = None):
+        self.code = "MANAGEMENT_READ_QUEUE_TIMEOUT" if queue_timeout_seconds is not None else "MANAGEMENT_READ_CAPACITY_FULL"
+        self.retry_after_seconds = max(1, int((queue_timeout_seconds or 0) + 0.999))
+        super().__init__("Management read capacity is temporarily unavailable")
 
 
 class RuntimeQueueTimeoutError(RuntimeError):

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy.sql import func
 
 from management.db.model.repository import get_model_by_model_id
-from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_all_configs_by_tenant_id, get_single_config_info, insert_config, update_config_by_tenant_config_id_and_data
+from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_single_config_info, insert_config, update_config_by_tenant_config_id_and_data
 
 logger = logging.getLogger("config_utils")
 
@@ -79,7 +79,7 @@ class TenantConfigManager:
             logger.warning(
                 f"No tenant_id specified when getting config for key: {key}")
             return default
-        tenant_config = self.load_config(tenant_id)
+        tenant_config = get_configs_by_tenant_id_and_keys(tenant_id, [key]) if tenant_id else {}
 
         if key in tenant_config:
             model_id = tenant_config[key]

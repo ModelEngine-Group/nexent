@@ -36,13 +36,21 @@ feature:
       persisted conversation for that agent across paginated list results, updates the
       selected/total state, and leaves conversations from other agents unchanged.
   - rule_id: CHAT-SIDEBAR-RULE-004
-    description: Visible messages update dedicated activity; activity-based pagination and automatic metadata
-      refresh preserve composer, runtime and pin semantics. Activity is stored as
+    description: Visible messages update dedicated activity; activity-based pagination and event-driven metadata
+      refresh preserve composer, runtime and pin semantics. Workbench performs no periodic history polling.
+      Confirmed first persistence, saved generated titles and terminal runs update history; existing confirmed
+      rename/delete/pin operations remain effective. Returning to a visible online page reconciles the loaded
+      range without hiding existing rows, replacing the active runtime or losing scroll/composer state.
+      Overlapping events coalesce, changes during a pending refresh retain one trailing refresh, and failures
+      wait for another event rather than scheduling retries. External-device changes while continuously viewing
+      the page become visible on the next operation or foreground event. Activity is stored as
       a UTC TIMESTAMP without time zone; database/session timezone changes cannot
       shift writes, cursor boundaries, pin metadata or public epoch timestamps.
       Legacy message-source backfill uses only explicit automation run message IDs,
       validates conversation ownership and leaves unlinked messages unchanged;
-      it never reads the message-unit table.
+      it never reads the message-unit table. Upgrades leave missing activity NULL
+      without historical activity backfill; lists use creation time until the next
+      committed visible message initializes activity. Existing activity is preserved.
   - rule_id: CHAT-SIDEBAR-RULE-005
     description: Workbench sidebar selection updates the URL to the selected saved
       conversation without document navigation or runtime replacement. New and

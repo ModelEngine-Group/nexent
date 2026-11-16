@@ -1,6 +1,10 @@
-import pytest
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import logging
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 mock_smolagents = MagicMock()
 mock_models_module = MagicMock()
@@ -116,7 +120,7 @@ def test_truncate_text_no_truncation_needed(long_context_model):
     assert long_context_model.truncate_text("short text", 20) == "short text"
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_start_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.count_tokens = MagicMock(return_value=100)
@@ -124,7 +128,7 @@ def test_truncate_text_start_strategy_with_tiktoken(mock_logger, long_context_mo
         assert long_context_model.truncate_text("long text", 5) == "decoded text"
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_middle_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.truncation_strategy = "middle"
@@ -134,7 +138,7 @@ def test_truncate_text_middle_strategy_with_tiktoken(mock_logger, long_context_m
         mock_tokenizer.decode.assert_called_once_with([1, 2, 3, 8, 9, 10])
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_end_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.truncation_strategy = "end"
@@ -144,7 +148,7 @@ def test_truncate_text_end_strategy_with_tiktoken(mock_logger, long_context_mode
         mock_tokenizer.decode.assert_called_once_with([6, 7, 8, 9, 10])
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_without_tiktoken_start_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.count_tokens = MagicMock(return_value=100)
@@ -152,7 +156,7 @@ def test_truncate_text_without_tiktoken_start_strategy(mock_logger, long_context
         assert result == "x" * 40
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_without_tiktoken_middle_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.truncation_strategy = "middle"
@@ -161,7 +165,7 @@ def test_truncate_text_without_tiktoken_middle_strategy(mock_logger, long_contex
         assert "[Content truncated...]" in result
 
 
-@patch.object(openai_long_context_model.logging, "getLogger")
+@patch.object(logging, "getLogger")
 def test_truncate_text_without_tiktoken_end_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.count_tokens = MagicMock(return_value=100)

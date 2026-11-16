@@ -10,9 +10,10 @@ from contracts.constants.constants import THINK_END_PATTERN, THINK_START_PATTERN
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.model.repository import get_model_by_model_id
-from management.services.model.adapter import get_llm_adapter_from_config
+from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.models.retry import get_retry_after_seconds
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from management.services.model.adapter import get_llm_adapter_from_config
 
 logger = logging.getLogger("llm_utils")
 
@@ -154,21 +155,22 @@ def call_llm_for_system_prompt(
         llm_model_config.get("timeout_seconds") if llm_model_config else None
     )
 
+    saved_outlet = isinstance(llm_model_config, dict) and llm_model_config.get("profile_schema_version") is not None
     llm = get_llm_adapter_from_config(
         llm_model_config,
         tenant_id,
-        temperature=0.3,
-        top_p=0.95,
+        **({} if saved_outlet else {"temperature": 0.3, "top_p": 0.95}),
         display_name=display_name or None,
         timeout_seconds=timeout_seconds,
     )
-    # The gateway adapter lazily wraps the legacy OpenAIModel; the streaming
-    # completion below reaches the wrapped model's client, so build it first.
+    # Build the gateway's compatibility model before consuming its stream.
     llm._build_model()
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
     ]
+    if saved_outlet:
+        return _consume_outlet_content(llm, messages, callback)
     for attempt in range(1, _LLM_RETRY_MAX_ATTEMPTS + 1):
         current_request = None
         try:
@@ -298,6 +300,37 @@ def call_llm_for_system_prompt(
                     logger.warning(
                         "Failed to close prompt-generation model stream", exc_info=True
                     )
+
+
+def _consume_outlet_content(llm, messages, callback):
+    """Consume normalized text with transport/retry owned by the saved outlet service."""
+    stream = None
+    try:
+        stream = llm.generate_stream(messages)
+        text = []
+        is_thinking = False
+        for delta in stream:
+            if delta.content is not None:
+                is_thinking = _process_thinking_tokens(delta.content, is_thinking, text, callback)
+        return "".join(text)
+    except ModelInvocationTerminalError as error:
+        codes = {
+            ModelErrorCode.AUTHENTICATION_ERROR: ErrorCode.MODEL_API_KEY_INVALID,
+            ModelErrorCode.NOT_FOUND: ErrorCode.MODEL_NOT_FOUND,
+            ModelErrorCode.RATE_LIMIT_EXHAUSTED: ErrorCode.MODEL_RATE_LIMIT_EXCEEDED,
+            ModelErrorCode.SERVICE_UNAVAILABLE: ErrorCode.MODEL_SERVICE_UNAVAILABLE,
+            ModelErrorCode.TIMEOUT: ErrorCode.MODEL_CONNECTION_ERROR,
+            ModelErrorCode.CONNECTION_ERROR: ErrorCode.MODEL_CONNECTION_ERROR,
+        }
+        raise AppException(codes.get(error.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)) from error
+    except Exception as error:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED) from error
+    finally:
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                logger.warning("Failed to close prompt-generation normalized stream")
 
 
 __all__ = ["call_llm_for_system_prompt", "_process_thinking_tokens"]

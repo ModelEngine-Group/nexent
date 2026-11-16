@@ -73,6 +73,32 @@ def serialize_stream_unit_content(data: Dict[str, Any], content: Any) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def bind_execution_result_unit(history, key: str, message_id: int, unit_index: int, data: dict):
+    """Bind a finished runtime record to the real buffered unit index."""
+    record = history.get(key)
+    if record is None:
+        raise ValueError("Unknown execution result")
+    history.bind(key, message_id, unit_index)
+    payload = json.dumps(record.payload(), ensure_ascii=False)
+    return {
+        "type": "execution_result", "unit_type": "execution_result",
+        "content": payload, "unit_content": payload, "unit_index": unit_index,
+        "invocation_id": data.get("invocation_id"),
+        "tool_call_id": data.get("tool_call_id"), "_execution_key": key,
+    }
+
+
+def finalize_execution_result_units(history, units):
+    """Snapshot summary and original content together before the existing batch commit."""
+    for unit in units:
+        key = unit.pop("_execution_key", None)
+        record = history.get(key) if key else None
+        if record is not None:
+            payload = json.dumps(record.payload(), ensure_ascii=False)
+            unit["content"] = payload
+            unit["unit_content"] = payload
+
+
 def _is_reasoning_configuration_error(exception: Optional[BaseException]) -> bool:
     """Return whether an exception chain contains a reasoning configuration error."""
     current = exception

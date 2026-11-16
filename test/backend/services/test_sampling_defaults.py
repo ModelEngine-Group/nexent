@@ -7,7 +7,6 @@ from copy import deepcopy
 import pytest
 from management.services.model.run_bindings import create_model_config_from_record
 from management.services.model import management
-from management.services.model.run_controls import overlay_root_model
 
 
 @pytest.mark.parametrize("sampling,expected", [
@@ -27,8 +26,16 @@ async def test_model_list_exposes_effective_sampling_without_filling_stored_fiel
     for key in ("temperature", "top_p"):
         assert result.get(key) == original.get(key)
         assert (key in result) == (key in original)
-    base = create_model_config_from_record(record)
-    inherited = overlay_root_model(base, {"temperature": None, "top_p": None}, "inherited")
+    from contracts.errors.exceptions import ModelOutletValidationError
+
+    # Persisted LLM rows must be migrated before runtime use. Anonymous legacy
+    # bindings still preserve the upstream sampling inheritance contract.
+    with pytest.raises(ModelOutletValidationError) as error:
+        create_model_config_from_record(record)
+    assert error.value.category == "PROFILE_MIGRATION_REQUIRED"
+    anonymous = {key: value for key, value in record.items() if key != "model_id"}
+    base = create_model_config_from_record(anonymous)
+    inherited = base
     assert {key: getattr(inherited, key) for key in expected} == expected
     assert inherited.explicit_sampling == []
     assert record == original

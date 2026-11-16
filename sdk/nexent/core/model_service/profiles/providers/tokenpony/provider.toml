@@ -1,0 +1,8 @@
+# Nexent-authored provider metadata; not copied from models.dev.
+# Source: https://docs.tokenpony.cn/ (checked 2026-10-16).
+# This declares the OpenAI-compatible endpoint, not per-model qualification.
+name = "TokenPony 小马算力"
+env = ["TOKENPONY_API_KEY"]
+npm = "@ai-sdk/openai-compatible"
+api = "https://api.tokenpony.cn/v1"
+doc = "https://docs.tokenpony.cn/"

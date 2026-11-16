@@ -43,6 +43,7 @@ import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import HighFidelityTextArea from "./HighFidelityTextArea";
+import { AgentFieldError } from "./agent-field-error";
 import AgentAvatarOptions from "./agent-avatar-options";
 import { createAgentIconFile } from "@/lib/chat/agentIconImage";
 
@@ -298,6 +299,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
     </>
   );
 
+  const isDescriptionEmpty = !editedAgent.description?.trim();
   const descriptionTextAreaProps = {
     placeholder: t(
       highFidelity
@@ -305,6 +307,11 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
         : "agent.descriptionPlaceholder"
     ),
     "aria-label": t("agent.description"),
+    "aria-required": true,
+    "aria-invalid": isDescriptionEmpty,
+    "aria-describedby": isDescriptionEmpty
+      ? "agent-description-error"
+      : undefined,
     rows: 3,
     disabled: isReadOnly,
     onChange: (event: ChangeEvent<HTMLTextAreaElement>) =>
@@ -327,10 +334,20 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           : "mb-0"
       }
       name="description"
-      required={highFidelity ? false : undefined}
+      required
+      validateStatus={isDescriptionEmpty ? "error" : undefined}
+      help={
+        isDescriptionEmpty ? (
+          <AgentFieldError
+            id="agent-description-error"
+            message={t("agent.validation.descriptionRequired")}
+          />
+        ) : undefined
+      }
       rules={[
         {
           required: true,
+          whitespace: true,
           message: t("agent.validation.descriptionRequired"),
         },
         {
@@ -350,7 +367,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           {...descriptionTextAreaProps}
           limit={HIGH_FIDELITY_DESCRIPTION_LIMIT}
           classNames={{
-            root: "!h-[100px] !rounded-[4px] !border-[#c9c9c9]",
+            root: "!h-[100px] !rounded-[4px]",
             textarea:
               "!h-[98px] !min-h-[98px] !resize-none !rounded-[4px] !px-3 !py-[5px] !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
             count:

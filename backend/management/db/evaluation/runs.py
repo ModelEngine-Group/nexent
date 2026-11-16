@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Float, select
+from sqlalchemy import Float, func, select
 
 from contracts.errors.codes import ErrorCode
 from contracts.evaluation import EvalRunStatus
@@ -223,11 +223,23 @@ def list_agent_evaluations_by_agent(
         if agent_ids:
             filters.append(AgentEvaluation.agent_id.in_(agent_ids))
 
+        # Match the detail view, including retained versions of unpublished agents.
+        agent_name = (
+            select(func.coalesce(func.nullif(AgentInfo.display_name, ""), AgentInfo.name))
+            .where(
+                AgentInfo.agent_id == AgentEvaluation.agent_id,
+                AgentInfo.tenant_id == AgentEvaluation.tenant_id,
+            )
+            .order_by(AgentInfo.version_no.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
         q = (
             session.query(
                 AgentEvaluation,
                 EvaluationSet.name.label("evaluation_set_name"),
                 ModelRecord.display_name.label("judge_model_name"),
+                agent_name.label("agent_name"),
             )
             .outerjoin(
                 EvaluationSet,
@@ -246,8 +258,9 @@ def list_agent_evaluations_by_agent(
             q = q.offset(offset).limit(limit)
         rows = q.all()
         results = []
-        for eval_row, evaluation_set_name, judge_model_name in rows:
+        for eval_row, evaluation_set_name, judge_model_name, agent_name in rows:
             rec = as_dict(eval_row)
+            rec["agent_name"] = agent_name or ""
             rec["evaluation_set_name"] = evaluation_set_name
             rec["judge_model_name"] = judge_model_name
             rec["case_count"] = eval_row.progress_total or 0

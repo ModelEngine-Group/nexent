@@ -9,21 +9,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contracts.agent import NL2AgentRunRequest, NL2SkillRunRequest
+from contracts.agent import NL2AgentRunRequest, NL2SkillRunRequest, SystemAgentRef
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from services import nl2agent_service as nl2agent_service
 from services import nl2skill_service as nl2skill_service
 
 
 @pytest.mark.parametrize("kind", ["nl2agent", "nl2skill"])
+@pytest.mark.parametrize("use_system_ref", [False, True])
 @pytest.mark.asyncio
-async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, kind):
+async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, kind, use_system_ref):
     module = nl2agent_service if kind == "nl2agent" else nl2skill_service
     request = (
         NL2AgentRunRequest(query="Create an Agent", agent_id=9)
         if kind == "nl2agent" else NL2SkillRunRequest(query="Create a skill")
     )
     stop_event = MagicMock()
-    run_info = SimpleNamespace(stop_event=stop_event)
+    run_info = SimpleNamespace(stop_event=stop_event, agent_config=SimpleNamespace(agent_id=None))
     builder = mocker.patch.object(module, f"build_{kind}_run_info", return_value=run_info)
 
     async def execute(info, **kwargs):
@@ -33,6 +35,9 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
 
     mocker.patch.object(module, "agent_run", execute)
     arguments = dict(request=request, tenant_id="tenant-a", language="en")
+    system_ref = SystemAgentRef(ASSET_OWNER_TENANT_ID, f"{kind}_main", 77, 0) if use_system_ref else None
+    if use_system_ref:
+        arguments["system_ref"] = system_ref
     if kind == "nl2agent":
         arguments["authorization"] = "Bearer token"
         arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
@@ -40,9 +45,9 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
     stream = await getattr(module, f"create_{kind}_stream")(**arguments)
     assert hasattr(stream, "__aiter__")
     if kind == "nl2agent":
-        builder.assert_awaited_once_with(**arguments)
+        builder.assert_awaited_once_with(**{**arguments, "system_ref": system_ref})
     else:
-        builder.assert_awaited_once_with(request, "tenant-a", "en")
+        builder.assert_awaited_once_with(request, "tenant-a", "en", system_ref=system_ref)
     chunks = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert chunks[0]["type"] == "tool"

@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from infrastructure.redis import run_state as runtime_state_module
+from infrastructure.redis.client import run_state as runtime_state_module
 from infrastructure.redis.run_state import RuntimeStateService
 
 
@@ -43,6 +43,9 @@ class FakeRedisClient:
         for key in keys:
             self.hashes.pop(key, None)
             self.values.pop(key, None)
+
+    def hdel(self, key, field):
+        self.hashes.get(key, {}).pop(field, None)
 
     def hgetall(self, key):
         self._maybe_fail("hgetall")

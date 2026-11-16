@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
+
+from html import unescape
 
 import pytest
 from nexent.core.agents.context import (
@@ -215,7 +218,7 @@ def test_context_manager_owns_final_answer_assembly():
         "memory fact",
     ]
     action_history = _message_text(final.messages[3])
-    assert '<completed_action_history read_only="true">' in action_history
+    assert '<completed_action>' in action_history
     assert "recorded_result:\nwork trace" in action_history
     assert "Calling tools:" not in action_history
     assert "Observation:" not in action_history
@@ -290,10 +293,10 @@ def test_completed_skill_read_is_available_to_the_next_model_step():
     action_history = next(
         _message_text(message)
         for message in final.messages
-        if '<completed_action_history read_only="true">' in _message_text(message)
+        if '<completed_action>' in _message_text(message)
     )
-    assert "read_skill_md" in action_history
-    assert 'read_skill_md("demo-skill")' in action_history
+    assert "read_skill_md" in str(final.messages)
+    assert 'tool: python_interpreter\ninput:\nskill_content = read_skill_md("demo-skill")' in unescape(action_history)
     assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
     assert "Do not copy this record's format as your next response." in action_history
 

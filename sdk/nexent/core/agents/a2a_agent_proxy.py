@@ -73,7 +73,7 @@ class A2AAgentInfo:
     transport_type: str = "http-streaming"
     protocol_version: str = "1.0"
     protocol_type: str = PROTOCOL_JSONRPC
-    timeout: float = 300.0
+    timeout: float = 900.0
     raw_card: Optional[Dict[str, Any]] = None
     custom_headers: Optional[Dict[str, str]] = None
     ssl_verify: bool = True

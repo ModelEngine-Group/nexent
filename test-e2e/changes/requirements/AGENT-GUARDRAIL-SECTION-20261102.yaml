@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-GUARDRAIL-SECTION-20261102
+  change_type: requirement
+  requirement_id: AGENT-GUARDRAIL-SECTION-20261102
+  title: Display guardrails as an independent Agent configuration section
+  description: Replace Advanced More modal with an independent collapsible guardrail card using existing controls and localization.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/agentConfigLayout.test.tsx
+    behaviors:
+      - Guardrails appear as a standalone card with existing controls and no More dialog.
+      - Collapsing is independent and retains mounted content without saving or fetching.
+      - Agent switches restore default guardrail expansion.
+      - Existing Advanced protocol repair and read-only form protection remain intact.
+    reason: Local composition and state proof belongs in frontend UT; no Python, API, runtime or risk-policy changes. Existing formal journey contract is preserved and its shared locator is adapted.
+  notes: SPEC ../nexent-doc/docs/Developing/dev-agent-config-visual-spacing/changes/dev-agent-guardrail-section. No new formal Cases. Browser geometry and live persistence are not claimed by composition UT.

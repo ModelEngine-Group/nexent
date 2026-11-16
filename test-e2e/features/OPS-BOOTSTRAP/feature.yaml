@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-BOOTSTRAP
+  name: Independent operations backend bootstrap
+  status: active
+  description: Start the operations backend from the shared backend image without business infrastructure.
+  business_rules:
+  - rule_id: OPS-BOOTSTRAP-RULE-01
+    description: The launcher and operations application do not initialize business clients, schedulers, telemetry or migrations.
+  - rule_id: OPS-BOOTSTRAP-RULE-02
+    description: Liveness reports alive; readiness follows process-local startup and shutdown only.
+  - rule_id: OPS-BOOTSTRAP-RULE-03
+    description: Operations listens on 0.0.0.0 with its centralized port and the shared LOG_LEVEL setting; Compose reuses NEXENT_IMAGE, joins nexent_network and publishes port 5016 by default without business-service dependencies.
+  - rule_id: OPS-BOOTSTRAP-RULE-04
+    description: Docker and Kubernetes application selection include ops; infrastructure-only selection excludes it. Deployment command failures and Kubernetes readiness failures propagate to the caller.
+  - rule_id: OPS-BOOTSTRAP-RULE-05
+    description: Helm uses the shared backend image, explicit minimal env and process probes without business secrets or business volumes; only persistent logs are mounted. Service port defaults to 5016 with configurable NodePort 30016 or ClusterIP.
+  - rule_id: OPS-BOOTSTRAP-RULE-06
+    description: Ops application and Uvicorn logs go to console and rotating persistent files using shared logging settings, without Elasticsearch. Kubernetes separates files per pod to avoid concurrent rotation.
+  required_test_stages: [D1, D5]
+  source:
+    requirement_ids: [OPS-BOOTSTRAP-20261026]
+    notes: User-approved minimal scaffold. The sibling nexent-doc repository is unavailable; no SPEC files are placed in the product repository.

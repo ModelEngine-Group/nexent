@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: RESPONSIBILITY-ROUTING-20261029
+  change_type: test-fix
+  title: Complete investigation routing and validate ownership at design time
+  description: >-
+    Fill explicit Feature mappings for modern and uncovered legacy capabilities,
+    add proving-boundary Case exceptions and require unique coverage in both
+    design and implementation validation. Export versioned current routing for
+    the independent read-only dashboard without changing execution snapshots.
+  affected_features:
+    existing: [AGENT-EDITOR-WORKFLOWS, AGENT-LIST-VIEWS, AGENT-PUBLICATION, AGENT-REPO-SORT-MAIN-TAG, CAS-USER-DISPLAY, CHAT-MODEL-CONTROLS, CHAT-SIDEBAR, SAI-001, TFP-001, WB-CONTROLS, SEARCH-DEEPSEEK, V5-SEC-06, V5-SEC-07]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [SEC-06, SEC-07, SAI-D3-001, SAI-D5-001, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D4-001, WB-CONTROLS-D4-004]
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Routing contacts, validator/export infrastructure and guidance only; Case definitions, assertions, bindings and execution results are unchanged.
+  notes: >-
+    Runtime owns selected-model request forwarding and invocation lifecycle;
+    Model owns permissions/capability contracts; Agent configuration owns creator
+    control serialization; Knowledge owns the AIDP selection journey. Sandbox
+    owns real Docker/Gateway isolation and deployment-image proof. SEC-06 calls
+    /mcp/test-connection; SEC-07 calls /skills/upload. DeepSeek search is a built-in
+    runtime tool, not an LLM health check. One main contact routes investigation
+    without claiming defect causality. No product deployment, formal rerun,
+    workflow modification, notifications or Git write operation is performed.

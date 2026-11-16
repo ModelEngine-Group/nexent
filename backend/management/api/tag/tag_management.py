@@ -2,17 +2,48 @@
 
 """HTTP endpoints for managing fixed tenant tag libraries."""
 
-from contracts.tag import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
-from contracts.tag import TAG_CONFLICT_RESPONSES
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
-from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
-from contracts.tag import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
+from contracts.errors.exceptions import (
+    TagManagementConflictError,
+    TagManagementNotFoundError,
+    ValidationError,
+)
+from contracts.roles import has_any_role
+from contracts.tag import (
+    TAG_CONFLICT_RESPONSES,
+    AgentTagAssignmentBatchRequest,
+    KnowledgeTagAssignmentBatchRequest,
+    SkillTagAssignmentBatchRequest,
+    TagAssignmentBulkOutcome,
+    TagAssignmentBulkReplaceRequest,
+    TagAssignmentReplaceRequest,
+    TagAssignmentResponse,
+    TagDefinitionCreateRequest,
+    TagDefinitionResponse,
+    TagDefinitionUpdateRequest,
+    TagDefinitionUsageResponse,
+    TagDeleteResponse,
+    TagDocumentBatchStatusRequest,
+    TagDocumentBatchStatusResponse,
+    TagDocumentProjectionStatusResponse,
+    TagLegacyFlatTagsProjectionResponse,
+    TagLibraryResponse,
+    TagOrderUpdateRequest,
+    TagResourceFilterRequest,
+    TagResourceFilterResponse,
+    TagStatusUpdateRequest,
+    TagValueCreateRequest,
+    TagValueResponse,
+    TagValueUpdateRequest,
+    TagValueUsageResponse,
+    ToolTagAssignmentBatchRequest,
+)
+from management.services.permission.identity.session import get_current_user_context
 from management.db.identity.role_permission import check_role_permission
-from fastapi import APIRouter, Header, HTTPException, Query
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 from management.services.permission.identity.session import get_current_user_context
@@ -38,7 +69,7 @@ def _assignment_caller(authorization: str | None) -> AuthenticatedCaller:
         user_id=user_id,
         authenticated_tenant_id=tenant_id,
         role=role,
-        can_edit_all=role in CAN_EDIT_ALL_USER_ROLES,
+        can_edit_all=has_any_role(role, CAN_EDIT_ALL_USER_ROLES),
     )
 
 

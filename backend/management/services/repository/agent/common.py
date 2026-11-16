@@ -1,9 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import logging
-from typing import FrozenSet, Tuple
 
-from contracts.constants.constants import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
+import logging
+import uuid
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+
+from contracts.constants.constants import (
+    STATUS_NOT_SHARED,
+    STATUS_PENDING_REVIEW,
+    STATUS_REJECTED,
+    STATUS_SHARED,
+    SYSTEM_TENANT_ID,
+)
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.roles import has_any_role, roles_from_record
+from management.db.agent.catalog import reset_agent_repository_status
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.services.permission.identity.display import repository_identity_fields
 
 logger = logging.getLogger("agent_repository_service")
 
@@ -46,8 +59,6 @@ _MY_AGENT_REPOSITORY_STATUSES = frozenset(
     {STATUS_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED}
 )
 
-import uuid
-
 
 def _repository_icon_url(agent_id: int, version_no: int, image_id: str) -> str:
     return f"/api/repository/agent/{agent_id}/versions/{version_no}/icon/{image_id}"
@@ -72,18 +83,12 @@ def _repository_image_id(icon_url: str, agent_id: int, version_no: int) -> str:
     return image_id
 
 
-from typing import Any, Dict
-
-from contracts.errors.exceptions import UnauthorizedError
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
-
-
 def _get_user_role(user_id: str) -> str:
     """Resolve user role from user_tenant_t; default to USER when unset."""
     user_tenant = get_user_tenant_by_user_id(user_id)
     if not user_tenant:
         return "USER"
-    return str(user_tenant.get("user_role") or "USER")
+    return roles_from_record(user_tenant)
 
 
 def _validate_create_listing_permission(
@@ -93,9 +98,9 @@ def _validate_create_listing_permission(
 ) -> None:
     """Only ADMIN, or DEV who created the agent, may share to marketplace."""
     user_role = _get_user_role(user_id)
-    if user_role == "ADMIN":
+    if has_any_role(user_role, {'ADMIN'}):
         return
-    if user_role == "DEV":
+    if has_any_role(user_role, {'DEV'}):
         agent_created_by = agent_info.get("created_by")
         if agent_created_by is not None and str(agent_created_by) == str(user_id):
             return
@@ -103,15 +108,6 @@ def _validate_create_listing_permission(
     raise UnauthorizedError(
         f"User role {user_role} not authorized to create repository listing"
     )
-
-
-from typing import Any, Dict, List, Optional
-
-from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED
-from contracts.constants.constants import SYSTEM_TENANT_ID
-from management.db.agent.catalog import reset_agent_repository_status
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.services.permission.identity.display import repository_identity_fields
 
 
 def _to_summary_item(

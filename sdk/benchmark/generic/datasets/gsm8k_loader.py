@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """GSM8K dataset loader and Langfuse upload.
 
 GSM8K (Grade School Math 8K) is a dataset of ~8.5K grade school math
@@ -39,8 +41,7 @@ def download_gsm8k(split: str = "test", cache_dir: str = None) -> list[dict]:
         from datasets import load_dataset
     except ImportError:
         print("ERROR: 'datasets' package not installed.")
-        print("  Install with: pip install datasets")
-        print("  Or: uv pip install datasets")
+        print("  Install with: uv pip install datasets")
         sys.exit(1)
 
     print(f"Downloading GSM8K ({split} split)...")

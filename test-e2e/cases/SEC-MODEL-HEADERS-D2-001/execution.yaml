@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: SEC-MODEL-HEADERS-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: SEC-MODEL-HEADERS-D2-001
+  profiles: [real_smoke]
+acceptance_bindings:
+  AC-01: [test_persisted_model_lists_omit_header_credentials]
+  AC-02: [test_persisted_model_lists_omit_header_credentials]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained real HTTP fixture authenticates from process-only test credentials, journals a unique model before creation, seeds only its new Header column, and always soft-deletes it. No shared anchors or provider calls.

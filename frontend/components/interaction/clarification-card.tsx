@@ -258,6 +258,7 @@ export function ClarificationCard({
                               : undefined
                           }
                           checked={checked}
+                          disabled={isLocked || option.disabled}
                           onChange={() => {
                             if (question.type === "multiple_choice") {
                               toggleMultipleChoice(question.id, option.id);

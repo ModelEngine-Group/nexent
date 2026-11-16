@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object", "additionalProperties": false,
-  "required": ["schema_version", "profiles", "cases", "recovery_cases"],
+  "required": ["schema_version", "profiles", "cases"],
   "properties": {
     "schema_version": {"const": 1},
     "profiles": {"type": "object", "minProperties": 1,
@@ -21,7 +21,7 @@
       }
     },
     "cases": {"type": "object", "additionalProperties": {"type": "string"}},
-    "recovery_cases": {"type": "array", "minItems": 1, "uniqueItems": true,
+    "recovery_cases": {"type": "array", "deprecated": true, "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}}
   }
 }

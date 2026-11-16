@@ -1,14 +1,34 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import assert from "node:assert/strict";
-import test from "node:test";
+import { readFileSync } from "node:fs";
+import test, { before } from "node:test";
+import i18n from "i18next";
 import type { AssistantRuntime } from "@assistant-ui/react";
 import {
   changeAgentTopology,
   changeCreationThread,
   returnFromCreation,
+  startWorkbenchConversation,
   // @ts-expect-error -- Node's TypeScript runner requires an explicit extension.
 } from "../features/workbench/conversationTransitions.ts";
+
+before(async () => {
+  await i18n.init({
+    lng: "zh",
+    keySeparator: false,
+    resources: {
+      zh: {
+        translation: JSON.parse(
+          readFileSync(
+            new URL("../public/locales/zh/common.json", import.meta.url),
+            "utf8"
+          )
+        ),
+      },
+    },
+  });
+});
 
 function fixture({ messages = 1, running = false, uploading = false } = {}) {
   const events: unknown[] = [];
@@ -48,6 +68,52 @@ function fixture({ messages = 1, running = false, uploading = false } = {}) {
   } as unknown as AssistantRuntime;
   return { runtime, events, attachment };
 }
+
+for (const running of [false, true]) {
+  test(`a new conversation reserves its unsent draft while running=${running}`, async () => {
+    const { runtime, events } = fixture({ messages: 0, running });
+    runtime.threads.getState = () =>
+      ({ mainThreadId: "creation", newThreadId: "creation" }) as ReturnType<
+        typeof runtime.threads.getState
+      >;
+    const original = runtime.thread.composer.getState();
+    await startWorkbenchConversation(runtime, () =>
+      events.push("generic_chat")
+    );
+    assert.deepEqual(events, ["reserve-draft", "new-thread", "generic_chat"]);
+    assert.deepEqual(runtime.thread.composer.getState(), original);
+  });
+}
+
+test("a failed new conversation does not reset the source and releases its transition lock", async () => {
+  const { runtime, events } = fixture();
+  runtime.threads.switchToNewThread = async () => {
+    throw new Error("switch failed");
+  };
+  await assert.rejects(
+    startWorkbenchConversation(runtime, () => events.push("reset")),
+    /switch failed/
+  );
+  assert.equal(events.length, 0);
+  runtime.threads.switchToNewThread = async () => {};
+  await startWorkbenchConversation(runtime, () => events.push("reset"));
+  assert.deepEqual(events, ["reset"]);
+});
+
+test("new conversation and creation actions cannot overlap", async () => {
+  const { runtime, events } = fixture();
+  let release!: () => void;
+  runtime.threads.switchToNewThread = () =>
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  const first = startWorkbenchConversation(runtime, () => events.push("reset"));
+  await assert.rejects(startWorkbenchConversation(runtime, () => {}));
+  await assert.rejects(changeCreationThread(runtime, () => {}));
+  release();
+  await first;
+  assert.deepEqual(events, ["reset"]);
+});
 
 test("UT-FE-WB-011 returning from creation opens one generic thread without copying its draft", async () => {
   const { runtime, events } = fixture({ messages: 0 });

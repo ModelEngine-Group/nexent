@@ -3,14 +3,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { App, Empty, Form, Input, Spin } from "antd";
+import { App, Empty, Form, Input, Spin, Button, Modal } from "antd";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardModal } from "@/components/common/StandardModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import {
@@ -123,20 +121,23 @@ export default function CreateAgentModal({
   const locale = params.locale || "zh";
 
   return (
-    <StandardModal
+    <Modal
       open={open}
       width={560}
-      maxHeight={CREATE_AGENT_MODAL_MAX_HEIGHT}
-      title={t("chat.agentLanding.createAgent")}
-      closeLabel={t("agentConfig.createModal.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      footer={null}
-      bodyClassName="!overflow-hidden !pb-0"
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) resetModalState();
+      centered
+      styles={{
+        container: {
+          maxHeight: CREATE_AGENT_MODAL_MAX_HEIGHT,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        },
+        body: { minHeight: 0, overflow: "hidden" },
       }}
-      onClose={handleCancel}
+      title={t("chat.agentLanding.createAgent")}
+      closable={{ "aria-label": t("agentConfig.createModal.close") }}
+      footer={null}
+      onCancel={handleCancel}
     >
       <Form
         form={form}
@@ -182,14 +183,14 @@ export default function CreateAgentModal({
               className="!h-8 !rounded-[4px] !border-[#c9c9c9] !px-3 !py-[5px] !text-[14px] !leading-[22px] ![letter-spacing:0px]"
             />
           </Form.Item>
-          <StandardButton
-            variant="primary"
+          <Button
+            type="primary"
             htmlType="submit"
             loading={isSubmitting}
             className="!mt-[30px] !mb-0"
           >
             {t("agentConfig.createModal.submit")}
-          </StandardButton>
+          </Button>
         </div>
       </Form>
 
@@ -217,12 +218,12 @@ export default function CreateAgentModal({
         ) : templatesQuery.isError ? (
           <div role="alert" className="flex flex-col items-center gap-3 py-6">
             <span>{t("agentConfig.createModal.templates.loadFailed")}</span>
-            <StandardButton
+            <Button
               disabled={templatesQuery.isFetching}
               onClick={() => void templatesQuery.refetch()}
             >
               {t("common.retry")}
-            </StandardButton>
+            </Button>
           </div>
         ) : templates.length === 0 ? (
           <Empty
@@ -240,7 +241,7 @@ export default function CreateAgentModal({
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => handleTemplateClick(template.id)}
-                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
+                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-lg border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
                     isSelected
                       ? "!border-[#2673e5]"
                       : "!border-[#c9c9c9] hover:!border-[#2673e5]"
@@ -278,6 +279,6 @@ export default function CreateAgentModal({
           </div>
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

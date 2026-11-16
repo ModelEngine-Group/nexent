@@ -76,6 +76,12 @@ def api_fixture(monkeypatch):
     })
     monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
+    def identity(authorization):
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return "fixture-owner", "tenant"
+
+    monkeypatch.setattr(agent_app_execution, "get_current_user_id", identity)
     monkeypatch.setattr(agent_app_execution, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
     monkeypatch.setattr(skill_app_creation, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
 
@@ -87,26 +93,25 @@ def api_fixture(monkeypatch):
                         lambda model_name, **kwargs: BUDGET if model_name == "budget" else
                         {"status": "unsupported", "levels": []} if model_name == "plain" else CAPABILITY)
 
+    from model_controls.profiles import frozen_fixture_profile
+    profiles = {row["model_id"]: frozen_fixture_profile(row, BUDGET if label == "budget" else
+        {"status": "unsupported"} if label == "plain" else CAPABILITY)
+        for label, row in records.items() if label != "embedding"}
+    from management.db.model import outlets as model_outlet_db
+    monkeypatch.setattr(model_outlet_db, "get_resolved_model_record", lambda identifier, *args, **kwargs: profiles.get(identifier))
+
     async def stream(request, ordinary=False):
         if ordinary and request.entrypoint != "workbench" and request.model_id and request.model_id not in state.configured:
             raise ForbiddenError("The selected model is not configured for this Agent")
-        if ordinary and request.workbench:
-            request.model_id = request.workbench.model_id
-            request.generation_config = request.workbench.generation_config
         run_controls.preflight_turn_controls(request, "tenant")
         selected = lookup(request.model_id, "tenant") if request.model_id else records["effort"]
-        base = run_bindings.create_model_config_from_record(selected)
-        values = request.generation_config.model_dump(exclude_unset=True) if request.generation_config else {}
-        for legacy, canonical in (("reasoning_effort", "thinking_effort"), ("reasoning_budget_tokens", "reasoning_budget_tokens")):
-            value = getattr(request, legacy, None)
-            if value is not None:
-                values[canonical] = value
-        root = run_controls.overlay_root_model(base, values, "root")
-        payload = {"model_id": selected["model_id"], "enabled": root.enable_thinking,
-                   "effort": root.reasoning_effort, "budget": root.reasoning_budget_tokens,
-                   "temperature": root.temperature, "top_p": root.top_p}
+        from management.services.conversation.model_preferences import merge_model_preferences
+        root = merge_model_preferences(profiles[selected["model_id"]], request.model_parameter_preferences.get(str(selected["model_id"]), {}))
+        values = root.parameter_values
+        payload = {"model_id": selected["model_id"], "enabled": values.get("enable_thinking"),
+                   "effort": values.get("reasoning_effort"), "budget": values.get("reasoning_budget_tokens"),
+                   "temperature": values.get("temperature"), "top_p": values.get("top_p")}
         state.calls.append(request.model_dump(exclude_unset=True))
-
         async def chunks():
             yield f"data: {json.dumps(payload)}\n\n"
         return chunks()
@@ -117,6 +122,15 @@ def api_fixture(monkeypatch):
     async def creator_stream(request, **kwargs):
         return await stream(request)
 
+    async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory):
+        # The real history service validates this resource declaration before saving it.
+        from contracts.agent import WorkbenchSessionConfig
+        if request.workbench_config is not None:
+            WorkbenchSessionConfig.model_validate(request.workbench_config)
+        return await stream_factory(request, None), 1
+
+    monkeypatch.setattr(agent_app_execution, "start_creation_turn", creation_turn)
+    monkeypatch.setattr(skill_app_creation, "start_creation_turn", creation_turn)
     monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
     monkeypatch.setattr(agent_app_execution, "create_nl2agent_stream", creator_stream)
     monkeypatch.setattr(skill_app_creation, "create_nl2skill_stream", creator_stream)

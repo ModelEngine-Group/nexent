@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: LEGACY-TOOL-ASSOCIATIONS-20261102
+  change_type: bugfix
+  bug_id: LEGACY-TOOL-ASSOCIATIONS-20261102
+  title: Preserve native tool associations in legacy message conversion
+  description: Preserve call metadata and result IDs across legacy cleaning without coalescing distinct tool results.
+  observed_behavior: A returned assistant tool call loses its metadata and a following tool result loses its ID, so the actual adapter rejects or misrepresents the next invocation.
+  expected_behavior: Dictionary and returned ChatMessage calls preserve function IDs and arguments; native results remain separate and linked; ordinary CodeAgent role conversion and adapter validation remain intact.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing legacy tests covered code-history roles; adapter tests started from ModelMessage and omitted a second compatibility invocation after a returned native call.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-036]
+    retired: []
+  affected_cases:
+    existing: [MODEL-RECOVERY-D3-001, CMSR-D1-003]
+    added: [MODEL-LEGACY-TOOLS-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Returned calls replay through the actual adapter with distinct result IDs in ordinary, stream and async-stream interfaces.
+    - Dictionary and object forms, multiple results, flattening and exact argument strings preserve caller data.
+    - Invalid IDs, call shapes and unsupported native capability fail before transport; existing code-history coalescing remains unchanged.
+    reason: UT controls only service events and executes actual legacy conversion and adapter preparation. The D3 adds actual HTTP framing and stream parsing evidence; no duplicate D1.
+    test_selectors:
+    - test/sdk/core/model_service/test_legacy_tool_continuation.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/sdk/core/model_service/test_openai_chat_adapter.py
+  notes: SPEC.md PR4083 Legacy native-tool continuation review owns AC-LT-01..03. Reuses F-036-RULE-01 and preserves all existing D1. Self-contained D3 uses no asset families and verifies provider/thread cleanup, routed to model. Separate real-model and Phoenix proof is required. Global inherited preparation blocker remains independently reported.

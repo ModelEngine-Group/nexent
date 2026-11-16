@@ -94,6 +94,7 @@ POST /nb/v1/chat/run
 | `conversation_id` | integer | No | Existing conversation ID; if not provided, create new conversation |
 | `attachments` | array | No | Attachment list (S3 URLs or attachment metadata objects) |
 | `model_id` | integer | No | Model ID (overrides Agent default model) |
+| `final_answer_mode` | string | No | Defaults to `complete`: one full root Agent `final_answer`; use `delta` to retain incremental answer events |
 | `metadata` | object | No | Runtime metadata (visible to Agent) |
 | `meta_data` | object | No | Audit metadata (recorded only, not exposed to Agent) |
 | `tool_params` | object | No | Tool parameter overrides |
@@ -203,6 +204,20 @@ data: {"type":"model_output_thinking","content":", please wait...","unit_index":
 
 data: {"type":"final_answer","content":"Analysis complete","unit_index":2}
 ```
+
+When `final_answer_mode` is omitted or set to `complete`, process events still stream immediately. After successful execution and persistence, one root `final_answer` contains the entire answer. Legacy clients can read the full result from the first `final_answer`. Child answers are not published as final results; failed or stopped runs do not promote partial answers to success.
+
+Clients requiring incremental answers must send `"final_answer_mode":"delta"` in the request body. The event type remains `final_answer`, with `answer_phase` identifying the stage:
+
+```text
+data: {"type":"final_answer","answer_phase":"delta","content":"Analysis "}
+
+data: {"type":"final_answer","answer_phase":"delta","content":"complete"}
+
+data: {"type":"final_answer","answer_phase":"complete","content":""}
+```
+
+Append delta fragments. A nonempty complete body replaces the accumulated draft; an empty complete body confirms the accumulated answer. Retain existing retry rollback and `reclassify_step` handling rather than concatenating every `final_answer`. Unsupported modes return `422`. Existing northbound clients relying on incremental answers must explicitly opt in to `delta` when upgrading.
 
 ## Structured clarification and follow-up after stopping
 

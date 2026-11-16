@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-RESULT-PRESENTATION-20261030
+  change_type: requirement
+  requirement_id: NL2AGENT-RESULT-PRESENTATION-20261030
+  title: Select Agent generation result-card presentation by entrypoint
+  description: Keep the configuration navigation result card in Workbench while hiding it in the existing Agent configuration creator panel.
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+      - frontend/tests/workbench/ThreadMessageRenderers.test.tsx
+      - frontend/tests/workbench/CreationResultCards.test.tsx
+      - frontend/tests/workbench/AgentCreationHistoryCard.test.ts
+    behaviors:
+      - The Agent configuration NL2Agent panel explicitly hides the result navigation card.
+      - Shared stable message renderers deliver current presentation flags without remounting or losing local message state.
+      - Default-enabled result cards retain the generated Agent summary and configuration link.
+      - Live/history generation metadata remains available independently of local card visibility.
+    reason: An entrypoint presentation option is proved with panel, message-context and existing result/replay component contracts; no execution or persistence change.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/proposal.md AC-024.
+    Thread showAgentCreationResult defaults true; the configuration NL2Agent panel passes false.
+    The same display switch applies to live and restored messages. Backend events, state callbacks and saved history are unchanged.
+    No new D1 duplicates local presentation UT; formal database/runtime Cases are unaffected. No browser/deployment pass is inferred.
