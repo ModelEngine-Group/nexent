@@ -207,11 +207,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
       render: (_, row) => (
         <div>
           <TrajectoryStatus status={row.status || row.availability} />
-          {row.coverage.complete !== true && row.trajectory_id && (
-            <small className="block text-amber-700">
-              {t("trajectory.partial")}
-            </small>
-          )}
         </div>
       ),
     },

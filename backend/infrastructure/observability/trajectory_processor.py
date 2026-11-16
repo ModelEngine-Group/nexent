@@ -9,7 +9,9 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+from contracts.trajectory import CleanupPolicy
 from nexent.monitor.duration import duration_attributes
 from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor
@@ -64,7 +66,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
         maintenance_store=None,
         cleanup_enabled=False,
         cleanup_interval_seconds=3600,
-        cleanup_interval_provider=None,
+        cleanup_policy_provider=None,
     ):
         if min(flush_interval_ms, flush_bytes, queue_max_bytes, run_queue_max_bytes) <= 0:
             raise ValueError("Trajectory processor budgets must be positive")
@@ -99,13 +101,12 @@ class LocalTrajectoryProcessor(SpanProcessor):
         self._cleanup_enabled = cleanup_enabled
         self.deleted_conversation_check = None
         self._cleanup_interval = cleanup_interval_seconds
-        self._cleanup_interval_provider = cleanup_interval_provider
+        self._cleanup_policy_provider = cleanup_policy_provider
         self._next_schedule_refresh = 0
-        self._cleanup_intervals = {}
-        self._tenant_last_maintenance = {}
-        self._maintenance_due_tenants = set()
-        self._maintenance_full_scan = False
-        self._next_full_maintenance = 0
+        self._cleanup_policies = None if cleanup_policy_provider else {}
+        self._next_cleanup_at = None
+        self._maintenance_cleanup_at = None
+        self._maintenance_policies = {}
         self._maintenance_iterator = None
         self._maintenance_pending = None
         self._next_maintenance = 0
@@ -490,56 +491,49 @@ class LocalTrajectoryProcessor(SpanProcessor):
             self._gaps.discard(run_id)
             self._last_snapshot = {key: value for key, value in self._last_snapshot.items() if key[0] != run_id}
 
-    def _refresh_cleanup_interval(self):
+    def _refresh_cleanup_policy(self):
         now = time.monotonic()
-        if self._cleanup_interval_provider is None or now < self._next_schedule_refresh:
+        if self._cleanup_policy_provider is None or now < self._next_schedule_refresh:
             return
         self._next_schedule_refresh = now + 30
         try:
-            intervals = self._cleanup_interval_provider()
-            if not isinstance(intervals, dict) or len(intervals) > 1000 or any(
-                not isinstance(tenant, str) or not tenant
-                or type(interval) is not int or not 60 <= interval <= 31536000
-                for tenant, interval in intervals.items()
+            policies = self._cleanup_policy_provider()
+            if not isinstance(policies, dict) or len(policies) > 1000 or any(
+                not isinstance(tenant, str) or not tenant for tenant in policies
             ):
-                raise ValueError("Invalid cleanup interval")
+                raise ValueError("Invalid cleanup policy")
+            validated = {tenant: CleanupPolicy.model_validate(value).model_dump() for tenant, value in policies.items()}
         except Exception:  # noqa: BLE001 - Configuration failure must not stop file maintenance.
             logger.warning("trajectory.cleanup_schedule_refresh_failed", exc_info=False)
             return
-        self._cleanup_intervals = intervals
-        if self._maintenance_iterator is None:
-            self._schedule_next_maintenance()
+        self._cleanup_policies = validated
 
-    def _schedule_next_maintenance(self):
-        deadlines = [self._next_full_maintenance]
-        if self._cleanup_enabled:
-            deadlines.extend(
-                self._tenant_last_maintenance.get(tenant, 0)
-                + self._cleanup_intervals.get(tenant, self._cleanup_interval)
-                if tenant in self._tenant_last_maintenance else 0
-                for tenant in self._cleanup_intervals.keys() | self._tenant_last_maintenance.keys()
-            )
-        self._next_maintenance = min(deadlines)
+    @staticmethod
+    def _next_midnight(now):
+        local = now.astimezone(ZoneInfo("Asia/Shanghai"))
+        return (local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).astimezone(UTC)
+
+    def _tenant_cleanup_policy(self, tenant, policies):
+        return policies.get(tenant, {
+            "enabled": self._cleanup_enabled,
+            "retention_days": min(self._maintenance_store.retention_days, 30),
+        })
 
     def _maintain(self):
         store = self._maintenance_store
         if store is None:
             return
-        self._refresh_cleanup_interval()
+        self._refresh_cleanup_policy()
+        wall_now = store.clock()
+        if self._next_cleanup_at is None and self._cleanup_policies is not None:
+            self._next_cleanup_at = self._next_midnight(wall_now)
         if self._maintenance_iterator is None:
-            now = time.monotonic()
-            if now < self._next_maintenance:
+            daily_due = self._next_cleanup_at is not None and wall_now >= self._next_cleanup_at
+            if time.monotonic() < self._next_maintenance and not daily_due:
                 return
-            self._maintenance_full_scan = now >= self._next_full_maintenance
-            self._maintenance_due_tenants = {
-                tenant for tenant in self._cleanup_intervals.keys() | self._tenant_last_maintenance.keys()
-                if tenant not in self._tenant_last_maintenance or now >= self._tenant_last_maintenance[tenant]
-                + self._cleanup_intervals.get(tenant, self._cleanup_interval)
-            }
-            self._maintenance_iterator = (
-                store.identities() if self._maintenance_full_scan
-                else store.identities(tenant_ids=self._maintenance_due_tenants)
-            )
+            self._maintenance_cleanup_at = self._next_cleanup_at if daily_due else None
+            self._maintenance_policies = dict(self._cleanup_policies or {})
+            self._maintenance_iterator = store.identities()
         started = time.monotonic()
         for _ in range(20):
             if not self._queue.empty() or time.monotonic() - started >= 0.05:
@@ -551,17 +545,17 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     identity = next(self._maintenance_iterator)
                 except StopIteration:
                     self._maintenance_iterator = None
-                    finished = time.monotonic()
-                    for tenant in self._maintenance_due_tenants:
-                        self._tenant_last_maintenance[tenant] = finished
-                    if self._maintenance_full_scan:
-                        self._next_full_maintenance = finished + self._cleanup_interval
-                    self._schedule_next_maintenance()
+                    self._next_maintenance = time.monotonic() + self._cleanup_interval
+                    if self._maintenance_cleanup_at is not None:
+                        self._next_cleanup_at = self._next_midnight(store.clock())
+                    self._maintenance_cleanup_at = None
+                    self._maintenance_policies = {}
                     return
                 after_turn = 0
-            if identity.tenant_id not in self._tenant_last_maintenance:
-                self._maintenance_due_tenants.add(identity.tenant_id)
-            retention_due = self._cleanup_enabled and identity.tenant_id in self._maintenance_due_tenants
+            policy = self._tenant_cleanup_policy(identity.tenant_id, self._maintenance_policies)
+            current_policy = self._tenant_cleanup_policy(identity.tenant_id, self._cleanup_policies or {})
+            retention_due = self._maintenance_cleanup_at is not None and policy["enabled"] and current_policy["enabled"]
+            cleanup_pending = False
             inspected = 0
             last_turn = after_turn
             has_more = False
@@ -571,6 +565,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                 if inspected >= 1000:
                     has_more = True
                     break
+                cleanup_pending |= bool(run.get("cleanup_reason") and not run.get("file_deleted_at"))
                 inspected += 1
                 last_turn = run["turn_no"]
                 if run["capture_state"] == "writing" and run["trajectory_id"] not in self._writers:
@@ -579,19 +574,22 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     except Exception:  # noqa: BLE001 - Another process can own the actual execution file lock.
                         logger.debug("trajectory.maintenance_recovery_deferred", exc_info=False)
             store.reconcile(identity)
-            if retention_due or self.deleted_conversation_check:
-                now = store.clock()
-                cutoff = now - timedelta(days=store.retention_days)
+            if retention_due or cleanup_pending or self.deleted_conversation_check:
+                now = self._maintenance_cleanup_at if retention_due else store.clock()
+                days = policy["retention_days"]
+                cutoff = now - timedelta(days=days)
                 result = {}
                 with cleanup_audit(
                     source="scheduled", tenant_id=identity.tenant_id, conversation_id=identity.conversation_id,
-                    before_days=store.retention_days, cutoff_at=timestamp(cutoff), counts=result, emit_empty=False,
+                    before_days=days, cutoff_at=timestamp(cutoff), counts=result, emit_empty=False,
                 ):
                     deleted = self.deleted_conversation_check(identity) if self.deleted_conversation_check else False
-                    if retention_due or deleted:
+                    if retention_due or cleanup_pending or deleted:
                         result.update(store.cleanup(
                             identity,
                             after_turn=after_turn,
+                            before_days=days if retention_due else None,
+                            scheduled=True,
                             force_reason="conversation_deleted" if deleted else None,
                             now=now,
                             cutoff_at=cutoff,

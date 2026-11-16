@@ -16,7 +16,10 @@ export async function installTrajectoryFixture(
     failure: "",
     cleanupPaused: false,
     multiRound: false,
-    schedules: {} as Record<string, number>,
+    schedules: {} as Record<
+      string,
+      { enabled: boolean; retention_days: number }
+    >,
     scheduleSaves: [] as Record<string, unknown>[],
     scheduleFailure: false,
   };
@@ -58,7 +61,7 @@ export async function installTrajectoryFixture(
     finished_at: "2026-11-10T01:00:02Z",
     duration_ms: 2000 - offset,
     usage:
-      kind === "tool"
+      kind === "tool" || kind === "phase"
         ? null
         : { input: 100, output: 20, total: 120, complete: true },
     ttft_ms: kind === "model" ? 0 : null,
@@ -85,6 +88,9 @@ export async function installTrajectoryFixture(
     makeNode("tool", "storage", "tool", "policy.check", 900),
     makeNode("security", "root", "agent", "安全审查", 500),
     makeNode("capacity", "root", "agent", "容量规划", 500),
+    makeNode("prepare", "root", "phase", "agent.prepare", 0),
+    makeNode("memory", "prepare", "phase", "memory.presearch", 20),
+    makeNode("sandbox", "root", "phase", "agent.sandbox.initialize", 50),
   ];
   const row = {
     tenant_id: "tenant",
@@ -161,7 +167,10 @@ export async function installTrajectoryFixture(
           });
           return;
         }
-        state.schedules[payload.tenant_id] = payload.interval_seconds;
+        state.schedules[payload.tenant_id] = {
+          enabled: payload.enabled,
+          retention_days: payload.retention_days,
+        };
       }
       const tenant =
         request.method() === "PUT"
@@ -169,9 +178,9 @@ export async function installTrajectoryFixture(
           : url.searchParams.get("tenant_id");
       data = {
         tenant_id: tenant,
-        interval_seconds: state.schedules[tenant] ?? 3600,
-        enabled: true,
-        retention_days: 30,
+        ...(state.schedules[tenant] ?? { enabled: true, retention_days: 30 }),
+        cleanup_time: "00:00",
+        timezone: "Asia/Shanghai",
       };
     } else if (path.endsWith("/trajectory/records")) {
       state.records.push(url);

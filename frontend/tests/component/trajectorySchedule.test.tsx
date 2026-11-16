@@ -16,7 +16,8 @@ vi.mock("@/services/trajectoryService", () => ({
 const api = vi.mocked(trajectoryService);
 const policy = {
   tenant_id: "tenant",
-  interval_seconds: 3600,
+  cleanup_time: "00:00",
+  timezone: "Asia/Shanghai",
   enabled: true,
   retention_days: 30,
 };
@@ -49,30 +50,30 @@ function open() {
 beforeEach(() => {
   vi.resetAllMocks();
   api.cleanupSchedule.mockResolvedValue(policy);
-  api.saveCleanupSchedule.mockImplementation(async (tenant, seconds) => ({
+  api.saveCleanupSchedule.mockImplementation(async (tenant, settings) => ({
     ...policy,
     tenant_id: tenant,
-    interval_seconds: seconds,
+    ...settings,
   }));
 });
 
 describe("tenant cleanup schedule", () => {
-  it("loads policy, converts minutes to seconds and saves only the selected tenant", async () => {
+  it("loads and saves days and switch only for the selected tenant", async () => {
     open();
     const input = await screen.findByRole("spinbutton");
-    expect(input).toHaveValue("60");
+    expect(input).toHaveValue("30");
     expect(api.cleanupSchedule).toHaveBeenCalledWith(
       "tenant",
       expect.any(AbortSignal)
     );
-    fireEvent.change(input, { target: { value: "120" } });
+    fireEvent.change(input, { target: { value: "7" } });
     fireEvent.click(
       screen.getByRole("button", { name: "trajectory.saveSchedule" })
     );
     await screen.findByText("trajectory.scheduleSaved");
     expect(api.saveCleanupSchedule).toHaveBeenCalledWith(
       "tenant",
-      7200,
+      { enabled: true, retention_days: 7 },
       expect.any(AbortSignal)
     );
   });
@@ -92,7 +93,7 @@ describe("tenant cleanup schedule", () => {
     await screen.findByText("trajectory.scheduleSaved");
     expect(api.saveCleanupSchedule).toHaveBeenCalledTimes(2);
   });
-  it("rejects empty or out of range minutes and never saves during loading", async () => {
+  it("rejects empty or out of range days and never saves during loading", async () => {
     let resolve!: (value: typeof policy) => void;
     api.cleanupSchedule.mockReturnValue(
       new Promise((done) => {
@@ -117,7 +118,59 @@ describe("tenant cleanup schedule", () => {
     open();
     await screen.findByText("trajectory.errors.query_unavailable");
     fireEvent.click(screen.getByRole("button", { name: "trajectory.retry" }));
-    await screen.findByText("trajectory.scheduleDisabled");
+    await screen.findByRole("switch");
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+    expect(api.saveCleanupSchedule).not.toHaveBeenCalled();
+  });
+  it("turns scheduled cleanup off and retains the days when reopened", async () => {
+    const view = open();
+    const toggle = await screen.findByRole("switch");
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    );
+    await screen.findByText("trajectory.scheduleSaved");
+    expect(api.saveCleanupSchedule).toHaveBeenCalledWith(
+      "tenant",
+      { enabled: false, retention_days: 30 },
+      expect.any(AbortSignal)
+    );
+    view.unmount();
+    api.cleanupSchedule.mockResolvedValue({ ...policy, enabled: false });
+    open();
+    expect(await screen.findByRole("switch")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.getByRole("spinbutton")).toHaveValue("30");
+    await waitFor(() =>
+      expect(screen.getByText("trajectory.scheduleTime")).toBeVisible()
+    );
+  });
+  it.each(["1", "30"])("saves boundary %s days", async (value) => {
+    open();
+    fireEvent.change(await screen.findByRole("spinbutton"), {
+      target: { value },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    );
+    await screen.findByText("trajectory.scheduleSaved");
+    expect(api.saveCleanupSchedule).toHaveBeenCalledWith(
+      "tenant",
+      { enabled: true, retention_days: Number(value) },
+      expect.any(AbortSignal)
+    );
+  });
+  it.each(["0", "31"])("blocks invalid %s days", async (value) => {
+    open();
+    fireEvent.change(await screen.findByRole("spinbutton"), {
+      target: { value },
+    });
+    expect(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    ).toBeDisabled();
     expect(api.saveCleanupSchedule).not.toHaveBeenCalled();
   });
   it("cancels an in flight save when the dialog unmounts", async () => {

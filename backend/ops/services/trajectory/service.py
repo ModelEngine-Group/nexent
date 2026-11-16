@@ -20,6 +20,7 @@ from .cache import ByteCache
 from .coverage import conversation_coverage
 from .nodes import build_nodes
 from .primitives import Budget, QueryError, fingerprint
+from .versions import apply_builtin_versions
 
 
 class TrajectoryService:
@@ -167,6 +168,10 @@ class TrajectoryService:
                 RecursionError,
             ) as error:
                 raise TrajectoryCorrupt("Invalid OTLP node structure") from error
+            for node in nodes:
+                if node["id"] == root and node.get("_agent_id") is None:
+                    node["_agent_id"] = run.get("root_agent_id")
+            apply_builtin_versions(self.catalog, [row["tenant_id"]], nodes, nodes=True)
             result = (nodes, root, coverage)
             # Four times serialized previews conservatively accounts for Python containers and strings.
             size = (
@@ -419,6 +424,7 @@ class TrajectoryService:
             }
             for run in runs[:limit]
         ]
+        apply_builtin_versions(self.catalog, [row["tenant_id"]], items)
         availability = self.conversation_availability(meta, state["publication"])
         result = {
             "snapshot_id": self.references.issue("conversation", state),

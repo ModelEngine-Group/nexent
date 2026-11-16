@@ -38,7 +38,7 @@ export function TrajectoryNodeDetail({
     container.current?.scrollTo?.(0, 0);
   }, [node.id]);
   const metrics = [
-    ...(node.kind !== "tool"
+    ...(node.kind === "agent" || node.kind === "model"
       ? [
           [t("trajectory.inputTokens"), formatMetric(node.usage?.input, 0)],
           [t("trajectory.outputTokens"), formatMetric(node.usage?.output, 0)],
@@ -72,7 +72,13 @@ export function TrajectoryNodeDetail({
           <NodeIcon kind={node.kind} large />
           <div className="min-w-0 flex-1">
             <div className="trajectory-node-title-row">
-              <h2>{node.name}</h2>
+              <h2>
+                {node.kind === "phase"
+                  ? t(`trajectory.phases.${node.name}`, {
+                      defaultValue: node.name,
+                    })
+                  : node.name}
+              </h2>
               {node.round_no != null && (
                 <span className="trajectory-round-label">
                   {t("trajectory.round", { number: node.round_no })}
@@ -139,7 +145,7 @@ export function TrajectoryNodeDetail({
               ` · ${t("trajectory.knownTokens")}: ${formatMetric(known.total, 0)}`}
           </p>
         )}
-        {node.kind !== "tool" &&
+        {(node.kind === "agent" || node.kind === "model") &&
           input != null &&
           output != null &&
           input + output > 0 && (

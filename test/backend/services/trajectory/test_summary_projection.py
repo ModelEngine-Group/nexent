@@ -68,6 +68,7 @@ def test_records_never_open_files_and_freeze_pages():
     service.max_candidates = 1000
     service.catalog.names.return_value = {}
     service.catalog.agent_names.return_value = {}
+    service.catalog.builtin_agent_ids.return_value = set()
     service.catalog.tenants.return_value = ["t"]
     service.catalog.actor_active.return_value = True
     service.execution_catalog.list_records.return_value = [
@@ -216,6 +217,7 @@ def test_same_scope_statistics_survive_filters_and_reset_rejects_removed_members
     service.catalog.tenants.return_value = ["t"]
     service.catalog.names.return_value = {}
     service.catalog.agent_names.return_value = {}
+    service.catalog.builtin_agent_ids.return_value = set()
     service.execution_catalog.list_records.return_value = []
     service.execution_catalog.statistics.return_value = {
         "complete": True,
@@ -249,6 +251,7 @@ def test_list_rechecks_administrator_permission_before_returning_statistics():
     service.catalog.tenants.return_value = ["t"]
     service.catalog.names.return_value = {}
     service.catalog.agent_names.return_value = {}
+    service.catalog.builtin_agent_ids.return_value = set()
     service.execution_catalog.list_records.return_value = []
     service.execution_catalog.statistics.return_value = {}
     with pytest.raises(QueryError) as caught:

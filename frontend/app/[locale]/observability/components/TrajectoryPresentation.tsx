@@ -1,7 +1,15 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { App, Tag } from "antd";
-import { Bot, BrainCircuit, Check, Copy, Wrench, X } from "lucide-react";
+import {
+  Bot,
+  BrainCircuit,
+  Check,
+  Copy,
+  Settings2,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 
@@ -13,7 +21,13 @@ export function NodeIcon({
   large?: boolean;
 }) {
   const Icon =
-    kind === "agent" ? Bot : kind === "model" ? BrainCircuit : Wrench;
+    kind === "agent"
+      ? Bot
+      : kind === "model"
+        ? BrainCircuit
+        : kind === "phase"
+          ? Settings2
+          : Wrench;
   return (
     <span
       className={`trajectory-kind-icon kind-${kind}${large ? " is-large" : ""}`}

@@ -141,7 +141,7 @@ def detach_owner(session, user_id, old_tenant, new_tenant):
 
 class ExecutionRepository:
     @staticmethod
-    def _owner(session, identity):
+    def _owner(session, identity, *, allow_missing=False):
         session.execute(text("SET LOCAL lock_timeout = '2s'"))
         session.execute(text("SET LOCAL statement_timeout = '30000ms'"))
         row = session.execute(
@@ -163,6 +163,8 @@ class ExecutionRepository:
             .with_for_update(read=True)
         ).first()
         if row is None or member is None:
+            if allow_missing:
+                return None
             raise PermissionError("Trajectory owner is no longer authorized")
         return row
 
@@ -239,7 +241,10 @@ class ExecutionRepository:
     def sync(self, identity, values):
         """Idempotent compensation cannot revive deleted or logically expired rows."""
         with get_db_session() as session:
-            self._owner(session, identity)
+            # Deleted conversations and revoked memberships are expected during catch-up.
+            # Return normally so the transaction manager does not log a database failure.
+            if self._owner(session, identity, allow_missing=True) is None:
+                return
             current = session.get(Execution, values["trajectory_id"])
             if current is not None and (
                 current.delete_flag != "N" or current.status == "expired"

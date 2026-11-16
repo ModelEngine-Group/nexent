@@ -43,13 +43,13 @@ def test_utc_normalization_and_semantically_equal_time_boundaries():
     assert query.filters["id_query"] == "a"
 
 
-@pytest.mark.parametrize("value", [0, -1, True, 7.0, "7", 3651])
+@pytest.mark.parametrize("value", [0, -1, True, 7.0, "7", 31])
 def test_cleanup_requires_strict_integer_days(value):
     with pytest.raises(ValidationError):
         CleanupRequest(before_days=value)
 
 
-@pytest.mark.parametrize("value", [1, 3650])
+@pytest.mark.parametrize("value", [1, 30])
 def test_cleanup_days_boundaries(value):
     assert CleanupRequest(before_days=value).before_days == value
 
@@ -101,6 +101,7 @@ def test_read_tightens_expiry_and_never_revives_after_extension():
     meta = {
         "runs": [
             {
+                "trajectory_id": "00000000-0000-0000-0000-000000000001",
                 "finished_at": "2026-11-01T00:00:00Z",
                 "expires_at": "2026-12-01T00:00:00Z",
             }

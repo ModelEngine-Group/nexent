@@ -158,13 +158,18 @@ class TrajectoryFileStore:
                 raise TrajectoryConflict("Trajectory storage mode differs")
             yield directory
 
-    def _locate(self, root, identity):
+    def _locate(self, root, identity, *, tenant_only=False):
         matches = []
         checks = 0
-        for tenant in os.listdir(root.fd):
+        tenants = [component(identity.tenant_id)] if tenant_only else os.listdir(root.fd)
+        for tenant in tenants:
             if tenant.startswith("."):
                 continue
-            with root.child(tenant) as td:
+            try:
+                tenant_directory = root.child(tenant)
+            except FileNotFoundError:
+                continue
+            with tenant_directory as td:
                 try:
                     user = td.child(component(identity.owner_user_id))
                 except FileNotFoundError:
@@ -196,6 +201,10 @@ class TrajectoryFileStore:
                                 )
         if len(matches) > 1:
             raise TrajectoryCorrupt("Conversation has multiple trajectory directories")
+        if tenant_only and not matches:
+            # A former-tenant archive must remain an ownership conflict rather than
+            # looking like an uncaptured conversation after membership changes.
+            return self._locate(root, identity)
         return matches[0] if matches else None
 
     def _validate_manifest(self, meta, identity, tenant, agent):
@@ -233,11 +242,13 @@ class TrajectoryFileStore:
                 raise TrajectoryCorrupt("Trajectory execution metadata is invalid") from error
 
     @contextmanager
-    def _session(self, identity, *, create=False, blocking=True):
+    def _session(self, identity, *, create=False, blocking=True, read_only=False):
+        if create and read_only:
+            raise ValueError("A read-only trajectory session cannot create directories")
         self.authorize(identity)
         with ExitStack() as stack:
             root = stack.enter_context(self._root())
-            path = self._locate(root, identity)
+            path = self._locate(root, identity, tenant_only=read_only)
             if path is None:
                 if not create:
                     raise FileNotFoundError("Conversation trajectory was not captured")
@@ -260,8 +271,11 @@ class TrajectoryFileStore:
             directory = root
             for part in path:
                 directory = stack.enter_context(directory.child(part))
-            stack.enter_context(directory.lock(".lock", blocking=blocking))
-            self.authorize(identity)
+            if not read_only:
+                stack.enter_context(directory.lock(".lock", blocking=blocking))
+                self.authorize(identity)
+            # Metadata is atomically replaced; historical readers pin the selected inode
+            # without competing with publication, cleanup or PG projection writers.
             meta = directory.read_json("meta.json")
             self._validate_manifest(meta, identity, path[0], path[2])
             yield directory
@@ -518,6 +532,7 @@ class TrajectoryFileStore:
         lock_held=False,
         deadline=None,
         force_reason=None,
+        scheduled=False,
     ):
         """Clean one authorized conversation; the scheduler supplies bounded batches."""
         days = self._days(before_days if before_days is not None else self.retention_days)
@@ -566,18 +581,18 @@ class TrajectoryFileStore:
                             changed = True
                     eligible = (
                         bool(force_reason)
-                        or expires <= now
+                        or (not scheduled and expires is not None and expires <= now)
                         or (before_days is not None and parse_time(run["finished_at"]) <= cutoff)
                     )
                     if not run["cleanup_reason"] and eligible:
                         run.update(
                             capture_state="expired",
-                            cleanup_reason=force_reason or ("manual" if before_days is not None else "retention"),
+                            cleanup_reason=force_reason or ("manual" if before_days is not None and not scheduled else "retention"),
                             cleanup_marked_at=timestamp(now),
                         )
                         meta["cleanup_version"] += 1
                         meta["had_expired_history"] = True
-                        meta["had_manual_cleanup"] |= before_days is not None
+                        meta["had_manual_cleanup"] |= before_days is not None and not scheduled
                         meta["expired_execution_count"] += 1
                         meta["earliest_expired_at"] = meta["earliest_expired_at"] or timestamp(now)
                         meta["latest_expired_at"] = timestamp(now)

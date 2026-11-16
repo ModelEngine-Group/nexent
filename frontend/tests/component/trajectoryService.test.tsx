@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 describe("trajectory HTTP adapter", () => {
-  it("uses tenant-scoped GET and PUT for the cleanup interval with cancellation", async () => {
+  it("uses tenant-scoped GET and PUT for the cleanup policy with cancellation", async () => {
     const signal = new AbortController().signal;
     await trajectoryService.cleanupSchedule("tenant + ?", signal);
     const url = new URL(String(request.mock.calls[0][0]), "http://localhost");
@@ -30,7 +30,11 @@ describe("trajectory HTTP adapter", () => {
     request.mockResolvedValueOnce(
       new Response(JSON.stringify({ code: 0, data: {} }))
     );
-    await trajectoryService.saveCleanupSchedule("tenant", 120, signal);
+    await trajectoryService.saveCleanupSchedule(
+      "tenant",
+      { enabled: false, retention_days: 7 },
+      signal
+    );
     expect(request.mock.calls[1][1]).toMatchObject({
       method: "PUT",
       signal,
@@ -38,7 +42,8 @@ describe("trajectory HTTP adapter", () => {
     });
     expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({
       tenant_id: "tenant",
-      interval_seconds: 120,
+      enabled: false,
+      retention_days: 7,
     });
   });
   it("preserves decimal IDs and forwards cancellation, filters and signed membership", async () => {
@@ -109,7 +114,7 @@ describe("trajectory HTTP adapter", () => {
     );
     const url = String(request.mock.calls[0][0]);
     expect(url).toContain("signed%2F%2B%3F");
-    expect(url).toContain("limit=1048576");
+    expect(url).toContain("limit=65536");
     expect(url).toContain("offset=1048575");
   });
   it("only posts days and cursor, never list tenant or path", async () => {

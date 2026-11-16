@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Segmented, Spin } from "antd";
 import {
   ChevronDown,
@@ -74,14 +74,22 @@ function TrajectoryBodyContent({
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
-  let formatted = text;
-  if (mode === "json") {
+  const formatted = useMemo(() => {
+    if (mode !== "json") return text;
     try {
-      formatted = JSON.stringify(JSON.parse(text), null, 2);
+      return JSON.stringify(JSON.parse(text), null, 2);
     } catch {
-      formatted = JSON.stringify({ content: text }, null, 2);
+      return JSON.stringify({ content: text }, null, 2);
     }
-  }
+  }, [text, mode]);
+  const lineNumbers = useMemo(
+    () =>
+      Array.from(
+        { length: Math.min(formatted.split("\n").length, 10000) },
+        (_, index) => index + 1
+      ).join("\n"),
+    [formatted]
+  );
   const load = useCallback(
     async (offset: number) => {
       if (!reference.content_id || request.current) return;
@@ -261,12 +269,7 @@ function TrajectoryBodyContent({
                     }
                   >
                     <span className="trajectory-line-numbers" aria-hidden>
-                      {Array.from(
-                        {
-                          length: Math.min(formatted.split("\n").length, 10000),
-                        },
-                        (_, index) => index + 1
-                      ).join("\n")}
+                      {lineNumbers}
                     </span>
                     <code>{formatted || t("trajectory.emptyBody")}</code>
                   </pre>

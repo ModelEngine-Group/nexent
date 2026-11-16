@@ -894,6 +894,8 @@ class MonitoringManager:
         self,
         metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
         operation_name: str = "agent.run",
+        *,
+        start_time: Optional[int] = None,
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
@@ -919,6 +921,7 @@ class MonitoringManager:
                     with self.trace_operation(
                         operation_name,
                         OPENINFERENCE_SPAN_KIND_AGENT,
+                        start_time=start_time,
                         **attributes,
                     ) as span:
                         with agent_trace_name_scope(span, trace_name, parent_span):
@@ -977,6 +980,7 @@ class MonitoringManager:
         self,
         operation_name: str,
         span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
+        start_time: Optional[int] = None,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """Trace a non-LLM operation using OpenInference span kind semantics."""
@@ -1006,7 +1010,8 @@ class MonitoringManager:
 
         with self._tracer.start_as_current_span(
             operation_name,
-            attributes=span_attrs
+            attributes=span_attrs,
+            start_time=start_time,
         ) as span:
             try:
                 yield span

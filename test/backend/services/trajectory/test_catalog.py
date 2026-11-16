@@ -146,3 +146,34 @@ def test_agent_names_match_existing_display_and_public_fallback(catalog, mocker)
         return_value=[(ASSET_OWNER_TENANT_ID, 7, "Public"), ("t", 7, "Local")],
     )
     assert service.agent_names(["t"], ["7"]) == {("t", "7"): "Local"}
+
+
+
+def test_builtin_identity_query_is_scoped_to_protected_definitions(catalog):
+    service, statements = catalog
+    assert service.builtin_agent_ids(["t"], {"7"}) == set()
+    sql = statements[-1]
+    for value in ("agent_origin = 'SYSTEM'", "nl2agent_main", "nl2skill_main", "workbench_main",
+                  "delete_flag = 'N'", "version_no = 0", "agent_id IN (7)", "LIMIT 10001"):
+        assert value in sql
+    assert "tenant_id IN ('t'," in sql
+    assert service.builtin_agent_ids(["t"], set()) == set()
+
+
+def test_builtin_identity_lookup_expands_shared_ids_without_cross_tenant_leaks(catalog, mocker):
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+
+    service, _ = catalog
+    mocker.patch("sqlalchemy.orm.Query.all", return_value=[("t", 7), (ASSET_OWNER_TENANT_ID, 9), ("foreign", 11)])
+    assert service.builtin_agent_ids(["t", "t2"], {"7", "9", "11"}) == {
+        ("t", "7"), ("t", "9"), ("t2", "9"),
+    }
+
+
+def test_builtin_identity_lookup_rejects_unbounded_results(catalog, mocker):
+    from ops.services.trajectory.primitives import QueryError
+
+    service, _ = catalog
+    mocker.patch("sqlalchemy.orm.Query.all", return_value=[("t", 7)] * 10001)
+    with pytest.raises(QueryError, match="agent_budget_exceeded"):
+        service.builtin_agent_ids(["t"], {"7"})

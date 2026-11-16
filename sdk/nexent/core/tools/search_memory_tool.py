@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Search memory tool for the new Memory system.
 
 This tool is invoked once by the runtime before the agent model loop. Under
@@ -21,12 +23,12 @@ import asyncio
 import logging
 from typing import Any
 
-from smolagents.tools import Tool
 from pydantic import Field
+from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver
-from ..utils.tools_common_message import ToolSign, ToolCategory
 from ..concurrency import ManagedTaskSpec, get_current_thread_manager
+from ..utils.observer import MessageObserver
+from ..utils.tools_common_message import ToolCategory, ToolSign
 
 
 logger = logging.getLogger("search_memory_tool")
@@ -211,17 +213,25 @@ class SearchMemoryTool(Tool):
         self, query: str, top_k: int
     ) -> str:
         """Run retrieval through the Phase 4 pipeline via MemoryContextService."""
+        from nexent.monitor.phase_capture import trace_phase
+
         async def _build():
-            return await self.memory_context_service.build_context(
-                tenant_id=self.tenant_id,
-                user_id=self.user_id,
-                agent_id=self.agent_id or None,
-                conversation_id=self.conversation_id or None,
-                query=query,
-                top_k=top_k,
-                layers=["agent"],
-                external_results=self.external_results,
-            )
+            with trace_phase(
+                "memory.retrieve", input_value={"query": query, "top_k": top_k, "layers": ["agent"]},
+                attributes={"agent.id": str(self.agent_id or "")},
+            ) as phase:
+                result = await self.memory_context_service.build_context(
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id or None,
+                    conversation_id=self.conversation_id or None,
+                    query=query,
+                    top_k=top_k,
+                    layers=["agent"],
+                    external_results=self.external_results,
+                )
+                phase.set_output({"agent_short_term": result.agent_short_term, "external": result.external})
+                return result
 
         context = _run_coroutine(_build())
         existing_external = {

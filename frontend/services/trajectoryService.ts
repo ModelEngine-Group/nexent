@@ -42,7 +42,7 @@ export const trajectoryService = {
     ),
   async saveCleanupSchedule(
     tenantId: string,
-    intervalSeconds: number,
+    policy: Pick<CleanupSchedule, "enabled" | "retention_days">,
     signal?: AbortSignal
   ): Promise<CleanupSchedule> {
     const response = await fetchWithErrorHandling(
@@ -52,7 +52,8 @@ export const trajectoryService = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenant_id: tenantId,
-          interval_seconds: intervalSeconds,
+          enabled: policy.enabled,
+          retention_days: policy.retention_days,
         }),
         signal,
         cache: "no-store",
@@ -124,7 +125,7 @@ export const trajectoryService = {
     read<ContentChunk>(
       queryUrl(API_ENDPOINTS.trajectory.content(conversationId, contentId), {
         offset,
-        limit: 1048576,
+        limit: 65536,
       }),
       signal
     ),

@@ -136,6 +136,33 @@ class TrajectoryCatalog:
             )
         return dict(names)
 
+    def builtin_agent_ids(self, tenants, ids):
+        """Resolve platform identities in one bounded query, independently of labels."""
+        if not ids:
+            return set()
+        with _session() as session:
+            rows = (
+                session.query(AgentInfo.tenant_id, AgentInfo.agent_id)
+                .filter(
+                    AgentInfo.tenant_id.in_([*tenants, ASSET_OWNER_TENANT_ID]),
+                    AgentInfo.agent_id.in_([int(i) for i in ids]),
+                    AgentInfo.agent_origin == "SYSTEM",
+                    AgentInfo.system_key.in_(("nl2agent_main", "nl2skill_main", "workbench_main")),
+                    AgentInfo.delete_flag == "N",
+                    AgentInfo.version_no == 0,
+                )
+                .limit(10_001)
+                .all()
+            )
+        if len(rows) > 10_000:
+            raise QueryError("agent_budget_exceeded", 503, retry_after=2)
+        return {
+            (tenant, str(agent))
+            for owner, agent in rows
+            for tenant in tenants
+            if owner in (tenant, ASSET_OWNER_TENANT_ID)
+        }
+
     def agent_names(self, tenants, ids):
         if not ids:
             return {}

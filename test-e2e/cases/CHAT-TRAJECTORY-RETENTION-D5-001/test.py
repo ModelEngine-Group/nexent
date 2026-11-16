@@ -451,6 +451,10 @@ def test_retention_independent_process_loads_cleanup_defaults_and_explicit_confi
         overrides.get("TRAJECTORY_CLEANUP_ENABLED") != "false"
     )
     assert interval - 10 < reported["until_next_seconds"] <= interval
+    scheduled = datetime.fromisoformat(reported["scheduled_at"])
+    following = datetime.fromisoformat(reported["next_cleanup_at"])
+    assert scheduled.hour == 16 and scheduled.minute == scheduled.second == 0
+    assert following - scheduled == timedelta(days=1)
     assert run.path.exists() != removed
     assert (state(files, run)["cleanup_reason"] == "retention") == removed
     assert digest(fresh.path) == fresh_hash

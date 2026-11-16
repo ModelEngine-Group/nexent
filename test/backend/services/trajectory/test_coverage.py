@@ -18,6 +18,7 @@ from ops.services.trajectory.service import TrajectoryService
 def service():
     now = datetime.now(UTC)
     catalog = Mock()
+    catalog.builtin_agent_ids.return_value = set()
     catalog.tenants.return_value = ["t"]
     catalog.actor_active.return_value = True
     catalog.resolve.return_value = {
@@ -53,7 +54,7 @@ def service():
     result.archive = SimpleNamespace(
         manifest=Mock(return_value=meta),
         available=lambda run: Archive.available(result.archive, run),
-        store=SimpleNamespace(clock=lambda: now),
+        store=SimpleNamespace(retention_days=30, clock=lambda: now),
     )
     return result
 

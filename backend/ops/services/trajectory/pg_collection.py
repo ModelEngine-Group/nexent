@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .access import authorize
 from .primitives import QueryError, fingerprint
+from .versions import apply_builtin_versions
 
 
 def records(
@@ -58,6 +59,7 @@ def records(
             item["root_agent_name"] = (
                 name if name != item.get("root_agent_id") else None
             )
+        apply_builtin_versions(service.catalog, tenants, items)
         state = {
             "members": items,
             "view": view,

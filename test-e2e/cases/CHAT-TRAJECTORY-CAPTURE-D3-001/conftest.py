@@ -165,6 +165,9 @@ class Catalog:
         assert limit > 0 and conversation_id in (None, '123')
         return [self.resolve(tenants, '123', target_user_id=target_user_id)]
 
+    def builtin_agent_ids(self, tenants, ids):
+        return set()
+
     def message_upper(self, conversation_id):
         return 0
 
@@ -247,7 +250,7 @@ def runtime(tmp_path, monkeypatch):
         assert active_provider[0].force_flush(timeout_millis=3000)
 
     def run(base, *, config=None, query='Controlled question', agent_id=7, submit_only=False, sampled=True,
-            models=None):
+            models=None, preparation=None):
         current = active_provider[0]
         delegate = ALWAYS_ON if sampled else ALWAYS_OFF
         current.sampler = local.wrap_sampler(delegate) if manager._config.provider != 'otlp' else delegate
@@ -272,6 +275,8 @@ def runtime(tmp_path, monkeypatch):
                             stop_event=stop, cancellation_scope=RunCancellationScope(stop),
                             history=[], conversation_id=123, user_id='owner',
                             sandbox_config=SandboxConfig(auto_sync_outputs=False), thread_manager=threads)
+        if preparation is not None:
+            info.preparation_trace = preparation.preparation_trace
         metadata = AgentRunMetadata(agent_id=agent_id, agent_name=config.name, tenant_id='tenant',
                                     user_id='owner', conversation_id=123, query=query)
         with agent_monitoring_context(metadata):

@@ -31,7 +31,23 @@ def scheduled_cleanup(root, clock, fault):
     )
     processor = create_maintenance_processor(config)
     assert processor is not None
-    processor._maintenance_store.clock = lambda: clock
+    wall = [clock]
+    processor._maintenance_store.clock = lambda: wall[0]
+    # Tenant policies are the controlled PG boundary; the real scheduler and files remain active.
+    processor._cleanup_policy_provider = dict
+    processor.deleted_conversation_check = lambda _: False
+    processor._maintenance_store.initialization_guard = None
+    processor._maintenance_store.expire_callback = None
+    before = sorted(str(path) for path in Path(root).rglob("*.otlp.jsonl"))
+    for _ in range(100):
+        processor._maintain()
+        if processor._maintenance_iterator is None:
+            break
+    else:
+        raise AssertionError("Owned startup maintenance did not finish")
+    assert sorted(str(path) for path in Path(root).rglob("*.otlp.jsonl")) == before
+    wall[0] = processor._next_cleanup_at
+    scheduled_at = wall[0]
     unlink = os.unlink
 
     def slow_unlink(path, **kwargs):
@@ -55,6 +71,8 @@ def scheduled_cleanup(root, clock, fault):
                 "cleanup_interval_seconds": config.TRAJECTORY_CLEANUP_INTERVAL_SECONDS,
                 "until_next_seconds": processor._next_maintenance - time.monotonic(),
                 "elapsed_seconds": time.monotonic() - started,
+                "scheduled_at": scheduled_at.isoformat(),
+                "next_cleanup_at": processor._next_cleanup_at.isoformat(),
             }
         ),
         flush=True,

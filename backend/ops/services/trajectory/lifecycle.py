@@ -7,7 +7,7 @@ from infrastructure.observability.trajectory_runtime import conversation_deleted
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
 from management.db.trajectory.repository import ExecutionRepository
 from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
-from ops.services.trajectory.cleanup_schedule import read_intervals
+from ops.services.trajectory.cleanup_schedule import read_policies
 from ops.services.trajectory.statistics import StatisticsWorker, SummaryWorker
 
 
@@ -73,7 +73,7 @@ def create_maintenance_processor(settings):
         maintenance_store=store,
         cleanup_enabled=settings.TRAJECTORY_CLEANUP_ENABLED,
         cleanup_interval_seconds=settings.TRAJECTORY_CLEANUP_INTERVAL_SECONDS,
-        cleanup_interval_provider=read_intervals,
+        cleanup_policy_provider=read_policies,
     )
     processor.deleted_conversation_check = conversation_deleted
     return processor

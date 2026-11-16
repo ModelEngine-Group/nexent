@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import threading
+import time
 from concurrent.futures import CancelledError
 from contextvars import Context, copy_context
 from copy import deepcopy
@@ -404,11 +405,21 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         agent_version_name=getattr(agent_run_info.agent_config, "version_name", None),
         query=current.query if current.query is not None else agent_run_info.query,
     )
+    from nexent.monitor.duration import duration_attributes
     from nexent.monitor.local_content import local_capture_enabled
+    from nexent.monitor.phase_capture import emit_preparation, preparation_start
     from nexent.monitor.run_capture import capture_run_input, capture_run_result
 
     manager = get_monitoring_manager()
-    with manager.start_agent_run(metadata) as span:
+    records = getattr(agent_run_info, "preparation_trace", None)
+    started_monotonic = min(r["started_monotonic"] for r in records) if isinstance(records, list) and records else None
+    started_at = preparation_start(agent_run_info)
+    run_scope = (
+        manager.start_agent_run(metadata, start_time=started_at)
+        if started_at is not None else manager.start_agent_run(metadata)
+    )
+    with run_scope as span:
+        emit_preparation(agent_run_info)
         if local_capture_enabled(manager):
             capture_run_input(
                 manager, span, query=agent_run_info.query, agent_config=agent_run_info.agent_config,
@@ -421,6 +432,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             _agent_run_thread(agent_run_info)
         finally:
             capture_run_result(manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None))
+            if started_at is not None and span is not None:
+                try:
+                    span.set_attributes(duration_attributes(started_monotonic, time.perf_counter()))
+                except Exception:
+                    logger.debug("Unable to attach preparation duration to Agent span")
 
 
 def _agent_run_thread(agent_run_info: AgentRunInfo):

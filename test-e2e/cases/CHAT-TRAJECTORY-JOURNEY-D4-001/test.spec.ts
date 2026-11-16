@@ -127,6 +127,24 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await open();
   });
   await contract.step(steps[2], async () => {
+    await page.getByRole("combobox", { name: "节点类型" }).click();
+    await page.getByRole("option", { name: "阶段", exact: true }).click();
+    await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
+    await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(0);
+    await page.getByRole("treeitem", { name: /记忆预检索/ }).click();
+    const phaseDetail = page.locator(".trajectory-node-detail");
+    await expect(phaseDetail.getByRole("heading", { name: "记忆预检索" })).toBeVisible();
+    await expect(phaseDetail.locator(".trajectory-node-times")).toContainText("结束时间");
+    await expect(phaseDetail.locator(".trajectory-node-metrics")).toContainText("耗时");
+    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("Token");
+    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("吞吐量");
+    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("TTFT");
+    await expect(phaseDetail).not.toContainText("智能体版本");
+    await page.getByRole("treeitem", { name: /沙箱初始化/ }).click();
+    await expect(phaseDetail.getByRole("heading", { name: "沙箱初始化" })).toBeVisible();
+    await page.getByRole("combobox", { name: "节点类型" }).click();
+    await page.getByRole("option", { name: "全部类型", exact: true }).click();
+    await page.getByRole("treeitem", { name: /Friday/ }).click();
     const search = page.getByRole("textbox", {
       name: "搜索名称、已加载输入 / 输出",
     });
@@ -288,8 +306,13 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await page.getByRole("button", { name: "定时清理", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const input = dialog.getByRole("spinbutton");
-    await expect(input).toHaveValue("60");
-    await input.fill("120");
+    await expect(input).toHaveValue("30");
+    await expect(dialog.getByText("每天北京时间 00:00 执行")).toBeVisible();
+    await input.fill("31");
+    await expect(
+      dialog.getByRole("button", { name: "保存设置", exact: true }),
+    ).toBeDisabled();
+    await input.fill("7");
     state.scheduleFailure = true;
     await dialog.getByRole("button", { name: "保存设置", exact: true }).click();
     await expect(
@@ -297,22 +320,21 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         exact: false,
       }),
     ).toBeVisible();
-    await expect(input).toHaveValue("120");
+    await expect(input).toHaveValue("7");
     state.scheduleFailure = false;
     await dialog.getByRole("button", { name: "重试", exact: true }).click();
-    await expect(
-      dialog.getByText("设置已保存，后台将在30秒内读取新周期"),
-    ).toBeVisible();
+    await expect(dialog.getByText("设置已保存")).toBeVisible();
     expect(state.scheduleSaves.at(-1)).toEqual({
       tenant_id: "tenant",
-      interval_seconds: 7200,
+      enabled: true,
+      retention_days: 7,
     });
     await dialog
       .getByRole("button", { name: "关闭", exact: true })
       .last()
       .click();
     await page.getByRole("button", { name: "定时清理", exact: true }).click();
-    await expect(page.getByRole("spinbutton")).toHaveValue("120");
+    await expect(page.getByRole("spinbutton")).toHaveValue("7");
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "关闭", exact: true })
@@ -329,7 +351,34 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .filter({ hasText: "Fixture Tenant" })
       .click();
     await page.getByRole("button", { name: "定时清理", exact: true }).click();
-    await expect(page.getByRole("spinbutton")).toHaveValue("120");
+    await expect(page.getByRole("spinbutton")).toHaveValue("7");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
+    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    const reopened = page.getByRole("dialog");
+    await expect(reopened.getByRole("switch")).toBeChecked();
+    await reopened.getByRole("switch").click();
+    await expect(reopened.getByRole("spinbutton")).toBeDisabled();
+    await expect(reopened.getByText("每天北京时间 00:00 执行")).toBeVisible();
+    await reopened
+      .getByRole("button", { name: "保存设置", exact: true })
+      .click();
+    await expect(reopened.getByText("设置已保存")).toBeVisible();
+    expect(state.scheduleSaves.at(-1)).toEqual({
+      tenant_id: "tenant",
+      enabled: false,
+      retention_days: 7,
+    });
+    await reopened
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
+    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await expect(page.getByRole("switch")).not.toBeChecked();
+    await expect(page.getByRole("spinbutton")).toHaveValue("7");
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "关闭", exact: true })

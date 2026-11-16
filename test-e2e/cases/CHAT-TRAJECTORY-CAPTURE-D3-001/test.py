@@ -556,3 +556,50 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
             assert root['agent_version_no'] == 0
             assert run['root_agent_id'] == '77'
             assert len([node for node in result['nodes'] if node['kind'] == 'model']) == 1
+
+
+def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runtime):
+    import asyncio
+    from types import SimpleNamespace
+
+    from nexent.monitor.phase_capture import capture_preparation, trace_phase
+
+    calls = []
+
+    @capture_preparation
+    async def prepare():
+        with trace_phase("memory.presearch", input_value={"query": "controlled", "api_key": "private"}) as phase:
+            calls.append("search")
+            phase.set_output({"memories": ["controlled preference"]})
+        return SimpleNamespace()
+
+    preparation = asyncio.run(prepare())
+    original = next(r for r in preparation.preparation_trace if r["name"] == "memory.presearch")
+
+    def reply(request, number, emit):
+        emit('<final_answer>completed</final_answer>')
+        emit(usage={"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13})
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base, preparation=preparation)
+        assert info.attempt_outcome == "completed" and len(requests) == 1
+    assert calls == ["search"] and info.preparation_trace == []
+    saved = runtime.spans()
+    memory = next(s for s in saved if s["name"] == "memory.presearch")
+    assert int(memory["startTimeUnixNano"]) == original["started_at_ns"]
+    assert int(memory["endTimeUnixNano"]) == original["finished_at_ns"]
+    assert "private" not in attrs(memory)["input.value"]
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+        nodes = {n["name"]: n for n in result["nodes"] if n["kind"] == "phase"}
+        root = next(n for n in result["nodes"] if n["parent_id"] is None)
+        assert nodes["memory.presearch"]["parent_id"] == nodes["agent.prepare"]["id"]
+        assert nodes["agent.prepare"]["parent_id"] == root["id"]
+        assert nodes["memory.presearch"]["kind"] == "phase"
+        assert root["started_at"] <= nodes["memory.presearch"]["started_at"]
+        assert root["duration_ms"] >= nodes["agent.prepare"]["duration_ms"]
+        assert root["model_call_count"] == 1 and root["tool_call_count"] == 0
+        assert root["usage"]["total"] == 13 and result["coverage"]["complete"]
+        assert "controlled preference" in nodes["memory.presearch"]["output"]["text"]
+        assert "agent.sandbox.initialize" in nodes

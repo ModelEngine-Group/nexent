@@ -57,8 +57,13 @@ def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog
     with maintenance.start(identity, str(uuid4()), str(uuid4()), core_type="jiuwen") as writer:
         writer.finish("completed")
     active = maintenance.start(identity, str(uuid4()), str(uuid4()), core_type="jiuwen")
-    maintenance.clock = lambda: now + timedelta(days=30)
+    clock = [now + timedelta(days=30)]
+    maintenance.clock = lambda: clock[0]
+    processor._cleanup_policy_provider = dict
     try:
+        processor._maintain()
+        assert maintenance.manifest(identity)["runs"][0]["file_deleted_at"] is None
+        clock[0] = processor._next_cleanup_at
         processor._maintain()
         meta = maintenance.manifest(identity)
         assert meta["runs"][0]["capture_state"] == "expired"
@@ -69,7 +74,7 @@ def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog
         event, = events
         assert event["source"] == "scheduled" and event["actor_id"] is None
         assert event["tenant_id"] == "tenant" and event["conversation_id"] == "1"
-        assert event["before_days"] == 30 and event["cutoff_at"] == "2026-11-01T00:00:00Z"
+        assert event["before_days"] == 30 and event["cutoff_at"] == "2026-11-01T16:00:00Z"
         assert event["deleted_runs"] == 1 and event["skipped_active"] == 1
         assert event["status"] == "success" and event["counts_complete"]
     finally:
@@ -202,6 +207,9 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     with store.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
         writer.finish("completed")
         fresh = writer.trajectory_id
+    processor._cleanup_policy_provider = dict
+    processor._maintain()
+    now = processor._next_cleanup_at
     directory = tmp_path / "tenant/owner/42/1"
     ticker = [10000.0]
     unlink = os.unlink

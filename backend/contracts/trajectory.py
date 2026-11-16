@@ -8,6 +8,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictInt,
     field_validator,
     model_validator,
@@ -90,13 +91,17 @@ class RecordsQuery(BaseModel):
         )
 
 
-class CleanupScheduleRequest(BaseModel):
+class CleanupPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    enabled: StrictBool
+    retention_days: StrictInt = Field(ge=1, le=30)
+
+
+class CleanupScheduleRequest(CleanupPolicy):
     tenant_id: str | None = Field(None, min_length=1, max_length=128)
-    interval_seconds: StrictInt = Field(ge=60, le=31536000)
 
 
 class CleanupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    before_days: StrictInt = Field(ge=1, le=3650)
+    before_days: StrictInt = Field(ge=1, le=30)
     cursor: str | None = Field(None, max_length=8192)

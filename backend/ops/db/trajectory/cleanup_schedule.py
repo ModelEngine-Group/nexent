@@ -1,14 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Store tenant cleanup intervals in the existing configuration table."""
+"""Store tenant cleanup policies in the existing configuration table."""
+
+import json
 
 from sqlalchemy import func, select, text
 
 # isort: split
-from contracts.trajectory import CleanupScheduleRequest
+from contracts.trajectory import CleanupPolicy
 from management.db.client import get_db_session
 from management.db.configuration.models import TenantConfig
 
-SCHEDULE_KEY = "trajectory.cleanup_interval_seconds"
+SCHEDULE_KEY = "trajectory.cleanup_schedule"
 
 
 class CleanupScheduleRepository:
@@ -34,8 +36,7 @@ class CleanupScheduleRepository:
             row = session.scalars(self._statement(tenant_id).limit(1)).first()
             if row is None:
                 return None
-            value = int(row.config_value)
-            return CleanupScheduleRequest(interval_seconds=value).interval_seconds
+            return CleanupPolicy.model_validate_json(row.config_value).model_dump()
 
     def read_all(self):
         with get_db_session() as session:
@@ -46,12 +47,11 @@ class CleanupScheduleRepository:
             values = {}
             for row in rows:
                 if row.tenant_id not in values:
-                    values[row.tenant_id] = CleanupScheduleRequest(
-                        interval_seconds=int(row.config_value),
-                    ).interval_seconds
+                    values[row.tenant_id] = CleanupPolicy.model_validate_json(row.config_value).model_dump()
             return values
 
-    def save(self, tenant_id, interval_seconds, actor_id):
+    def save(self, tenant_id, policy, actor_id):
+        value = CleanupPolicy.model_validate(policy).model_dump()
         with get_db_session() as session:
             session.execute(text("SET LOCAL statement_timeout = '2000ms'"))
             session.execute(
@@ -68,7 +68,7 @@ class CleanupScheduleRepository:
                     delete_flag="N",
                 )
                 session.add(row)
-            row.config_value = str(interval_seconds)
+            row.config_value = json.dumps(value, separators=(",", ":"))
             row.user_id = actor_id
             row.updated_by = actor_id
             row.update_time = func.current_timestamp()

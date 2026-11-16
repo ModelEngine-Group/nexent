@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent factories defer initialization and release only resources they acquire."""
 
 import json
@@ -8,7 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from nexent.core.agents import nexent_agent as agent_module
 from nexent.core.agents import sandbox
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
@@ -32,7 +33,7 @@ def factory_execution(mocker, tmp_path):
     mocker.patch.object(factory, "create_tool", side_effect=lambda config: (
         script_tool if config.class_name == "RunSkillScriptTool" else tool
     ))
-    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda value, _: value)
+    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda value, _, *, observer=None: value)
     mocker.patch.object(agent_module, "CoreAgent", side_effect=lambda **kwargs: SimpleNamespace(
         **kwargs, python_executor=kwargs["executor"],
     ))

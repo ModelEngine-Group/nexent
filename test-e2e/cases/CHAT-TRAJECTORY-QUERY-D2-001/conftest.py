@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from urllib.parse import parse_qs
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ from ops.services.trajectory.service import TrajectoryService
 class Catalog:
     def __init__(self):
         self.rows, self.chat = {}, {}
+        self.builtin_ids = set()
         self.members = {("t1", "u1"), ("t2", "u2")}
         self.actors = {
             "admin": ("t1", "ADMIN"),
@@ -86,6 +88,9 @@ class Catalog:
             if (not search or search in option["name"])
             and (not after or (option["tenant_id"], option["id"]) > tuple(after))
         ][: limit + 1]
+
+    def builtin_agent_ids(self, tenants, ids):
+        return {(tenant, agent) for tenant in tenants for agent in ids if agent in self.builtin_ids}
 
     def agent_names(self, tenants, ids):
         return {
@@ -169,10 +174,29 @@ def harness(tmp_path, monkeypatch):
     app = FastAPI()
     app.state.thread_manager = manager
     app.include_router(api.router)
+    from management.api.conversation import conversation_management as conversations
     from management.api.identity import user as users_api
-    from ops.api import trajectory_directory as conversations
+    from ops.api import trajectory_directory
 
-    app.include_router(conversations.router)
+    app.include_router(trajectory_directory.router)
+    legacy_directories = FastAPI()
+    legacy_directories.include_router(conversations.router)
+
+    class DirectoryRouting:
+        """Match the gateway split while retaining both real HTTP routers."""
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            legacy = (
+                scope["type"] == "http"
+                and scope["path"].startswith("/conversation/agent_groups")
+                and "view" not in parse_qs(scope.get("query_string", b"").decode())
+            )
+            await (legacy_directories if legacy else self.app)(scope, receive, send)
+
+    app.add_middleware(DirectoryRouting)
     app.include_router(users_api.router)
 
     def context(header):
@@ -250,6 +274,8 @@ def harness(tmp_path, monkeypatch):
         fragment=False,
         missing_usage=False,
         legacy=False,
+        agent_version=None,
+        phases=False,
     ):
         row = catalog.rows[conversation]
         identity = CaptureIdentity(
@@ -280,6 +306,9 @@ def harness(tmp_path, monkeypatch):
                 "input.value": '输入\n"\\',
                 "output.value": body if kind == "TOOL" else "回答",
             }
+            if kind == "AGENT" and agent_version is not None:
+                attrs["agent.id"] = agent if record == root else "8"
+                attrs["agent.version_no"] = agent_version if record == root else 0
             if parent:
                 attrs["nexent.parent_record_id"] = parent
             if kind == "LLM":
@@ -370,6 +399,28 @@ def harness(tmp_path, monkeypatch):
                     ],
                 }
             )
+        if phases:
+            preparation, memory, sandbox = (str(uuid4()) for _ in range(3))
+            for offset, (record, parent, name, failed) in enumerate([
+                (preparation, root, "agent.prepare", False),
+                (memory, preparation, "memory.presearch", True),
+                (sandbox, root, "agent.sandbox.warmup", False),
+            ], start=20):
+                values = {
+                    "tenant.id": identity.tenant_id, "nexent.owner_user_id": identity.owner_user_id,
+                    "conversation.id": conversation, "session.id": conversation,
+                    "nexent.record_id": record, "nexent.parent_record_id": parent,
+                    "nexent.node.kind": "phase", "openinference.span.kind": "CHAIN",
+                    "nexent.trajectory_id": run, "nexent.trace_id": conversation,
+                    "input.value": '{"query":"记忆查询"}',
+                    "output.value": '{"ready":true}',
+                }
+                if failed:
+                    values["error.type"] = "RuntimeError"
+                    values["nexent.business_status"] = "failed"
+                spans.append({**spans[0], "spanId": f"{offset:016x}", "name": name,
+                    "status": {"code": 2 if failed else 1},
+                    "attributes": [{"key": k, "value": {"stringValue": v}} for k, v in values.items()]})
         request = {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
         with store.start(
             identity, run, str(uuid4()), core_type="smolagents", started_at=begin

@@ -161,7 +161,7 @@ async def put_cleanup_schedule(
     request: Request, body: CleanupScheduleRequest, authorization: str | None = Header(None),
 ):
     return await dispatch(
-        request, authorization, lambda service, actor: save_schedule(actor, body.interval_seconds, body.tenant_id),
+        request, authorization, lambda service, actor: save_schedule(actor, body.enabled, body.retention_days, body.tenant_id),
         needs_service=False,
     )
 

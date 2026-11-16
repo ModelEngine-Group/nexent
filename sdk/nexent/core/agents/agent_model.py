@@ -437,6 +437,10 @@ class AgentPlan(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    preparation_trace: List[Dict[str, Any]] = Field(
+        default_factory=list, exclude=True, description="Local preparation phase facts awaiting the authorized worker"
+    )
+
     attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")

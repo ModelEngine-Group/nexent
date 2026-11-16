@@ -170,7 +170,8 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
         elif "nexent.duration_ms" in attrs:
             duration = finite_number(attrs["nexent.duration_ms"])
         semantic = str(attrs.get("openinference.span.kind", "")).upper()
-        kind = {"AGENT": "agent", "LLM": "model", "TOOL": "tool"}.get(semantic)
+        phase = attrs.get("nexent.node.kind") == "phase" or span.get("name") == "agent.sandbox.warmup"
+        kind = "phase" if phase else {"AGENT": "agent", "LLM": "model", "TOOL": "tool"}.get(semantic)
         if kind is None and semantic:
             kind = "context"
         if kind is None:
@@ -297,6 +298,7 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 "span_id": str(span["spanId"]),
                 "export_seq": str(attrs.get("nexent.export_seq", "")),
             },
+            "_agent_id": attrs.get("agent.id") if kind == "agent" else None,
             "_native_parent": None
             if attrs.get("nexent.trajectory.root")
             else native_parent,

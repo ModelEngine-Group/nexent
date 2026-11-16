@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useState } from "react";
-import { Alert, InputNumber, Spin } from "antd";
+import { Alert, InputNumber, Spin, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { StandardModal } from "@/components/common/StandardModal";
 import { StandardButton } from "@/components/common/StandardButton";
@@ -21,23 +21,24 @@ export function CleanupScheduleDialog({
 }: CleanupScheduleDialogProps) {
   const { t } = useTranslation();
   const { query, mutation } = useCleanupSchedule(scope, tenantId);
-  const [editedMinutes, setEditedMinutes] = useState<
-    number | null | undefined
-  >();
-  const minutes =
-    editedMinutes === undefined
-      ? (query.data?.interval_seconds ?? 0) / 60
-      : editedMinutes;
+  const [editedDays, setEditedDays] = useState<number | null | undefined>();
+  const [editedEnabled, setEditedEnabled] = useState<boolean | undefined>();
+  const days =
+    editedDays === undefined ? query.data?.retention_days : editedDays;
+  const enabled = editedEnabled ?? query.data?.enabled ?? false;
   const valid =
-    minutes != null &&
-    Number.isInteger(minutes) &&
-    minutes >= 1 &&
-    minutes <= 525600;
+    days != null && Number.isInteger(days) && days >= 1 && days <= 30;
   const save = () => {
     if (!valid || !query.data || query.isError || mutation.isPending) return;
-    mutation.mutate(minutes! * 60, {
-      onSuccess: () => setEditedMinutes(undefined),
-    });
+    mutation.mutate(
+      { enabled, retention_days: days! },
+      {
+        onSuccess: () => {
+          setEditedDays(undefined);
+          setEditedEnabled(undefined);
+        },
+      }
+    );
   };
   return (
     <StandardModal
@@ -80,32 +81,43 @@ export function CleanupScheduleDialog({
         )}
         {query.data && !query.isError && (
           <>
-            <Alert
-              type={query.data.enabled ? "info" : "warning"}
-              showIcon
-              title={t(
-                query.data.enabled
-                  ? "trajectory.schedulePolicy"
-                  : "trajectory.scheduleDisabled",
-                { days: query.data.retention_days }
-              )}
-              description={t("trajectory.scheduleHelp")}
-            />
-            <label className="flex items-center gap-3">
-              <span>{t("trajectory.cleanupIntervalMinutes")}</span>
-              <InputNumber
-                aria-label={t("trajectory.cleanupIntervalMinutes")}
-                min={1}
-                max={525600}
-                precision={0}
-                value={minutes}
+            <label className="flex items-center justify-between gap-3">
+              <span>{t("trajectory.scheduleEnabled")}</span>
+              <Switch
+                aria-label={t("trajectory.scheduleEnabled")}
+                checked={enabled}
                 disabled={mutation.isPending}
                 onChange={(value) => {
-                  setEditedMinutes(value);
+                  setEditedEnabled(value);
                   mutation.reset();
                 }}
               />
             </label>
+            <label className="flex items-center gap-3">
+              <span>{t("trajectory.beforeDays")}</span>
+              <InputNumber
+                aria-label={t("trajectory.beforeDays")}
+                min={1}
+                max={30}
+                precision={0}
+                value={days}
+                disabled={!enabled || mutation.isPending}
+                onInput={(value) => {
+                  setEditedDays(value.trim() === "" ? null : Number(value));
+                  mutation.reset();
+                }}
+                onChange={(value) => {
+                  setEditedDays(value);
+                  mutation.reset();
+                }}
+              />
+            </label>
+            <Alert
+              type="info"
+              showIcon
+              title={t("trajectory.scheduleTime")}
+              description={t("trajectory.scheduleHelp")}
+            />
           </>
         )}
         {mutation.isError && (

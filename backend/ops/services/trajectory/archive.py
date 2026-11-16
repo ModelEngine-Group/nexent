@@ -24,6 +24,7 @@ from infrastructure.observability.trajectory_store import (
     uuid_string,
 )
 
+from .cache import ByteCache
 from .primitives import QueryError
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,27 @@ class Archive:
     def __init__(self, store, *, source_query=None):
         self.store = store
         self.source_query = source_query
+        self._checksums = ByteCache(1024 * 1024, ttl=60)
+
+    def _verify(self, fd, run):
+        """Reuse verification only while the pinned regular file is unchanged."""
+        info = os.fstat(fd)
+        size = run["confirmed_bytes"]
+        if info.st_size != size:
+            raise TrajectoryCorrupt("Published trajectory size differs")
+        key = (
+            info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+            info.st_ctime_ns, run["confirmed_sha256"],
+        )
+        if self._checksums.get(key) is None:
+            if prefix_hash(fd, size).hexdigest() != run["confirmed_sha256"]:
+                raise TrajectoryCorrupt("Published trajectory checksum differs")
+            after = os.fstat(fd)
+            if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+            ):
+                raise TrajectoryCorrupt("Published trajectory changed during verification")
+            self._checksums.put(key, True, 512)
 
     def manifest(self, row):
         meta = self._manifest(row)
@@ -78,7 +100,7 @@ class Archive:
 
     def _manifest(self, row):
         try:
-            with self.store._session(identity(row), blocking=False) as directory:
+            with self.store._session(identity(row), read_only=True) as directory:
                 meta = directory.read_json("meta.json")
                 changed = False
                 for run in meta["runs"]:
@@ -91,9 +113,22 @@ class Archive:
                         if expiry != parse_time(run["expires_at"]):
                             run["expires_at"] = timestamp(expiry)
                             changed = True
-                if changed:
-                    self.store._save_manifest(directory, meta)
-                return meta
+            if changed:
+                # Persist a shorter retention period without making a historical GET
+                # wait for an unrelated writer. Maintenance also tightens these bounds.
+                try:
+                    with self.store._session(identity(row), blocking=False) as directory:
+                        current = directory.read_json("meta.json")
+                        expiries = {run["trajectory_id"]: run.get("expires_at") for run in meta["runs"]}
+                        for run in current["runs"]:
+                            expiry = expiries.get(run["trajectory_id"])
+                            if expiry and run.get("expires_at") and parse_time(expiry) < parse_time(run["expires_at"]):
+                                run["expires_at"] = expiry
+                        self.store._save_manifest(directory, current)
+                except TrajectoryConflict as error:
+                    if "already locked" not in str(error):
+                        raise
+            return meta
         except FileNotFoundError:
             # Verify the root separately; a lost mount is never reported as uncaptured.
             try:
@@ -107,11 +142,12 @@ class Archive:
     def available(self, run):
         if run.get("cleanup_reason") or run["capture_state"] == "expired":
             return "expired"
-        if (
-            run.get("expires_at")
-            and parse_time(run["expires_at"]) <= self.store.clock()
-        ):
-            return "expired"
+        if run.get("expires_at"):
+            expiry = parse_time(run["expires_at"])
+            if run.get("finished_at"):
+                expiry = min(expiry, parse_time(run["finished_at"]) + timedelta(days=self.store.retention_days))
+            if expiry <= self.store.clock():
+                return "expired"
         if run["capture_state"] == "corrupt":
             return "corrupt"
         if run.get("publication_no") is None:
@@ -147,24 +183,16 @@ class Archive:
     def opened(self, row, run_id, budget, expected=None):
         fd = None
         try:
-            with self.store._session(identity(row), blocking=False) as directory:
+            with self.store._session(identity(row), read_only=True) as directory:
                 meta = directory.read_json("meta.json")
                 run = self.run(meta, run_id, expected)
                 fd = directory.open(f"{run_id}.otlp.jsonl", os.O_RDONLY)
             size = run["confirmed_bytes"]
             budget.check(size=size)
-            if (
-                os.fstat(fd).st_size != size
-                or prefix_hash(fd, size).hexdigest() != run["confirmed_sha256"]
-            ):
-                raise TrajectoryCorrupt("Published trajectory checksum differs")
+            self._verify(fd, run)
             yield fd, meta, run
             budget.check(size=size)
-            if (
-                os.fstat(fd).st_size != size
-                or prefix_hash(fd, size).hexdigest() != run["confirmed_sha256"]
-            ):
-                raise TrajectoryCorrupt("Published trajectory changed during reading")
+            self._verify(fd, run)
         except FileNotFoundError as error:
             raise QueryError("trajectory_corrupt", 503) from error
         except (OSError, TrajectoryConflict, TrajectoryCorrupt) as error:

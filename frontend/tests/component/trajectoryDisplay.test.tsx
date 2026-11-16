@@ -19,6 +19,7 @@ import { TrajectoryNodeDetail } from "@/app/observability/components/TrajectoryN
 import { userInputPreview } from "@/app/observability/components/TrajectoryPresentation";
 import { TrajectoryTimeline } from "@/app/observability/components/TrajectoryTimeline";
 import { BodyCache } from "@/lib/trajectory";
+import * as trajectoryUtils from "@/lib/trajectory";
 import { getTenant } from "@/services/tenantService";
 import { trajectoryService } from "@/services/trajectoryService";
 import type { User } from "@/types/auth";
@@ -291,6 +292,7 @@ describe("admin list display", () => {
         view.container.querySelector(".trajectory-conversation-count small")
       ).toBeNull();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByText("trajectory.partial")).not.toBeInTheDocument();
     }
   );
 
@@ -354,5 +356,30 @@ describe("whole-scope statistics", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "trajectory.statisticsGlobal"
     );
+  });
+});
+
+describe("trajectory tree selection cost", () => {
+  it("keeps the derived tree when selecting a different node", () => {
+    const filter = vi.spyOn(trajectoryUtils, "filterTree");
+    const nodes = [
+      traceNode(),
+      traceNode({ id: "child", parent_id: "node", kind: "tool" }),
+    ];
+    const props = {
+      nodes,
+      complete: true,
+      cache: new BodyCache(),
+      onSelect: vi.fn(),
+    };
+    const view = render(
+      <TrajectoryTimeline {...props} selected={nodes[0].id} />
+    );
+    const before = filter.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+    view.rerender(<TrajectoryTimeline {...props} selected="child" />);
+    expect(filter).toHaveBeenCalledTimes(before);
+    expect(screen.getByRole("treeitem", { selected: true })).toBeVisible();
+    filter.mockRestore();
   });
 });

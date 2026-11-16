@@ -12,6 +12,7 @@ from infrastructure.observability.trajectory_store import parse_time
 from .access import authorize
 from .conversation_view import frozen_runs, project
 from .primitives import QueryError, fingerprint, percentiles
+from .versions import apply_builtin_versions
 
 
 def _run_matches(run, filters):
@@ -344,6 +345,8 @@ def records(
             item["root_agent_name"] = (
                 display_name if display_name and display_name != agent_id else None
             )
+
+    apply_builtin_versions(service.catalog, tenants, result)
 
     def stable(item):
         return (

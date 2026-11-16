@@ -25,7 +25,7 @@ export function CleanupDialog({
   };
   const result = cleanup.result;
   const valid =
-    days != null && Number.isInteger(days) && days >= 1 && days <= 3650;
+    days != null && Number.isInteger(days) && days >= 1 && days <= 30;
   const partial =
     !!result && (result.pending_runs > 0 || result.failed_runs > 0);
   return (
@@ -69,10 +69,13 @@ export function CleanupDialog({
           <InputNumber
             aria-label={t("trajectory.beforeDays")}
             min={1}
-            max={3650}
+            max={30}
             precision={0}
             value={days}
             disabled={cleanup.running || !!cleanup.error}
+            onInput={(value) =>
+              setDays(value.trim() === "" ? null : Number(value))
+            }
             onChange={setDays}
           />
         </label>

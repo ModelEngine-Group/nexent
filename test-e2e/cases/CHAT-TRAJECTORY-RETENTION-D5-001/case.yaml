@@ -5,6 +5,7 @@ case:
   case_id: CHAT-TRAJECTORY-RETENTION-D5-001
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
+  - CHAT-TRAJECTORY-DAILY-CLEANUP-20261116
   - CHAT-LOCAL-TRAJECTORY-20261103
   - CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
   - CHAT-TRAJECTORY-SUMMARY-20261113
@@ -25,7 +26,7 @@ case:
   - 基于现有MonitoringManager，通过MONITORING_PROVIDER选择互斥的local_file/otlp及远端提供方；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
   - 目录使用tenant/user/agent/conversation业务ID，agent_id固定为首次采集根Agent；首次目录登记使用PG会话行锁，后续读写使用会话目录内.lock。会话切换根Agent仍读写同一物理目录。
   - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
-  - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间；文件部分使用本Case独占目录，完整运行验收按用户要求暂缓。
+  - 清理服务具备可控UTC时钟与独占文件夹具；各租户清理开关及1至30天天数，每天北京时间00:00执行；巡检默认3600秒；主动POST /trajectory/cleanup固定可信租户和首次截止时间；文件部分使用本Case独占目录，完整运行验收按用户要求暂缓。
   test_data:
     profile: mock
   steps:
@@ -43,8 +44,8 @@ case:
     expected: trace仍按现有会话定位聊天，whole_conversation_trace_complete=false，原始过期正文不可读，新快照不续期旧数据；今日运行仍可读。逐执行墓碑有界回收，meta.json只留无正文归属/覆盖/过期汇总，清理换代旧游标snapshot_reset；30天后仍按现有最近Agent分组找到会话，删除立即撤权且文件最终清理，执行摘要标记expired，会话删除与摘要软删同事务完成。
       清理按固定agent_id定位，同会话的未过期运行与稳定会话锁保持有效。
   - order: 5
-    action: 在可控UTC时钟下验证默认30天/3600秒；改为7天并跨恰好7×24小时边界，关闭/开启定时器，读取收紧期限后再调大；长会话保留今日运行，记录meta而非mtime判定。
-    expected: 定时策略清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
+    action: 在受控时钟下验证启动只维护、下一北京时间00:00执行清理；按租户开关和1至30天清理，固定截止时间；恢复巡检独立按3600秒运行，保留原读取期限收紧与活跃文件保护。
+    expected: 启动只恢复巡检，下一北京时间00:00按各租户开关及1至30天清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
   - order: 6
     action: 保持定期30天，管理员主动清理7天以前的轨迹，沿游标完成多批，推进时钟并重试相同请求；对照当前租户跨用户/Agent会话、新执行、另一租户、聊天及附件canary。
     expected: 主动清理可提前回收且不更改定期配置；本轮cutoff_at固定，重复请求幂等；meta先撤引用并记录manual/时间/cleanup_version，旧快照reset、正文410，跨块读复核。成功unlink并fsync后才计删除数量/逻辑字节，pending/failed分别记录；其他租户、新执行、活跃运行、聊天及附件canary保持。
@@ -57,7 +58,7 @@ case:
   - 单个及批量删除只对PG确认删除且归属匹配的会话立即提交清理，受管线程删除全部轮次OTLP；关闭定期过期清理仍生效，失败/占用保留待删标记并重试，队列满或重启由巡检补偿；数据库失败和范围外文件保持。会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
   - trace仍按现有会话定位聊天，whole_conversation_trace_complete=false，原始过期正文不可读，新快照不续期旧数据；今日运行仍可读。逐执行墓碑有界回收，meta.json只留无正文归属/覆盖/过期汇总，清理换代旧游标snapshot_reset；30天后仍按现有最近Agent分组找到会话，删除立即撤权且文件最终清理，执行摘要标记expired，会话删除与摘要软删同事务完成。
     清理按固定agent_id定位，同会话的未过期运行与稳定会话锁保持有效。
-  - 定时策略清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
+  - 启动只恢复巡检，下一北京时间00:00按各租户开关及1至30天清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
   - 主动清理可提前回收且不更改定期配置；本轮cutoff_at固定，重复请求幂等；meta先撤引用并记录manual/时间/cleanup_version，旧快照reset、正文410，跨块读复核。成功unlink并fsync后才计删除数量/逻辑字节，pending/failed分别记录；其他租户、新执行、活跃运行、聊天及附件canary保持。
   - 批次互斥，最多检查1000执行/删除100文件或工作2秒后让出；占用/失败留pending或failed且不冒充完成。未确认删除的执行项跨7天仍保留以供重试，文件缺失幂等；物理删除确认后才回收墓碑。清理标记优先于重新发布，实际写入/聊天及全部canary保持，受管worker和测试资产释放。
   forbidden_side_effects:
@@ -93,7 +94,7 @@ case:
     expected_results:
     - 4
   - id: AC-05
-    description: 定时策略清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
+    description: 启动只恢复巡检，下一北京时间00:00按各租户开关及1至30天清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
     steps:
     - 5
     expected_results:
@@ -115,6 +116,7 @@ case:
     acceptance_criteria:
     - AC-008
     - AC-013
+    - AC-SCHEDULE-01
     blocked_reason: Backend cleanup is implemented, including the scheduled two-second work deadline. File-risk scripts and
       QUERY-D2 after-read HTTP expiry/cleanup/revocation variants are prepared but unexecuted. Live PG/chat reconciliation
       and managed timer startup/wakeup remain unimplemented in this Case; no complete execution binding is declared. Full

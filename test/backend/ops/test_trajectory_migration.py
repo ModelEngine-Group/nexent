@@ -149,7 +149,7 @@ def test_runtime_capture_has_no_periodic_maintenance(tmp_path, mocker):
     settings.TRAJECTORY_ROOT_DIR = str(tmp_path)
     processor = create_local_processor(settings, lambda: None)
     assert processor._maintenance_store is None
-    assert processor._cleanup_interval_provider is None
+    assert processor._cleanup_policy_provider is None
 
 
 @pytest.mark.asyncio

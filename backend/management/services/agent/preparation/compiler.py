@@ -6,11 +6,11 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
-from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
@@ -43,12 +43,12 @@ from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
-from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
     _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
     _resolve_input_budget,
 )
+from management.services.model.run_controls import select_configured_model_id
 from nexent.core.agents.agent_model import (
     AgentConfig,
     AgentVerificationConfig,
@@ -63,6 +63,7 @@ from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.concurrency import run_blocking
 from nexent.memory import models as memory_models
+from nexent.monitor.phase_capture import trace_phase
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -308,13 +309,18 @@ async def create_agent_config(
                     build_memory_service_for_agent,
                 )
 
-                memory_service = build_memory_service_for_agent(
-                    tenant_id=memory_context.tenant_id,
-                    user_id=memory_context.user_id,
-                    agent_id=str(memory_context.agent_id or ""),
-                )
-                if memory_service is None:
-                    raise RuntimeError("MemoryService builder returned no service")
+                with trace_phase(
+                    "memory.initialize", input_value={"service": "memory"},
+                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                ) as phase:
+                    memory_service = build_memory_service_for_agent(
+                        tenant_id=memory_context.tenant_id,
+                        user_id=memory_context.user_id,
+                        agent_id=str(memory_context.agent_id or ""),
+                    )
+                    if memory_service is None:
+                        raise RuntimeError("MemoryService builder returned no service")
+                    phase.set_output({"service": "memory", "ready": True})
                 memory_metadata["memory_service"] = memory_service
             except Exception as exc:
                 logger.warning(
@@ -332,11 +338,16 @@ async def create_agent_config(
                     get_memory_context_service,
                 )
 
-                memory_context_service = get_memory_context_service()
-                if memory_context_service is None:
-                    raise RuntimeError(
-                        "MemoryContextService provider returned no service"
-                    )
+                with trace_phase(
+                    "memory.initialize", input_value={"service": "context"},
+                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                ) as phase:
+                    memory_context_service = get_memory_context_service()
+                    if memory_context_service is None:
+                        raise RuntimeError(
+                            "MemoryContextService provider returned no service"
+                        )
+                    phase.set_output({"service": "context", "ready": True})
                 memory_metadata["memory_context_service"] = memory_context_service
             except Exception as exc:
                 logger.warning(
@@ -376,13 +387,18 @@ async def create_agent_config(
                                 top_k=top_k,
                             )
 
-                            ext_search_results = (
-                                await provider_service.search_all_enabled(
-                                    tenant_id=str(memory_context.tenant_id or ""),
-                                    request=search_request,
-                                    limit=top_k,
+                            with trace_phase(
+                                "memory.external_search", input_value={"query": last_user_query or "", "top_k": top_k},
+                                attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                            ) as phase:
+                                ext_search_results = (
+                                    await provider_service.search_all_enabled(
+                                        tenant_id=str(memory_context.tenant_id or ""),
+                                        request=search_request,
+                                        limit=top_k,
+                                    )
                                 )
-                            )
+                                phase.set_output(ext_search_results)
 
                             if ext_search_results:
                                 external_results = [
@@ -413,24 +429,29 @@ async def create_agent_config(
                             type(exc).__name__,
                         )
 
-                    long_term_search_context = (
-                        await memory_context_service.build_context(
-                            tenant_id=str(memory_context.tenant_id or ""),
-                            user_id=str(memory_context.user_id or ""),
-                            agent_id=str(memory_context.agent_id or "") or None,
-                            conversation_id=(
-                                str(conversation_id)
-                                if conversation_id is not None
-                                else None
-                            ),
-                            query=None,
-                            layers=["tenant", "user"],
-                            external_results=external_results,
+                    with trace_phase(
+                        "memory.load_context", input_value={"layers": ["tenant", "user"]},
+                        attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                    ) as phase:
+                        long_term_search_context = (
+                            await memory_context_service.build_context(
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                user_id=str(memory_context.user_id or ""),
+                                agent_id=str(memory_context.agent_id or "") or None,
+                                conversation_id=(
+                                    str(conversation_id)
+                                    if conversation_id is not None
+                                    else None
+                                ),
+                                query=None,
+                                layers=["tenant", "user"],
+                                external_results=external_results,
+                            )
                         )
-                    )
-                    long_term_memory_items = _build_long_term_memory_items(
-                        long_term_search_context
-                    )
+                        long_term_memory_items = _build_long_term_memory_items(
+                            long_term_search_context
+                        )
+                        phase.set_output(long_term_memory_items)
                 except Exception as exc:
                     logger.warning(
                         "event=long_term_memory_load_failed tenant_id=%s user_id=%s "
@@ -489,14 +510,19 @@ async def create_agent_config(
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
                 fixed_search_tool.external_results = external_results
-                fixed_search_result = await run_blocking(
-                    "memory-presearch",
-                    fixed_search_tool.forward,
-                    last_user_query or "",
-                    5,
-                    lane="model-tool-io",
-                    owner="runtime",
-                )
+                with trace_phase(
+                    "memory.presearch", input_value={"query": last_user_query or "", "top_k": 5},
+                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                ) as phase:
+                    fixed_search_result = await run_blocking(
+                        "memory-presearch",
+                        fixed_search_tool.forward,
+                        last_user_query or "",
+                        5,
+                        lane="model-tool-io",
+                        owner="runtime",
+                    )
+                    phase.set_output(fixed_search_result)
             else:
                 fixed_search_result = (
                     "Memory search unavailable: retrieval pipeline is not configured. "

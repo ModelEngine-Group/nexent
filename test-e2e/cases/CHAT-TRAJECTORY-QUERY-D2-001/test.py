@@ -233,12 +233,20 @@ def test_trj_query_whole_result_metrics_filters_and_stable_membership(harness):
     assert get(harness, "/trajectory/records").status_code == 503
 
 
-def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness):
+@pytest.mark.parametrize("writer_locked", [False, True])
+def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness, writer_locked):
+    from contextlib import nullcontext
+
+    from infrastructure.observability.trajectory_store import CaptureIdentity
     from ops.services.trajectory.primitives import ReferenceStore
 
-    view = snapshot(harness)
-    tool = next(node for node in view["nodes"] if node["kind"] == "tool")
-    content_id = tool["output"]["content_id"]
+    owner = CaptureIdentity("t1", "u1", "123", "7")
+    guard = harness.store._session(owner) if writer_locked else nullcontext()
+    with guard:
+        view = snapshot(harness)
+        tool = next(node for node in view["nodes"] if node["kind"] == "tool")
+        content_id = tool["output"]["content_id"]
+        assert get(harness, "/trajectory/conversations/123/contents/" + content_id).status_code == 200
     assert len(content_id) == 32 and int(content_id, 16) >= 0
     prefix = "/trajectory/conversations/123/contents/"
     assert get(harness, prefix + content_id).status_code == 200
@@ -410,7 +418,7 @@ def test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry(harness, caplog):
         ).status_code
         == 409
     )
-    for days in [0, -1, 1.5, True, 3651]:
+    for days in [0, -1, 1.5, True, 31]:
         assert (
             harness.client.post(
                 "/trajectory/cleanup",
@@ -677,16 +685,10 @@ def test_trj_query_cleanup_batches_and_cursor_scope(harness):
     )
     assert last["cutoff_at"] == first["cutoff_at"]
     assert last["deleted_runs"] == 3 and last["done"]
-    assert (
-        data(
-            harness.client.post(
-                "/trajectory/cleanup",
-                json={"before_days": 3650},
-                headers={"Authorization": "admin"},
-            )
-        )["deleted_runs"]
-        == 0
-    )
+    for days in [1, 30]:
+        assert data(harness.client.post(
+            "/trajectory/cleanup", json={"before_days": days}, headers={"Authorization": "admin"},
+        ))["deleted_runs"] == 0
 
 
 def test_trj_query_expiry_rechecks_cached_records_and_content(harness):
@@ -942,7 +944,8 @@ def test_trj_query_private_validation_under_api_root(harness):
 
 
 @pytest.mark.parametrize("missing_input", [False, True])
-def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch, missing_input):
+@pytest.mark.parametrize("builtin", [False, True])
+def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch, missing_input, builtin):
     """Controlled PG results cross the real HTTP boundary; detail still opens the actual archive."""
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -993,6 +996,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     }
     catalog = Mock()
     catalog.list_records.return_value = [projected]
+    harness.catalog.builtin_ids = {"7"} if builtin else set()
     catalog.statistics.return_value = summary
     catalog.facets.return_value = [{"id": "m", "name": "model", "tenant_id": "t1"}]
     harness.service.execution_catalog = catalog
@@ -1013,6 +1017,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
         )
     )
     assert first["items"][0]["conversation_id"] == "123" and first["summary"] == summary
+    assert first["items"][0]["root_agent_version_no"] == (1 if builtin else values["agent_version_no"])
     usage = first["items"][0]["usage"]
     assert usage == {
         "input": None if missing_input else values["input_tokens"],
@@ -1079,40 +1084,80 @@ def test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes(har
     values = {}
     repository = SimpleNamespace(
         read=lambda tenant: values.get(tenant),
-        save=lambda tenant, seconds, actor: values.update({tenant: seconds}),
+        save=lambda tenant, policy, actor: values.update({tenant: policy}),
     )
     monkeypatch.setattr(settings, "CleanupScheduleRepository", lambda: repository)
     monkeypatch.setattr(settings, "TrajectoryCatalog", lambda: harness.catalog)
-    monkeypatch.setattr(settings.config, "TRAJECTORY_CLEANUP_INTERVAL_SECONDS", 3600)
     monkeypatch.setattr(settings.config, "TRAJECTORY_CLEANUP_ENABLED", True)
     monkeypatch.setattr(settings.config, "TRAJECTORY_RETENTION_DAYS", 30)
     # Settings must remain available even when the trajectory file mount is unavailable.
     from ops.api import trajectory as api
     monkeypatch.setattr(api, "get_service", lambda: (_ for _ in ()).throw(OSError("unmounted")))
     path = "/trajectory/cleanup/schedule"
-    assert data(get(harness, path))["interval_seconds"] == 3600
-    for actor, tenant, seconds in [("admin", "t1", 60), ("su", "t2", 31536000)]:
-        saved = harness.client.put(path, json={"tenant_id": tenant, "interval_seconds": seconds},
-                                   headers={"Authorization": actor})
-        assert data(saved) == {"tenant_id": tenant, "interval_seconds": seconds, "enabled": True, "retention_days": 30}
+    assert data(get(harness, path)) == {
+        "tenant_id": "t1", "enabled": True, "retention_days": 30,
+        "cleanup_time": "00:00", "timezone": "Asia/Shanghai",
+    }
+    for actor, tenant, enabled, days in [("admin", "t1", True, 1), ("su", "t2", False, 30)]:
+        policy = {"enabled": enabled, "retention_days": days}
+        saved = harness.client.put(path, json={"tenant_id": tenant, **policy}, headers={"Authorization": actor})
+        assert data(saved) == {"tenant_id": tenant, **policy, "cleanup_time": "00:00", "timezone": "Asia/Shanghai"}
         assert saved.headers["cache-control"] == "private,no-store"
-        assert data(get(harness, path, actor=actor, tenant_id=tenant))["interval_seconds"] == seconds
-    assert values == {"t1": 60, "t2": 31536000}
+        assert data(get(harness, path, actor=actor, tenant_id=tenant)) == data(saved)
+    expected = {"t1": {"enabled": True, "retention_days": 1}, "t2": {"enabled": False, "retention_days": 30}}
+    assert values == expected
+    policy = {"enabled": True, "retention_days": 7}
     assert get(harness, path, actor="admin", tenant_id="t2").status_code == 404
-    assert harness.client.put(path, json={"tenant_id": "t2", "interval_seconds": 120},
-                              headers={"Authorization": "admin"}).status_code == 404
+    assert harness.client.put(path, json={"tenant_id": "t2", **policy}, headers={"Authorization": "admin"}).status_code == 404
     assert get(harness, path, actor="user").status_code == 403
-    assert harness.client.put(path, json={"interval_seconds": 120},
-                              headers={"Authorization": "user"}).status_code == 403
-    for value in [59, 31536001, 60.5, "60", True]:
-        invalid = harness.client.put(path, json={"interval_seconds": value}, headers={"Authorization": "admin"})
-        assert invalid.status_code == 422 and invalid.headers["cache-control"] == "private,no-store"
-    assert harness.client.put(path, json={"interval_seconds": 120, "path": "injected"},
-                              headers={"Authorization": "admin"}).status_code == 422
-    assert values == {"t1": 60, "t2": 31536000}
+    assert harness.client.put(path, json=policy, headers={"Authorization": "user"}).status_code == 403
+    for field, invalid_values in [("retention_days", [0, 31, 1.5, "7", True]), ("enabled", [1, "true", None])]:
+        for value in invalid_values:
+            invalid = harness.client.put(path, json={**policy, field: value}, headers={"Authorization": "admin"})
+            assert invalid.status_code == 422 and invalid.headers["cache-control"] == "private,no-store"
+    assert harness.client.put(path, json={**policy, "interval_seconds": 120}, headers={"Authorization": "admin"}).status_code == 422
+    assert values == expected
     repository.save = lambda *args: (_ for _ in ()).throw(ConnectionError("private PG details"))
-    unavailable = harness.client.put(path, json={"interval_seconds": 120}, headers={"Authorization": "admin"})
+    unavailable = harness.client.put(path, json=policy, headers={"Authorization": "admin"})
     assert unavailable.status_code == 503 and "private PG details" not in unavailable.text
-    assert values["t1"] == 60
+    assert values == expected
     harness.catalog.actors.pop("admin")
     assert get(harness, path).status_code == 403
+
+
+@pytest.mark.parametrize("version", [0, 4])
+def test_trj_query_builtin_versions_preserve_archived_values(harness, version):
+    harness.run = harness.add_run(agent_version=version)
+    harness.catalog.builtin_ids = {"7"}
+    before = {str(path): path.read_bytes() for path in harness.root.rglob("*.otlp.jsonl")}
+    listing = data(get(harness, "/trajectory/records"))
+    assert all(row["root_agent_version_no"] == 1 for row in listing["items"])
+    execution = data(get(harness, "/trajectory/conversations/123"))
+    assert all(row["root_agent_version_no"] == 1 for row in execution["executions"])
+    nodes = snapshot(harness)["nodes"]
+    root = next(node for node in nodes if node["id"] == harness.run.root)
+    child = next(node for node in nodes if node["id"] == harness.run.sub)
+    assert root["agent_version_no"] == 1 and root["agent_version_name"] == "V1"
+    assert child["agent_version_no"] == 0
+    assert all(node["agent_version_no"] is None for node in nodes if node["kind"] != "agent")
+    assert before == {str(path): path.read_bytes() for path in harness.root.rglob("*.otlp.jsonl")}
+
+
+def test_trj_query_phase_nodes_retain_hierarchy_time_and_bodies_without_counting_calls(harness):
+    run = harness.add_run(duration=3000, phases=True)
+    result = data(get(harness, "/trajectory/conversations/123/snapshot", trajectory_id=run.id))
+    nodes = result["nodes"]
+    root = next(n for n in nodes if n["id"] == run.root)
+    phases = {n["name"]: n for n in nodes if n["kind"] == "phase"}
+    assert set(phases) == {"agent.prepare", "memory.presearch", "agent.sandbox.warmup"}
+    assert phases["memory.presearch"]["parent_id"] == phases["agent.prepare"]["id"]
+    assert phases["agent.prepare"]["parent_id"] == phases["agent.sandbox.warmup"]["parent_id"] == root["id"]
+    assert phases["memory.presearch"]["status"] == "failed"
+    for phase in phases.values():
+        assert phase["started_at"] and phase["finished_at"] and phase["duration_ms"] == 3000
+        assert phase["usage"] is None and phase["ttft_ms"] is None and phase["throughput"] is None
+        assert phase["agent_version_no"] is None
+        assert "记忆查询" in phase["input"]["text"]
+        assert phase["output"]["text"] == '{"ready":true}'
+    assert root["model_call_count"] == 2 and root["tool_call_count"] == 1
+    assert root["usage"]["total"] == 50

@@ -120,7 +120,7 @@ export interface TrajectoryNode {
   id: string;
   parent_id: string | null;
   display_trace_id: string;
-  kind: "agent" | "model" | "tool" | string;
+  kind: "agent" | "model" | "tool" | "phase" | string;
   name: string;
   status: string;
   agent_version_no: number | null;
@@ -166,7 +166,8 @@ export interface ContentChunk {
 }
 export interface CleanupSchedule {
   tenant_id: string;
-  interval_seconds: number;
+  cleanup_time: string;
+  timezone: string;
   enabled: boolean;
   retention_days: number;
 }

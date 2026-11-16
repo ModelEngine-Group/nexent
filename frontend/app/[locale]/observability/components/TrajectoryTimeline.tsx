@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, Select } from "antd";
 import {
   ChevronDown,
@@ -27,26 +27,46 @@ import {
   userInputPreview,
 } from "./TrajectoryPresentation";
 
+const noExecutions: TrajectoryExecution[] = [];
+
 export function TrajectoryTimeline({
-  nodes,
+  nodes: sourceNodes,
   root,
   selected,
   complete,
   cache,
+  bodyRevision = 0,
   onSelect,
   onEndReached,
-  unavailable = [],
+  unavailable = noExecutions,
 }: {
   nodes: TrajectoryNode[];
   root?: TrajectoryNode;
   selected?: string;
   complete: boolean;
   cache: BodyCache;
+  bodyRevision?: number;
   onSelect: (node: TrajectoryNode) => void;
   onEndReached?: () => void;
   unavailable?: TrajectoryExecution[];
 }) {
   const { t } = useTranslation();
+  const nodes = useMemo(
+    () =>
+      sourceNodes.some((node) => node.kind === "phase")
+        ? sourceNodes.map((node) =>
+            node.kind === "phase"
+              ? {
+                  ...node,
+                  name: t(`trajectory.phases.${node.name}`, {
+                    defaultValue: node.name,
+                  }),
+                }
+              : node
+          )
+        : sourceNodes,
+    [sourceNodes, t]
+  );
   const container = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 800 });
@@ -69,77 +89,95 @@ export function TrajectoryTimeline({
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
   const [collapsed, setCollapsed] = useState(new Set<string>());
-  const visible = filterTree(nodes, search, kind, undefined, (id, query) =>
-    cache.matches(`${id}:`, query)
-  );
   const filtering = !!search.trim() || !!kind;
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const children = new Map<string, TrajectoryNode[]>();
-  for (const node of nodes) {
-    const key =
-      node.parent_id && byId.has(node.parent_id) ? node.parent_id : "";
-    const siblings = children.get(key) ?? [];
-    siblings.push(node);
-    children.set(key, siblings);
-  }
-  const treeRows: { node: TrajectoryNode; depth: number }[] = [];
-  const visited = new Set<string>();
-  function walk(node: TrajectoryNode, depth: number) {
-    if (visited.has(node.id)) return;
-    visited.add(node.id);
-    if (!visible.has(node.id)) return;
-    treeRows.push({ node, depth });
-    if (filtering || !collapsed.has(node.id))
-      for (const child of children.get(node.id) ?? []) walk(child, depth + 1);
-  }
-  for (const node of children.get("") ?? []) walk(node, 0);
-  // Broken historical ancestry stays visible rather than silently disappearing.
-  for (const node of nodes) {
-    if (visited.has(node.id)) continue;
-    const ancestors = new Set<string>();
-    let parent = node.parent_id;
-    let hidden = false;
-    while (parent && !ancestors.has(parent)) {
-      if (visited.has(parent)) {
-        hidden = true;
-        break;
+  const searchRevision = search.trim() ? bodyRevision : 0;
+  const { rows, byId, children } = useMemo(() => {
+    const visible = filterTree(nodes, search, kind, undefined, (id, query) =>
+      cache.matches(`${id}:`, query)
+    );
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const children = new Map<string, TrajectoryNode[]>();
+    for (const node of nodes) {
+      const key =
+        node.parent_id && byId.has(node.parent_id) ? node.parent_id : "";
+      const siblings = children.get(key) ?? [];
+      siblings.push(node);
+      children.set(key, siblings);
+    }
+    const treeRows: { node: TrajectoryNode; depth: number }[] = [];
+    const visited = new Set<string>();
+    function walk(node: TrajectoryNode, depth: number) {
+      if (visited.has(node.id)) return;
+      visited.add(node.id);
+      if (!visible.has(node.id)) return;
+      treeRows.push({ node, depth });
+      if (filtering || !collapsed.has(node.id))
+        for (const child of children.get(node.id) ?? []) walk(child, depth + 1);
+    }
+    for (const node of children.get("") ?? []) walk(node, 0);
+    // Broken historical ancestry stays visible rather than silently disappearing.
+    for (const node of nodes) {
+      if (visited.has(node.id)) continue;
+      const ancestors = new Set<string>();
+      let parent = node.parent_id;
+      let hidden = false;
+      while (parent && !ancestors.has(parent)) {
+        if (visited.has(parent)) {
+          hidden = true;
+          break;
+        }
+        ancestors.add(parent);
+        parent = byId.get(parent)?.parent_id ?? null;
       }
-      ancestors.add(parent);
-      parent = byId.get(parent)?.parent_id ?? null;
+      if (!hidden) walk(node, 0);
     }
-    if (!hidden) walk(node, 0);
-  }
-  const rows: (
-    | { node: TrajectoryNode; depth: number }
-    | { execution: TrajectoryExecution; depth: number }
-    | { heading: TrajectoryNode; depth: number }
-    | { axis: TrajectoryNode; depth: number }
-  )[] = treeRows.flatMap((entry) =>
-    entry.node.parent_id === null
-      ? [
-          ...(entry.node.round_no != null
-            ? [{ heading: entry.node, depth: 0 }]
-            : []),
-          { axis: entry.node, depth: 0 },
-          entry,
-        ]
-      : [entry]
-  );
-  if (!filtering) {
-    for (const execution of unavailable) {
-      const index = rows.findIndex(
-        (entry) =>
-          ("node" in entry
-            ? (entry.node.round_no ?? 0)
-            : "execution" in entry
-              ? entry.execution.round_no
-              : "heading" in entry
-                ? (entry.heading.round_no ?? 0)
-                : (entry.axis.round_no ?? 0)) > execution.round_no
-      );
-      rows.splice(index < 0 ? rows.length : index, 0, { execution, depth: 0 });
+    const rows: (
+      | { node: TrajectoryNode; depth: number }
+      | { execution: TrajectoryExecution; depth: number }
+      | { heading: TrajectoryNode; depth: number }
+      | { axis: TrajectoryNode; depth: number }
+    )[] = treeRows.flatMap((entry) =>
+      entry.node.parent_id === null
+        ? [
+            ...(entry.node.round_no != null
+              ? [{ heading: entry.node, depth: 0 }]
+              : []),
+            { axis: entry.node, depth: 0 },
+            entry,
+          ]
+        : [entry]
+    );
+    if (!filtering) {
+      for (const execution of unavailable) {
+        const index = rows.findIndex(
+          (entry) =>
+            ("node" in entry
+              ? (entry.node.round_no ?? 0)
+              : "execution" in entry
+                ? entry.execution.round_no
+                : "heading" in entry
+                  ? (entry.heading.round_no ?? 0)
+                  : (entry.axis.round_no ?? 0)) > execution.round_no
+        );
+        rows.splice(index < 0 ? rows.length : index, 0, {
+          execution,
+          depth: 0,
+        });
+      }
     }
-  }
+    return { rows, byId, children };
+    // BodyCache mutates in place; its revision makes newly loaded text searchable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    nodes,
+    search,
+    kind,
+    cache,
+    collapsed,
+    unavailable,
+    searchRevision,
+    filtering,
+  ]);
   const originNode = (node: TrajectoryNode) =>
     byId.get(node.execution_root_id ?? "") ??
     root ??
@@ -252,7 +290,7 @@ export function TrajectoryTimeline({
             }}
             options={[
               { value: "", label: t("trajectory.allTypes") },
-              ...["agent", "model", "tool"].map((value) => ({
+              ...["agent", "model", "tool", "phase"].map((value) => ({
                 value,
                 label: t(`trajectory.kinds.${value}`),
               })),

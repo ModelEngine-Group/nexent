@@ -258,3 +258,22 @@ describe("automatic trajectory body loading", () => {
     expect(content.mock.calls.map((call) => call[2])).toEqual([0, 0]);
   });
 });
+
+// Unrelated UI updates must not parse large bodies again.
+describe("trajectory body rendering cost", () => {
+  it("reuses JSON formatting when only expansion changes", () => {
+    const text = JSON.stringify({ content: "example" });
+    const parse = vi.spyOn(JSON, "parse");
+    const view = mount(body(text));
+    const before = parse.mock.calls.filter(([value]) => value === text).length;
+    expect(before).toBeGreaterThan(0);
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.expandContent" })
+    );
+    expect(parse.mock.calls.filter(([value]) => value === text)).toHaveLength(
+      before
+    );
+    expect(view.text()).toContain("example");
+    parse.mockRestore();
+  });
+});

@@ -90,10 +90,11 @@ beforeEach(() => {
 });
 
 describe("observability role gate", () => {
-  it("allows the tenant admin to configure their own cleanup interval", async () => {
+  it("allows the tenant admin to configure their own cleanup policy", async () => {
     api.cleanupSchedule.mockResolvedValue({
       tenant_id: "tenant",
-      interval_seconds: 3600,
+      cleanup_time: "00:00",
+      timezone: "Asia/Shanghai",
       enabled: true,
       retention_days: 30,
     });
@@ -106,7 +107,7 @@ describe("observability role gate", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
     );
-    expect(await screen.findByRole("spinbutton")).toHaveValue("60");
+    expect(await screen.findByRole("spinbutton")).toHaveValue("30");
     expect(api.cleanupSchedule).toHaveBeenCalledWith(
       "tenant",
       expect.any(AbortSignal)
@@ -696,6 +697,19 @@ describe("administrator page and cleanup confirmation", () => {
       screen.getByRole("button", { name: "trajectory.cleanup" })
     ).toBeDisabled();
   });
+  it.each(["0", "31", ""])(
+    "blocks manual cleanup for invalid %s days",
+    (value) => {
+      render(<CleanupDialog onClose={vi.fn()} onComplete={vi.fn()} />, {
+        wrapper,
+      });
+      fireEvent.change(screen.getByRole("spinbutton"), { target: { value } });
+      expect(
+        screen.getByRole("button", { name: "trajectory.confirmCleanup" })
+      ).toBeDisabled();
+      expect(api.cleanup).not.toHaveBeenCalled();
+    }
+  );
   it("requires confirmation, validates days and shows partial batch completion", async () => {
     api.cleanup.mockResolvedValue({
       cutoff_at: "2026-11-03T01:00:00Z",

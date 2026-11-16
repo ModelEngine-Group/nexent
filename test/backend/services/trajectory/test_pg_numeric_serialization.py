@@ -17,12 +17,13 @@ from ops.services.trajectory.primitives import ReferenceStore
 
 
 @pytest.mark.parametrize("view", ["conversation", "execution"])
+@pytest.mark.parametrize("builtin", [False, True])
 @pytest.mark.parametrize(
     "tokens",
     [(3179, 1446, 4625), (None, 0, None), (9007199254740993, 0, 9007199254740993)],
 )
 def test_pg_token_numbers_survive_json_cache_response_and_frozen_paging(
-    mocker, view, tokens
+    mocker, view, tokens, builtin
 ):
     run = "00000000-0000-0000-0000-000000000001"
     row = {
@@ -63,6 +64,7 @@ def test_pg_token_numbers_survive_json_cache_response_and_frozen_paging(
     authority.tenants.return_value = ["t"]
     authority.names.return_value = {}
     authority.agent_names.return_value = {}
+    authority.builtin_agent_ids.return_value = {("t", "7")} if builtin else set()
     service = SimpleNamespace(
         execution_catalog=catalog,
         catalog=authority,
@@ -72,6 +74,8 @@ def test_pg_token_numbers_survive_json_cache_response_and_frozen_paging(
     )
     actor = Actor("admin", "t", "ADMIN")
     first = records(service, actor, {}, view=view, sort_by="total_tokens", page_size=1)
+    assert first["items"][0]["root_agent_version_no"] == (1 if builtin else 0)
+    assert row["agent_version_no"] == 0
     parsed = json.loads(json.dumps(first))
     usage = parsed["items"][0]["usage"]
     for key, expected in zip(("input", "output", "total"), tokens):

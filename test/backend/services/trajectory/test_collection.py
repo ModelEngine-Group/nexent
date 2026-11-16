@@ -47,12 +47,13 @@ def service():
     catalog.resolve.return_value = row
     catalog.names.return_value = {"t": "Tenant"}
     catalog.agent_names.return_value = {}
+    catalog.builtin_agent_ids.return_value = set()
     catalog.message_upper.return_value = 0
     instance = TrajectoryService(Mock(), catalog, ReferenceStore())
     instance.archive = SimpleNamespace(
         manifest=Mock(return_value=meta),
         available=lambda run: Archive.available(instance.archive, run),
-        store=SimpleNamespace(clock=lambda: now),
+        store=SimpleNamespace(retention_days=30, clock=lambda: now),
     )
 
     def load(actor, row, run_id, budget):
@@ -330,3 +331,12 @@ def test_unarchived_placeholder_does_not_fabricate_filter_matches(service, filte
     assert result["total"] == 0
     assert result["summary"]["conversation_count"] == 0
     service.load.assert_not_called()
+
+
+
+def test_builtin_list_versions_use_identity_and_keep_normal_drafts(service):
+    service.catalog.builtin_agent_ids.return_value = {("t", "7")}
+    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    assert all(row["root_agent_version_no"] == 1 for row in result["items"])
+    assert all(row["root_agent_version_name"] == "V1" for row in result["items"])
+    service.catalog.builtin_agent_ids.assert_called_once_with(["t"], {"7"})

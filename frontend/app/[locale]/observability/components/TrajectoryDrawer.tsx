@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Spin } from "antd";
 import { Clock3, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -32,7 +32,7 @@ export function TrajectoryDrawer({
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [invalidated, setInvalidated] = useState<unknown>(null);
-  const [, setContentRevision] = useState(0);
+  const [contentRevision, setContentRevision] = useState(0);
   const cache = useMemo(() => new BodyCache(), []);
   useEffect(() => () => cache.clear(), [cache]);
   const query = useConversationTrajectory(row, queryId);
@@ -64,8 +64,12 @@ export function TrajectoryDrawer({
     [pages]
   );
   const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
-  const unavailable = (pages ?? []).filter(
-    ({ run, snapshot }) => run && !snapshot
+  const unavailable = useMemo(
+    () =>
+      (pages ?? [])
+        .filter(({ run, snapshot }) => run && !snapshot)
+        .map(({ run }) => run!),
+    [pages]
   );
   const fatal =
     invalidated ?? (invalidatesTrajectory(query.error) ? query.error : null);
@@ -91,6 +95,8 @@ export function TrajectoryDrawer({
     else void query.refetch();
   };
   const canLoad = query.hasNextPage && !query.isFetching && !query.isError;
+  const { fetchNextPage } = query;
+  const loadNext = useCallback(() => void fetchNextPage(), [fetchNextPage]);
   return (
     <StandardDrawer
       open
@@ -163,14 +169,13 @@ export function TrajectoryDrawer({
               <div className="trajectory-detail-grid">
                 <TrajectoryTimeline
                   nodes={nodes}
-                  unavailable={unavailable.map(({ run }) => run!)}
+                  unavailable={unavailable}
+                  bodyRevision={contentRevision}
                   selected={selected?.id}
                   complete={!query.hasNextPage && !query.hasPreviousPage}
                   cache={cache}
                   onSelect={(node) => setSelectedId(node.id)}
-                  onEndReached={
-                    canLoad ? () => void query.fetchNextPage() : undefined
-                  }
+                  onEndReached={canLoad ? loadNext : undefined}
                 />
                 {selected && (
                   <TrajectoryNodeDetail

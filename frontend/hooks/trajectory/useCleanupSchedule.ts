@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CleanupSchedule } from "@/types/trajectory";
 import { trajectoryService } from "@/services/trajectoryService";
 
 export function useCleanupSchedule(scope: string, tenantId: string) {
@@ -17,13 +18,15 @@ export function useCleanupSchedule(scope: string, tenantId: string) {
     refetchOnWindowFocus: false,
   });
   const mutation = useMutation({
-    mutationFn: async (intervalSeconds: number) => {
+    mutationFn: async (
+      policy: Pick<CleanupSchedule, "enabled" | "retention_days">
+    ) => {
       controller.current?.abort();
       const request = new AbortController();
       controller.current = request;
       const result = await trajectoryService.saveCleanupSchedule(
         tenantId,
-        intervalSeconds,
+        policy,
         request.signal
       );
       if (request.signal.aborted) throw new Error("Aborted");
