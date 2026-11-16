@@ -24,10 +24,17 @@ class ForbiddenImports:
 
 sys.meta_path.insert(0, ForbiddenImports())
 
-from contracts.agentos_knowledge import CleanseArtifact, ObjectReference
+from contracts.agentos_knowledge import (
+    CleanseArtifact,
+    FileCleanseRequest,
+    ObjectReference,
+)
 from management.services.file.cleanse_executor import CleanseExecutor
+from management.services.file.process_cleanse_executor import ProcessCleanseExecutor
+from nexent.storage.errors import OutcomeUnknown
 from nexent.storage.models import ObjectMetadata, ObjectRef, OperationContext, Revision
 
+from infrastructure.file_processing.isolated import run_isolated
 from infrastructure.file_processing.parser import DocumentParserRuntime
 
 
@@ -142,6 +149,76 @@ def child(inherited, pipe):
         pipe.close()
 
 
+def check_isolation():
+    import time
+
+    def factory(*, context):
+        def execute(payload, *, context):
+            if payload == "crash":
+                os._exit(17)
+            time.sleep(30)
+
+        return execute
+
+    for payload in ("hang", "crash", "cancel"):
+        stop = multiprocessing.get_context("fork").Event()
+
+        def tick(*, context, payload=payload, stop=stop):
+            if payload == "cancel":
+                stop.set()
+
+        try:
+            run_isolated(
+                factory,
+                payload,
+                context=OperationContext(
+                    "failure-proof", monotonic() + 0.4, cancelled=stop
+                ),
+                tick=tick,
+            )
+        except OutcomeUnknown:
+            pass
+        else:
+            raise AssertionError("dispatched failure was not quarantined")
+        assert not multiprocessing.active_children()
+    actual_parent = os.getpid()
+    data = b"Isolated parser fixture text."
+    request = FileCleanseRequest(
+        run_id="a" * 32,
+        filename="isolated.txt",
+        idempotency_key="isolated",
+        source=ObjectReference(
+            space="cleanse",
+            key="isolated.txt",
+            version="source-v1",
+            sha256=hashlib.sha256(data).hexdigest(),
+        ),
+    )
+
+    def parser_factory():
+        assert os.getpid() != actual_parent
+        return CleanseExecutor(
+            runtime=DocumentParserRuntime(1, [], {}),
+            objects=Objects("isolated.txt", data),
+            parser_version="parser-proof-v1",
+        )
+
+    ref = ProcessCleanseExecutor(parser_factory)(
+        {
+            "scope_kind": "run",
+            "run_id": request.run_id,
+            "request_payload": request.model_dump(mode="json"),
+            "parser_version": "parser-proof-v1",
+        },
+        request,
+        context=OperationContext("isolated-parser", monotonic() + 30),
+    )
+    assert ref.key.startswith("artifacts/" + request.source.sha256 + "/")
+    assert ref.key.endswith(ref.sha256 + ".json")
+    assert not multiprocessing.active_children()
+    assert "nexent.data_process" not in sys.modules
+
+
 if __name__ == "__main__":
     assert "nexent.data_process" not in sys.modules
     inherited = DocumentParserRuntime(1, [], {})
@@ -159,12 +236,19 @@ if __name__ == "__main__":
         assert result["child_pid"] != os.getpid()
         assert not inherited.initialized and "nexent.data_process" not in sys.modules
         result["parent_lazy"] = True
+        check_isolation()
+        result["isolated_failures_reclaimed"] = True
+        result["isolated_parser_rebuilt"] = True
         result["source_hashes"] = {
             str(path): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (
                 Path("/proof/infrastructure/file_processing/parser.py"),
                 Path("/proof/backend/management/services/file/cleanse_executor.py"),
                 Path("/proof/sdk/nexent/data_process/core.py"),
+                Path("/proof/infrastructure/file_processing/isolated.py"),
+                Path(
+                    "/proof/backend/management/services/file/process_cleanse_executor.py"
+                ),
             )
         }
         print(json.dumps(result))

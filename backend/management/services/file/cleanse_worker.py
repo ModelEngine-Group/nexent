@@ -41,12 +41,16 @@ def consume_once(queue, registry, *, max_wait, context):
     except BaseException:
         # Broker acknowledgement follows durable job outcome, never precedes it.
         try:
-            queue.retry(delivery.receipt, context=context)
+            queue.retry(delivery.receipt, context=_cleanup_context(context))
         except StorageError:
             queue.close()
         raise
-    queue.ack(delivery.receipt, context=context)
+    queue.ack(delivery.receipt, context=_cleanup_context(context))
     return True
+
+
+def _cleanup_context(context, seconds=5):
+    return replace(context, deadline=monotonic() + seconds, cancelled=None)
 
 
 def enqueue_ready(jobs, queue, *, limit=100, context):
@@ -61,7 +65,16 @@ def enqueue_ready(jobs, queue, *, limit=100, context):
 
 
 class CleanseHandler:
-    def __init__(self, jobs, *, owner_id, lease_seconds, authorize_execution, execute):
+    def __init__(
+        self,
+        jobs,
+        *,
+        owner_id,
+        lease_seconds,
+        authorize_execution,
+        execute,
+        finalize_seconds=5,
+    ):
         if not callable(authorize_execution) or not callable(execute):
             raise InvalidInput()
         self.jobs = jobs
@@ -69,6 +82,13 @@ class CleanseHandler:
         self.lease_seconds = lease_seconds
         self.authorize = authorize_execution
         self.execute = execute
+        if type(finalize_seconds) is not int or not 1 <= finalize_seconds <= 30:
+            raise InvalidInput()
+        self.finalize_seconds = finalize_seconds
+
+    def _finalize_context(self, context):
+        # Only durable cleanup gets a fresh budget; execution keeps its original deadline.
+        return _cleanup_context(context, self.finalize_seconds)
 
     def __call__(self, task, *, context):
         if (
@@ -108,14 +128,23 @@ class CleanseHandler:
             if not isinstance(artifact, ObjectReference):
                 raise InvalidInput()
         except OutcomeUnknown:
-            self.jobs.mark_uncertain(row, context=context)
+            self.jobs.mark_uncertain(row, context=self._finalize_context(context))
             return
         except Exception as error:  # noqa: BLE001 - Persist a sanitized handler failure.
             logger.warning("cleanse_handler_failed error_type=%s", type(error).__name__)
             self.jobs.transition(
-                row, status="failed", error_code="CLEANSE_FAILED", context=context
+                row,
+                status="failed",
+                error_code="CLEANSE_FAILED",
+                context=self._finalize_context(context),
             )
             return
-        self.jobs.transition(
-            row, status="completed", artifact=artifact, context=context
+        completed = self.jobs.transition(
+            row,
+            status="completed",
+            artifact=artifact,
+            context=self._finalize_context(context),
         )
+        if not completed:
+            # A confirmed artifact without an accepted completion must not replay blindly.
+            self.jobs.mark_uncertain(row, context=self._finalize_context(context))

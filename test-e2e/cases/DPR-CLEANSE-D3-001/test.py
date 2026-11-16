@@ -51,6 +51,7 @@ def test_durable_cleanse_dispatch(record_property):
         "utc_audit_with_non_utc_session",
         "knowledge_scope_ownership",
         "knowledge_dispatch",
+        "consumer_stopped_closed",
     ):
         assert evidence[key] is True, key
     record_property("cleanse_job_probe", json.dumps(evidence, sort_keys=True))

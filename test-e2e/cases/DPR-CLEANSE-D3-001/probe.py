@@ -7,6 +7,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 
 root = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
@@ -17,6 +18,7 @@ from contracts.agentos_knowledge import (
     ObjectReference,
 )
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
+from management.services.file.cleanse_consumer import serve
 from management.services.file.cleanse_jobs import CleanseJobs
 from management.services.file.cleanse_worker import (
     HANDLER,
@@ -25,7 +27,7 @@ from management.services.file.cleanse_worker import (
     consume_once,
     enqueue_ready,
 )
-from nexent.storage.errors import NotFound
+from nexent.storage.errors import NotFound, ScopeDenied
 from nexent.storage.models import (
     Comparison,
     OperationContext,
@@ -227,6 +229,37 @@ try:
     assert worker.mark_uncertain(handle, context=context())
     clock[0] += timedelta(seconds=120)
     assert worker.ready(context=context()) == ()
+    last = public.submit(
+        request.model_copy(update={"idempotency_key": "consumer-stop"}),
+        context=context(),
+    )
+    assert enqueue_ready(worker, queue, context=context()) == 1
+    stop = Event()
+
+    def finish_and_stop(task, *, context):
+        handler(task, context=context)
+        stop.set()
+
+    serve(
+        queue,
+        HandlerRegistry({HANDLER: finish_and_stop}),
+        stop=stop,
+        operation_seconds=10,
+    )
+    assert (
+        public.inspect(
+            FileCleanseLookup(run_id=request.run_id, job_id=last.job_id),
+            context=context(),
+        ).status
+        == "completed"
+    )
+    try:
+        enqueue_ready(worker, queue, context=context())
+        queue.consume(max_wait=0.1, context=context())
+    except ScopeDenied:
+        pass
+    else:
+        raise AssertionError("stopped consumer did not close the queue")
     row = public.records.query(
         DATASET,
         RecordQuery(where=Comparison("job_id", "eq", state.job_id)),
@@ -266,6 +299,7 @@ try:
         "utc_audit_with_non_utc_session": True,
         "knowledge_scope_ownership": True,
         "knowledge_dispatch": True,
+        "consumer_stopped_closed": True,
     }
     print(json.dumps(result))
 finally:

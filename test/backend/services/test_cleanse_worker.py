@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Worker dispatch acknowledges only after durable job policy has run."""
 
+from datetime import timedelta
+from threading import Event
+from time import monotonic
 from unittest.mock import Mock
 
 import pytest
@@ -13,7 +16,7 @@ from management.services.file.cleanse_worker import (
     enqueue_ready,
 )
 from nexent.storage.errors import InvalidInput, OutcomeUnknown
-from nexent.storage.models import TaskEnvelope
+from nexent.storage.models import OperationContext, TaskEnvelope
 from nexent.storage.queue import Delivery
 
 from test.backend.services.test_cleanse_jobs import artifact, context, request
@@ -128,3 +131,56 @@ def test_empty_queue_does_not_dispatch():
         queue, HandlerRegistry({HANDLER: callback}), max_wait=0.1, context=context()
     )
     callback.assert_not_called()
+
+
+def test_unknown_result_is_persisted_after_execution_cancellation(setup):
+    make, _ = setup
+    jobs = make()
+    state = jobs.submit(request(), context=context())
+    stop = Event()
+
+    def execute(*args, **kwargs):
+        stop.set()
+        raise OutcomeUnknown()
+
+    handler = CleanseHandler(
+        make("worker"),
+        owner_id="worker",
+        lease_seconds=60,
+        authorize_execution=Mock(),
+        execute=execute,
+    )
+    handler(
+        task(state),
+        context=OperationContext("cancelled", monotonic() + 5, cancelled=stop),
+    )
+    result = jobs.inspect(
+        FileCleanseLookup(job_id=state.job_id, run_id=state.run_id), context=context()
+    )
+    assert result.error_code == "CLEANSE_OUTCOME_UNKNOWN"
+    assert jobs.ready(context=context()) == ()
+
+
+def test_confirmed_artifact_after_lease_expiry_requires_reconciliation(setup):
+    make, clock = setup
+    jobs = make()
+    state = jobs.submit(request(), context=context())
+
+    def execute(*args, **kwargs):
+        clock[0] += timedelta(seconds=61)
+        return artifact()
+
+    handler = CleanseHandler(
+        make("worker"),
+        owner_id="worker",
+        lease_seconds=60,
+        authorize_execution=Mock(),
+        execute=execute,
+    )
+    handler(task(state), context=context())
+    result = jobs.inspect(
+        FileCleanseLookup(job_id=state.job_id, run_id=state.run_id), context=context()
+    )
+    assert result.error_code == "CLEANSE_OUTCOME_UNKNOWN"
+    assert result.artifact is None
+    assert jobs.ready(context=context()) == ()

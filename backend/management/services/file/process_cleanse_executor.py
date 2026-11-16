@@ -1,0 +1,44 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Construct parser and scoped storage in a child; retain job ownership in Management."""
+
+from contracts.agentos_knowledge import ObjectReference
+from contracts.knowledge_cleanse import parse_cleanse_request
+from nexent.storage.errors import InvalidInput, OutcomeUnknown
+
+from infrastructure.file_processing.isolated import run_isolated
+
+
+class ProcessCleanseExecutor:
+    def __init__(self, factory, *, tick=None):
+        if not callable(factory) or tick is not None and not callable(tick):
+            raise InvalidInput()
+        self.factory = factory
+        self.tick = tick
+
+    def __call__(self, row, request, *, context):
+        if parse_cleanse_request(row) != request:
+            raise InvalidInput()
+
+        def initialize(*, context):
+            executor = self.factory()
+            executor.warmup(context=context)
+
+            def execute(snapshot, *, context):
+                typed = parse_cleanse_request(snapshot)
+                return executor(snapshot, typed, context=context).model_dump(
+                    mode="json"
+                )
+
+            return execute
+
+        def tick(*, context):
+            if self.tick is not None:
+                self.tick(row, context=context)
+
+        result = run_isolated(
+            initialize, row, context=context, tick=tick if self.tick else None
+        )
+        try:
+            return ObjectReference.model_validate(result)
+        except ValueError:
+            raise OutcomeUnknown(operation_id=context.operation_id) from None

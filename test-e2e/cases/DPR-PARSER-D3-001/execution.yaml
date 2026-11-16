@@ -8,6 +8,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_process_owned_parser]
   AC-02: [test_process_owned_parser]
+  AC-03: [test_process_owned_parser]
 preparation:
   families: []
   anchors: false

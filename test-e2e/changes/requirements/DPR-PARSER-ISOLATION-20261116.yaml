@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-PARSER-ISOLATION-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Isolate native cleansing and preserve unknown outcomes after worker loss
+  description: >-
+    Add Linux one-task process supervision with bounded JSON, post-fork executor
+    construction, group reclamation and conservative dispatched-failure handling.
+    Give durable cleanup a separate bounded budget. Production pools remain pending.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-PARSER-D3-001, DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-PARSER-D3-001, DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Bound JSON before process admission and dispatch only after readiness.
+    - Reclaim owned workers on failures and refuse admission after reclamation failure.
+    - Preserve unknown outcomes after dispatch and reject malformed published references.
+    - Persist unknown cleanup with a separate deadline after execution cancellation.
+    - Stop a single-owner consumer after durable dispatch and close broker ports on exit or failure.
+    reason: Prior parser tests prove SDK ownership but not native process failure supervision.
+    test_selectors:
+    - test/backend/infrastructure/test_isolated_parser.py
+    - test/backend/services/test_process_cleanse_executor.py
+    - test/backend/services/test_cleanse_worker.py
+    - test/backend/services/test_cleanse_consumer.py

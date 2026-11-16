@@ -34,12 +34,16 @@ case:
   - order: 5
     action: Read audit timestamps under a non-UTC PostgreSQL session and remove owned test resources.
     expected: UTC values and date filters remain correct; no test containers or anonymous volumes are retained.
+  - order: 6
+    action: Run the synchronous consumer and request stop after durable dispatch, before broker acknowledgement.
+    expected: Completion remains inspectable, acknowledgement completes with a bounded cleanup budget and the queue is closed.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
   - Lease takeover fences the previous attempt.
   - Recorded unknown outcomes are not blindly requeued.
   - Audit timestamps retain UTC semantics and disposable resources are reclaimed.
+  - Consumer stop closes its queue after durable acknowledgement without a new dispatch.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
@@ -63,4 +67,9 @@ case:
     description: Unknown outcomes and UTC audit semantics survive real storage interaction.
     steps: [4, 5]
     expected_results: [4, 5]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Orderly consumer stop preserves durable completion and closes delivery resources.
+    steps: [6]
+    expected_results: [6]
     forbidden_side_effects: [1]

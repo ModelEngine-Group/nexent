@@ -78,6 +78,8 @@ def test_process_owned_parser(record_property):
         "sdk_text_and_spreadsheet",
         "core_reused",
         "forbidden_imports_unused",
+        "isolated_failures_reclaimed",
+        "isolated_parser_rebuilt",
     ):
         assert evidence[key] is True, key
     record_property("parser_probe", json.dumps(evidence, sort_keys=True))
