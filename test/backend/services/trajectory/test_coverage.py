@@ -60,7 +60,7 @@ def service():
 
 
 def view(service, **kwargs):
-    return service.conversation(Actor("admin", "t", "ADMIN"), "1", **kwargs)
+    return service.conversation(Actor("admin", "t", "OPS"), "1", **kwargs)
 
 
 def messages():

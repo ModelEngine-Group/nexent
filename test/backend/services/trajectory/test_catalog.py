@@ -51,6 +51,32 @@ def test_catalog_ownership_filter_and_limit_are_pushed_to_pg(catalog):
         assert fragment in sql
 
 
+@pytest.mark.parametrize("role", ["OPS", "SU"])
+def test_actor_authority_uses_membership_role_array(catalog, mocker, role):
+    from ops.services.trajectory.access import Actor
+
+    service, statements = catalog
+
+    def first(query):
+        statements.append(str(query.statement.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )))
+
+    mocker.patch("sqlalchemy.orm.Query.first", first)
+    assert not service.actor_active(Actor("operator", "tenant", role))
+    assert "user_account_t.user_roles" in statements[-1]
+    assert f"@> ARRAY['{role}']" in statements[-1]
+    assert "user_account_t.user_role =" not in statements[-1]
+
+
+def test_ops_scope_does_not_enumerate_other_tenants(catalog):
+    from ops.services.trajectory.access import Actor
+
+    service, statements = catalog
+    assert service.tenants(Actor("operator", "tenant", "OPS")) == ["tenant"]
+    assert statements == []
+
+
 @pytest.mark.parametrize("group", [None, "agent:7", "other"])
 def test_directory_keyset_and_category_compile(catalog, group):
     service, statements = catalog

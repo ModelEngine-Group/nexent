@@ -232,7 +232,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       ).toHaveCount(0);
       expect(state.records.length).toBe(before);
     }
-    state.role = "ADMIN";
+    state.role = "OPS";
     await page.goto(`${base}/zh/observability`);
   });
   await contract.step(steps[5], async () => {

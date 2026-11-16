@@ -19,7 +19,7 @@ case:
   preconditions:
   - Retired on 2026-11-05 following the user scope change; no product, fixed script or execution binding was implemented.
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
-  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 读取使用可信OPS/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG零新增表、零新增字段、零新增序列且无SQL migration，轨迹及索引全部为文件。
   test_data:
     profile: mock

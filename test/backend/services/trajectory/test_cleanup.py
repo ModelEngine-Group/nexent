@@ -13,7 +13,7 @@ from ops.services.trajectory.access import Actor
 from ops.services.trajectory.cleanup import cleanup
 from ops.services.trajectory.primitives import QueryError, ReferenceStore
 
-ACTOR = Actor("admin", "tenant", "ADMIN")
+ACTOR = Actor("admin", "tenant", "OPS")
 
 
 def audit_events(caplog):

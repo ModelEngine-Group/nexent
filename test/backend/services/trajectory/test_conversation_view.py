@@ -12,7 +12,7 @@ from ops.services.trajectory.primitives import QueryError
 
 service = collection_fixtures.service
 
-ACTOR = Actor("admin", "t", "ADMIN")
+ACTOR = Actor("admin", "t", "OPS")
 
 
 def test_conversation_view_aggregates_all_rounds_but_summarizes_matches(service):

@@ -32,7 +32,7 @@ change:
     - frontend/tests/component/trajectoryService.test.tsx
     - frontend/tests/component/trajectoryHooks.test.tsx
     - frontend/tests/component/trajectoryComponents.test.tsx
-    - frontend/tests/component/standardDrawer.test.tsx
+    - frontend/tests/component/trajectoryDisplay.test.tsx
   notes: Primary ownership runtime via CHAT-TRAJECTORY. D4 uses a controlled HTTP
     fixture with real product components and no model/tool execution; resources are
     browser context/routes and released on failure. Formal acceptance is deferred

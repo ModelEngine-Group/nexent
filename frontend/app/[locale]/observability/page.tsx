@@ -7,6 +7,7 @@ import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { hasRole, effectiveRoles } from "@/lib/roles";
 import { ObservabilityCenter } from "./components/ObservabilityCenter";
 import "./trajectory.css";
 
@@ -21,7 +22,7 @@ export default function ObservabilityPage() {
     );
   if (
     !user ||
-    !["ADMIN", "SU"].includes(user.role) ||
+    !hasRole(user, "OPS", "SU") ||
     !accessibleRoutes.includes("/observability")
   ) {
     return (
@@ -60,7 +61,7 @@ export default function ObservabilityPage() {
       }}
     >
       <ObservabilityCenter
-        key={JSON.stringify([user.id, user.tenantId, user.role])}
+        key={JSON.stringify([user.id, user.tenantId, effectiveRoles(user)])}
         user={user}
       />
     </ConfigProvider>

@@ -179,7 +179,7 @@ describe("automatic trajectory body loading", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "trajectory.errors.invalid_parameters"
     );
-    fireEvent.wheel(view.pre(), { deltaY: 1 });
+    expect(view.pre()).toBeNull();
     expect(content).toHaveBeenCalledTimes(1);
   });
 

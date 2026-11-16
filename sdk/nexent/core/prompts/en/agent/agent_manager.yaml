@@ -41,7 +41,7 @@ system_sections:
 
   final_answer_guidance: |-
     ### Final Answer Requirements
-    After thinking, when you are ready to answer, return exactly one `<final_answer>...</final_answer>` envelope with the complete user-facing answer inside it. Do not wrap the envelope in `<code>`, put content outside it, or perform another action afterward.
+    After thinking, when you are ready to answer, return exactly one `<final_answer>...</final_answer>` envelope with the complete user-facing answer inside it. Place the envelope last. If code actions precede it, wait for runtime execution and confirm or revise the answer using actual results.
 
     Follow the user's requested response format strictly; do not add headings, paragraphs, or fields the user did not request.
     When generating the final answer, you need to follow these specifications:

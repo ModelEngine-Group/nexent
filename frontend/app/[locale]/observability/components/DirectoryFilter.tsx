@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Select, Spin } from "antd";
+import { Select, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import { trajectoryService } from "@/services/trajectoryService";
-import { StandardButton } from "@/components/common/StandardButton";
 import type {
   DirectoryOption,
   TrajectoryFacet,
@@ -125,9 +124,9 @@ export function DirectoryFilter({
         loading ? (
           <Spin size="small" />
         ) : query.isError ? (
-          <StandardButton onClick={() => void query.refetch()}>
+          <Button onClick={() => void query.refetch()}>
             {t("trajectory.retry")}
-          </StandardButton>
+          </Button>
         ) : (
           t("trajectory.noOptions")
         )
@@ -136,17 +135,17 @@ export function DirectoryFilter({
         <>
           {menu}
           {query.hasNextPage && (
-            <StandardButton
+            <Button
               loading={query.isFetchingNextPage}
               onClick={() => void query.fetchNextPage()}
             >
               {t("trajectory.loadMore")}
-            </StandardButton>
+            </Button>
           )}
           {query.isError && options.length > 0 && (
-            <StandardButton onClick={() => void query.refetch()}>
+            <Button onClick={() => void query.refetch()}>
               {t("trajectory.retry")}
-            </StandardButton>
+            </Button>
           )}
         </>
       )}

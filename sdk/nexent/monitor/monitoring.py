@@ -18,7 +18,7 @@ Installation:
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
 try:
-    from opentelemetry import metrics, trace
+    from opentelemetry import metrics, propagate, trace
     from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPSpanExporterGRPC
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTP
@@ -741,6 +741,18 @@ class MonitoringManager:
     def tracer(self):
         """Get the tracer instance."""
         return self._tracer
+
+    def get_trace_headers(self) -> Dict[str, str]:
+        """Propagate only W3C trace context across internal HTTP boundaries."""
+        if not self.is_enabled:
+            return {}
+        carrier: Dict[str, str] = {}
+        try:
+            propagate.inject(carrier)
+        except Exception:
+            logger.debug("Unable to inject telemetry context", exc_info=True)
+            return {}
+        return {key: value for key, value in carrier.items() if key in {"traceparent", "tracestate"}}
 
     def setup_fastapi_app(self, app) -> bool:
         """Setup monitoring for a FastAPI application."""

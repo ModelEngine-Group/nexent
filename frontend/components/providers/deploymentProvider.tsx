@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import {
@@ -43,7 +44,7 @@ interface DeploymentVersionResponse {
 }
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
-  const [isSpeedMode, setIsSpeedMode] = useState(false);
+  const isSpeedMode = false;
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [deploymentVersion, setDeploymentVersion] = useState("");
@@ -59,7 +60,6 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         );
         const data: DeploymentVersionResponse = await response.json();
         setDeploymentVersion(data.deployment_version);
-        setIsSpeedMode(data.deployment_version === "speed");
         setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         setEnableAgentWorkbench(data.enable_agent_workbench ?? false);
         setHideHomePage(data.hide_home_page ?? false);
@@ -68,7 +68,6 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         log.error("Failed to fetch deployment info:", error);
-        setIsSpeedMode(false);
       } finally {
         setIsDeploymentReady(true);
       }

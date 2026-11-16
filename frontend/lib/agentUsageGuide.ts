@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export function buildAgentUsageGuidePath(
   locale: string,
   agentId: number
@@ -195,12 +197,9 @@ export function isAnonymousConversationSharePath(pathname: string): boolean {
   return pathname.startsWith("/share/");
 }
 
-export function buildNorthboundRunUrl(
-  northboundBaseUrl?: string,
-  siteOrigin?: string
-): string {
-  const baseUrl = (northboundBaseUrl || siteOrigin)?.trim().replace(/\/+$/, "");
-  return `${baseUrl || "<NEXENT_BASE_URL>"}/nb/v1/chat/run`;
+export function buildNorthboundRunUrl(northboundBaseUrl?: string): string {
+  const baseUrl = northboundBaseUrl?.trim().replace(/\/+$/, "");
+  return `${baseUrl || "http://localhost:5013/api"}/nb/v1/chat/run`;
 }
 
 export function buildUserApiKeyPath(locale: string): string {

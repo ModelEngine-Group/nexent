@@ -5,6 +5,8 @@ backend image. It owns historical trajectory queries, retrieval, administrator
 cleanup settings and background summary/statistics maintenance. Runtime retains
 Agent execution, capture identity, file writing and conversation-deletion hooks.
 
+Authenticated operations also expose scope and resource inventory metadata using the existing PostgreSQL identity and permission tables.
+
 ## Local startup
 
 Use the existing Python 3.11 backend environment. From `backend/`:
@@ -45,6 +47,12 @@ requests remain on Runtime. Roles, tenant ownership, private-cache headers,
 response envelopes and opaque references retain their existing contracts.
 References are process-local; multi-replica deployments need affinity or must
 restart a query when its reference is unavailable.
+
+Health checks describe only the operations process and do not probe dependencies.
+`GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
+OPS is restricted to its tenant; SU can select any tenant or all tenants. The
+dashboard and configuration action grants are permission contracts; monitoring
+and configuration CRUD implementations are outside this change.
 
 ## Storage and process resources
 
@@ -101,3 +109,6 @@ uses a per-pod log directory to avoid concurrent rotation.
 - `ops/concurrency.py`, `ops/lifespan.py`: process-owned resources.
 - `management/db/trajectory/`: shared ORM and transactional capture/projection writes.
 - `infrastructure/observability/`: shared file primitives and Runtime capture wiring.
+
+Database identity and permission access is reused from management. Resource inventory
+selects metadata fields explicitly and excludes credentials and content.

@@ -152,7 +152,7 @@ class Catalog:
         return ['tenant']
 
     def actor_active(self, actor):
-        return actor.user_id == 'admin' and actor.role == 'ADMIN'
+        return actor.user_id == 'admin' and actor.role == 'OPS'
 
     def user_active(self, tenant_id, user_id):
         return (tenant_id, user_id) == ('tenant', 'owner')
@@ -300,7 +300,7 @@ def runtime(tmp_path, monkeypatch):
         service = TrajectoryService(reader, catalog, ReferenceStore())
         monkeypatch.setattr(api, 'get_service', lambda: service)
         monkeypatch.setattr(api, 'get_current_user_context',
-                            lambda header: ('admin', 'tenant', 'ADMIN') if header == 'admin'
+                            lambda header: ('admin', 'tenant', 'OPS') if header == 'admin'
                             else ('owner', 'tenant', 'USER'))
         app = FastAPI()
         app.state.thread_manager = threads

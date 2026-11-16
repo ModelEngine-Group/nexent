@@ -39,7 +39,7 @@ def main():
     service = TrajectoryService(store, Catalog(), ReferenceStore())
     api.get_service = lambda: service
     api.get_current_user_context = lambda header: (
-        ('admin', 'tenant', 'ADMIN') if header == 'admin' else ('owner', 'tenant', 'USER')
+        ('admin', 'tenant', 'OPS') if header == 'admin' else ('owner', 'tenant', 'USER')
     )
     app = FastAPI(lifespan=lifespan)
     app.state.thread_manager = manager

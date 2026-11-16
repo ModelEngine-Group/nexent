@@ -25,7 +25,7 @@ def _session():
 
 class TrajectoryCatalog:
     def tenants(self, actor):
-        if actor.role == "ADMIN":
+        if actor.role != "SU":
             return [actor.tenant_id]
         with _session() as session:
             rows = (
@@ -50,7 +50,7 @@ class TrajectoryCatalog:
                     UserTenant.tenant_id == actor.tenant_id,
                     UserTenant.delete_flag == "N",
                     UserAccount.delete_flag == "N",
-                    UserAccount.user_role == actor.role,
+                    UserTenant.roles.contains([actor.role]),
                 )
                 .first()
                 is not None

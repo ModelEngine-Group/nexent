@@ -41,7 +41,7 @@ def test_schedule_forbids_scope_or_policy_injection():
         CleanupScheduleRequest(enabled=True, retention_days=7, interval_seconds=60)
 
 
-@pytest.mark.parametrize("role", ["USER", "DEV", "SPEED"])
+@pytest.mark.parametrize("role", ["ADMIN", "USER", "DEV", "SPEED"])
 def test_only_administrators_can_read_or_write_schedule(repository, role):
     actor = Actor("actor", "tenant", role)
     for operation in [
@@ -95,7 +95,7 @@ def test_schedule_storage_failure_is_not_reported_as_success(repository):
 def test_invalid_stored_policy_is_unavailable_instead_of_a_bad_request(repository):
     repository.read.side_effect = ValueError("bad stored policy")
     with pytest.raises(QueryError) as raised:
-        schedule.read_schedule(Actor("admin", "tenant", "ADMIN"))
+        schedule.read_schedule(Actor("admin", "tenant", "OPS"))
     assert raised.value.status == 503
 
 
@@ -110,7 +110,7 @@ def test_dynamic_policy_reader_batches_all_tenants(repository):
 
 
 def test_admin_updates_own_tenant_and_cannot_override_scope(repository):
-    actor = Actor("admin", "tenant", "ADMIN")
+    actor = Actor("admin", "tenant", "OPS")
     assert schedule.save_schedule(actor, False, 30)["tenant_id"] == "tenant"
     repository.save.assert_called_once_with(
         "tenant", {"enabled": False, "retention_days": 30}, "admin"

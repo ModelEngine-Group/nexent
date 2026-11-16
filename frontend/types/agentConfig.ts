@@ -19,6 +19,7 @@ export type AgentConfigUpdate = Partial<
     | "is_main_agent"
     | "provide_run_summary"
     | "allow_chat_metadata"
+    | "allow_mcp_header_passthrough"
     | "enable_protocol_repair_retry"
     | "description"
     | "prompt"
@@ -130,6 +131,7 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  allow_mcp_header_passthrough?: boolean;
   /** Agent-owned model inference snapshots used by the chat runtime. */
   model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   enable_protocol_repair_retry?: boolean;
@@ -176,6 +178,7 @@ export interface Agent {
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
+  allow_mcp_header_passthrough?: boolean;
   enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;

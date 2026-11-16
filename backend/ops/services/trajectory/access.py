@@ -18,7 +18,7 @@ class Actor:
 
 
 def authorize(catalog, actor, tenant_id=None):
-    if actor.role not in {"ADMIN", "SU"}:
+    if actor.role not in {"OPS", "SU"}:
         raise QueryError("administrator_required", 403)
     if not catalog.actor_active(actor):
         raise QueryError("administrator_required", 403)

@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { Alert } from "antd";
+import { Alert, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 import type { Coverage } from "@/types/trajectory";
 
 export function TrajectoryError({
@@ -24,9 +23,7 @@ export function TrajectoryError({
       title={t(`trajectory.errors.${code}`, {
         defaultValue: t("trajectory.errors.query_unavailable"),
       })}
-      action={
-        <StandardButton onClick={retry}>{t("trajectory.retry")}</StandardButton>
-      }
+      action={<Button onClick={retry}>{t("trajectory.retry")}</Button>}
     />
   );
 }

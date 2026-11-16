@@ -90,7 +90,7 @@ beforeEach(() => {
 });
 
 describe("observability role gate", () => {
-  it("allows the tenant admin to configure their own cleanup policy", async () => {
+  it("allows the operations administrator to configure their own cleanup policy", async () => {
     api.cleanupSchedule.mockResolvedValue({
       tenant_id: "tenant",
       cleanup_time: "00:00",
@@ -100,7 +100,7 @@ describe("observability role gate", () => {
     });
     render(
       <ObservabilityCenter
-        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as never}
+        user={{ id: "admin", role: "OPS", tenantId: "tenant" } as never}
       />,
       { wrapper }
     );
@@ -125,7 +125,7 @@ describe("observability role gate", () => {
     ).toBeDisabled();
     expect(api.cleanupSchedule).not.toHaveBeenCalled();
   });
-  it.each(["USER", "DEV", "SPEED", "ASSET_OWNER"])(
+  it.each(["ADMIN", "USER", "DEV", "SPEED", "ASSET_OWNER"])(
     "denies %s without fetching protected content",
     (role) => {
       auth.mockReturnValue({
@@ -138,6 +138,35 @@ describe("observability role gate", () => {
       expect(api.records).not.toHaveBeenCalled();
     }
   );
+  it.each([
+    ["OPS", ["OPS"], true],
+    ["SU", ["SU"], true],
+    ["ADMIN", ["ADMIN", "OPS"], true],
+    ["DEV", ["DEV", "OPS"], true],
+    ["SU", [], false],
+    ["OPS", ["USER"], false],
+    ["SU", ["SU", "OPS"], false],
+  ])(
+    "uses effective role arrays for page access (%s, %j)",
+    async (role, roles, allowed) => {
+      auth.mockReturnValue({
+        isAuthzReady: true,
+        user: { id: "u", tenantId: "tenant", role, roles },
+        accessibleRoutes: ["/observability"],
+      } as unknown as AuthorizationContextType);
+      const view = render(<ObservabilityPage />, { wrapper });
+      if (allowed) {
+        await waitFor(() => expect(api.records).toHaveBeenCalled());
+        expect(
+          screen.queryByText("trajectory.forbidden")
+        ).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText("trajectory.forbidden")).toBeVisible();
+        expect(api.records).not.toHaveBeenCalled();
+      }
+      view.unmount();
+    }
+  );
   it("waits for authorization and requires the server menu grant", () => {
     auth.mockReturnValue({
       isAuthzReady: false,
@@ -148,7 +177,7 @@ describe("observability role gate", () => {
     expect(api.records).not.toHaveBeenCalled();
     auth.mockReturnValue({
       isAuthzReady: true,
-      user: { id: "u", role: "ADMIN" },
+      user: { id: "u", role: "OPS" },
       accessibleRoutes: [],
     } as unknown as AuthorizationContextType);
     view.rerender(<ObservabilityPage />);
@@ -719,7 +748,7 @@ describe("administrator page and cleanup confirmation", () => {
   const admin = {
     id: "admin",
     email: "admin@example.test",
-    role: USER_ROLES.ADMIN,
+    role: USER_ROLES.OPS,
     tenantId: "tenant",
   };
   it("shows the historical root version in the execution list", async () => {

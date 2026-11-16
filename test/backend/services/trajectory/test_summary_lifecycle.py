@@ -311,7 +311,7 @@ def test_directory_candidates_use_pg_without_file_checks(mocker):
         {"conversation_id": "123", "agent_id": "7", "user_id": "u"}
     ]
     service.catalog.agent_names.return_value = {("t", "7"): "Agent"}
-    result = directory(service, Actor("admin", "t", "ADMIN"), target_user_id="u")
+    result = directory(service, Actor("admin", "t", "OPS"), target_user_id="u")
     assert result["items"][0]["agent_name"] == "Agent"
     service.archive.manifest.assert_not_called()
 

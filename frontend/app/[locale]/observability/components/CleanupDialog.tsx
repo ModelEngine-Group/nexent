@@ -1,10 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { Alert, InputNumber } from "antd";
+import { Alert, InputNumber, Button, Modal } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
-import { StandardButton } from "@/components/common/StandardButton";
 import { useTrajectoryCleanup } from "@/hooks/trajectory/useTrajectoryCleanup";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
@@ -29,31 +27,30 @@ export function CleanupDialog({
   const partial =
     !!result && (result.pending_runs > 0 || result.failed_runs > 0);
   return (
-    <StandardModal
+    <Modal
       open
       title={t("trajectory.cleanup")}
-      closeLabel={t("trajectory.close")}
+      centered
+      closable={{ "aria-label": t("trajectory.close") }}
+      mask={{ closable: false }}
       cancelText={t("trajectory.close")}
-      confirmText={t("trajectory.confirmCleanup")}
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
+      onCancel={close}
       footer={
         <div className="flex justify-end gap-4">
-          <StandardButton onClick={close}>
+          <Button onClick={close}>
             {cleanup.running
               ? t("trajectory.stopCleanup")
               : t("trajectory.close")}
-          </StandardButton>
-          <StandardButton
-            variant="primary"
+          </Button>
+          <Button
+            type="primary"
             disabled={!valid || cleanup.running}
             onClick={() => void cleanup.start(days!, !!cleanup.error)}
           >
             {cleanup.error
               ? t("trajectory.retry")
               : t("trajectory.confirmCleanup")}
-          </StandardButton>
+          </Button>
         </div>
       }
     >
@@ -119,6 +116,6 @@ export function CleanupDialog({
           </>
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

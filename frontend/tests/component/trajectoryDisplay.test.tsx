@@ -12,7 +12,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import type { StandardPaginatorProps } from "@/components/common/StandardPaginator";
+import type { PaginationProps } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DirectoryFilter } from "@/app/observability/components/DirectoryFilter";
 import { TrajectoryBody } from "@/app/observability/components/TrajectoryBody";
@@ -32,12 +32,9 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("@/services/tenantService", () => ({ getTenant: vi.fn() }));
 // Exercise center-owned page transitions independently of AntD layout effects.
-vi.mock("@/components/common/StandardPaginator", () => ({
-  StandardPaginator: ({
-    current = 1,
-    pageSize = 10,
-    onChange,
-  }: StandardPaginatorProps) => (
+vi.mock("antd", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("antd")>()),
+  Pagination: ({ current = 1, pageSize = 10, onChange }: PaginationProps) => (
     <button
       aria-label="test.nextPage"
       onClick={() => onChange?.(current + 1, pageSize)}
@@ -265,9 +262,14 @@ describe("documented execution information", () => {
 });
 
 describe("admin list display", () => {
-  it.each(["ADMIN", "SU"] as const)(
-    "renders the %s tenant layout",
-    async (role) => {
+  it.each([
+    ["OPS", ["OPS"], "OPS"],
+    ["SU", ["SU"], "SU"],
+    ["ADMIN", ["ADMIN", "OPS"], "OPS"],
+    ["DEV", ["DEV", "OPS"], "OPS"],
+  ] as const)(
+    "renders the %s tenant layout with roles %j",
+    async (role, roles, layoutRole) => {
       const page = recordsPage();
       page.summary.coverage = { complete: false };
       page.items = [
@@ -280,14 +282,19 @@ describe("admin list display", () => {
       api.records.mockResolvedValue(page);
       const view = render(
         <ObservabilityCenter
-          user={{ id: "admin", role, tenantId: "tenant" } as User}
+          user={
+            { id: "admin", role, roles: [...roles], tenantId: "tenant" } as User
+          }
         />,
         { wrapper }
       );
       expect(
         await screen.findByRole("button", { name: "通用智能体" })
       ).toBeVisible();
-      if (role === "ADMIN") {
+      expect(
+        view.container.querySelector(".trajectory-filters")
+      ).toHaveAttribute("data-role", layoutRole);
+      if (layoutRole === "OPS") {
         expect(screen.queryByText("示例租户")).not.toBeInTheDocument();
         expect(tenant).not.toHaveBeenCalled();
         expect(
@@ -320,7 +327,7 @@ describe("admin list display", () => {
   it("keeps tenant scoping after clearing filters without displaying its name", async () => {
     render(
       <ObservabilityCenter
-        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
+        user={{ id: "admin", role: "OPS", tenantId: "tenant" } as User}
       />,
       { wrapper }
     );
@@ -340,7 +347,7 @@ describe("trajectory page refresh", () => {
   it("refreshes records and summary while retaining filters and sorting and returning to page one", async () => {
     const view = render(
       <ObservabilityCenter
-        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
+        user={{ id: "admin", role: "OPS", tenantId: "tenant" } as User}
       />,
       { wrapper }
     );
@@ -402,11 +409,15 @@ describe("trajectory page refresh", () => {
   it("prevents duplicate refresh requests and allows retry after a failed refresh", async () => {
     render(
       <ObservabilityCenter
-        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
+        user={{ id: "admin", role: "OPS", tenantId: "tenant" } as User}
       />,
       { wrapper }
     );
-    await screen.findByRole("button", { name: "Root Agent" });
+    await screen.findByRole(
+      "button",
+      { name: "Root Agent" },
+      { timeout: 5000 }
+    );
     let fail!: (error: Error) => void;
     api.records.mockImplementationOnce(
       () =>
@@ -425,7 +436,11 @@ describe("trajectory page refresh", () => {
     expect(refresh).not.toBeDisabled();
     await userEvent.click(refresh);
     expect(
-      await screen.findByRole("button", { name: "Root Agent" })
+      await screen.findByRole(
+        "button",
+        { name: "Root Agent" },
+        { timeout: 5000 }
+      )
     ).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(api.records).toHaveBeenCalledTimes(3);

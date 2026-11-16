@@ -48,7 +48,7 @@
   gap: 12px;
   align-items: end;
 }
-.trajectory-filters[data-role="ADMIN"] {
+.trajectory-filters[data-role="OPS"] {
   --trajectory-directory-columns: 3;
 }
 .trajectory-filters label {

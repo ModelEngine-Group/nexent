@@ -91,7 +91,7 @@ def test_records_never_open_files_and_freeze_pages():
         "complete": False,
         "computed_at": None,
     }
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     first = records(service, actor, {}, view="conversation", page_size=1)
     service.execution_catalog.list_records.return_value = []
     second = records(
@@ -224,14 +224,14 @@ def test_same_scope_statistics_survive_filters_and_reset_rejects_removed_members
         "conversation_count": 30,
     }
     first = records(
-        service, Actor("a", "t", "ADMIN"), {"model": "unknown"}, view="conversation"
+        service, Actor("a", "t", "OPS"), {"model": "unknown"}, view="conversation"
     )
     assert first["total"] == 0 and first["summary"]["conversation_count"] == 30
     service.execution_catalog.validate.side_effect = QueryError("snapshot_reset", 409)
     with pytest.raises(QueryError, match="snapshot_reset"):
         records(
             service,
-            Actor("a", "t", "ADMIN"),
+            Actor("a", "t", "OPS"),
             {"model": "unknown"},
             view="conversation",
             query_id=first["query_id"],
@@ -255,5 +255,5 @@ def test_list_rechecks_administrator_permission_before_returning_statistics():
     service.execution_catalog.list_records.return_value = []
     service.execution_catalog.statistics.return_value = {}
     with pytest.raises(QueryError) as caught:
-        records(service, Actor("admin", "t", "ADMIN"), {}, view="conversation")
+        records(service, Actor("admin", "t", "OPS"), {}, view="conversation")
     assert caught.value.status == 403

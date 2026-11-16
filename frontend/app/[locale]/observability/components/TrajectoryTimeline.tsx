@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Empty, Select } from "antd";
+import { Empty, Select, Button, Input } from "antd";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,8 +10,6 @@ import {
   Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
 import {
   BodyCache,
   filterTree,
@@ -231,7 +229,7 @@ export function TrajectoryTimeline({
       }}
     >
       <div className="trajectory-timeline-controls">
-        <StandardInput
+        <Input
           prefix={<Search size={14} />}
           aria-label={t("trajectory.nodeSearch")}
           placeholder={t("trajectory.nodeSearch")}
@@ -244,7 +242,7 @@ export function TrajectoryTimeline({
         />
         <div className="trajectory-tree-toolbar">
           <span>{t("trajectory.timeline")}</span>
-          <StandardButton
+          <Button
             className="trajectory-collapse-all !h-[22px] !w-[22px] !border-0 !p-0 !text-[#777]"
             aria-label={t(
               collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
@@ -272,7 +270,7 @@ export function TrajectoryTimeline({
             ) : (
               <ChevronsDownUp size={14} aria-hidden />
             )}
-          </StandardButton>
+          </Button>
         </div>
         <div className="trajectory-tree-filter">
           <span>

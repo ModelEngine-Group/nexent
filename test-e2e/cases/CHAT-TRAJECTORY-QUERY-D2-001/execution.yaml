@@ -20,6 +20,7 @@ acceptance_bindings:
   AC-08:
   - test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed
   AC-01:
+  - test_trj_query_effective_operations_roles
   - test_trj_query_existing_directory_admin_branch_and_user_reuse
   - test_trj_query_storage_states_and_tenant_migration
   - test_trj_query_unauthorized_identity_is_401_and_private

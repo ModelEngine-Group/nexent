@@ -931,6 +931,28 @@ def test_trj_query_unauthorized_identity_is_401_and_private(harness, monkeypatch
     assert response.json() == {"detail": {"code": "unauthenticated"}}
 
 
+@pytest.mark.parametrize("roles,allowed", [
+    (("OPS",), True), (("SU",), True), (("ADMIN", "OPS"), True),
+    (("DEV", "OPS"), True), (("ADMIN",), False), (("USER",), False),
+    ((), False), (("SU", "OPS"), False),
+])
+def test_trj_query_effective_operations_roles(harness, monkeypatch, roles, allowed):
+    from ops.api import trajectory as api
+
+    actor = "su" if roles == ("SU",) else "admin"
+    monkeypatch.setattr(api, "get_current_user_context", lambda _: (actor, "t1", roles))
+    response = get(harness, "/trajectory/conversations/123/snapshot", trajectory_id=harness.run.id)
+    if allowed:
+        assert data(response)["nodes"]
+        if roles != ("SU",):
+            assert get(harness, "/trajectory/conversations/123", tenant_id="t2").status_code == 404
+        harness.catalog.actors.pop(actor)
+        assert get(harness, "/trajectory/conversations/123").status_code == 403
+    else:
+        assert response.status_code == 403
+        assert response.json() == {"detail": {"code": "administrator_required"}}
+
+
 def test_trj_query_private_validation_under_api_root(harness):
     harness.app.root_path = "/api"
     response = get(
@@ -961,7 +983,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     from ops.services.trajectory.access import Actor
 
     nodes, root, _ = harness.service.load(
-        Actor("admin", "t1", "ADMIN"), row, harness.run.id, harness.service.budget()
+        Actor("admin", "t1", "OPS"), row, harness.run.id, harness.service.budget()
     )
     values = execution_values("123", meta["runs"][0], nodes, root)
     projected = ExecutionCatalog._dto(

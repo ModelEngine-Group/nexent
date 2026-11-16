@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-ONBOARDING-LAYOUT-20261015
+  change_type: bugfix
+  bug_id: MODEL-ONBOARDING-LAYOUT-20261015
+  title: Make single and batch LLM onboarding usable with one profile draft editor
+  description: Reorder basic fields into a responsive two-row layout, move profile selection into the basic form and reuse the draft editor for per-model batch configuration.
+  observed_behavior: Single onboarding spreads essential fields vertically and hides profile selection behind a manual toggle; batch rows use a different legacy configuration editor.
+  expected_behavior: Provider, credential and editable URL precede model ID, profile and display name; Other expands advanced settings; batch row drafts remain independent and use the same configuration for checking and saving.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing PW-MODEL-01 proves saved outlet and Agent behavior but does not assert basic-field layout, Other expansion or batch draft cancellation/isolation. Strengthen frontend regression assertions and record supplementary built-in-browser evidence without claiming the unchanged fixed runner proves those interactions.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Reuse onboarding UT and add targeted suggestion and batch-state regressions; no Python production behavior changes.
+    behaviors:
+    - Manual model profiles do not rewrite request model IDs or get replaced by automatic matches.
+    - Other expands advanced settings; malformed parameters still block saving.
+    - Batch configuration is local until applied, cancellation preserves prior values and rows do not share overrides.
+    - Connection checking and creation use the same configured draft; non-LLM paths are preserved.
+    - Equivalent parent rerenders retain preview readiness; changed or stale drafts remain blocked.
+    test_selectors:
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelProfileSuggestion.test.tsx
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  notes: Approved user sketch recorded in model-access-native-agent/SPEC.md and TECHNICAL-DESIGN.md. Keep actual browser/layout evidence separate from formal execution. No new D1 duplicates component UT; VLM form and transport remain outside this change.

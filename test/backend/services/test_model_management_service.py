@@ -379,6 +379,15 @@ db_mm_mod.get_model_by_display_name = _noop
 db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
 db_mm_mod.get_models_by_display_name = _get_models_by_display_name
 db_mm_mod.get_model_records = _get_model_records
+db_mm_mod.get_capacity_model_records = lambda model_types, tenant_id: []
+
+
+def _get_model_records_page(filters, tenant_id, page, page_size):
+    records = sys.modules["management.services.model.management"].get_model_records(filters, tenant_id)
+    return records[(page - 1) * page_size:page * page_size], len(records)
+
+
+db_mm_mod.get_model_records_page = _get_model_records_page
 db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
 
 
@@ -445,6 +454,7 @@ def _update_config_by_tenant_config_id(*args, **kwargs):
 
 db_tenant_cfg_mod.delete_config_by_tenant_config_id = _delete_config_by_tenant_config_id
 db_tenant_cfg_mod.get_all_configs_by_tenant_id = _get_all_configs_by_tenant_id
+db_tenant_cfg_mod.get_configs_by_tenant_id_and_keys = lambda tenant_id, keys: {}
 db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
 db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
@@ -2315,7 +2325,7 @@ def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
         },
     ]
 
-    with mock.patch.object(svc, "get_model_records", return_value=records), \
+    with mock.patch.object(svc, "get_capacity_model_records", return_value=records), \
             mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
         result = svc.get_capacity_coverage("tenant-a")
 
@@ -2331,7 +2341,7 @@ def test_get_capacity_coverage_visibility_flag_off():
     svc = import_svc("capacity")
 
     with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
-            mock.patch.object(svc, "get_model_records") as mock_get_records:
+            mock.patch.object(svc, "get_capacity_model_records") as mock_get_records:
         result = svc.get_capacity_coverage("tenant-a")
 
     assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
@@ -2450,7 +2460,7 @@ def test_get_capacity_coverage_cross_tenant_isolation():
             return list(tenant_b_rows)
         return []
 
-    with mock.patch.object(svc, "get_model_records", side_effect=get_records_by_tenant), \
+    with mock.patch.object(svc, "get_capacity_model_records", side_effect=get_records_by_tenant), \
             mock.patch.object(svc, "_capacity_suggestion_available", return_value=False):
         result_a = svc.get_capacity_coverage("tenant-a")
         result_b = svc.get_capacity_coverage("tenant-b")

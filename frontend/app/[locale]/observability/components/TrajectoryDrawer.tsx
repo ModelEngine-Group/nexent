@@ -1,11 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Spin } from "antd";
+import { Alert, Spin, Button, Drawer } from "antd";
 import { Clock3, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardDrawer } from "@/components/common/StandardDrawer";
-import { StandardButton } from "@/components/common/StandardButton";
 import {
   BodyCache,
   invalidatesTrajectory,
@@ -98,15 +96,19 @@ export function TrajectoryDrawer({
   const { fetchNextPage } = query;
   const loadNext = useCallback(() => void fetchNextPage(), [fetchNextPage]);
   return (
-    <StandardDrawer
+    <Drawer
       open
       title={t("trajectory.conversationDetail")}
-      closeLabel={t("trajectory.close")}
-      closeText={t("trajectory.close")}
+      closable={{ placement: "end", "aria-label": t("trajectory.close") }}
       onClose={onClose}
-      width="min(1800px, 98vw)"
-      maskClosable
-      bodyClassName="!pb-0"
+      size="min(1800px, 98vw)"
+      mask={{ closable: true }}
+      classNames={{
+        section: "!p-6 !shadow-[-2px_0_12px_0_rgba(0,0,0,0.08)]",
+        header: "!m-0 !h-[28px] !shrink-0 !border-0 !p-0",
+        title: "!text-[20px] !leading-[28px]",
+        body: "!flex !min-h-0 !flex-1 !overflow-y-auto !px-0 !pt-4 !pb-0",
+      }}
       footer={null}
     >
       <div className="trajectory-drawer-content">
@@ -159,12 +161,12 @@ export function TrajectoryDrawer({
                 />
               )}
               {query.hasPreviousPage && (
-                <StandardButton
+                <Button
                   loading={query.isFetchingPreviousPage}
                   onClick={() => void query.fetchPreviousPage()}
                 >
                   {t("trajectory.previousRounds")}
-                </StandardButton>
+                </Button>
               )}
               <div className="trajectory-detail-grid">
                 <TrajectoryTimeline
@@ -198,19 +200,19 @@ export function TrajectoryDrawer({
                   {t("trajectory.nodes")}
                 </small>
                 {query.hasNextPage && (
-                  <StandardButton
+                  <Button
                     disabled={!query.hasNextPage}
                     loading={query.isFetchingNextPage}
                     onClick={() => void query.fetchNextPage()}
                   >
                     {t("trajectory.loadMore")}
-                  </StandardButton>
+                  </Button>
                 )}
               </footer>
             </>
           )}
         </div>
       </div>
-    </StandardDrawer>
+    </Drawer>
   );
 }

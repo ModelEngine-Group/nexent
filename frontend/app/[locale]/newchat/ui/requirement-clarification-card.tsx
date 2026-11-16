@@ -16,11 +16,14 @@ import type {
   Nl2AgentCardAction,
   Nl2aRequirementClarificationPayload,
 } from "../adapter/remote-chat-model-adapter";
+import type { RequirementSubmission } from "./requirement-clarification-history";
 
 export const RequirementClarificationCard: FC<{
   payload: Nl2aRequirementClarificationPayload;
   disabled?: boolean;
-}> = ({ payload, disabled = false }) => {
+  sourceMessageId?: string;
+  submission?: RequirementSubmission;
+}> = ({ payload, disabled = false, sourceMessageId, submission }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
   const reactId = useId();
@@ -69,6 +72,7 @@ export const RequirementClarificationCard: FC<{
 
   return (
     <ClarificationCard
+      key={JSON.stringify([sourceMessageId ?? reactId, payload, submission])}
       dataSlot="aui-requirement-clarification"
       title={t(
         "nl2agent.requirementClarification.title",
@@ -91,6 +95,8 @@ export const RequirementClarificationCard: FC<{
         otherInputExpanded: question.other_input_expanded,
       }))}
       disabled={disabled || !isCardInteractive(cardKey)}
+      initialAnswers={submission?.answers}
+      submitted={submission !== undefined}
       otherLabel={t("nl2agent.requirementClarification.other", "Other")}
       submitLabel={t("nl2agent.requirementClarification.submit", "Submit")}
       submittedLabel={t(

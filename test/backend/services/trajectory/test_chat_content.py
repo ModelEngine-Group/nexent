@@ -9,7 +9,7 @@ from ops.services.trajectory.access import Actor
 from ops.services.trajectory.primitives import QueryError, ReferenceStore
 from ops.services.trajectory.service import TrajectoryService
 
-ACTOR = Actor("admin", "tenant", "ADMIN")
+ACTOR = Actor("admin", "tenant", "OPS")
 
 
 @pytest.fixture

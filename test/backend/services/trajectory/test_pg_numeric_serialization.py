@@ -72,7 +72,7 @@ def test_pg_token_numbers_survive_json_cache_response_and_frozen_paging(
         queries=ByteCache(),
         references=ReferenceStore(),
     )
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     first = records(service, actor, {}, view=view, sort_by="total_tokens", page_size=1)
     assert first["items"][0]["root_agent_version_no"] == (1 if builtin else 0)
     assert row["agent_version_no"] == 0

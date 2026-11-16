@@ -12,9 +12,9 @@ import { monitoringService } from "@/services/monitoringService";
 export function useAccountMonitoring() {
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
-  const enabled = isSpeedMode || !!user;
+  const enabled = !!user;
   const { data: status } = useQuery({
-    queryKey: ["account-monitoring-status", user?.id, user?.role, isSpeedMode],
+    queryKey: ["account-monitoring-status", user?.id, user?.role, user?.roles],
     queryFn: monitoringService.fetchStatus,
     enabled,
     retry: false,
@@ -23,7 +23,7 @@ export function useAccountMonitoring() {
   return enabled &&
     status?.telemetry_enabled &&
     canViewMonitoringDashboard(
-      user?.role,
+      user?.roles ?? user?.role,
       isSpeedMode,
       status.dashboard_allowed_roles
     )

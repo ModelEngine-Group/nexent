@@ -3,6 +3,8 @@
 
 from contracts.constants.environment import APP_VERSION
 from fastapi import FastAPI
+from management.utils.exception_handlers import register_exception_handlers
+from ops.api.access import router as access_router
 from ops.api.health import router as health_router
 from ops.lifespan import ops_lifespan, trajectory_enabled
 
@@ -16,6 +18,8 @@ def create_app() -> FastAPI:
         root_path="/api",
     )
     application.state.ready = False
+    register_exception_handlers(application)
+    application.include_router(access_router)
     application.include_router(health_router)
     if trajectory_enabled():
         from ops.api.trajectory import router as trajectory_router

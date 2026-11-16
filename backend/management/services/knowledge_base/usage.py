@@ -32,6 +32,8 @@ from management.services.knowledge_base.quota_common import (
     _personal_quota_key,
     _platform_allocation_lock,
     _usage_cache,
+    usage_refresh_guard,
+    store_usage_cache,
     bytes_to_readable,
     delete_config_by_tenant_config_id,
     get_committed_bytes_by_kb,
@@ -509,29 +511,31 @@ class KnowledgeUsageAccounting:
         Aggregate storage usage across all tenant KBs from MinIO/ES.
         Results are cached with 60s TTL. force_refresh bypasses cache.
         """
-        cache_key = self.tenant_id
+        with usage_refresh_guard(self.tenant_id) as generation:
+            cache_key = self.tenant_id
 
-        # Check cache
-        now = time.time()
-        if not force_refresh and cache_key in _usage_cache:
-            cached_time, cached_data = _usage_cache[cache_key]
-            if now - cached_time < CACHE_TTL_SECONDS:
-                if not detail:
-                    # Return without breakdown for non-detail requests
-                    result = dict(cached_data)
-                    result.pop("breakdown", None)
-                    return result
-                return dict(cached_data)
+            # Check cache
+            now = time.time()
+            cached = _usage_cache.get(cache_key)
+            if not force_refresh and cached is not None:
+                cached_time, cached_data = cached
+                if now - cached_time < CACHE_TTL_SECONDS:
+                    if not detail:
+                        # Return without breakdown for non-detail requests
+                        result = dict(cached_data)
+                        result.pop("breakdown", None)
+                        return result
+                    return dict(cached_data)
 
-        # Compute usage by querying file sizes from MinIO/ES
-        usage_data = self._compute_usage()
-        _usage_cache[cache_key] = (now, dict(usage_data))
+            # Compute usage by querying file sizes from MinIO/ES
+            usage_data = self._compute_usage()
+            store_usage_cache(cache_key, now, usage_data, generation)
 
-        if not detail:
-            result = dict(usage_data)
-            result.pop("breakdown", None)
-            return result
-        return dict(usage_data)
+            if not detail:
+                result = dict(usage_data)
+                result.pop("breakdown", None)
+                return result
+            return dict(usage_data)
 
     def _compute_usage(self) -> Dict[str, Any]:
         """

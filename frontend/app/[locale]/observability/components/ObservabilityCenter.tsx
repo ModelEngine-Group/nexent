@@ -1,7 +1,16 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useState } from "react";
-import { DatePicker, Popover, Tag, Tooltip } from "antd";
+import {
+  DatePicker,
+  Popover,
+  Tag,
+  Tooltip,
+  Button,
+  Input,
+  Table,
+  Pagination,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ChevronRight,
@@ -16,6 +25,7 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { useTranslation } from "react-i18next";
 import type { User } from "@/types/auth";
+import { effectiveRoles, hasRole } from "@/lib/roles";
 import type {
   DirectoryField,
   DirectoryOption,
@@ -23,10 +33,6 @@ import type {
   TrajectoryFilters,
   TrajectoryRecord,
 } from "@/types/trajectory";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardTable } from "@/components/common/StandardTable";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
 import { useTrajectoryRecords } from "@/hooks/trajectory/useTrajectoryRecords";
 import {
   formatMetric,
@@ -48,8 +54,9 @@ dayjs.extend(timezone);
 
 export function ObservabilityCenter({ user }: { user: User }) {
   const { t } = useTranslation();
+  const isSuperAdmin = hasRole(user, "SU");
   const initial = (): TrajectoryFilters =>
-    user.role === "ADMIN" ? { tenant_id: user.tenantId } : {};
+    isSuperAdmin ? {} : { tenant_id: user.tenantId };
   const [filters, setFilters] = useState<TrajectoryFilters>(initial);
   const [directoryLabels, setDirectoryLabels] = useState<
     Partial<Record<DirectoryField, string>>
@@ -62,7 +69,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [selected, setSelected] = useState<TrajectoryRecord | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
-  const scope = JSON.stringify([user.id, user.tenantId, user.role]);
+  const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
   const records = useTrajectoryRecords(scope, {
     view: "conversation",
     ...filters,
@@ -300,7 +307,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
                     })
                   }
                 />
-                <StandardButton
+                <Button
                   onClick={() =>
                     change({
                       ...filters,
@@ -310,7 +317,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
                   }
                 >
                   {t("trajectory.clear")}
-                </StandardButton>
+                </Button>
               </div>
             }
           >
@@ -339,7 +346,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
       render: (_, row) => <code>{row.conversation_id}</code>,
     },
   ];
-  if (user.role === "SU")
+  if (isSuperAdmin)
     columns.splice(8, 0, {
       title: t("trajectory.tenants"),
       width: 150,
@@ -358,7 +365,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
-          <StandardButton
+          <Button
             aria-label={t("common.refresh")}
             icon={<RefreshCw size={14} />}
             loading={records.isFetching}
@@ -366,36 +373,36 @@ export function ObservabilityCenter({ user }: { user: User }) {
             onClick={refresh}
           >
             {t("common.refresh")}
-          </StandardButton>
+          </Button>
           <Tooltip title={tenant ? "" : t("trajectory.scheduleSelectTenant")}>
             <span>
-              <StandardButton
+              <Button
                 icon={<Clock3 size={14} />}
                 disabled={!tenant}
                 onClick={() => setScheduling(true)}
               >
                 {t("trajectory.scheduledCleanup")}
-              </StandardButton>
+              </Button>
             </span>
           </Tooltip>
           <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
             <span>
-              <StandardButton
+              <Button
                 icon={<Trash2 size={14} />}
                 disabled={!canCleanup}
                 onClick={() => setCleaning(true)}
               >
                 {t("trajectory.cleanup")}
-              </StandardButton>
+              </Button>
             </span>
           </Tooltip>
         </div>
       </header>
       <section
         className="trajectory-panel trajectory-filters"
-        data-role={user.role}
+        data-role={isSuperAdmin ? "SU" : "OPS"}
       >
-        {user.role === "SU" && (
+        {isSuperAdmin && (
           <label>
             <span>{t("trajectory.tenants")}</span>
             <DirectoryFilter
@@ -445,7 +452,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
         </label>
         <label className="trajectory-id-filter">
           <span>{t("trajectory.idSearchLabel")}</span>
-          <StandardInput
+          <Input
             prefix={<Search size={14} />}
             suffix={
               <button
@@ -469,13 +476,12 @@ export function ObservabilityCenter({ user }: { user: User }) {
             }}
           />
         </label>
-        <StandardButton onClick={clear}>{t("trajectory.clear")}</StandardButton>
+        <Button onClick={clear}>{t("trajectory.clear")}</Button>
       </section>
       <div className="trajectory-active-filters">
         {Object.entries(filters)
           .filter(
-            ([key, value]) =>
-              !!value && !(user.role === "ADMIN" && key === "tenant_id")
+            ([key, value]) => !!value && !(!isSuperAdmin && key === "tenant_id")
           )
           .map(([key, value]) => (
             <Tag
@@ -520,7 +526,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
             {t("trajectory.total", { count: records.data?.total ?? 0 })}
           </span>
         </div>
-        <StandardTable<TrajectoryRecord>
+        <Table<TrajectoryRecord>
           className="trajectory-table [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
           size="middle"
           rowKey={recordKey}
@@ -528,7 +534,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           dataSource={records.data?.items ?? []}
           loading={records.isFetching}
           pagination={false}
-          scroll={{ x: user.role === "SU" ? 1776 : 1626 }}
+          scroll={{ x: isSuperAdmin ? 1776 : 1626 }}
           locale={{
             emptyText: records.isError
               ? t("trajectory.queryFailed")
@@ -561,7 +567,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           }}
         />
         <div className="mt-4 flex justify-end">
-          <StandardPaginator
+          <Pagination
             current={paging.page}
             pageSize={paging.page_size}
             total={records.data?.total ?? 0}

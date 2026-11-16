@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BranchConversationRequest, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
 from contracts.agent import WorkbenchConfigUpdateRequest
 from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError, AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, AgentDraftEditError, WorkbenchConfigVersionConflict, WorkbenchError
@@ -12,6 +12,7 @@ from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
 from management.db.conversation.repository import get_conversation_list_page
 from management.services.conversation.service import (
+    branch_conversation_service,
     create_new_conversation,
     delete_conversation_service,
     delete_conversations_batch_service,
@@ -30,9 +31,34 @@ from management.services.conversation.agent_history import (
     list_agent_groups,
 )
 from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from contracts.clarification import ClarificationResponse
+from contracts.errors.exceptions import UnauthorizedError
+from management.services.conversation.creation_mode import confirm_creation_mode
 
 
 router = APIRouter(prefix="/conversation")
+
+
+@router.post("/{conversation_id}/creation_mode_responses", response_model=ConversationResponse)
+def confirm_creation_mode_endpoint(
+    conversation_id: Annotated[int, Path(gt=0, le=2147483647)],
+    response: "ClarificationResponse",
+    authorization: Optional[str] = Header(None),
+):
+    """Record an owned AI confirmation without running a model or creating resources."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = confirm_creation_mode(conversation_id, response, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=data)
+    except (TokenExpiredError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=401, detail="Please login first") from exc
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Workbench conversation not found") from exc
+    except (ValidationError, AppException) as exc:
+        raise HTTPException(status_code=422, detail="Creation confirmation is invalid or no longer available") from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Failed to record creation confirmation")
+        raise HTTPException(status_code=500, detail="Failed to record creation confirmation") from exc
 
 
 @router.get("/agent_groups", response_model=ConversationResponse)
@@ -267,6 +293,55 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/branch", response_model=ConversationResponse)
+async def branch_conversation_endpoint(
+    request: BranchConversationRequest, authorization: Optional[str] = Header(None)
+):
+    """
+    Branch a conversation into a new one up to and including the given turn
+
+    Args:
+        request: BranchConversationRequest object containing:
+            - conversation_id: Source conversation ID
+            - turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        authorization: Authorization header
+
+    Returns:
+        ConversationResponse object containing:
+            - conversation_id: New conversation ID
+            - conversation_title: New conversation title (suffixed with the branch marker)
+            - branched_message_count: Number of copied messages
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        target = {
+            key: value
+            for key, value in request.model_dump(include={"source_message_id", "answer_index"}).items()
+            if value is not None
+        }
+        branched = branch_conversation_service(
+            request.conversation_id, request.turn_index, user_id, **target
+        )
+        return ConversationResponse(code=0, message="success", data=branched)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except AppException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception(f"Failed to branch conversation: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to branch conversation",
+        ) from e
 
 
 @router.delete("/{conversation_id}", response_model=ConversationResponse)

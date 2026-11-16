@@ -296,14 +296,11 @@ async def test_su_can_access_manage_endpoints(su_client, mocker):
 
 
 @pytest.mark.asyncio
-async def test_speed_role_bypasses_permission_checks(mocker):
-    """SPEED passes require() without seeds, matching permissions.depends."""
-    mocker.patch('permissions.depends.IS_SPEED_MODE', True)
-
+async def test_retired_speed_role_cannot_access_models(mocker):
     client = _make_client(mocker, "SPEED", set())
-    mocker.patch(
-        'management.api.model.model_managment.list_models_for_tenant',
-        return_value=[],
-    )
+    list_models = mocker.patch("management.api.model.model_managment.list_models_for_tenant")
+
     response = client.get("/model/list", headers=auth_header)
-    assert response.status_code == HTTPStatus.OK
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    list_models.assert_not_called()

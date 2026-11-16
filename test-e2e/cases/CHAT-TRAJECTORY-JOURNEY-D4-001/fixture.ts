@@ -8,7 +8,7 @@ export async function installTrajectoryFixture(
   base = process.env.NEXENT_BASE_URL || "http://localhost:3000",
 ) {
   const state = {
-    role: "ADMIN",
+    role: "OPS",
     records: [] as URL[],
     reads: [] as URL[],
     cleanups: [] as Record<string, unknown>[],
@@ -136,7 +136,7 @@ export async function installTrajectoryFixture(
       JSON.stringify({
         id: "administrator",
         email: "fixture@example.test",
-        role: "ADMIN",
+        role: "OPS",
         tenantId: "tenant",
       }),
     );
@@ -148,7 +148,7 @@ export async function installTrajectoryFixture(
     let data: unknown = {};
     if (
       path.includes("/trajectory/") &&
-      !["ADMIN", "SU"].includes(state.role)
+      !["OPS", "SU"].includes(state.role)
     ) {
       await route.fulfill({
         status: 403,
@@ -334,7 +334,7 @@ export async function installTrajectoryFixture(
               permissions: [],
               accessibleRoutes: [
                 "/",
-                ...(["ADMIN", "SU"].includes(state.role)
+                ...(["OPS", "SU"].includes(state.role)
                   ? ["/observability"]
                   : []),
               ],

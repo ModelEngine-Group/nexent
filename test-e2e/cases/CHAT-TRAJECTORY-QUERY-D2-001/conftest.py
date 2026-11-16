@@ -27,8 +27,8 @@ class Catalog:
         self.builtin_ids = set()
         self.members = {("t1", "u1"), ("t2", "u2")}
         self.actors = {
-            "admin": ("t1", "ADMIN"),
-            "admin2": ("t2", "ADMIN"),
+            "admin": ("t1", "OPS"),
+            "admin2": ("t2", "OPS"),
             "su": ("t1", "SU"),
         }
 
@@ -205,9 +205,9 @@ def harness(tmp_path, monkeypatch):
 
             raise TokenExpiredError("Missing session")
         if header == "user":
-            return "u1", "t1", "USER"
-        tenant, role = catalog.actors.get(header, ("t1", "ADMIN"))
-        return header, tenant, role
+            return "u1", "t1", ("USER",)
+        tenant, role = catalog.actors.get(header, ("t1", "OPS"))
+        return header, tenant, (role,)
 
     monkeypatch.setattr(api, "get_current_user_context", context)
     monkeypatch.setattr(api, "get_service", lambda: service)

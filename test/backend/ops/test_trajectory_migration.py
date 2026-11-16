@@ -85,7 +85,11 @@ def test_query_lanes_are_owned_by_ops():
     assert "trajectory-cleanup" not in ast.unparse(runtime)
 
 
-@pytest.mark.parametrize("role,expected", [("ADMIN", 200), ("USER", 403), ("", 401)])
+@pytest.mark.parametrize("role,expected", [
+    (("OPS",), 200), (("SU",), 200), (("ADMIN", "OPS"), 200),
+    (("DEV", "OPS"), 200), (("ADMIN",), 403), (("USER",), 403),
+    (("DEV",), 403), (("SU", "OPS"), 403), ((), 401),
+])
 def test_enabled_ops_serves_private_queries_on_existing_api_prefix(
     monkeypatch, role, expected
 ):
@@ -127,6 +131,7 @@ def test_enabled_ops_serves_private_queries_on_existing_api_prefix(
             assert response.json()["data"] == {"items": [], "total": 0}
             assert records.call_args.args[0] is service
             assert records.call_args.args[1].tenant_id == "tenant"
+            assert records.call_args.args[1].role == ("SU" if "SU" in role else "OPS")
         else:
             records.assert_not_called()
         invalid = client.get(

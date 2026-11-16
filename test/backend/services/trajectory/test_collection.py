@@ -87,7 +87,7 @@ def service():
 
 
 def test_aggregate_is_not_page_dependent_and_query_members_are_fixed(service):
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     first = records(
         service, actor, {}, page_size=1, sort_by="duration_ms", sort_order="asc"
     )
@@ -114,7 +114,7 @@ def test_aggregate_is_not_page_dependent_and_query_members_are_fixed(service):
 
 
 def test_model_and_child_id_filtering_empty_values(service):
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     found = records(service, actor, {"id_query": " CHILD-2 ", "model": "model"})
     assert found["total"] == 1 and found["summary"]["duration"]["mean_ms"] == 20
     empty = records(service, actor, {"model": "missing"})
@@ -134,7 +134,7 @@ def test_list_projects_historical_root_version_not_child_or_current_agent(servic
         return nodes, root, coverage
 
     service.load.side_effect = load
-    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    result = records(service, Actor("admin", "t", "OPS"), {})
     assert all(row["root_agent_version_no"] == 3 for row in result["items"])
     assert all(
         row["root_agent_version_name"] == "Historical release"
@@ -151,13 +151,13 @@ def test_list_projects_historical_root_version_not_child_or_current_agent(servic
 )
 def test_missing_agent_display_name_never_uses_id_or_another_tenant(service, names):
     service.catalog.agent_names.return_value = names
-    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    result = records(service, Actor("admin", "t", "OPS"), {})
     assert result["items"]
     assert all(row["root_agent_name"] is None for row in result["items"])
 
 
 def test_old_archive_root_version_stays_unknown(service):
-    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    result = records(service, Actor("admin", "t", "OPS"), {})
     assert all(row["root_agent_version_no"] is None for row in result["items"])
     assert all(row["root_agent_version_name"] is None for row in result["items"])
 
@@ -172,7 +172,7 @@ def test_roles_cannot_be_promoted_by_filters(service, role):
 
 def test_foreign_scope_and_revoked_actor_are_rejected(service):
     with pytest.raises(QueryError) as exc:
-        authorize(service.catalog, Actor("admin", "t", "ADMIN"), "other")
+        authorize(service.catalog, Actor("admin", "t", "OPS"), "other")
     assert exc.value.status == 404
     service.catalog.actor_active.return_value = False
     with pytest.raises(QueryError) as exc:
@@ -181,7 +181,7 @@ def test_foreign_scope_and_revoked_actor_are_rejected(service):
 
 
 def test_expired_query_and_budget_never_return_partial_totals(service):
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     data = records(service, actor, {})
     service.queries.entries.clear()
     with pytest.raises(QueryError, match="snapshot_reset"):
@@ -202,7 +202,7 @@ def test_expired_query_and_budget_never_return_partial_totals(service):
     ],
 )
 def test_manifest_filters_avoid_body_io_without_changing_empty_totals(service, filters):
-    response = records(service, Actor("admin", "t", "ADMIN"), filters)
+    response = records(service, Actor("admin", "t", "OPS"), filters)
     assert (
         response["total"] == 0 and response["summary"]["duration"]["sample_count"] == 0
     )
@@ -215,7 +215,7 @@ def test_facet_rechecks_owner_after_reading_candidate_names(service):
     service.catalog.agent_names.return_value = {("t", "7"): "Agent"}
     service.catalog.resolve.side_effect = QueryError("trajectory_not_found", 404)
     with pytest.raises(QueryError, match="trajectory_not_found"):
-        facets(service, Actor("admin", "t", "ADMIN"), {}, "agents")
+        facets(service, Actor("admin", "t", "OPS"), {}, "agents")
 
 
 @pytest.mark.parametrize(
@@ -232,7 +232,7 @@ def test_facet_rechecks_owner_after_reading_candidate_names(service):
     ],
 )
 def test_conversation_and_placeholder_availability(service, state, expected, active):
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     meta = service.archive.manifest.return_value
     ready = meta["runs"][0]
     pending = {
@@ -285,7 +285,7 @@ def test_conversation_and_placeholder_availability(service, state, expected, act
 
 
 def test_unarchived_placeholder_survives_publication_until_query_refresh(service):
-    actor = Actor("admin", "t", "ADMIN")
+    actor = Actor("admin", "t", "OPS")
     meta = service.archive.manifest.return_value
     meta["runs"][:] = meta["runs"][:1]
     run = meta["runs"][0]
@@ -327,7 +327,7 @@ def test_unarchived_placeholder_does_not_fabricate_filter_matches(service, filte
         run["publication_no"] = None
         run["capture_state"] = "writing"
     meta["publication_no"] = 0
-    result = records(service, Actor("admin", "t", "ADMIN"), filters)
+    result = records(service, Actor("admin", "t", "OPS"), filters)
     assert result["total"] == 0
     assert result["summary"]["conversation_count"] == 0
     service.load.assert_not_called()
@@ -336,7 +336,7 @@ def test_unarchived_placeholder_does_not_fabricate_filter_matches(service, filte
 
 def test_builtin_list_versions_use_identity_and_keep_normal_drafts(service):
     service.catalog.builtin_agent_ids.return_value = {("t", "7")}
-    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    result = records(service, Actor("admin", "t", "OPS"), {})
     assert all(row["root_agent_version_no"] == 1 for row in result["items"])
     assert all(row["root_agent_version_name"] == "V1" for row in result["items"])
     service.catalog.builtin_agent_ids.assert_called_once_with(["t"], {"7"})

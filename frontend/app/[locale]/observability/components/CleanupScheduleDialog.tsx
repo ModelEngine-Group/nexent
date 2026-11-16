@@ -1,10 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useState } from "react";
-import { Alert, InputNumber, Spin, Switch } from "antd";
+import { Alert, InputNumber, Spin, Switch, Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardModal } from "@/components/common/StandardModal";
-import { StandardButton } from "@/components/common/StandardButton";
 import { useCleanupSchedule } from "@/hooks/trajectory/useCleanupSchedule";
 import { TrajectoryError } from "./TrajectoryFeedback";
 
@@ -41,22 +39,19 @@ export function CleanupScheduleDialog({
     );
   };
   return (
-    <StandardModal
+    <Modal
       open
       title={t("trajectory.scheduledCleanup")}
-      closeLabel={t("trajectory.close")}
+      centered
+      closable={{ "aria-label": t("trajectory.close") }}
+      mask={{ closable: false }}
       cancelText={t("trajectory.close")}
-      confirmText={t("trajectory.saveSchedule")}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
+      onCancel={onClose}
       footer={
         <div className="flex justify-end gap-4">
-          <StandardButton onClick={onClose}>
-            {t("trajectory.close")}
-          </StandardButton>
-          <StandardButton
-            variant="primary"
+          <Button onClick={onClose}>{t("trajectory.close")}</Button>
+          <Button
+            type="primary"
             disabled={
               !valid || !query.data || query.isError || mutation.isPending
             }
@@ -67,7 +62,7 @@ export function CleanupScheduleDialog({
                 ? "trajectory.savingSchedule"
                 : "trajectory.saveSchedule"
             )}
-          </StandardButton>
+          </Button>
         </div>
       }
     >
@@ -131,6 +126,6 @@ export function CleanupScheduleDialog({
           />
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

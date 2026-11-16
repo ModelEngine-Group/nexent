@@ -84,7 +84,10 @@ beforeEach(() => {
     }
   );
 });
-function setup(conversationId: number | undefined) {
+function setup(
+  conversationId: number | undefined,
+  draftScope = "fresh-thread"
+) {
   return render(
     <QueryClientProvider
       client={
@@ -94,7 +97,7 @@ function setup(conversationId: number | undefined) {
       <App>
         <ModelSelector
           conversationId={conversationId}
-          parameterSettingsScopeKey="fresh-thread"
+          parameterSettingsScopeKey={draftScope}
           defaultOpen
           models={[
             {
@@ -150,7 +153,6 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
     11,
     42,
     {
-
       parameter_values: { temperature: 0.31, top_p: 0.72 },
       delete_parameters: [],
     }
@@ -174,7 +176,6 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
     11,
     42,
     {
-
       parameter_values: {},
       delete_parameters: ["temperature", "top_p"],
     }
@@ -241,7 +242,6 @@ it("UI-SESSION-15 resets an effort by deletion and clears inactive reasoning whe
       11,
       42,
       {
-
         parameter_values: {},
         delete_parameters: ["reasoning_effort"],
       }
@@ -260,7 +260,6 @@ it("UI-SESSION-15 resets an effort by deletion and clears inactive reasoning whe
       11,
       42,
       {
-
         parameter_values: { enable_thinking: false },
         delete_parameters: ["reasoning_effort"],
       }
@@ -376,3 +375,47 @@ it("TD-03 shows declared reasoning without controls as always on", async () => {
   fireEvent.click(screen.getByRole("switch"));
   expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
 });
+
+it("AC-010 keeps a confirmed shutdown restriction in the conversation quick control", async () => {
+  saved.reasoning_status = "supported";
+  saved.reasoning_can_disable = false;
+  saved.defaults.enable_thinking = true;
+  setup(11);
+  await waitFor(() => expect(screen.getByRole("switch")).toBeChecked());
+  expect(screen.getByRole("switch")).toBeDisabled();
+  fireEvent.click(screen.getByRole("switch"));
+  expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+});
+
+it.each([false, true, null])(
+  "first-turn controls preserve can_disable=%s without a forbidden draft",
+  async (canDisable) => {
+    saved.defaults.enable_thinking = true;
+    api.getModelOutlet.mockResolvedValue({
+      config_revision: 7,
+      profile: {
+        parameter_values: saved.defaults,
+        capabilities: {
+          reasoning: { status: "supported", can_disable: canDisable },
+        },
+      },
+      field_specs: saved.field_specs,
+    });
+    const scope = `first-turn-restriction-${canDisable}`;
+    setup(undefined, scope);
+    const toggle = screen.getByRole("switch");
+    await waitFor(() => expect(toggle).toBeChecked());
+    if (canDisable === false) {
+      expect(toggle).toBeDisabled();
+      fireEvent.click(toggle);
+      expect(readModelDraft(scope, 42)).toEqual({});
+    } else {
+      await waitFor(() => expect(toggle).toBeEnabled());
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(readModelDraft(scope, 42)).toEqual({ enable_thinking: false })
+      );
+    }
+    expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+  }
+);

@@ -5,6 +5,7 @@ import logging
 from typing import Annotated
 
 from contracts.errors.exceptions import UnauthorizedError
+from contracts.roles import has_any_role
 from contracts.trajectory import CleanupRequest, CleanupScheduleRequest, RecordsQuery
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -52,12 +53,12 @@ router = APIRouter(prefix="/trajectory", route_class=PrivateRoute)
 
 async def dispatch(request, authorization, operation, *, lane="trajectory-read", needs_service=True):
     def work(cancel_event):
-        user, tenant, role = get_current_user_context(authorization)
+        user, tenant, roles = get_current_user_context(authorization)
         if not user:
             raise QueryError("unauthenticated", 401)
-        actor = Actor(user, tenant, role)
-        if role not in {"ADMIN", "SU"}:
+        if not has_any_role(roles, {"OPS", "SU"}):
             raise QueryError("administrator_required", 403)
+        actor = Actor(user, tenant, "SU" if has_any_role(roles, {"SU"}) else "OPS")
         token = CURRENT_CANCEL.set(cancel_event)
         try:
             return operation(get_service() if needs_service else None, actor)
