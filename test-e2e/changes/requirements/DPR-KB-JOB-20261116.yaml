@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-JOB-20261116
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Persist Runtime KB request identity, writer fencing, visibility and tombstones
+  description: >-
+    Runtime owns durable upload/delete jobs and authoritative file visibility through RecordStore.
+    Current owner/attempt and file CAS fence publication; deletion hides covered versions and
+    cannot report physical completion while a writer may still write. No automatic replay or retry is added.
+  affected_features:
+    existing: []
+    added: [DPR-KNOWLEDGE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DPR-KB-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve deterministic request identity, full-payload conflicts and user/tenant ownership.
+    - Persist execution intent before writes, fence expired attempts and keep unknown outcomes from replay.
+    - Publish job and visible generation atomically and roll back failures.
+    - Hide deleted generations immediately and require all covered writers to end before confirmed cleanup.
+    reason: >-
+      New isolated state tests execute real SQLite RecordStore and Runtime policy. Actual PostgreSQL
+      D3 adds migration, concurrent CAS and non-UTC audit proof beyond unit assertions. Existing D1
+      stays unchanged; the case does not prove actual vector cleanup, models or signed transport.
+    test_selectors:
+    - test/backend/services/test_knowledge_jobs.py
+  notes: >-
+    Self-contained preparation uses only an owned disposable database and controlled authorization,
+    clock and physical-absence receipt. Feature routing is explicitly Runtime. Full retirement remains pending.

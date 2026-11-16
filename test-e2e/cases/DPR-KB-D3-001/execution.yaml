@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-KB-D3-001
+timeout_seconds: 150
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_durable_knowledge_visibility
+acceptance_bindings:
+  AC-01: [test_durable_knowledge_visibility]
+  AC-02: [test_durable_knowledge_visibility]
+  AC-03: [test_durable_knowledge_visibility]
+  AC-04: [test_durable_knowledge_visibility]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

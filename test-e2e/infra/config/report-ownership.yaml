@@ -74,6 +74,7 @@ domains:
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
   DPR-CLEANSE: knowledge
+  DPR-KNOWLEDGE: runtime
   AOS-MODEL: model
   AOS-TRANSPORT: runtime
   SI-STORAGE: system

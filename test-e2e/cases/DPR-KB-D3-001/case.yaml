@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-KB-D3-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-002, DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02, DPR-KNOWLEDGE-RULE-03]
+  title: Durable Runtime KB visibility and deletion fencing through PostgreSQL
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual migration, scoped record transactions, concurrent CAS and logical deletion with durable writer obligations.
+  preconditions:
+  - Docker and the cached postgres:15-alpine image are available.
+  test_data:
+    resources: One disposable PostgreSQL container with a loopback-only port and synthetic tenant, user and file references.
+    boundaries: Resource authorization is controlled; no models, vectors or application storage are used.
+  steps:
+  - order: 1
+    action: Start the owned database, execute the Runtime job migration twice and inspect schema comments and constraints.
+    expected: Both runs succeed; every column is commented and neither table introduces foreign keys or non-primary unique constraints.
+  - order: 2
+    action: Admit and replay an upload, attempt a changed payload and inspect it as another user and tenant.
+    expected: Replay preserves the job ID; changed payload conflicts and other ownership scopes cannot inspect it.
+  - order: 3
+    action: Submit two replacement requests through separate managed workers after synchronizing their stale manifest revisions.
+    expected: One transaction wins, the other reports Conflict, and no orphan job is committed by the losing transaction.
+  - order: 4
+    action: Begin an execution, expire its lease, then publish a separate completed file, delete it and submit a late completion.
+    expected: Started execution cannot be reclaimed; visible publication is atomic and deletion hides its version permanently.
+  - order: 5
+    action: Delete a file with an active writer, confirm its actual closure through the state contract, and finish cleanup only with an explicit absence receipt.
+    expected: Cleanup remains pending until writer closure; the confirmed delete is idempotent and no covered version can be admitted again.
+  - order: 6
+    action: Inspect UTC audit values under the non-UTC session and close handles, engine and owned container including anonymous volumes.
+    expected: Audit timestamps represent the observed UTC interval and no owned resources remain.
+  expected_results:
+  - Runtime records and migration preserve scope, schema integrity and comments.
+  - Concurrent admission and publication use real database transactions and CAS without automatic retry.
+  - Deleted versions cannot become visible again and unended writers block physical completion.
+  - Owned resources are released and UTC audit values remain correct.
+  forbidden_side_effects:
+  - No application database, Management tables, model requests or vector cleanup are touched or claimed as verified.
+  integration_boundary:
+  - Actual PostgreSQL migration, production RecordStore and Runtime KnowledgeJobs; controlled authorization, clock, admission barrier and explicit physical-absence receipt.
+  observations:
+  - Stable job IDs, failed CAS with one committed replacement, writer flags, visible generation and tombstone.
+  cleanup:
+  - Close owned handles and engine, remove the uniquely named test container and its anonymous volumes, including startup failure.
+  acceptance:
+  - id: AC-01
+    description: Actual migration and scoped idempotent admission preserve schema and ownership.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Concurrent CAS and execution fencing preserve a single current visible generation.
+    steps: [3, 4]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Logical deletion fences publication and requires writer closure before confirmed cleanup.
+    steps: [4, 5]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: UTC audit and owned cleanup are verified.
+    steps: [6]
+    expected_results: [4]
+    forbidden_side_effects: [1]

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-KNOWLEDGE
+  name: Runtime KnowledgeBase
+feature:
+  feature_id: DPR-KNOWLEDGE
+  name: Runtime knowledge execution and authoritative visibility
+  status: active
+  description: Runtime-owned ingestion jobs, writer fencing, visible versions and deletion high-water marks through StorageInterface.
+  business_rules:
+  - rule_id: DPR-KNOWLEDGE-RULE-01
+    description: Admission binds immutable request identity to its tenant, user and file version.
+  - rule_id: DPR-KNOWLEDGE-RULE-02
+    description: Only the current live attempt can publish visibility; unconfirmed execution cannot be replayed automatically.
+  - rule_id: DPR-KNOWLEDGE-RULE-03
+    description: Deletion removes logical visibility before cleanup, and unended writers prevent physical completion.
+  required_test_stages: [D3]
