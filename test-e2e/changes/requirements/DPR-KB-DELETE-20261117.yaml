@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-DELETE-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Confirm Runtime vector cleanup through one durable authorized delete attempt
+  description: >-
+    Discover eligible unstarted deletes only after covered writers end, persist the owner
+    and attempt before storage actions, and delete/count through model-independent
+    VectorStore maintenance bindings. Complete only after confirmed absence and a fresh
+    signed Management grant. Preserve unknown outcomes without replay or fallback.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-HTTP-D3-001, SI-VECTOR-D3-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, DPR-KB-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Model-independent maintenance bindings permit only scoped count/delete.
+    - One durable delete owner/attempt starts after all covered upload writers end.
+    - Unknown or partial deletion, remaining vectors, revocation and cancellation cannot complete or replay cleanup.
+    - Discovery selects eligible deletes and preserves the original actor while routing by operation.
+    reason: >-
+      Extend actual RecordStore and ThreadManager UT and existing VectorStore protocol regressions.
+      Strengthen existing multi-store and PG cases for real deletion and mandatory completion
+      handles without adding duplicate formal D1 or changing public AgentOS payloads.
+    test_selectors:
+    - test/backend/services/test_knowledge_deletion.py
+    - test/backend/services/test_knowledge_delete_jobs.py
+    - test/backend/services/test_knowledge_jobs.py
+    - test/backend/services/test_knowledge_dispatch.py
+    - test/backend/infrastructure/test_knowledge_dispatch.py
+    - test/backend/infrastructure/test_vector_maintenance.py
+  notes: >-
+    Only current Runtime text vectors are covered. Management owns source/artifact cleanup;
+    image outputs, search, historical vectors, consumers and final image retirement remain pending.

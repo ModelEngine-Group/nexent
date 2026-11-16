@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from contracts.agentos_knowledge import (
     KnowledgeAuthorizationRequest,
+    KnowledgeFileDelete,
     KnowledgeFileUpload,
 )
 from nexent.core.concurrency import run_blocking
@@ -60,10 +61,11 @@ def read_knowledge_job(lookup, actor, *, context):
         return row
 
 
-def _payload(row):
-    if row["operation"] != "upload":
+def knowledge_request(row, *, operation):
+    if row["operation"] != operation or operation not in {"upload", "delete"}:
         raise InvalidInput()
-    request = KnowledgeFileUpload.model_validate(row["request_payload"])
+    schema = KnowledgeFileUpload if operation == "upload" else KnowledgeFileDelete
+    request = schema.model_validate(row["request_payload"])
     encoded = json.dumps(
         request.model_dump(mode="json"),
         sort_keys=True,
@@ -76,6 +78,11 @@ def _payload(row):
     ):
         raise InvalidInput()
     return request
+
+
+def cancellable_context(context):
+    owned = Event()
+    return replace(context, cancelled=_Cancellation(owned, context.cancelled)), owned
 
 
 class KnowledgeUploadWorker:
@@ -149,17 +156,14 @@ class KnowledgeUploadWorker:
         context = context or OperationContext(
             "knowledge-execution-" + uuid4().hex, monotonic() + self.operation_seconds
         )
-        cancelled = Event()
-        context = replace(
-            context, cancelled=_Cancellation(cancelled, context.cancelled)
-        )
+        context, cancelled = cancellable_context(context)
         handle = ingestor = grant = None
         try:
             async with asyncio.timeout(context.remaining()):
                 row = await self._blocking(
                     read_knowledge_job, lookup, actor, context=context
                 )
-                request = _payload(row)
+                request = knowledge_request(row, operation="upload")
                 if (
                     row["status"] not in {"queued", "running"}
                     or row["write_started"]

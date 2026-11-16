@@ -493,15 +493,46 @@ class KnowledgeJobs:
             self._lock_file(tx, lookup, context)
             return not self._writers_active(tx, lookup, context)
 
-    def finish_delete(self, lookup, *, physical_absence_confirmed, context):
-        if physical_absence_confirmed is not True:
+    def begin_delete(self, lookup, *, owner_id, context):
+        if not isinstance(owner_id, str) or not owner_id.strip() or len(owner_id) > 100:
             raise InvalidInput()
         self.authorize(lookup, context=context)
+        self._job(self.records, lookup, context)
         with self.records.transaction(context=context) as tx:
-            self._lock_file(tx, lookup, context)
+            manifest = self._lock_file(tx, lookup, context)
             row = self._job(tx, lookup, context)
             if row["operation"] != "delete":
                 raise InvalidInput()
+            if manifest["tombstone_version"] < lookup.file_version:
+                raise Conflict()
+            if (row["status"] != "cleanup_pending" or row["owner_id"] is not None
+                    or row["write_started"] or row["reconcile_required"]
+                    or self._writers_active(tx, lookup, context)):
+                return None
+            return self._patch(tx, JOBS, row, {
+                "owner_id": owner_id, "attempt_id": uuid4().hex,
+                "write_started": True, "writer_ended": False, "reconcile_required": True,
+            }, context)
+
+    def finish_delete(self, handle, *, physical_absence_confirmed, context):
+        if physical_absence_confirmed is not True:
+            raise InvalidInput()
+        if not isinstance(handle, dict):
+            raise Conflict()
+        lookup = _lookup(handle)
+        self.authorize(lookup, context=context)
+        with self.records.transaction(context=context) as tx:
+            manifest = self._lock_file(tx, lookup, context)
+            row = self._job(tx, lookup, context)
+            if row["operation"] != "delete":
+                raise InvalidInput()
+            if (manifest["tombstone_version"] < lookup.file_version
+                or row["status"] not in {"cleanup_pending", "deleted"}
+                or not row["write_started"] or any(
+                not row[name] or row[name] != handle.get(name)
+                for name in ("owner_id", "attempt_id")
+            )):
+                raise Conflict()
             if self._writers_active(tx, lookup, context):
                 raise Conflict()
             if row["status"] != "deleted":
@@ -509,7 +540,8 @@ class KnowledgeJobs:
                     tx,
                     JOBS,
                     row,
-                    {"status": "deleted", "physical_cleanup_complete": True},
+                    {"status": "deleted", "physical_cleanup_complete": True,
+                     "writer_ended": True, "reconcile_required": False},
                     context,
                 )
         return job_state(row)

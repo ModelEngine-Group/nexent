@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_runtime_knowledge_upload]
   AC-03: [test_runtime_knowledge_upload]
   AC-04: [test_runtime_knowledge_upload]
+  AC-05: [test_runtime_knowledge_upload]
 preparation:
   families: []
   anchors: false

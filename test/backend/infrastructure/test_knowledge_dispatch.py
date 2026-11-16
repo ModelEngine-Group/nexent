@@ -4,6 +4,7 @@
 from datetime import timedelta
 
 import pytest
+from contracts.agentos_knowledge import KnowledgeFileDelete
 from nexent.storage.errors import InvalidInput, ScopeDenied
 from nexent.storage.models import PageRequest, RecordQuery, StorageScope
 from runtime.knowledge_base.jobs import KnowledgeJobs
@@ -56,6 +57,28 @@ def test_running_started_failed_or_soft_deleted_are_not_discovered(setup):
         from infrastructure.rdb.knowledge_jobs import jobs
         with engine.begin() as connection:
             connection.execute(jobs.update().where(jobs.c.job_id == fresh.job_id).values(delete_flag="Y"))
+        assert not discover.query(DATASET, RecordQuery(), PageRequest(), context=context).items
+    finally:
+        discover.close()
+
+
+def test_delete_discovery_waits_for_covered_writer_and_excludes_started_cleanup(setup):
+    policy, _, engine, request, context, _, _ = setup
+    state = policy.submit(request, context=context)
+    writer = policy.claim(lookup(state), owner_id="writer", lease_seconds=30, context=context)
+    assert policy.begin_execution(writer, context=context)
+    deleting = policy.submit(KnowledgeFileDelete(
+        **request.model_dump(include={"knowledge_id", "file_id", "file_version"}),
+        idempotency_key="delete",
+    ), context=context)
+    discover = bind_knowledge_dispatch(engine)
+    try:
+        assert not discover.query(DATASET, RecordQuery(), PageRequest(), context=context).items
+        assert policy.end_attempt(writer, writer_ended=True, context=context)
+        candidates = discover.query(DATASET, RecordQuery(), PageRequest(), context=context).items
+        assert len(candidates) == 1
+        assert candidates[0]["job_id"] == deleting.job_id and candidates[0]["operation"] == "delete"
+        assert policy.begin_delete(lookup(deleting), owner_id="cleaner", context=context)
         assert not discover.query(DATASET, RecordQuery(), PageRequest(), context=context).items
     finally:
         discover.close()

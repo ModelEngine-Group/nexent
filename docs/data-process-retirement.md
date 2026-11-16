@@ -39,4 +39,6 @@ Management 与 Runtime 只通过 AgentOS 交换授权请求、产物引用和状
 
 Runtime 上传 worker 已接通真实 ObjectStore/VectorStore 与版本发布，经过 PostgreSQL、MinIO、Elasticsearch 和签名 Management HTTP 验证。2026-11-17 已接入 Runtime lifespan，通过只读持久任务投影发现新上传；失败后退出并使就绪检查返回 503，不自动重试或重启。图片和真实 provider 验证继续待完成。新向量布局使用独立物理索引并保留旧索引，历史数据迁移及核对完成前不能切换旧查询或删除 data-process。
 
+同日已接通 Runtime 文本向量的物理删除，使用持久 owner/attempt、已结束 writer 检查、单次 VectorStore 删除及实际缺失核对。维护句柄只支持 count/delete，不查询模型维度或创建集合；更新版本及其他 scope 保留。未知结果不会自动重放。Management 源/清洗产物清理、图片、检索与旧消费者仍待迁移，尚未删除 data-process。
+
 父 PR 的旧私有入口测试迁移、异步接纳与旧过载 D2 语义，以及既有前端测试绑定缺失继续单独跟踪，不能以本批交付声明已解决。

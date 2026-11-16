@@ -16,7 +16,7 @@ from infrastructure.storage.catalog import FieldDefinition
 class VectorBinding:
     collection: str
     index: str
-    dimensions: int
+    dimensions: int | None
     fields: tuple[FieldDefinition, ...]
     text_field: str = "content"
     metric: str = "cosine"
@@ -29,8 +29,9 @@ class VectorBinding:
             type(self.writable) is not bool
             or not self.collection
             or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", self.index)
-            or type(self.dimensions) is not int
-            or self.dimensions < 1
+            or self.dimensions is not None and (
+                type(self.dimensions) is not int or self.dimensions < 1
+            )
             or len(set(names)) != len(names)
             or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names)
             or self.text_field not in names
@@ -46,6 +47,8 @@ class VectorBinding:
         return {field.name: field for field in self.fields}
 
     def mapping(self):
+        if self.dimensions is None:
+            raise CapabilityUnsupported()
         kinds = {
             "string": "keyword",
             "integer": "long",

@@ -3,6 +3,7 @@
 
 from contextlib import contextmanager
 
+from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
 
 from infrastructure.knowledge_objects import bind_knowledge_objects
@@ -49,3 +50,15 @@ def knowledge_execution_ports(actor, grant, dimensions, *, context):
             [vectors.close] if vectors is not None else []
         )
         close_owned(context, callbacks)
+
+
+@contextmanager
+def knowledge_deletion_ports(actor, grant, *, context):
+    context.remaining()
+    if grant.action != "delete":
+        raise ScopeDenied()
+    vectors = bind_knowledge_vectors(actor, grant.collection, None)
+    try:
+        yield vectors
+    finally:
+        close_owned(context, [vectors.close])

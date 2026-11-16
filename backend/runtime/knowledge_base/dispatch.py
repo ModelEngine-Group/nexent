@@ -26,7 +26,7 @@ def _owner(owner_id):
         raise InvalidInput()
 
 
-async def dispatch_once(worker, *, owner_id, stop):
+async def dispatch_once(workers, *, owner_id, stop):
     _owner(owner_id)
     if stop.is_set():
         return 0
@@ -48,6 +48,7 @@ async def dispatch_once(worker, *, owner_id, stop):
         if stop.is_set():
             break
         actor = ServicePrincipal(row["user_id"], row["tenant_id"])
+        worker = workers[row["operation"]]
         lookup = KnowledgeJobLookup(**{name: row[name] for name in (
             "job_id", "knowledge_id", "file_id", "file_version",
         )})
@@ -62,29 +63,30 @@ async def dispatch_once(worker, *, owner_id, stop):
     return consumed
 
 
-async def serve(worker, *, owner_id, stop, poll_seconds=1):
+async def serve(workers, *, owner_id, stop, poll_seconds=1):
     _owner(owner_id)
     if (type(poll_seconds) not in {int, float} or not math.isfinite(poll_seconds)
             or not 0.01 <= poll_seconds <= 30):
         raise InvalidInput()
     while not stop.is_set():
-        await dispatch_once(worker, owner_id=owner_id, stop=stop)
+        await dispatch_once(workers, owner_id=owner_id, stop=stop)
         if not stop.is_set():
             await asyncio.sleep(poll_seconds)
 
 
-def default_worker():
+def default_workers():
     from contracts.constants import environment
     from runtime.agentos.knowledge import default_service
+    from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
     from runtime.knowledge_base.worker import KnowledgeUploadWorker
 
     service = default_service()
-    return KnowledgeUploadWorker(
+    return {"upload": KnowledgeUploadWorker(
         service.client, service.models,
         max_artifact_bytes=environment.MAX_KNOWLEDGE_FILE_SIZE_BYTES,
         max_source_bytes=environment.MAX_KNOWLEDGE_FILE_SIZE_BYTES,
         operation_seconds=environment.MAX_TIMEOUT,
-    )
+    ), "delete": KnowledgeDeleteWorker(service.client, operation_seconds=environment.MAX_TIMEOUT)}
 
 
 def _finished(task, stop):
@@ -95,10 +97,10 @@ def _finished(task, stop):
 
 
 @asynccontextmanager
-async def knowledge_lifespan(app, *, worker=None):
+async def knowledge_lifespan(app, *, workers=None):
     stop = Event()
     task = asyncio.create_task(
-        serve(worker or default_worker(), owner_id="knowledge-" + uuid4().hex, stop=stop),
+        serve(workers if workers is not None else default_workers(), owner_id="knowledge-" + uuid4().hex, stop=stop),
         name="runtime-knowledge-dispatch",
     )
     task.add_done_callback(lambda finished: _finished(finished, stop))

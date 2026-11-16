@@ -53,6 +53,10 @@ def test_runtime_knowledge_upload(record_property):
         "revocation_before_write",
         "lifespan_discovery",
         "failed_readiness",
+        "physical_cleanup",
+        "newer_version_preserved",
+        "other_scope_preserved",
+        "delete_without_model",
         "owned_cleanup",
     ):
         assert evidence[name] is True, name

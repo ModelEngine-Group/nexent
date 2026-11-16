@@ -242,7 +242,8 @@ def test_durable_knowledge_visibility(record_property, monkeypatch):
         )
         assert not owner.complete(handle, chunk_count=2, context=context())
         assert owner.finish_delete(
-            lookup(deleted), physical_absence_confirmed=True, context=context()
+            owner.begin_delete(lookup(deleted), owner_id="cleaner", context=context()),
+            physical_absence_confirmed=True, context=context()
         ).physical_cleanup_complete
 
         other_file = payload.model_copy(update={"file_id": "b" * 32})
@@ -265,6 +266,7 @@ def test_durable_knowledge_visibility(record_property, monkeypatch):
             deletion(other_file, "delete-running"), context=context()
         )
         assert not owner.cleanup_ready(lookup(deleting), context=context())
+        assert owner.begin_delete(lookup(deleting), owner_id="blocked-cleaner", context=context()) is None
         with pytest.raises(Conflict):
             owner.finish_delete(
                 lookup(deleting), physical_absence_confirmed=True, context=context()
@@ -272,7 +274,8 @@ def test_durable_knowledge_visibility(record_property, monkeypatch):
         assert owner.end_attempt(active, writer_ended=True, context=context())
         assert owner.cleanup_ready(lookup(deleting), context=context())
         final = owner.finish_delete(
-            lookup(deleting), physical_absence_confirmed=True, context=context()
+            owner.begin_delete(lookup(deleting), owner_id="cleaner", context=context()),
+            physical_absence_confirmed=True, context=context()
         )
         assert final.status == "deleted" and final.physical_cleanup_complete
         with pytest.raises(Conflict):

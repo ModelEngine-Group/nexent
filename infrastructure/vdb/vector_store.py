@@ -76,13 +76,15 @@ class ElasticsearchVectorStore:
         ):
             raise ScopeDenied()
         self._factory = client_factory
+        if any(binding.dimensions is None for binding in bindings):
+            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete"}))
         self._closed = False
 
     @property
     def scope(self):
         return self._scope
 
-    def _binding(self, collection, *, write=False):
+    def _binding(self, collection, *, write=False, maintenance=False):
         if (
             self._closed
             or collection not in self.scope.namespaces
@@ -91,6 +93,8 @@ class ElasticsearchVectorStore:
             raise ScopeDenied()
         if write and not self._bindings[collection].writable:
             raise ScopeDenied()
+        if self._bindings[collection].dimensions is None and not maintenance:
+            raise CapabilityUnsupported()
         return self._bindings[collection]
 
     def _key(self, collection, key):
@@ -361,7 +365,7 @@ class ElasticsearchVectorStore:
         return tuple(hits)
 
     def count(self, collection, where, *, context):
-        binding = self._binding(collection)
+        binding = self._binding(collection, maintenance=True)
         query = self._filter(binding, where)
         with self._client(context) as client:
             result = self._call(
@@ -378,7 +382,7 @@ class ElasticsearchVectorStore:
     def delete(self, collection, where, *, context):
         from infrastructure.vdb.vector_delete import delete_vectors
 
-        binding = self._binding(collection, write=True)
+        binding = self._binding(collection, write=True, maintenance=True)
         if where is None:
             raise InvalidInput()
         return delete_vectors(

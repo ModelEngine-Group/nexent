@@ -117,7 +117,7 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ### KnowledgeBase 文件生命周期
 
-Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传 worker 已接入 Runtime lifespan，完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
+Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，完整检索、图片及 Management 对象清理仍在迁移，当前公开入库流程尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |
 | --- | --- | --- |
@@ -134,6 +134,8 @@ KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒
 
 Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按原用户和租户依次执行。发现端口仅返回调度元数据，只选尚未开始且无未知义务的 `queued`，不扫描 `running` 或失败任务。空闲发现间隔为一秒，异常使调度退出并将 `/health/ready` 标为 503，不自动重试或重启。关闭时先标记取消，再等待 owned task，最后排空现有线程管理器。源和产物上限共用 `MAX_KNOWLEDGE_FILE_SIZE_MB`，单次执行截止采用现有 `DP_SPLIT_WAIT_TIMEOUT_MAX_S`，当前支持至 3600 秒。
 
+同一调度器也发现未开始的 `cleanup_pending` 删除，仅选择覆盖 upload writer 均已结束的任务。`KnowledgeDeleteWorker` 经 Management 授权后持久记录删除 owner/attempt，再通过不依赖模型维度的 VectorStore 维护句柄执行一次过滤删除和数量核对。过滤包含 KB、文件及版本上限；确认无残留并重新校验授权后才标为 `deleted`。partial、unknown、取消、撤权或非零残留均保持待核对状态，不自动重放。它只清理 Runtime 文本向量，源对象及清洗产物仍归 Management。
+
 新向量句柄把逻辑 collection 映射到固定 `si-kb-` 命名空间。旧索引会保留，历史数据迁移和核对仍是生产切换前置条件，当前不会自动回退查询旧索引。
 
 `AgentOSClient` 对 JSON body、operation、user_id、tenant_id 生成服务签名。双方用 JWT_SECRET 派生不同方向的 HMAC 密钥，token 有效期为 30 秒，绑定 issuer、audience、operation 和 body hash。客户端自动签名，业务代码不应自己拼 token。Gateway 外部用户 token 不直接替代 AgentOS 服务身份。
@@ -148,6 +150,6 @@ Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按�
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-KnowledgeBase.search、物理清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，上传发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
+KnowledgeBase.search、Management 源/产物清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

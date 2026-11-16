@@ -25,6 +25,7 @@ from contracts.agentos_knowledge import (
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
+from deletion_probe import prove_deletion
 from fastapi import FastAPI
 from management.api.knowledge_base.agentos_authorization import (
     create_knowledge_authorization_router,
@@ -47,6 +48,7 @@ from nexent.storage.models import (
     StorageScope,
     VectorKey,
 )
+from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
 from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.knowledge_base.jobs import KnowledgeJobs
 from runtime.knowledge_base.service import KnowledgeService
@@ -262,6 +264,7 @@ def main(run_id):
         worker = KnowledgeUploadWorker(
             rpc, models, max_artifact_bytes=1024 * 1024, max_source_bytes=1024 * 1024
         )
+        workers = {"upload": worker, "delete": KnowledgeDeleteWorker(rpc)}
         actor = ServicePrincipal("user-a", "tenant-a")
 
         async def scenario():
@@ -291,7 +294,7 @@ def main(run_id):
             )
             server.capture_signals = lambda: nullcontext()
             serving = asyncio.create_task(server.serve(sockets=[listener]))
-            health_app = FastAPI(lifespan=lambda app: knowledge_lifespan(app, worker=worker))
+            health_app = FastAPI(lifespan=lambda app: knowledge_lifespan(app, workers=workers))
             install_health_contract(health_app)
             health_socket = socket.socket()
             health_socket.bind(("127.0.0.1", 0))
@@ -371,6 +374,9 @@ def main(run_id):
                 assert vector.generation == Revision(row["attempt_id"])
                 assert vector.payload["content"] == content.decode()
                 assert vector.payload["embedding_revision"] == "v1"
+                evidence.update(await prove_deletion(
+                    api, actor, request, vectors, vector, workers, db, owned, calls,
+                ))
                 rejected = await api.upload(
                     request.model_copy(update={"file_id": "b" * 32}), actor
                 )
@@ -438,12 +444,17 @@ def main(run_id):
                 for path in (
                     "backend/runtime/knowledge_base/worker.py",
                     "backend/runtime/knowledge_base/dispatch.py",
+                    "backend/runtime/knowledge_base/deletion.py",
+                    "backend/runtime/knowledge_base/jobs.py",
                     "backend/runtime/knowledge_base/ingestion.py",
                     "backend/runtime/api/application.py",
                     "backend/http/server/health.py",
                     "infrastructure/knowledge_objects.py",
                     "infrastructure/knowledge_vectors.py",
+                    "infrastructure/knowledge_runtime.py",
                     "infrastructure/rdb/knowledge_dispatch.py",
+                    "infrastructure/vdb/vector_schema.py",
+                    "infrastructure/vdb/vector_store.py",
                 )
             },
         )
