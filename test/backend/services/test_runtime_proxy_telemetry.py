@@ -62,7 +62,7 @@ def test_nb_ac005_propagator_cannot_inject_authorization_or_baggage(manager, mon
 
 def test_nb_ac004_northbound_enables_existing_monitoring_and_deployment_config():
     root = Path(__file__).resolve().parents[3]
-    tree = ast.parse((root/'backend/apps/northbound_base_app.py').read_text())
+    tree = ast.parse((root/'backend/gateway/application.py').read_text())
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and isinstance(node.func, ast.Name) and node.func.id == 'create_app']
     assert len(calls) == 1
