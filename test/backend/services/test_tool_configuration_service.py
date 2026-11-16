@@ -356,6 +356,7 @@ setattr(sys.modules['nexent.vector_database'], 'elasticsearch_core',
 
 # Mock nexent.storage module and its submodules
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
+sys.modules['nexent.storage'].__path__ = [str(SDK_ROOT / 'nexent' / 'storage')]
 storage_factory_module = types.ModuleType(
     'nexent.storage.storage_client_factory')
 storage_config_module = types.ModuleType('nexent.storage.minio_config')
@@ -3751,119 +3752,6 @@ class TestValidateLocalToolRAGFlowSearch:
         assert call_kwargs["highlight"] is False
 
 
-class TestValidateLocalToolAnalyzeTextFile:
-    """Test cases for _validate_local_tool function with analyze_text_file tool"""
-
-    @patch_import_context('management.services.tool.configuration._get_tool_class_by_name')
-    @patch_import_context('management.services.tool.configuration.inspect.signature')
-    @patch_import_context('management.services.tool.configuration.get_llm_adapter')
-    @patch_import_context('management.services.tool.configuration.minio_client')
-    @patch_import_context('management.services.tool.configuration.DATA_PROCESS_SERVICE', "http://data-process-service")
-    def test_validate_local_tool_analyze_text_file_success(self, mock_minio_client, mock_get_llm_model,
-                                                           mock_signature, mock_get_class):
-        """Test successful analyze_text_file tool validation with proper dependencies"""
-        # Mock tool class
-        mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "analyze text file result"
-        mock_tool_class.return_value = mock_tool_instance
-
-        mock_get_class.return_value = mock_tool_class
-
-        # Mock signature for analyze_text_file tool
-        mock_sig = Mock()
-        mock_sig.parameters = {
-            'self': Mock(),
-            'llm_model': Mock(),
-            'storage_client': Mock(),
-            'data_process_service_url': Mock()
-        }
-        mock_signature.return_value = mock_sig
-
-        # Mock dependencies
-        mock_llm_model = Mock()
-        mock_get_llm_model.return_value = mock_llm_model
-
-        from management.services.tool.configuration import _validate_local_tool
-
-        result = _validate_local_tool(
-            "analyze_text_file",
-            {"input": "test input"},
-            {"param": "config"},
-            "tenant1",
-            "user1"
-        )
-
-        assert result == "analyze text file result"
-        mock_get_class.assert_called_once_with("analyze_text_file")
-
-        # Verify analyze_text_file specific parameters were passed
-        mock_tool_class.assert_called_once()
-        call_kwargs = mock_tool_class.call_args.kwargs
-        assert 'llm_model' in call_kwargs
-        assert 'storage_client' in call_kwargs
-        assert 'data_process_service_url' in call_kwargs
-        assert call_kwargs['data_process_service_url'] == "http://data-process-service"
-        assert 'validate_url_access' in call_kwargs
-        assert callable(call_kwargs['validate_url_access'])
-        mock_tool_instance.forward.assert_called_once_with(input="test input")
-
-        # Verify service calls
-        mock_get_llm_model.assert_called_once_with("tenant1", None, modality="llm_long_context")
-
-    @patch_import_context('management.services.tool.configuration._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
-        """Test analyze_text_file tool validation when tenant_id is missing"""
-        mock_tool_class = Mock()
-        mock_get_class.return_value = mock_tool_class
-
-        from management.services.tool.configuration import _validate_local_tool
-
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
-            _validate_local_tool(
-                "analyze_text_file",
-                {"input": "test input"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                "user1"
-            )
-
-    @patch_import_context('management.services.tool.configuration._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_user_id(self, mock_get_class):
-        """Test analyze_text_file tool validation when user_id is missing"""
-        mock_tool_class = Mock()
-        mock_get_class.return_value = mock_tool_class
-
-        from management.services.tool.configuration import _validate_local_tool
-
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
-            _validate_local_tool(
-                "analyze_text_file",
-                {"input": "test input"},
-                {"param": "config"},
-                "tenant1",
-                None  # Missing user_id
-            )
-
-    @patch_import_context('management.services.tool.configuration._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_both_ids(self, mock_get_class):
-        """Test analyze_text_file tool validation when both tenant_id and user_id are missing"""
-        mock_tool_class = Mock()
-        mock_get_class.return_value = mock_tool_class
-
-        from management.services.tool.configuration import _validate_local_tool
-
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
-            _validate_local_tool(
-                "analyze_text_file",
-                {"input": "test input"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                None   # Missing user_id
-            )
 
 
 class TestGetLlmModel:
@@ -5237,38 +5125,6 @@ class TestValidateLocalToolMonitoring:
         mock_op.assert_called_once_with(
             "tool_validation", display_name="VLM-Model")
 
-    @patch_import_context('management.services.tool.configuration.set_monitoring_operation')
-    @patch_import_context('management.services.tool.configuration.set_monitoring_context')
-    @patch_import_context('management.services.tool.configuration.minio_client')
-    @patch_import_context('management.services.tool.configuration.DATA_PROCESS_SERVICE', "http://svc")
-    @patch_import_context('management.services.tool.configuration.get_llm_adapter')
-    @patch_import_context('management.services.tool.configuration._get_tool_class_by_name')
-    @patch_import_context('management.services.tool.configuration.inspect.signature')
-    def test_analyze_text_file_sets_monitoring_context(
-            self, mock_signature, mock_get_class, mock_get_llm_model,
-            mock_minio_client, mock_ctx, mock_op):
-        mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "ok"
-        mock_tool_class.return_value = mock_tool_instance
-        mock_get_class.return_value = mock_tool_class
-        mock_llm = Mock(display_name="LLM-Model")
-        mock_get_llm_model.return_value = mock_llm
-        mock_sig = Mock()
-        mock_sig.parameters = {
-            'llm_model': Mock(), 'storage_client': Mock(),
-            'data_process_service_url': Mock(),
-        }
-        mock_signature.return_value = mock_sig
-
-        from management.services.tool.configuration import _validate_local_tool
-        _validate_local_tool(
-            "analyze_text_file", {"input": "text"}, {"param": "c"},
-            "tenant1", "user1")
-
-        mock_ctx.assert_called_once_with(tenant_id="tenant1")
-        mock_op.assert_called_once_with(
-            "tool_validation", display_name="LLM-Model")
 
 
 class TestValidateToolImplBranches:

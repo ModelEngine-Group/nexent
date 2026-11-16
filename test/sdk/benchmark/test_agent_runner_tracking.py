@@ -445,7 +445,7 @@ def test_build_tools_from_yaml_filters_disabled_and_unsupported_tools(
     monkeypatch.setattr(
         agent_runner,
         "_build_analyze_tool_metadata",
-        lambda class_name: metadata,
+        lambda class_name, **kwargs: metadata,
     )
     tools = agent_runner.build_tools_from_yaml(
         [
@@ -487,17 +487,53 @@ def test_analyze_tool_metadata_selects_text_or_vlm_dependencies(monkeypatch):
     monkeypatch.setattr(agent_runner, "_build_storage_client", lambda: storage)
     monkeypatch.setattr(agent_runner, "_build_llm_model", lambda: llm)
     monkeypatch.setattr(agent_runner, "_build_vlm_model", lambda: vlm)
-    monkeypatch.setenv("DATA_PROCESS_SERVICE", "http://data-process")
+    cleanser = lambda *args, **kwargs: "text"
 
-    assert agent_runner._build_analyze_tool_metadata("AnalyzeTextFileTool") == {
+    assert agent_runner._build_analyze_tool_metadata("AnalyzeTextFileTool", text_cleanser=cleanser) == {
         "storage_client": storage,
         "llm_model": llm,
-        "data_process_service_url": "http://data-process",
+        "text_cleanser": cleanser,
     }
     assert agent_runner._build_analyze_tool_metadata("AnalyzeImageTool") == {
         "storage_client": storage,
         "vlm_model": vlm,
     }
+
+
+def test_text_benchmark_rejects_missing_capability_before_initializing_clients(monkeypatch):
+    def unexpected():
+        raise AssertionError("Client must not be constructed")
+    monkeypatch.setattr(agent_runner, "_build_storage_client", unexpected)
+    monkeypatch.setattr(agent_runner, "_build_llm_model", unexpected)
+    with pytest.raises(ValueError, match="text_cleanser capability"):
+        agent_runner._build_analyze_tool_metadata("AnalyzeTextFileTool")
+
+
+def test_text_schema_export_needs_no_runtime_capability(monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Runtime metadata must not be initialized")
+    monkeypatch.setattr(agent_runner, "_build_analyze_tool_metadata", unexpected)
+    tools = agent_runner.build_tools_from_yaml(
+        [{"tool_class": "AnalyzeTextFileTool", "tool_name": "analyze_text_file"}], include_runtime_metadata=False,
+    )
+    assert len(tools) == 1 and tools[0].metadata is None
+
+
+def test_standalone_benchmark_parser_preserves_text_without_a_service(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from nexent.core.concurrency import RunCancellationScope
+    from nexent.storage.errors import OperationCancelled
+    parser = MagicMock()
+    parser.file_process.return_value = ([{"content": "one"}, {"content": "two"}], [])
+    monkeypatch.setattr(agent_runner, "_benchmark_text_parser", lambda: parser)
+    assert agent_runner.benchmark_text_cleanser("source.txt", b"input") == "one\ntwo"
+    parser.file_process.assert_called_once_with(file_data=b"input", filename="source.txt", chunking_strategy="basic")
+    scope = RunCancellationScope()
+    scope.cancel()
+    with pytest.raises(OperationCancelled):
+        agent_runner.benchmark_text_cleanser("source.txt", b"input", cancellation_scope=scope)
+    assert parser.file_process.call_count == 1
 
 
 def test_optional_runtime_dependency_builders_return_none_without_configuration(

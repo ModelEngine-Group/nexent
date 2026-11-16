@@ -3,9 +3,20 @@
 
 import pytest
 import tomllib
+import yaml
 
 from test.backend.deploy.test_gateway_image import bash_run
 from test.backend.deploy.test_service_image_sources import ROOT
+
+
+def test_container_deployments_enable_the_required_cleanse_root():
+    from dotenv import dotenv_values
+    assert dotenv_values(ROOT / "deploy/env/.env.example")["MANAGEMENT_FILE_CLEANSE_ENABLED"] == "true"
+    common = ROOT / "deploy/k8s/helm/nexent/charts/nexent-common"
+    values = yaml.safe_load((common / "values.yaml").read_text(encoding="utf-8"))
+    assert values["config"]["fileCleanse"]["enabled"] == "true"
+    template = (common / "templates/configmap.yaml").read_text(encoding="utf-8")
+    assert "MANAGEMENT_FILE_CLEANSE_ENABLED: {{ .Values.config.fileCleanse.enabled | quote }}" in template
 
 
 @pytest.mark.parametrize("role", ["management", "runtime"])

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-TEXT-CLEANSE-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Move the actual text analysis consumer to AgentOS cleansing
+  description: Bind current actor/run, stage exact temporary source, consume verified
+    cleansing artifacts and release without the retired HTTP text endpoint.
+  affected_features:
+    existing:
+    - DPR-CLEANSE
+    added: []
+    modified:
+    - DPR-CLEANSE
+    retired: []
+  affected_cases:
+    existing:
+    - DPR-FILE-CLEANSE-D3-001
+    - DPR-PARSER-IMAGES-D5-001
+    added:
+    - DPR-TEXT-CLEANSE-D3-001
+    modified: [DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve JSON detection, language prompts and per-file analysis failure results
+      while removing old HTTP constructor/method.
+    - Bind real run identity and verify exact source/artifact scope, checksum and
+      release before source deletion.
+    - Cancel one known job on failure or stop; preserve source and original errors
+      on unknown outcomes without retry.
+    - Bound all network waits, unregister cancellation callbacks and retain timeout
+      redaction.
+    reason: Existing SDK UT covers business projection; new Runtime ownership and
+      error paths need isolated UT plus actual signed storage D3. Preserve existing
+      D1, with no duplicate unit wrapper.
+    test_selectors:
+    - test/backend/runtime/test_text_cleanse.py
+    - test/backend/app/test_agentos_tools.py
+    - test/backend/app/test_agentos_prepared_analysis.py
+    - test/sdk/core/tools/test_analyze_text_file_tool.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/benchmark/test_agent_runner_tracking.py
+    - test/backend/app/test_data_process_app.py
+    - test/backend/services/test_data_process_service.py
+    - test/backend/services/test_tool_configuration_service.py
+    - test/backend/services/test_file_cleanse_boundary.py
+    - test/backend/deploy/test_service_image_sources.py
+    - test/backend/deploy/test_parser_image_build.py
+    - test/backend/app/test_agentos_file_cleanse.py
+    - test/backend/services/test_run_cleanse_service.py
+    - test/backend/services/test_file_cleanse_release.py

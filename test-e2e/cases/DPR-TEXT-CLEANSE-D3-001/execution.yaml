@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-TEXT-CLEANSE-D3-001
+timeout_seconds: 160
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_text_cleanse_consumer
+acceptance_bindings:
+  AC-01: [test_text_cleanse_consumer]
+  AC-02: [test_text_cleanse_consumer]
+  AC-03: [test_text_cleanse_consumer]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+# The script owns synthetic databases, buckets, sockets, tasks and managed workers.

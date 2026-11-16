@@ -83,6 +83,7 @@ class EvaluationAgentRun(BaseModel):
 
 
 class AgentOperation(str, Enum):
+    INVOKE_TOOL = NAMESPACE + "v1/agent/tools/invoke"
     RUN = NAMESPACE + "v1/agent/run"
     RUN_EPHEMERAL = NAMESPACE + "v1/agent/run-ephemeral"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
@@ -174,6 +175,17 @@ class ToolBinding(RunSpecModel):
     version: str = Field(min_length=1)
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
     credential_ref: str | None = None
+
+
+class AgentToolInvocation(RunSpecModel):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    tool: ToolBinding
+    inputs: dict[str, JsonValue]
+    language: Literal["zh", "en"] = "en"
+
+
+class AgentToolResult(RunSpecModel):
+    result: JsonValue
 
 
 class ParallelExecutorBinding(RunSpecModel):

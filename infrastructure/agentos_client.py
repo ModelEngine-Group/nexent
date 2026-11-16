@@ -18,6 +18,7 @@ from contracts.agentos import (
     AgentRunReference,
     AgentRunState,
     AgentStop,
+    AgentToolResult,
     CompatibilityStop,
     DebugRunReference,
     EvaluationAgentResult,
@@ -65,6 +66,7 @@ _MODEL_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
 _KNOWLEDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
 _KNOWLEDGE_DEADLINE_SECONDS = 10.0
 _KNOWLEDGE_SEARCH_DEADLINE_SECONDS = 180.0
+_TOOL_DEADLINE_SECONDS = 600.0
 logger = logging.getLogger(__name__)
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -81,6 +83,19 @@ class AgentOSClient:
     def __init__(self, runtime_url, create_client):
         self.runtime_url = runtime_url.rstrip("/")
         self.create_client = create_client
+
+    async def invoke_tool(self, payload, user_id, tenant_id):
+        try:
+            async with asyncio.timeout(_TOOL_DEADLINE_SECONDS):
+                response = await self._post_json(
+                    AgentOperation.INVOKE_TOOL, payload, user_id, tenant_id,
+                    timeout=httpx.Timeout(connect=5, read=600, write=30, pool=5),
+                )
+                return self._validate_result(AgentToolResult, response)
+        except (TimeoutError, RuntimeServiceTimeoutError) as error:
+            logger.warning("agentos_tool_timeout run_id=%s phase=request threshold_seconds=%s exception_type=%s",
+                           payload.run_id, _TOOL_DEADLINE_SECONDS, type(error).__name__)
+            raise RuntimeServiceTimeoutError("AgentOS tool invocation timed out") from error
 
     async def submit_file_cleanse(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.FILE_CLEANSE, payload, user_id, tenant_id, FileCleanseState)

@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Form, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from contracts.errors.exceptions import OfficeConversionException
@@ -245,35 +245,6 @@ async def filter_important_image(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing image: {e!s}")
 
 
-@router.post("/process_text_file")
-async def process_text_file(file: UploadFile = File(...), chunking_strategy: str = Form("basic")):
-    """
-    Transfer the uploaded file to text content using SDK DataProcessCore
-
-    This interface is specifically used for file-to-text conversion, supporting multiple file formats including PDF, Word, Excel, etc.
-    Uses DataProcessCore from SDK for direct in-memory processing.
-
-    Returns a JSON object containing the extracted text and metadata.
-    """
-    try:
-        logger.info(f"Processing uploaded file: {file.filename} using SDK DataProcessCore")
-
-        file_content = await file.read()
-        filename = file.filename or "unknown_file"
-
-        result = await service.process_uploaded_text_file(
-            file_content=file_content,
-            filename=filename,
-            chunking_strategy=chunking_strategy,
-        )
-        return JSONResponse(content=result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error processing uploaded file {file.filename}: {e!s}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"An error occurred while processing the file: {e!s}"
-        )
 
 
 @router.post("/convert_state")

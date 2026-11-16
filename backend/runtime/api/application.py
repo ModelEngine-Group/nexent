@@ -21,6 +21,7 @@ from runtime.agentos.model import create_model_router
 from runtime.agentos.model_administration import create_model_administration_router
 from runtime.agentos.prepared_run import create_prepared_run_router
 from runtime.agentos.resume import create_run_lifecycle_router
+from runtime.agentos.tools import create_tool_router
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from runtime.knowledge_base.dispatch import knowledge_lifespan
@@ -116,6 +117,7 @@ app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
+app.include_router(create_tool_router())
 app.include_router(create_memory_store_router())
 app.include_router(create_knowledge_router())
 app.include_router(create_model_administration_router())

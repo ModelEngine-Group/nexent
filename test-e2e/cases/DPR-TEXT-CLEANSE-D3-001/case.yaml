@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-TEXT-CLEANSE-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids:
+  - DPR-004
+  business_rule_ids:
+  - DPR-CLEANSE-RULE-05
+  - DPR-CLEANSE-RULE-06
+  - DPR-CLEANSE-RULE-08
+  - DPR-CLEANSE-RULE-11
+  title: Runtime text tool consumes signed Management cleansing and reclaims its private
+    objects
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the actual Runtime text consumer across signed Management HTTP
+    and owned durable storage.
+  preconditions:
+  - Cached PostgreSQL and MinIO images and loopback sockets are available.
+  - Only uniquely labelled test containers and synthetic identities are used.
+  test_data:
+    files: Synthetic text and JSON input bytes; controlled parser and long-context
+      model boundaries.
+    scope: Two distinct run contexts and exact object keys; no application data.
+  steps:
+  - order: 1
+    action: Invoke the real SDK text tool in a managed worker with a Runtime cleaner
+      bound to the real run; execute signed submit/inspect and Management cleansing
+      over PG/MinIO.
+    expected: Text is structurally cleansed, chunked and passed to long-context analysis;
+      JSON retains its source structure.
+  - order: 2
+    action: Inspect completed jobs and objects after release and retain the original
+      user source and a different run sentinel.
+    expected: Only this job artifacts and temporary source are removed; released task
+      identity remains and foreign objects remain readable.
+  - order: 3
+    action: Stop owned HTTP, worker and manager and remove exact test containers and
+      anonymous volumes.
+    expected: No owned task, listener, execution or container remains.
+  expected_results:
+  - SDK analysis receives actual Runtime-produced text from signed Management cleansing.
+  - Exact temporary objects are reclaimed only after confirmed release, preserving
+    original and foreign scope.
+  - Owned resources are reclaimed.
+  forbidden_side_effects:
+  - No old data-process service, real model call, retry loop, unscoped object access
+    or application state mutation.
+  integration_boundary:
+  - Real SDK tool, ThreadManager, Runtime cleaner, signed HTTP client/router, Management
+    jobs and StorageInterface PG/MinIO.
+  observations:
+  - Run/job identity, text/JSON model inputs, released PG rows and exact object presence.
+  cleanup:
+  - Close owned servers and manager and delete only exact unique-label containers
+    and anonymous volumes.
+  acceptance:
+  - id: AC-01
+    description: The actual managed SDK tool consumes run-bound signed cleansing and
+      preserves text/JSON analysis input.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Release and temporary source cleanup preserve original and foreign
+      resources.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Owned runtime and storage resources are reclaimed.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1

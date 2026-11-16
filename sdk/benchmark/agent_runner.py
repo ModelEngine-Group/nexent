@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+from functools import cache
 from typing import Callable, Optional
 
 from dotenv import load_dotenv  # noqa: E402
@@ -410,7 +411,28 @@ def _build_llm_model():
     )
 
 
-def _build_analyze_tool_metadata(class_name: str) -> dict:
+@cache
+def _benchmark_text_parser():
+    from nexent.data_process.core import DataProcessCore
+    return DataProcessCore()
+
+
+def benchmark_text_cleanser(filename, content, *, cancellation_scope=None):
+    """Explicit local SDK algorithm for standalone benchmarks, outside service images."""
+    from nexent.storage.errors import OperationCancelled
+    if cancellation_scope is not None and cancellation_scope.cancelled:
+        raise OperationCancelled()
+    chunks, _ = _benchmark_text_parser().file_process(
+        file_data=content, filename=filename, chunking_strategy="basic",
+    )
+    if cancellation_scope is not None and cancellation_scope.cancelled:
+        raise OperationCancelled()
+    return "".join(chunk["content"] + "\n" for chunk in chunks if "content" in chunk).strip()
+
+
+def _build_analyze_tool_metadata(class_name: str, *, text_cleanser=None) -> dict:
+    if class_name == "AnalyzeTextFileTool" and not callable(text_cleanser):
+        raise ValueError("Text analysis benchmark requires an injected text_cleanser capability")
     metadata = {}
     storage_client = _build_storage_client()
     if storage_client:
@@ -419,9 +441,7 @@ def _build_analyze_tool_metadata(class_name: str) -> dict:
         llm_model = _build_llm_model()
         if llm_model:
             metadata["llm_model"] = llm_model
-        data_process_url = os.getenv("DATA_PROCESS_SERVICE")
-        if data_process_url:
-            metadata["data_process_service_url"] = data_process_url
+        metadata["text_cleanser"] = text_cleanser
     else:
         vlm_model = _build_vlm_model()
         if vlm_model:
@@ -433,6 +453,7 @@ def build_tools_from_yaml(
     tools_yaml: list,
     *,
     include_runtime_metadata: bool = True,
+    text_cleanser=None,
 ) -> list[ToolConfig]:
     """Reconstruct ToolConfig objects from exported YAML.
 
@@ -450,7 +471,7 @@ def build_tools_from_yaml(
             skipped.append(f"{tool_name} ({class_name})")
             continue
         metadata = (
-            _build_analyze_tool_metadata(class_name)
+            _build_analyze_tool_metadata(class_name, text_cleanser=text_cleanser)
             if include_runtime_metadata and class_name in _ANALYZE_TOOL_CLASSES
             else None
         )

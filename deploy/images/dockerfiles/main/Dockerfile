@@ -105,7 +105,6 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 WORKDIR /opt/backend
 
-COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 ENV PYTHONPATH=/opt:/opt/backend
@@ -138,6 +137,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
         pandoc poppler-utils tesseract-ocr libmagic1 libgl1 libglib2.0-0
 
 COPY --from=management-deps /opt/backend/.venv /opt/backend/.venv
+COPY --from=builder /opt/sdk /opt/sdk
 RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
     mkdir -p /opt/models && \
     cp -a /tmp/model-assets/nltk_data /opt/models/nltk_data && \
@@ -182,6 +182,7 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 FROM backend-common AS runtime
 
 COPY --from=runtime-deps /opt/backend/.venv /opt/backend/.venv
+COPY --from=builder /opt/sdk /opt/sdk
 RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
     mkdir -p /opt/models && \
     cp -a /tmp/model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32 && \
@@ -212,6 +213,7 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 # Keep the existing full backend as the default build target.
 FROM backend-common AS final
 COPY --from=builder /opt/backend/.venv /opt/backend/.venv
+COPY --from=builder /opt/sdk /opt/sdk
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/

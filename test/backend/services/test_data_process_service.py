@@ -2078,63 +2078,7 @@ class TestDataProcessService(unittest.TestCase):
     def test_create_batch_tasks_impl_empty_task_id(self):
         asyncio.run(self.async_test_create_batch_tasks_impl_empty_task_id())
 
-    @patch('data_process.services.tasks.DataProcessCore')
-    @pytest.mark.asyncio
-    async def async_test_process_uploaded_text_file(self, mock_data_process_core):
-        """
-        Async implementation for testing processing uploaded text file with mixed chunks.
 
-        This test verifies that:
-        1. Chunks with 'content' are concatenated and returned
-        2. Chunks without 'content' are ignored from text/chunks but count towards chunks_count
-        3. Returned metadata fields are set correctly
-        """
-        # Arrange: mock DataProcessCore.file_process to return mixed chunks
-        mock_instance = MagicMock()
-        mock_instance.file_process.return_value = (
-            [
-                {"content": "First chunk"},
-                {"no_content": True},
-                {"content": "Second chunk"},
-            ],
-            []  # images_info
-        )
-        mock_data_process_core.return_value = mock_instance
-
-        filename = "test.txt"
-        chunking_strategy = "semantic"
-        file_bytes = b"ignored-by-mock"
-
-        # Act
-        result = await self.service.process_uploaded_text_file(
-            file_content=file_bytes,
-            filename=filename,
-            chunking_strategy=chunking_strategy
-        )
-
-        # Assert core call
-        mock_instance.file_process.assert_called_once_with(
-            file_data=file_bytes,
-            filename=filename,
-            chunking_strategy=chunking_strategy
-        )
-
-        # Assert result shape and values
-        self.assertTrue(result["success"])
-        self.assertEqual(result["filename"], filename)
-        self.assertEqual(result["chunking_strategy"], chunking_strategy)
-        self.assertEqual(result["chunks"], ["First chunk", "Second chunk"])
-        # includes chunk without 'content'
-        self.assertEqual(result["chunks_count"], 3)
-        self.assertEqual(result["text"], "First chunk\nSecond chunk")
-        self.assertEqual(result["text_length"],
-                         len("First chunk\nSecond chunk"))
-
-    def test_process_uploaded_text_file(self):
-        """
-        Test wrapper to run the async test for processing uploaded text files.
-        """
-        asyncio.run(self.async_test_process_uploaded_text_file())
 
     def test_convert_celery_states_to_custom(self):
         """

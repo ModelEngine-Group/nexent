@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,29 +46,9 @@ def observer_en():
 
 
 @pytest.fixture
-def http_client_manager(mocker):
-    """Fixture to mock http_client_manager for tests."""
-    mock = mocker.patch(
-        "sdk.nexent.core.tools.analyze_text_file_tool.http_client_manager"
-    )
-    mock_client = MagicMock()
-    mock.get_sync_client.return_value = mock_client
-    return mock, mock_client
-
-
-@pytest.fixture
-def tool(http_client_manager, observer_zh, llm_model):
-    """Fixture to create AnalyzeTextFileTool instance with mocked HTTP client."""
-    mock_manager, mock_client = http_client_manager
-    tool_instance = AnalyzeTextFileTool(
-        storage_client=MagicMock(),
-        observer=observer_zh,
-        data_process_service_url="http://data-process",
-        llm_model=llm_model,
-    )
-    # Store the mock client for tests to use
-    tool_instance._mock_http_client = mock_client
-    return tool_instance
+def tool(observer_zh, llm_model):
+    return AnalyzeTextFileTool(storage_client=MagicMock(), observer=observer_zh,
+                               text_cleanser=MagicMock(return_value="text"), llm_model=llm_model)
 
 
 class TestAnalyzeTextFileTool:
@@ -75,16 +56,16 @@ class TestAnalyzeTextFileTool:
         tool = AnalyzeTextFileTool(
             storage_client=MagicMock(),
             observer=observer_en,
-            data_process_service_url="http://data-process",
+            text_cleanser=MagicMock(return_value="text"),
             llm_model=llm_model,
         )
-        tool.process_text_file = MagicMock(return_value="text")
+        tool.text_cleanser = MagicMock(return_value="text")
         tool.analyze_file = MagicMock(return_value=("answer", 0.0))
 
         result = tool._forward_impl([b"x"], "question")
 
         assert result == ["answer"]
-        tool.process_text_file.assert_called_once_with("file_1.txt", b"x")
+        tool.text_cleanser.assert_called_once_with("file_1.txt", b"x", cancellation_scope=None)
     @pytest.mark.parametrize(
         "payload",
         [
@@ -93,13 +74,13 @@ class TestAnalyzeTextFileTool:
         ],
     )
     def test_forward_impl_preserves_json_format(self, tool, payload):
-        tool.process_text_file = MagicMock(return_value="text")
+        tool.text_cleanser = MagicMock(return_value="text")
         tool.analyze_file = MagicMock(return_value=("answer", 0.0))
 
         result = tool._forward_impl([payload], "question")
 
         assert result == ["answer"]
-        tool.process_text_file.assert_called_once_with("file_1.json", payload)
+        tool.text_cleanser.assert_called_once_with("file_1.json", payload, cancellation_scope=None)
 
     @pytest.mark.parametrize(
         "payload,error",
@@ -113,62 +94,32 @@ class TestAnalyzeTextFileTool:
             tool._forward_impl(payload, "prompt")
 
     def test_forward_impl_raises_when_no_text(self, tool):
-        tool.process_text_file = MagicMock(return_value="")
+        tool.text_cleanser = MagicMock(return_value="")
 
         with pytest.raises(Exception, match="No text content extracted"):
             tool._forward_impl([b"file"], "prompt")
 
     def test_forward_impl_appends_analysis_exception(self, tool):
-        tool.process_text_file = MagicMock(return_value="text")
+        tool.text_cleanser = MagicMock(return_value="text")
         tool.analyze_file = MagicMock(side_effect=Exception("LLM failed"))
 
         result = tool._forward_impl([b"x"], "prompt")
 
         assert result == ["LLM failed"]
 
-    def test_process_text_file_success(self, tool):
-        mock_response = MagicMock(status_code=200)
-        mock_response.json.return_value = {"text": "converted"}
-        tool._mock_http_client.post.return_value = mock_response
+    def test_cleansing_error_is_not_retried_or_sent_to_model(self, tool):
+        tool.text_cleanser.side_effect = OSError("cleanse-failed")
+        tool.analyze_file = MagicMock()
+        with pytest.raises(Exception, match="cleanse-failed"):
+            tool._forward_impl([b"input"], "query")
+        assert tool.text_cleanser.call_count == 1
+        tool.analyze_file.assert_not_called()
 
-        result = tool.process_text_file("doc.txt", b"bytes")
-
-        assert result == "converted"
-        tool._mock_http_client.post.assert_called_once()
-        request_kwargs = tool._mock_http_client.post.call_args.kwargs
-        assert request_kwargs["files"]["file"] == (
-            "doc.txt", b"bytes", "application/octet-stream")
-
-    def test_process_text_file_uses_json_content_type(self, tool):
-        mock_response = MagicMock(status_code=200)
-        mock_response.json.return_value = {"text": "converted"}
-        tool._mock_http_client.post.return_value = mock_response
-        payload = b'{"name":"alice"}'
-
-        result = tool.process_text_file("doc.json", payload)
-
-        assert result == "converted"
-        request_kwargs = tool._mock_http_client.post.call_args.kwargs
-        assert request_kwargs["files"]["file"] == (
-            "doc.json", payload, "application/json")
-
-    def test_process_text_file_http_error_json_detail(self, tool):
-        mock_response = MagicMock(status_code=400)
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"detail": "bad request"}
-        tool._mock_http_client.post.return_value = mock_response
-
-        with pytest.raises(Exception, match="bad request"):
-            tool.process_text_file("doc.txt", b"bytes")
-
-    def test_process_text_file_http_error_plain_text(self, tool):
-        mock_response = MagicMock(status_code=500)
-        mock_response.headers = {}
-        mock_response.text = "server exploded"
-        tool._mock_http_client.post.return_value = mock_response
-
-        with pytest.raises(Exception, match="server exploded"):
-            tool.process_text_file("doc.txt", b"bytes")
+    @pytest.mark.parametrize("capability", [None, "old-service-url"])
+    def test_missing_capability_rejected_without_legacy_entry(self, capability):
+        with pytest.raises(ValueError, match="capability is required"):
+            AnalyzeTextFileTool(text_cleanser=capability)
+        assert not hasattr(AnalyzeTextFileTool, "process_text_file")
 
     def test_analyze_file_uses_prompt_template(self, tool, llm_model, observer_zh, monkeypatch):
         prompts = {
@@ -218,7 +169,7 @@ class TestAnalyzeTextFileToolValidateUrlAccess:
             tool = AnalyzeTextFileTool(
                 storage_client=MagicMock(),
                 observer=observer_en,
-                data_process_service_url="http://data-process",
+                text_cleanser=MagicMock(return_value="text"),
                 llm_model=llm_model,
             )
 
@@ -241,7 +192,7 @@ class TestAnalyzeTextFileToolValidateUrlAccess:
             tool = AnalyzeTextFileTool(
                 storage_client=MagicMock(),
                 observer=observer_en,
-                data_process_service_url="http://data-process",
+                text_cleanser=MagicMock(return_value="text"),
                 llm_model=llm_model,
                 validate_url_access=validate_callback,
             )
@@ -263,7 +214,7 @@ class TestAnalyzeTextFileToolValidateUrlAccess:
             tool = AnalyzeTextFileTool(
                 storage_client=MagicMock(),
                 observer=observer_en,
-                data_process_service_url="http://data-process",
+                text_cleanser=MagicMock(return_value="text"),
                 llm_model=llm_model,
                 validate_url_access="not_a_callable",
             )
@@ -287,7 +238,7 @@ class TestAnalyzeTextFileToolValidateUrlAccess:
             tool = AnalyzeTextFileTool(
                 storage_client=MagicMock(),
                 observer=observer_en,
-                data_process_service_url="http://data-process",
+                text_cleanser=MagicMock(return_value="text"),
                 llm_model=llm_model,
                 validate_url_access=validate_callback,
             )
@@ -304,7 +255,7 @@ class TestAnalyzeTextFileToolValidateUrlAccess:
         tool = AnalyzeTextFileTool(
             storage_client=MagicMock(),
             observer=observer_en,
-            data_process_service_url="http://data-process",
+            text_cleanser=MagicMock(return_value="text"),
             llm_model=llm_model,
         )
 

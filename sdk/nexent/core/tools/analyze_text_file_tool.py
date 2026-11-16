@@ -1,23 +1,25 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Analyze Text File Tool
 
 Extracts content from text files (excluding images) and analyzes it using a large language model.
 Supports files from S3, HTTP, and HTTPS URLs.
 """
+
 import json
 import logging
 from typing import List, Optional
 
-from jinja2 import Template, StrictUndefined
+from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.utils.observer import MessageObserver, ProcessType
-from ..prompts import load_prompt
+from ...core.utils.observer import MessageObserver
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
-from ...storage import MinIOStorageClient
 from ...multi_modal.load_save_object import LoadSaveObjectManager
-from ...utils.http_client_manager import http_client_manager
+from ...storage import MinIOStorageClient
+from ...storage.errors import DeadlineExceeded, OperationCancelled
+from ..prompts import load_prompt
 
 
 logger = logging.getLogger("analyze_text_file_tool")
@@ -39,31 +41,25 @@ class AnalyzeTextFileTool(Tool):
         "file_url_list": {
             "type": "array",
             "description": "List of file URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
-            "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
+            "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。",
         },
         "query": {
             "type": "string",
             "description": "User's question to guide the analysis",
-            "description_zh": "用户的问题，用于指导分析"
-        }
+            "description_zh": "用户的问题，用于指导分析",
+        },
     }
 
     init_param_descriptions = {
-        "storage_client": {
-            "description": "Storage client for downloading files"
-        },
-        "data_process_service_url": {
-            "description": "URL of data process service"
-        },
-        "llm_model": {
-            "description": "The LLM model to use"
-        },
+        "storage_client": {"description": "Storage client for downloading files"},
+        "text_cleanser": {"description": "Run-bound text cleansing capability provided by the runtime"},
+        "llm_model": {"description": "The LLM model to use"},
         "selected_model_id": {
             "description": "Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used."
         },
         "validate_url_access": {
             "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
-        }
+        },
     }
     output_type = "array"
     category = ToolCategory.MULTIMODAL.value
@@ -74,49 +70,37 @@ class AnalyzeTextFileTool(Tool):
         storage_client: Optional[MinIOStorageClient] = Field(
             description="Storage client for downloading files from S3 URLs、HTTP URLs、HTTPS URLs.",
             default=None,
-            exclude=True
+            exclude=True,
         ),
-        observer: MessageObserver = Field(
-            description="Message observer",
-            default=None,
-            exclude=True
-        ),
-        data_process_service_url: str = Field(
-            description="URL of data process service",
-            default=None,
-            exclude=True),
-        llm_model: str = Field(
-            description="The LLM model to use",
-            default=None,
-            exclude=True),
+        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
+        text_cleanser: callable = Field(default=None, exclude=True, description="Runtime text cleansing capability"),
+        llm_model: str = Field(description="The LLM model to use", default=None, exclude=True),
         selected_model_id: int = Field(
             description="Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used.",
-            default=None),
-        validate_url_access: callable = Field(
-            description="Callback function to validate URL access permissions",
             default=None,
-            exclude=True)
+        ),
+        validate_url_access: callable = Field(
+            description="Callback function to validate URL access permissions", default=None, exclude=True
+        ),
     ):
         super().__init__()
         self.storage_client = storage_client
         self.observer = observer
         self.llm_model = llm_model
         self.selected_model_id = selected_model_id
-        self.data_process_service_url = data_process_service_url
+        if not callable(text_cleanser):
+            raise ValueError("Text cleansing capability is required")
+        self.text_cleanser = text_cleanser
+        self.cancellation_scope = None
 
         # Create LoadSaveObjectManager with the storage client and validation callback
         # Ensure validate_url_access is callable before passing to LoadSaveObjectManager
         validate_callback = None
         if validate_url_access is not None and callable(validate_url_access):
             validate_callback = validate_url_access
-        self.mm = LoadSaveObjectManager(
-            storage_client=self.storage_client,
-            validate_url_access=validate_callback
-        )
-        self.time_out = 60 * 5
+        self.mm = LoadSaveObjectManager(storage_client=self.storage_client, validate_url_access=validate_callback)
         # Dynamically apply the load_object decorator to forward method
-        self.forward = self.mm.load_object(
-            input_names=["file_url_list"])(self._forward_impl)
+        self.forward = self.mm.load_object(input_names=["file_url_list"])(self._forward_impl)
 
     def _forward_impl(
         self,
@@ -148,33 +132,32 @@ class AnalyzeTextFileTool(Tool):
             analysis_results: List[str] = []
 
             for index, single_file in enumerate(file_url_list, start=1):
-                logger.info(
-                    f"Extracting text content from file #{index}, query: {query}")
+                logger.info(f"Extracting text content from file #{index}, query: {query}")
                 extension = ".json" if self._is_valid_json(single_file) else ".txt"
                 filename = f"file_{index}{extension}"
 
                 # Step 1: Get file content
-                raw_text = self.process_text_file(filename, single_file)
+                raw_text = self.text_cleanser(filename, single_file, cancellation_scope=self.cancellation_scope)
 
                 if not raw_text:
                     error_msg = f"No text content extracted from file #{index}"
                     logger.error(error_msg)
                     raise Exception(error_msg)
 
-                logger.info(
-                    f"Analyzing text content with LLM for file #{index}, query: {query}")
+                logger.info(f"Analyzing text content with LLM for file #{index}, query: {query}")
 
                 # Step 2: Analyze file content
                 try:
                     text, _ = self.analyze_file(query, raw_text)
                     analysis_results.append(text)
                 except Exception as analysis_error:
-                    logger.error(
-                        f"Failed to analyze file #{index}: {analysis_error}")
+                    logger.error(f"Failed to analyze file #{index}: {analysis_error}")
                     analysis_results.append(str(analysis_error))
 
             return analysis_results
 
+        except (DeadlineExceeded, OperationCancelled):
+            raise
         except Exception as e:
             logger.error(f"Error analyzing text file: {str(e)}", exc_info=True)
             error_msg = f"Error analyzing text file: {str(e)}"
@@ -189,74 +172,23 @@ class AnalyzeTextFileTool(Tool):
             return False
         return True
 
-    def process_text_file(self, filename: str, file_content: bytes,) -> str:
+    def analyze_file(
+        self,
+        query: str,
+        raw_text: str,
+    ):
         """
         Process text file, convert to text using external API
         """
-        # file_content is byte data, need to send to API through file upload
-        api_url = f"{self.data_process_service_url}/tasks/process_text_file"
-        logger.info(f"Processing text file {filename} with API: {api_url}")
-
-        raw_text = ""
-        try:
-            # Upload byte data as a file
-            content_type = (
-                "application/json"
-                if filename.lower().endswith(".json")
-                else "application/octet-stream"
-            )
-            files = {
-                'file': (filename, file_content, content_type)
-            }
-            data = {
-                'chunking_strategy': 'basic',
-                'timeout': self.time_out,
-            }
-            # Use shared HttpClientManager for connection pooling
-            client = http_client_manager.get_sync_client(
-                base_url=self.data_process_service_url,
-                timeout=float(self.time_out),
-                verify_ssl=True
-            )
-            response = client.post(api_url, files=files, data=data)
-
-            if response.status_code == 200:
-                result = response.json()
-                raw_text = result.get("text", "")
-                logger.info(
-                    f"File processed successfully: {raw_text[:200]}...{raw_text[-200:]}...， length: {len(raw_text)}")
-            else:
-                error_detail = response.json().get('detail', 'unknown error') if response.headers.get(
-                    'content-type', '').startswith('application/json') else response.text
-                logger.error(
-                    f"File processing failed (status code: {response.status_code}): {error_detail}")
-                raise Exception(error_detail)
-
-        except Exception as e:
-            logger.error(
-                f"Failed to process text file {filename}: {str(e)}", exc_info=True)
-            raise
-
-        return raw_text
-
-    def analyze_file(self, query: str, raw_text: str,):
-        """
-        Process text file, convert to text using external API
-        """
-        language = getattr(self.observer, "lang",
-                           "en") if self.observer else "en"
+        language = getattr(self.observer, "lang", "en") if self.observer else "en"
         prompts = load_prompt(language, "tool/analyze_file")
-        system_prompt_template = Template(
-            prompts['system_prompt'], undefined=StrictUndefined)
-        user_prompt_template = Template(
-            prompts['user_prompt'], undefined=StrictUndefined)
+        system_prompt_template = Template(prompts["system_prompt"], undefined=StrictUndefined)
+        user_prompt_template = Template(prompts["user_prompt"], undefined=StrictUndefined)
 
-        system_prompt = system_prompt_template.render({'query': query})
+        system_prompt = system_prompt_template.render({"query": query})
         user_prompt = user_prompt_template.render({})
 
         result, truncation_percentage = self.llm_model.analyze_long_text(
-            text_content=raw_text,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt
+            text_content=raw_text, system_prompt=system_prompt, user_prompt=user_prompt
         )
         return result.content, truncation_percentage

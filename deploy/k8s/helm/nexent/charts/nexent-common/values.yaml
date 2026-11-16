@@ -28,6 +28,8 @@ envFiles:
 # ConfigMap data - this will be used by nexent-config ConfigMap
 config:
   timezone: "Asia/Shanghai"
+  fileCleanse:
+    enabled: "true"
   # Service URLs (internal)
   services:
     gatewayUrl: "http://nexent-gateway:5013"

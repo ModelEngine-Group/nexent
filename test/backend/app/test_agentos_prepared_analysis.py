@@ -39,7 +39,7 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[raw])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
     lookup = mocker.patch.object(adapter, "get_model_by_model_id", return_value=model)
-    legacy_text = mocker.patch.object(tools, "get_llm_adapter")
+    legacy_text = mocker.patch.object(adapter, "get_llm_adapter")
     legacy_media = mocker.patch.object(tools, "get_vlm_adapter")
     tool, = await tools.create_tool_config_list(7, "tenant-a", "user-a", portable_evaluation=True)
     lookup.assert_called_once_with(9, "tenant-a")
@@ -54,7 +54,7 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     create_adapter = mocker.patch.object(prepared_analysis, "get_adapter_from_config")
     mocker.patch.object(environment, "DATA_PROCESS_SERVICE", "http://runtime-processing")
     rebound = prepared_analysis.materialize_analysis_tools(
-        [ToolBinding.model_validate_json(encoded)], ServicePrincipal("user-a", "tenant-a"),
+        [ToolBinding.model_validate_json(encoded)], ServicePrincipal("user-a", "tenant-a"), run_id="a" * 32,
     )[reference.tool_id]
     assert rebound.name == name
     runtime_model.assert_called_once_with(9, "tenant-a")
@@ -65,7 +65,9 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     assert tool_instance.selected_model_id == 9
     assert (tool_instance.llm_model if slot == "llm" else tool_instance.vlm_model) is create_adapter.return_value
     if slot == "llm":
-        assert tool_instance.data_process_service_url == "http://runtime-processing"
+        assert callable(tool_instance.text_cleanser)
+        assert tool_instance.text_cleanser.run_id == "a" * 32
+        assert "data_process_service_url" not in rebound.metadata
     validate = rebound.metadata["validate_url_access"]
     validate(["/bucket/attachments/user-a/file.txt", "https://example.invalid/image.png"])
     for alias in ("s3://", "s3:/", "/", "//", " s3://"):

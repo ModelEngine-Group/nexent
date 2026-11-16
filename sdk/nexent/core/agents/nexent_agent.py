@@ -471,9 +471,10 @@ class NexentAgent:
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
-                                       data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
+                                       text_cleanser=tool_config.metadata.get("text_cleanser"),
                                        validate_url_access=validate_url_access,
                                        **params)
+                tools_obj.cancellation_scope = getattr(self, "cancellation_scope", None)
             elif class_name in ["AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool"]:
                 # Extract validate_url_access from metadata if it's callable
                 validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None

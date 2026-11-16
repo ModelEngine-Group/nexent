@@ -24,6 +24,10 @@ def test_role_parser_images(record_property):
         "management.services.file.cleanse_lifespan": "backend/management/services/file/cleanse_lifespan.py",
         "nexent.data_process.core": "sdk/nexent/data_process/core.py",
         "runtime.knowledge_base.chunking": "backend/runtime/knowledge_base/chunking.py",
+        "runtime.text_cleanse": "backend/runtime/text_cleanse.py",
+        "runtime.agentos.tools": "backend/runtime/agentos/tools.py",
+        "nexent.core.tools.analyze_text_file_tool": "sdk/nexent/core/tools/analyze_text_file_tool.py",
+        "management.services.tool.text_validation": "backend/management/services/tool/text_validation.py",
         "nexent.multi_modal.image_filter": "sdk/nexent/multi_modal/image_filter.py",
     }
     try:

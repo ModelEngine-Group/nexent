@@ -3,7 +3,6 @@
 
 import hashlib
 import io
-import time
 
 from contracts.agentos_knowledge import (
     CleanseArtifact,
@@ -144,28 +143,3 @@ def cleanse_object(
     if published.sha256 != digest:
         raise ValueError("Artifact publication was not confirmed")
     return _object_reference(published)
-
-
-def extract_uploaded_text(
-    file_content, filename, chunking_strategy, *, parser, clock=time.time
-):
-    """Preserve the existing text endpoint result while injecting parser execution."""
-    started = clock()
-    chunks, _images = parser.file_process(
-        file_data=file_content,
-        filename=filename,
-        chunking_strategy=chunking_strategy,
-    )
-    texts = [chunk["content"] for chunk in chunks if "content" in chunk]
-    text = "".join(value + "\n" for value in texts).strip()
-    return {
-        "success": True,
-        "task_id": None,
-        "filename": filename,
-        "text": text,
-        "chunks": texts,
-        "chunks_count": len(chunks),
-        "text_length": len(text),
-        "processing_time": clock() - started,
-        "chunking_strategy": chunking_strategy,
-    }

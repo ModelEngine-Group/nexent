@@ -15,6 +15,8 @@
 | preparation 标记及 export_evaluation 开关 | 新运行均已使用标准快照，无需 legacy/management 跳转选择 | 单一路径编译与原幂等指纹 |
 | 旧公开 Runtime、compat 启动及 Management 反向派发 | Gateway、Northbound、A2A、自动化均已迁移 | Management 对外适配和标准 AgentOS |
 
+文本工具已移除 SDK 的 data_process_service_url 构造参数、process_text_file HTTP 方法，以及旧服务的 /tasks/process_text_file 路由、process_uploaded_text_file 和无调用方 extract_uploaded_text。Management 试跑改用签名 Agent.tools.invoke，普通运行从真实上下文注入清洗能力，benchmark 必须显式注入。其他 data-process 功能仍有调用方，镜像及剩余模块继续等待迁移。
+
 没有增加旧模块别名、弃用包装器或 import 回退。两个服务目录之间不允许直接源码导入。
 
 ## 仍有用途的历史处理

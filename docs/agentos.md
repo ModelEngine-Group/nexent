@@ -1,6 +1,6 @@
 # AgentOS 接口与开发用法
 
-本文对应 `feat-management-runtime-boundary` 当前实现。AgentOS 是 Management 与 Runtime 之间的带类型服务协议，当前使用 HTTP POST、JSON 和 SSE。协议定义在 `backend/contracts/agentos.py`，客户端在 `infrastructure/agentos_client.py`，Management 通过 `management.clients.agentos.AgentOSClient` 使用它。
+本文对应 `feat-data-process-retirement` 当前实现。AgentOS 是 Management 与 Runtime 之间的带类型服务协议，当前使用 HTTP POST、JSON 和 SSE。协议定义在 `backend/contracts/agentos.py`，客户端在 `infrastructure/agentos_client.py`，Management 通过 `management.clients.agentos.AgentOSClient` 使用它。
 
 ## 服务职责
 
@@ -17,6 +17,7 @@ Gateway 验证外部身份并路由请求。Management 检查资源权限、用�
 | 持久会话运行 | `/agent/run` | `start_prepared_run` | `PreparedAgentRun`，返回 `AgentRunReference`，执行与 SSE 订阅分离 |
 | 临时运行与调试 | `/agent/run-ephemeral` | `run_ephemeral` | `PreparedEphemeralRun` 或创建类快照，返回流；不创建普通会话消息 |
 | 单个评估样本执行 | `/agent/evaluation-case` | `run_prepared_evaluation` | `PreparedEvaluationRun`，返回 answer 和 events；任务编排及判分策略归 Management |
+| 工具试跑 | `/agent/tools/invoke` | `invoke_tool` | `AgentToolInvocation`，返回 `AgentToolResult`；当前支持文本分析，执行归 Runtime |
 | 从游标重连 | `/agent/resume` | `resume` | `AgentResume`，返回保留的事件及后续 SSE |
 | 检查运行 | `/agent/inspect` | `inspect_run` | `AgentRunLookup` 或 `AgentMessageRunLookup`，返回 `AgentRunState` |
 | 请求停止 | `/agent/stop` | `stop_run` | `AgentStop`，返回状态和 cancellation_requested |
@@ -106,6 +107,33 @@ vectors = await client.invoke_model(
 | 检查已有模型、探测配置 | healthcheck、probe | ModelHealthcheck、ModelProbe |
 
 这些路径统一位于 `/internal/agentos/v1/model/`。当前没有单独通用的 `Model.list` AgentOS 操作；不要把设计中的抽象方法写成已存在的路由。
+
+## 文本工具试跑与清洗
+
+Management 的工具试跑先编译已有 `ToolBinding`，再调用 `/internal/agentos/v1/agent/tools/invoke`。输入包含服务端生成的 run_id、工具绑定、inputs 和 language。当前入口只接收 `analyze_text_file`，Runtime 校验模型 ID/revision 后在受管线程执行。请求断开或600秒总截止会取消当前 scope；该接口不创建普通会话消息，也不返回SSE。
+
+```python
+from uuid import uuid4
+from contracts.agentos import AgentToolInvocation
+
+result = await client.invoke_tool(
+    AgentToolInvocation(
+        run_id=uuid4().hex, tool=authorized_binding,
+        inputs={"file_url_list": file_urls, "query": query}, language="zh",
+    ), user_id, tenant_id,
+)
+analyses = result.result
+```
+
+普通 Agent 的文本工具也使用同一 Runtime 清洗适配器，run_id 来自运行上下文。SDK 接收本地 `text_cleanser` callable，此对象仅在 Runtime 内注入，不能放入跨HTTP的资源快照。SDK benchmark 直接构造文本工具时，也必须显式传入此能力。随仓库提供的 generic benchmark CLI 显式使用本机SDK DataProcessCore公共算法，不依赖服务容器，需安装SDK data_process依赖及本机解析资源；这是离线算法评测场景。旧 `DATA_PROCESS_SERVICE` 地址和 `process_text_file` 方法已经移除。
+
+Runtime 将已加载的文件字节存为本次 run 的唯一暂存对象，再反向调用 Management 的 FileCleanse.submit/inspect。Management 提取结构，Runtime 读取带 revision/hash 的私有产物并完成最终分块；JSON 分块使用同一源字节。工具按原顺序逐文件分析，保留长文本模型接口与每文件分析异常结果。
+
+FileCleanse 的 submit、inspect、cancel、release 分别位于 `/internal/agentos/v1/file/cleanse`、`file/cleanse-status`、`file/cleanse-cancel`、`file/cleanse-release`，客户端为同名 `*_file_cleanse` 方法。清洗等待上限300秒，各HTTP操作仍受10秒总截止。消费后先确认release，再删除本次暂存源；用户原文件保持不变。提交结果不明或release失败会报错并保留对象，不自动重试或恢复。已知未结束任务只发送一次cancel。
+
+新镜像部署需要设置 `MANAGEMENT_FILE_CLEANSE_ENABLED=true`。新 `.env.example` 和 Helm `nexent-common.config.fileCleanse.enabled` 均已默认启用，升级已有 `.env` 时需同步该值；通过 `nexent-env` Secret注入同名变量时也需同步。本地backend未配置时仍默认关闭。维护窗口内先确认Management迁移与清洗root就绪，再部署Runtime并恢复流量。
+
+本批只迁移文本清洗执行链。通用SDK加载器原有MinIO调用、历史附件及共享知识库的旧URL权限策略仍需后续整改；本次没有扩大读取范围，不能据此声称StorageInterface全覆盖或data-process完整退役。
 
 ## Memory 与反向回调
 

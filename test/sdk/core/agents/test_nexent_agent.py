@@ -960,7 +960,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         metadata={
             "llm_model": "llm_model_obj",
             "storage_client": "storage_client_obj",
-            "data_process_service_url": "https://example.com",
+            "text_cleanser": "https://example.com",
         },
     )
 
@@ -980,7 +980,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         llm_model="llm_model_obj",
         storage_client="storage_client_obj",
         prompt="describe this",
-        data_process_service_url="https://example.com",
+        text_cleanser="https://example.com",
     )
     assert result == mock_analyze_tool_instance
 
@@ -1364,7 +1364,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         metadata={
             "llm_model": "llm_model_obj",
             "storage_client": "storage_client_obj",
-            "data_process_service_url": "DATA_PROCESS_SERVICE",
+            "text_cleanser": "DATA_PROCESS_SERVICE",
 
         },
     )
@@ -1384,7 +1384,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         observer=nexent_agent_instance.observer,
         llm_model="llm_model_obj",
         storage_client="storage_client_obj",
-        data_process_service_url="DATA_PROCESS_SERVICE",
+        text_cleanser="DATA_PROCESS_SERVICE",
         validate_url_access=None,
         prompt="describe this",
     )
@@ -3451,7 +3451,7 @@ class TestCreateLocalToolAnalyze:
             metadata={
                 "llm_model": ["gpt-4"],
                 "storage_client": "storage",
-                "data_process_service_url": "http://service.com"
+                "text_cleanser": "http://service.com"
             }
         )
 
@@ -3471,7 +3471,7 @@ class TestCreateLocalToolAnalyze:
         assert call_kwargs["observer"] == nexent_agent_instance.observer
         assert call_kwargs["llm_model"] == ["gpt-4"]
         assert call_kwargs["storage_client"] == "storage"
-        assert call_kwargs["data_process_service_url"] == "http://service.com"
+        assert call_kwargs["text_cleanser"] == "http://service.com"
         assert call_kwargs["param1"] == "value1"
         assert result == mock_tool_instance
 
@@ -3577,7 +3577,7 @@ class TestCreateLocalToolAnalyze:
             metadata={
                 "llm_model": ["gpt-4"],
                 "storage_client": "storage",
-                "data_process_service_url": "http://service.com"
+                "text_cleanser": "http://service.com"
             }
         )
 
@@ -3616,7 +3616,7 @@ class TestCreateLocalToolAnalyze:
             metadata={
                 "llm_model": ["gpt-4"],
                 "storage_client": "storage",
-                "data_process_service_url": "http://service.com",
+                "text_cleanser": "http://service.com",
                 "validate_url_access": mock_validate_func
             }
         )
@@ -3653,7 +3653,7 @@ class TestCreateLocalToolAnalyze:
             metadata={
                 "llm_model": ["gpt-4"],
                 "storage_client": "storage",
-                "data_process_service_url": "http://service.com",
+                "text_cleanser": "http://service.com",
                 "validate_url_access": "not_a_callable_string"
             }
         )
@@ -6036,7 +6036,7 @@ class TestWrapToolMonitoringInvocation:
 
         with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "agent_async")
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 wrapped.forward(q="world")
             )
 
@@ -6093,7 +6093,7 @@ class TestWrapToolMonitoringInvocation:
 
         with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(async_func, "agent_ac")
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 wrapped(val=5)
             )
 

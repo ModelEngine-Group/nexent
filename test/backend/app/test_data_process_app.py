@@ -134,10 +134,6 @@ class _ServiceStub:
             raise RuntimeError("bad")
         return {"important": True, "score": 0.9}
 
-    async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str):
-        if filename == "err.bin":
-            raise RuntimeError("bad file")
-        return {"filename": filename, "text": file_content.decode(errors="ignore")}
 
     def convert_celery_states_to_custom(self, process_celery_state: str, forward_celery_state: str) -> str:
         if process_celery_state == "SUCCESS" and forward_celery_state == "SUCCESS":
@@ -485,35 +481,8 @@ def test_filter_important_image_success_and_error():
     assert err.status_code == 500
 
 
-def test_process_text_file_success_and_error(tmp_path):
-    app = _build_app()
-    client = TestClient(app)
-    # success
-    files = {"file": ("a.txt", b"hello", "text/plain")}
-    ok = client.post("/tasks/process_text_file", files=files, data={"chunking_strategy": "basic"})
-    assert ok.status_code == 200
-    # error branch
-    files = {"file": ("err.bin", b"data", "application/octet-stream")}
-    bad = client.post("/tasks/process_text_file", files=files, data={"chunking_strategy": "basic"})
-    assert bad.status_code == 500
 
 
-def test_process_text_file_http_exception(monkeypatch):
-    from data_process.api.tasks import routes as app_module
-
-    async def err_http(*args, **kwargs):
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="bad file")
-
-    monkeypatch.setattr(app_module.service,
-                        "process_uploaded_text_file", err_http, raising=True)
-
-    app = _build_app()
-    client = TestClient(app)
-    files = {"file": ("x.txt", b"hello", "text/plain")}
-    resp = client.post("/tasks/process_text_file", files=files,
-                       data={"chunking_strategy": "basic"})
-    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 def test_convert_state_success_and_error(monkeypatch):
@@ -593,3 +562,9 @@ def test_convert_to_pdf_missing_params():
     client = TestClient(app)
     resp = client.post("/tasks/convert_to_pdf", data={})
     assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_retired_text_endpoint_is_not_exposed():
+    client = TestClient(_build_app())
+    response = client.post("/tasks/process_text_file", files={"file": ("source.txt", b"text")})
+    assert response.status_code == 404

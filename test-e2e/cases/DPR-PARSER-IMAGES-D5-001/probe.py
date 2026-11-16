@@ -201,7 +201,11 @@ else:
         chunks=len(chunks), json_chunks=len(json_chunks),
         extraction_absent=True,
     )
-    modules = ["runtime.knowledge_base.chunking", "nexent.multi_modal.image_filter"]
+    modules = ["runtime.knowledge_base.chunking", "nexent.multi_modal.image_filter",
+               "runtime.text_cleanse", "runtime.agentos.tools", "nexent.core.tools.analyze_text_file_tool"]
+
+if role == "management":
+    modules.append("management.services.tool.text_validation")
 
 evidence["source_hashes"] = {
     name: hashlib.sha256(

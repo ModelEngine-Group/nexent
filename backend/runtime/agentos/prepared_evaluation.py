@@ -233,7 +233,7 @@ def _materialize_agent(
     ))
     local_tools.update(materialize_analysis_tools(
         [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)
-         or binding.tool_id.startswith(ANALYSIS_TOOL_BINDING_PREFIX)], actor,
+         or binding.tool_id.startswith(ANALYSIS_TOOL_BINDING_PREFIX)], actor, run_id=workspace_run_id,
     ))
     ordered_tools = {
         "mcp": iter(mcp.materialize(resource, workbench_tools=mounted_tools)),

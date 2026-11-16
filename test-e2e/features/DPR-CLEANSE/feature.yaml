@@ -28,4 +28,6 @@ feature:
     description: Management owns one separate cleansing root, exposes unexpected exit as unhealthy and reclaims its processes without automatic restart.
   - rule_id: DPR-CLEANSE-RULE-10
     description: Management owns structural parser dependencies and extraction weights; Runtime owns pure chunking and CLIP with no peer source or extraction models.
+  - rule_id: DPR-CLEANSE-RULE-11
+    description: Runtime text analysis uses run-bound AgentOS cleansing and exact temporary object ports; confirmed release precedes source cleanup without retries or the retired text API.
   required_test_stages: [D3, D5]

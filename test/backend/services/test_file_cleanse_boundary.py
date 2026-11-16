@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from management.services.file.cleanse import extract_uploaded_text
 
 from infrastructure.file_processing.conversion import convert_office_to_pdf
 
@@ -44,31 +43,6 @@ def test_cleansing_uses_structure_only_and_checks_source(mocker):
     parser.file_structure.assert_not_called()
 
 
-def test_text_response_preserves_empty_chunks_and_output_shape(mocker):
-    parser = SimpleNamespace(
-        file_process=Mock(
-            return_value=(
-                [
-                    {"content": "one"},
-                    {"metadata": {}},
-                    {"content": "two"},
-                    {"content": ""},
-                ],
-                [],
-            )
-        )
-    )
-    result = extract_uploaded_text(
-        b"source", "document.txt", "basic", parser=parser, clock=lambda: 10.0
-    )
-    assert result == {
-        "success": True, "task_id": None, "filename": "document.txt", "text": "one\ntwo",
-        "chunks": ["one", "two", ""], "chunks_count": 4, "text_length": 7,
-        "processing_time": 0.0, "chunking_strategy": "basic",
-    }
-    parser.file_process.assert_called_once_with(
-        file_data=b"source", filename="document.txt", chunking_strategy="basic"
-    )
 
 
 @pytest.mark.asyncio

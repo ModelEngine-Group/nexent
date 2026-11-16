@@ -13,7 +13,6 @@ from contracts.constants.environment import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
 )
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
@@ -37,7 +36,7 @@ from management.services.knowledge_base.service import (
     get_embedding_model_by_index_name,
     get_vector_db_core,
 )
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
@@ -509,12 +508,14 @@ async def create_tool_config_list(
             if kb_overrides and "document_paths" in kb_overrides:
                 document_paths = kb_overrides.get("document_paths")
 
-        if portable_evaluation and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
+        if (portable_evaluation or tool_config.class_name == "AnalyzeTextFileTool") and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
             from management.services.agent.preparation.analysis import prepare_analysis_tool
 
             if prepare_analysis_tool(tool_config, tenant_id):
                 tool_config_list.append(tool_config)
                 continue
+            if tool_config.class_name == "AnalyzeTextFileTool":
+                raise ValidationError("Unsupported text analysis configuration")
 
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
@@ -609,16 +610,6 @@ async def create_tool_config_list(
 
             tool_config.metadata = {
                 "rerank_model": rerank_model,
-            }
-        elif tool_config.class_name == "AnalyzeTextFileTool":
-            selected_model_id = param_dict.get("selected_model_id")
-            tool_config.metadata = {
-                "llm_model": get_llm_adapter(
-                    tenant_id, selected_model_id, modality="llm_long_context"
-                ),
-                "storage_client": minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             selected_model_id = param_dict.get("selected_model_id")

@@ -44,9 +44,6 @@ from management.services.file.upload import convert_office_to_pdf
 from nexent.multi_modal.image_filter import ImageImportanceFilter
 from PIL import Image
 
-DataProcessCore = None
-
-
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 
@@ -547,29 +544,6 @@ class DataProcessService:
         content_type = f"image/{image.format.lower() if image.format else 'jpeg'}"
         return image_data, content_type
 
-    async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str = "basic") -> dict[str, Any]:
-        """Process uploaded file bytes into text/chunks using SDK DataProcessCore.
-
-        Args:
-            file_content: Raw bytes of the uploaded file
-            filename: Original filename for format detection
-            chunking_strategy: Chunking strategy name
-
-        Returns:
-            Dict[str, Any]: Processing result including text and metadata
-        """
-        from management.services.file.cleanse import extract_uploaded_text
-        from nexent.core.concurrency import run_blocking
-
-        global DataProcessCore
-        if DataProcessCore is None:
-            from nexent.data_process.core import DataProcessCore as _DataProcessCore
-
-            DataProcessCore = _DataProcessCore
-        return await run_blocking(
-            "file-cleanse-text", extract_uploaded_text, file_content, filename, chunking_strategy,
-            parser=DataProcessCore(), lane="control-io", owner="management",
-        )
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
         """Full conversion pipeline: download -> convert -> upload -> validate -> cleanup.

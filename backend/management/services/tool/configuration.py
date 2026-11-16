@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 
 import jsonref
 import requests
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 from contracts.errors.messages import ErrorMessage
 from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError, NotFoundException, ResourceBindingError, ToolExecutionException, ValidationError
 from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
@@ -35,7 +35,7 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from management.services.mcp.addressing import get_tenant_local_mcp_server
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
 from management.services.tool.catalog import (
     get_local_tools_classes,

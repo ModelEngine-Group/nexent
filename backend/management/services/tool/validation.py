@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from contracts.tool import ToolSourceEnum, ToolValidateRequest
 from infrastructure.object_storage.client import minio_client
@@ -20,7 +20,7 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from management.services.mcp.addressing import get_tenant_local_mcp_server
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
 from management.services.tool.common import (
     logger,
@@ -416,26 +416,6 @@ def _validate_local_tool(
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "analyze_text_file":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(
-                    f"Tenant ID and User ID are required for {tool_name} validation"
-                )
-            selected_model_id = instantiation_params.get("selected_model_id")
-            long_text_to_text_model = get_llm_adapter(
-                tenant_id, selected_model_id, modality="llm_long_context"
-            )
-            llm_display_name = getattr(long_text_to_text_model, "display_name", None)
-            set_monitoring_context(tenant_id=tenant_id)
-            set_monitoring_operation("tool_validation", display_name=llm_display_name)
-            params = {
-                **instantiation_params,
-                "llm_model": long_text_to_text_model,
-                "storage_client": minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
-            }
-            tool_instance = tool_class(**params)
         else:
             tool_instance = tool_class(**instantiation_params)
 
@@ -538,6 +518,9 @@ async def validate_tool_impl(
                     tool_name, inputs, usage, tenant_id
                 )
         elif source == ToolSourceEnum.LOCAL.value:
+            if tool_name == "analyze_text_file":
+                from management.services.tool.text_validation import validate_text_tool
+                return await validate_text_tool(request, tenant_id, user_id)
             if tool_name == "deepseek_search":
                 return await run_blocking(
                     "validate-local-tool", _validate_local_tool,
