@@ -602,3 +602,35 @@ async def test_bounded_embedding_wait_cancels_slow_http_response(monkeypatch):
         await adapter.get_embeddings_with_deadline("sample", timeout=0.03)
     assert len(calls) == 1
     assert cancelled.is_set()
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected_error"),
+    [(b'{"data":[{"embedding":[0.2,0.8]}]}', None), (b"not-json", "Invalid embedding JSON")],
+)
+@pytest.mark.asyncio
+async def test_bounded_embedding_http_response_is_decoded_once(monkeypatch, reply, expected_error):
+    import json
+
+    import httpx
+
+    from nexent.core.gateway.modality.embedding import openai
+
+    calls = []
+    original = httpx.AsyncClient
+
+    async def model(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, content=reply)
+
+    def client(**kwargs):
+        return original(transport=httpx.MockTransport(model), **kwargs)
+
+    monkeypatch.setattr(openai.httpx, "AsyncClient", client)
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+    if expected_error:
+        with pytest.raises(openai.InvalidEmbeddingResponse, match=expected_error):
+            await adapter.get_embeddings_with_deadline("sample", timeout=1)
+    else:
+        assert await adapter.get_embeddings_with_deadline("sample", timeout=1) == [[0.2, 0.8]]
+    assert [request["input"] for request in calls] == [["sample"]]
