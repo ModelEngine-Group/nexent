@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-QUEUE-20261116
+  change_type: requirement
+  requirement_id: SI-REQ-006
+  title: Scoped Kombu delivery adapter and neutral WorkQueue port
+  description: >-
+    Add enqueue/consume/ack/immediate retry/cancel-request/delivery inspection.
+    Broker connections remain private to Infrastructure; delivery observations
+    use the injected scoped KV port. Job outcomes remain owned by RecordStore.
+    No application worker or legacy Celery app is switched in this slice.
+  affected_features:
+    existing: [SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Isolated delivery contracts use traditional UT with actual Kombu memory
+    transport and controlled KV boundaries. A separate local Redis probe covers
+    real broker/metadata I/O. Full worker crash/lease/job recovery and prefork
+    acceptance is pending; no duplicate D1 or placeholder worker Case is added.
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve JSON task snapshots and reject unknown handlers and scope mismatches.
+    - Limit one active delivery, invalidate old receipts and requeue retries.
+    - Keep cancellation observations independent from acknowledgement state.
+    - Reject unbounded waits and event-loop synchronous broker access.
+    - Sanitize uncertain transport writes and reclaim failed delivery ownership.
+    reason: Existing storage tests do not exercise broker delivery ownership.
+    test_selectors:
+    - test/backend/infrastructure/test_work_queue.py
+    - test/sdk/storage/test_interface_contract.py

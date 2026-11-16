@@ -32,6 +32,7 @@ from .models import (
     VectorRecord,
     WriteReceipt,
 )
+from .queue import WorkQueue
 
 
 class StoragePort(Protocol):
@@ -171,3 +172,4 @@ class StorageInterface:
     records: RecordStore | None = None
     objects: ObjectStore | None = None
     vectors: VectorStore | None = None
+    queue: WorkQueue | None = None
