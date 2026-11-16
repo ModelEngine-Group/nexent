@@ -11,7 +11,20 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
+import type { TrajectoryNode } from "@/types/trajectory";
+
+export function trajectoryNodeName(node: TrajectoryNode, t: TFunction): string {
+  if (node.kind !== "phase") return node.name;
+  const label = t(`trajectory.phases.${node.name}`, {
+    defaultValue: node.name,
+  });
+  const agent = node.attributes["agent.name"];
+  return node.name === "memory.prepare" && typeof agent === "string" && agent
+    ? `${label} · ${agent}`
+    : label;
+}
 
 export function NodeIcon({
   kind,

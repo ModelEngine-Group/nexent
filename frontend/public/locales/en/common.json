@@ -6931,6 +6931,8 @@
   "trajectory.scheduleTime": "Runs daily at 00:00 Beijing time (UTC+8)",
   "trajectory.kinds.phase": "Phase",
   "trajectory.phases.agent.prepare": "Execution preparation",
+  "trajectory.phases.memory.prepare": "Memory preparation",
+  "trajectory.phases.code.execute": "Code execution",
   "trajectory.phases.memory.initialize": "Memory initialization",
   "trajectory.phases.memory.external_search": "External memory search",
   "trajectory.phases.memory.load_context": "Long-term memory loading",

@@ -24,6 +24,7 @@ import {
   NodeIcon,
   TrajectoryStatus,
   nodeDuration,
+  trajectoryNodeName,
   userInputPreview,
 } from "./TrajectoryPresentation";
 
@@ -58,9 +59,7 @@ export function TrajectoryTimeline({
             node.kind === "phase"
               ? {
                   ...node,
-                  name: t(`trajectory.phases.${node.name}`, {
-                    defaultValue: node.name,
-                  }),
+                  name: trajectoryNodeName(node, t),
                 }
               : node
           )

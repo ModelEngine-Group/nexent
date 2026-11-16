@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Acceptance tests for request-only format reminders and bare-text continuation."""
 
 import sys
@@ -66,7 +67,7 @@ def _agent_with_responses(contents, *, strict, monkeypatch):
         )
     )
     sandbox_module = ModuleType(f"{core_agent_module.__package__}.sandbox")
-    sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
+    sandbox_module._execute_with_tool_context = lambda executor, code, *, trace_execution=False: executor(code)
     monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 
     base = [

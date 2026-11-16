@@ -6929,6 +6929,8 @@
   "trajectory.scheduleTime": "每天北京时间 00:00 执行",
   "trajectory.kinds.phase": "阶段",
   "trajectory.phases.agent.prepare": "执行准备",
+  "trajectory.phases.memory.prepare": "记忆准备",
+  "trajectory.phases.code.execute": "代码执行",
   "trajectory.phases.memory.initialize": "记忆初始化",
   "trajectory.phases.memory.external_search": "外部记忆检索",
   "trajectory.phases.memory.load_context": "长期记忆加载",

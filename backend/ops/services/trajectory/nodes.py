@@ -316,8 +316,23 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 if f"nexent.availability.{slot}" in attrs
             },
         }
+        if kind == "phase" and span.get("name") == "memory.prepare" and attrs.get("agent.name"):
+            node["attributes"]["agent.name"] = str(attrs["agent.name"])
         node["attributes"].update(version_availability)
         nodes[identity] = node
+    # Fold sandbox implementation phases only when an initialization ancestor exists.
+    for node in nodes.values():
+        if node["kind"] != "phase" or node["name"] not in {"agent.sandbox.warmup", "agent.sandbox.workspace"}:
+            continue
+        parent = node["parent_id"] or aliases.get(node["_native_parent"], node["_native_parent"])
+        visited = set()
+        while parent in nodes and parent not in visited:
+            visited.add(parent)
+            ancestor = nodes[parent]
+            if ancestor["kind"] == "phase" and ancestor["name"] == "agent.sandbox.initialize":
+                node["kind"] = "context"
+                break
+            parent = ancestor["parent_id"] or aliases.get(ancestor["_native_parent"], ancestor["_native_parent"])
     # Technical spans retain source ancestry but do not become Agent/model/tool calls.
     for node in nodes.values():
         parent = node["parent_id"] or aliases.get(

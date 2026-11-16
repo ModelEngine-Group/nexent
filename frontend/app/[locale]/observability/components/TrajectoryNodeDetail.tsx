@@ -14,6 +14,7 @@ import {
   TrajectoryStatus,
   nodeDuration,
   nodeTime,
+  trajectoryNodeName,
 } from "./TrajectoryPresentation";
 
 export function TrajectoryNodeDetail({
@@ -72,13 +73,7 @@ export function TrajectoryNodeDetail({
           <NodeIcon kind={node.kind} large />
           <div className="min-w-0 flex-1">
             <div className="trajectory-node-title-row">
-              <h2>
-                {node.kind === "phase"
-                  ? t(`trajectory.phases.${node.name}`, {
-                      defaultValue: node.name,
-                    })
-                  : node.name}
-              </h2>
+              <h2>{trajectoryNodeName(node, t)}</h2>
               {node.round_no != null && (
                 <span className="trajectory-round-label">
                   {t("trajectory.round", { number: node.round_no })}

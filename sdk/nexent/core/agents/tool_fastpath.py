@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Restricted official-tool actions with deferred ordinary executor creation."""
 
 from __future__ import annotations
@@ -276,6 +277,10 @@ class DeferredToolExecutor:
         }
 
     def __call__(self, code: str) -> Any:
+        return self.execute(code)
+
+    def execute(self, code: str, *, trace_execution: bool = False) -> Any:
+        """Time only the selected code invocation after executor preparation."""
         from .sandbox import _execute_with_tool_context
 
         with self._lock:
@@ -302,6 +307,8 @@ class DeferredToolExecutor:
                     for statement in statements:
                         import_names.update(_json_import_bindings(statement))
                     try:
+                        if trace_execution:
+                            return _execute_with_tool_context(self.local, code, trace_execution=True)
                         return self.local(code)
                     finally:
                         # Retain only bindings actually established before a local error.
@@ -328,6 +335,8 @@ class DeferredToolExecutor:
                     self._release_executor(executor)
                     raise
                 self.remote = executor
+            if trace_execution:
+                return _execute_with_tool_context(self.remote, code, trace_execution=True)
             return _execute_with_tool_context(self.remote, code)
 
     def cleanup(self) -> None:

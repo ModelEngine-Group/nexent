@@ -33,23 +33,33 @@ acceptance_bindings:
   - test_capture_model_display_uses_provider_bodies_and_cold_content
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
   - test_capture_actual_worker_cancel_preserves_partial_output
+  AC-09:
+  - test_capture_preparation_phases_survive_authorized_worker_and_cold_read
+  - test_capture_parallel_tools_nested_output_and_full_local_body
 preparation:
   families: []
   anchors: false
   special_assets: false
   d4_groups: []
-notes: 'Current assertions own private loopback Provider/OTLP HTTP servers, real smolagents workers and sandbox
-  executor, private local OTLP roots, real cold FastAPI readers including an independent Uvicorn process with asserted
-  shutdown, and bounded ThreadManager lanes. Tool implementations and PG identities/catalog are controlled boundaries.
-  SDK configuration/exporters are real; repeated startup provider registration is isolated inside this process.
-  All created model clients close, private sandbox pool shuts down on its owning manager, HTTP server threads join
-  and managed active_count is asserted zero. No shared preparation family or shared service is used. Bindings describe
-  implemented assertion locations only. This Case remains blocked: live PG schema/sequence/committed-chat reconciliation,
-  backend environment bootstrap across processes remain unverified; integration acceptance is deferred by the user.
-  A direct script pass is not complete acceptance of AC-01/03/05 or this full Case. The creator regression uses
-  the real shared orchestration and NL2Agent stream, with the AgentRunInfo builder and PG history boundary controlled,
-  then real SDK/HTTP/file capture and cold reads. It owns no additional shared resources; existing teardown applies.
-  AC-07 uses the same private resources and asserted teardown; cold snapshot and content chunks must reconstruct
-  the exact original Agent query while physical model requests remain complete. AC-08 reuses private provider and
-  cold reader resources; all model body chunks are compared with native provider fields, with existing fixture-owned
-  teardown.'
+notes: 'Current assertions own private loopback Provider/OTLP HTTP servers, real smolagents
+  workers and sandbox executor, private local OTLP roots, real cold FastAPI readers
+  including an independent Uvicorn process with asserted shutdown, and bounded ThreadManager
+  lanes. Tool implementations and PG identities/catalog are controlled boundaries.
+  SDK configuration/exporters are real; repeated startup provider registration is
+  isolated inside this process. All created model clients close, private sandbox pool
+  shuts down on its owning manager, HTTP server threads join and managed active_count
+  is asserted zero. No shared preparation family or shared service is used. Bindings
+  describe implemented assertion locations only. This Case remains blocked: live PG
+  schema/sequence/committed-chat reconciliation, backend environment bootstrap across
+  processes remain unverified; integration acceptance is deferred by the user. A direct
+  script pass is not complete acceptance of AC-01/03/05 or this full Case. The creator
+  regression uses the real shared orchestration and NL2Agent stream, with the AgentRunInfo
+  builder and PG history boundary controlled, then real SDK/HTTP/file capture and
+  cold reads. It owns no additional shared resources; existing teardown applies. AC-07
+  uses the same private resources and asserted teardown; cold snapshot and content
+  chunks must reconstruct the exact original Agent query while physical model requests
+  remain complete. AC-08 reuses private provider and cold reader resources; all model
+  body chunks are compared with native provider fields, with existing fixture-owned
+  teardown. Per-agent memory grouping reuses the same fixture resources; success,
+  recovered failure and cancellation variants compare grouped steps, identity and
+  original time ranges through file export and cold content reads.'

@@ -17,6 +17,7 @@ except ImportError:
 
 from .duration import duration_attributes
 from .local_content import local_capture_enabled, safe_local_content
+from .preparation_groups import group_memory_preparation
 
 
 _MAX_PREPARATION_PHASES = 4096
@@ -181,6 +182,10 @@ def emit_preparation(info):
         return
     info.preparation_trace = []
     root, emitted = trace.get_current_span(), {}
+    try:
+        records = group_memory_preparation(records)
+    except Exception:
+        _gap(root)
     try:
         for index, record in enumerate(records):
             parent = emitted.get(record["parent"], root)

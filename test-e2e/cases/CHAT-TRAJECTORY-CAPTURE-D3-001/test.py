@@ -149,6 +149,11 @@ def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monke
         assert root['tool_call_count'] == 4
         assert len([n for n in result['nodes'] if n['name'] == 'python_interpreter']) == 1
         assert len([n for n in result['nodes'] if n['name'] == 'capture_echo']) == 2
+        python = next(n for n in result['nodes'] if n['name'] == 'python_interpreter')
+        execution = next(n for n in result['nodes'] if n['name'] == 'code.execute')
+        assert execution['parent_id'] == python['id'] and execution['kind'] == 'phase'
+        assert execution['duration_ms'] >= 0 and execution['duration_ms'] <= python['duration_ms']
+        assert execution['usage'] is None and execution['tool_call_count'] is None
 
 
 def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
@@ -250,7 +255,9 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         assert agent['model_call_count'] == 2 and agent['tool_call_count'] == 2
         tools = [n for n in nodes.values() if n['kind'] == 'tool' and n['parent_id'] == agent['id']]
         assert len(tools) == 1 and tools[0]['name'] == 'python_interpreter'
-        leaves = [n for n in nodes.values() if n['parent_id'] == tools[0]['id']]
+        executions = [n for n in nodes.values() if n['parent_id'] == tools[0]['id']]
+        assert len(executions) == 1 and executions[0]['name'] == 'code.execute'
+        leaves = [n for n in nodes.values() if n['parent_id'] == executions[0]['id']]
         assert len(leaves) == 1 and leaves[0]['name'] == 'capture_leaf'
     root = next(n for n in nodes.values() if n['parent_id'] is None)
     assert root['agent_version_no'] == 3
@@ -569,7 +576,8 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
             assert len([node for node in result['nodes'] if node['kind'] == 'model']) == 1
 
 
-def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runtime):
+@pytest.mark.parametrize("outcome", ["success", "failed", "cancelled"])
+def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runtime, outcome):
     import asyncio
     from types import SimpleNamespace
 
@@ -579,13 +587,39 @@ def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runt
 
     @capture_preparation
     async def prepare():
-        with trace_phase("memory.presearch", input_value={"query": "controlled", "api_key": "private"}) as phase:
-            calls.append("search")
-            phase.set_output({"memories": ["controlled preference"]})
+        for agent_id, agent_name in [(2, "子智能体"), (1, "主智能体")]:
+            attributes = {"agent.id": str(agent_id), "agent.name": agent_name}
+            for name, inputs in [
+                ("memory.initialize", {"service": "memory"}),
+                ("memory.initialize", {"service": "context"}),
+                ("memory.external_search", {"query": "controlled", "api_key": "private"}),
+                ("memory.load_context", {"layers": ["tenant", "user"]}),
+                ("memory.presearch", {"query": "controlled", "top_k": 5}),
+            ]:
+                try:
+                    with trace_phase(name, input_value=inputs, attributes=attributes) as phase:
+                        calls.append((agent_id, name))
+                        if name == "memory.external_search" and agent_id == 2:
+                            if outcome == "failed":
+                                raise RuntimeError("private error")
+                            if outcome == "cancelled":
+                                raise asyncio.CancelledError("private cancellation")
+                        if name == "memory.presearch":
+                            with trace_phase("memory.retrieve", attributes=attributes) as nested:
+                                nested.set_output({"matches": [agent_name]})
+                        phase.set_output({"memories": ["controlled preference", agent_name]})
+                except (RuntimeError, asyncio.CancelledError):
+                    pass
+        with trace_phase("agent.sandbox.initialize") as phase:
+            with trace_phase("agent.sandbox.warmup"):
+                pass
+            with trace_phase("agent.sandbox.workspace"):
+                pass
+            phase.set_output({"ready": True})
         return SimpleNamespace()
 
     preparation = asyncio.run(prepare())
-    original = next(r for r in preparation.preparation_trace if r["name"] == "memory.presearch")
+    original = list(preparation.preparation_trace)
 
     def reply(request, number, emit):
         emit('<final_answer>completed</final_answer>')
@@ -595,25 +629,52 @@ def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runt
     with runtime.http(reply) as (base, requests):
         info, _ = runtime.run(base, preparation=preparation)
         assert info.attempt_outcome == "completed" and len(requests) == 1
-    assert calls == ["search"] and info.preparation_trace == []
+    assert len(calls) == 10 and info.preparation_trace == []
     saved = runtime.spans()
-    memory = next(s for s in saved if s["name"] == "memory.presearch")
-    assert int(memory["startTimeUnixNano"]) == original["started_at_ns"]
-    assert int(memory["endTimeUnixNano"]) == original["finished_at_ns"]
-    assert "private" not in attrs(memory)["input.value"]
+    assert {"agent.sandbox.warmup", "agent.sandbox.workspace"} <= {s["name"] for s in saved}
+    memories = [s for s in saved if s["name"] == "memory.prepare"]
+    assert len(memories) == 2
+    assert not any(s["name"] in {"memory.initialize", "memory.presearch", "memory.retrieve"} for s in saved)
+    for memory in memories:
+        values = attrs(memory)
+        facts = [r for r in original if r["attributes"].get("agent.id") == values["agent.id"]]
+        assert int(memory["startTimeUnixNano"]) == min(r["started_at_ns"] for r in facts)
+        assert int(memory["endTimeUnixNano"]) == max(r["finished_at_ns"] for r in facts)
+        assert len(json.loads(values["output.value"])["steps"]) == 6
+        assert "private" not in str(values)
     with runtime.client() as client:
         result = snapshot(runtime, client)
-        nodes = {n["name"]: n for n in result["nodes"] if n["kind"] == "phase"}
+        phases = [n for n in result["nodes"] if n["kind"] == "phase"]
+        assert not {"agent.sandbox.warmup", "agent.sandbox.workspace"} & {n["name"] for n in phases}
+        prepare_node = next(n for n in phases if n["name"] == "agent.prepare")
+        grouped = [n for n in phases if n["name"] == "memory.prepare"]
         root = next(n for n in result["nodes"] if n["parent_id"] is None)
-        assert nodes["memory.presearch"]["parent_id"] == nodes["agent.prepare"]["id"]
-        assert nodes["agent.prepare"]["parent_id"] == root["id"]
-        assert nodes["memory.presearch"]["kind"] == "phase"
-        assert root["started_at"] <= nodes["memory.presearch"]["started_at"]
-        assert root["duration_ms"] >= nodes["agent.prepare"]["duration_ms"]
+        assert len(grouped) == 2 and prepare_node["parent_id"] == root["id"]
+        assert {n["attributes"]["agent.name"] for n in grouped} == {"子智能体", "主智能体"}
+        for node in grouped:
+            assert node["parent_id"] == prepare_node["id"]
+            assert root["started_at"] <= node["started_at"]
+            assert node["status"] == (outcome if node["attributes"]["agent.name"] == "子智能体" else "success")
+            body, offset, chunks = node["output"], 0, []
+            for _ in range(100):
+                chunk = data(client.get('/trajectory/conversations/123/contents/' + body['content_id'],
+                                        params={'offset': offset, 'limit': 8192}, headers={'Authorization': 'admin'}))
+                chunks.append(chunk["text"])
+                offset = chunk["next_offset"]
+                if chunk["complete"]:
+                    break
+            else:
+                pytest.fail("Grouped memory output did not complete")
+            text = "".join(chunks)
+            assert "controlled preference" in text and "private" not in text
+            steps = json.loads(text)["steps"]
+            assert len(steps) == 6 and steps[-1]["parent_step"] == 4
+            if node["status"] != "success":
+                assert steps[2]["error_type"] == ("RuntimeError" if outcome == "failed" else "CancelledError")
+        assert root["duration_ms"] >= prepare_node["duration_ms"]
         assert root["model_call_count"] == 1 and root["tool_call_count"] == 0
         assert root["usage"]["total"] == 13 and result["coverage"]["complete"]
-        assert "controlled preference" in nodes["memory.presearch"]["output"]["text"]
-        assert "agent.sandbox.initialize" in nodes
+        assert any(node["name"] == "agent.sandbox.initialize" for node in phases)
 
 
 @pytest.mark.parametrize('query', ['用户问题', '用户问题🙂\n' * 5000], ids=['short', 'chunked-unicode'])

@@ -13,7 +13,11 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: { defaultValue?: string }) =>
       key === "trajectory.phases.memory.presearch"
         ? "记忆预检索"
-        : (options?.defaultValue ?? key),
+        : key === "trajectory.phases.memory.prepare"
+          ? "记忆准备"
+          : key === "trajectory.phases.code.execute"
+            ? "代码执行"
+            : (options?.defaultValue ?? key),
   }),
 }));
 
@@ -30,6 +34,90 @@ const phase = traceNode({
 });
 
 describe("trajectory preparation phases", () => {
+  it("shows code execution duration separately from sandbox initialization", () => {
+    render(
+      <App>
+        <TrajectoryNodeDetail
+          node={{ ...phase, name: "code.execute", duration_ms: 125 }}
+          conversationId="123"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />
+      </App>
+    );
+    expect(screen.getByRole("heading", { name: "代码执行" })).toBeTruthy();
+    expect(screen.getByText("125 ms")).toBeTruthy();
+    expect(screen.queryByText("trajectory.toolCalls")).toBeNull();
+  });
+
+  it("distinguishes grouped agents and preserves selection, search and detail titles", () => {
+    const grouped = (id: string, name: string) => ({
+      ...phase,
+      id,
+      name: "memory.prepare",
+      attributes: { "agent.name": name },
+    });
+    const selected = grouped("memory-root", "主智能体");
+    const onSelect = vi.fn();
+    const { unmount } = render(
+      <App>
+        <TrajectoryTimeline
+          nodes={[traceNode(), selected, grouped("memory-child", "子智能体")]}
+          complete
+          cache={new BodyCache()}
+          onSelect={onSelect}
+        />
+      </App>
+    );
+    fireEvent.click(
+      screen.getByRole("treeitem", { name: /记忆准备 · 主智能体/ })
+    );
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: selected.id })
+    );
+    const clicked = onSelect.mock.calls[0][0];
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "子智能体" },
+    });
+    expect(
+      screen.getByRole("treeitem", { name: /记忆准备 · 子智能体/ })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("treeitem", { name: /记忆准备 · 主智能体/ })
+    ).toBeNull();
+    unmount();
+    render(
+      <App>
+        <TrajectoryNodeDetail
+          node={clicked}
+          conversationId="123"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />
+      </App>
+    );
+    expect(
+      screen.getByRole("heading", { name: "记忆准备 · 主智能体" })
+    ).toBeTruthy();
+  });
+
+  it("shows a grouped phase without a name using the localized fallback", () => {
+    render(
+      <App>
+        <TrajectoryNodeDetail
+          node={{ ...phase, name: "memory.prepare", attributes: {} }}
+          conversationId="123"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />
+      </App>
+    );
+    expect(screen.getByRole("heading", { name: "记忆准备" })).toBeTruthy();
+  });
+
   it("localizes phase names and searches without losing parent context", () => {
     const select = vi.fn();
     render(
