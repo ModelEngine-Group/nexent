@@ -158,6 +158,20 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
     assert first_update.kwargs["error_code"] == "CONTAINER_RESTARTED"
 
 
+def test_new_source_intents_are_not_deleted_by_legacy_recovery(monkeypatch):
+    transition, delete_object = MagicMock(), MagicMock()
+    _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
+    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=MagicMock())
+    _install_module(monkeypatch, "management.db.knowledge_base.file_lifecycle",
+                    list_uploading_files_created_before=MagicMock(return_value=[
+                        {"file_id": "pending", "stage": "SOURCE_UPLOAD"},
+                        {"file_id": "pinned", "source_revision": "etag:known"},
+                    ]), transition_file_record=transition)
+    assert startup_recovery_service.fail_interrupted_uploads(MagicMock(), "management") == 0
+    transition.assert_not_called()
+    delete_object.assert_not_called()
+
+
 def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
     cutoff = datetime(2026, 9, 1, 12, 0)
     record = {

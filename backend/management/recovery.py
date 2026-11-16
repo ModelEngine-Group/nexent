@@ -77,6 +77,9 @@ def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int
         cutoff,
         upload_owner_service,
     ):
+        if record.get("stage") == "SOURCE_UPLOAD" or record.get("source_revision"):
+            logger.warning("source_upload_reconciliation_pending file_id=%s", record["file_id"])
+            continue
         claimed = transition_file_record(
             record["file_id"],
             status="FAILED",

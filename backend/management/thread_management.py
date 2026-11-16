@@ -1,12 +1,23 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.constants import MAX_CONCURRENT_CONVERSIONS
+from contracts.constants.constants import (
+    MAX_CONCURRENT_CONVERSIONS,
+    MAX_CONCURRENT_UPLOADS,
+)
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
 config_thread_manager = ThreadManager(
     service_name="config",
     lane_policies={
+        "file-upload": LanePolicy(
+            name="file-upload",
+            max_workers=MAX_CONCURRENT_UPLOADS,
+            max_queue_size=MAX_CONCURRENT_UPLOADS,
+            queue_timeout_seconds=30,
+            cancel_grace_seconds=5,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "office-conversion": LanePolicy(
             name="office-conversion",
             max_workers=MAX_CONCURRENT_CONVERSIONS,

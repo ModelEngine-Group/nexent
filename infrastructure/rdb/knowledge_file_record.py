@@ -121,6 +121,11 @@ class KnowledgeFileLifecycle(TableBase):
         doc="Optimistic-lock version",
     )
 
+    source_upload_sha256 = Column(
+        String(64),
+        nullable=True,
+        comment="Expected source SHA256 persisted before upload; null for legacy intents.",
+    )
     source_generation = Column(
         Integer,
         nullable=False,
@@ -172,5 +177,24 @@ sa.CheckConstraint(
         ),
     ),
     name="ck_knowledge_file_cleanse_source",
+    table=KnowledgeFileLifecycle.__table__,
+)
+sa.CheckConstraint(
+    sa.and_(
+        sa.or_(
+            _source.source_upload_sha256.is_(None),
+            _source.source_upload_sha256.regexp_match("^[0-9a-f]{64}$"),
+        ),
+        sa.or_(
+            _source.stage.is_(None),
+            _source.stage != "SOURCE_UPLOAD",
+            sa.and_(
+                _source.source_upload_sha256.is_not(None),
+                _source.file_size.is_not(None),
+                _source.file_size >= 0,
+            ),
+        ),
+    ),
+    name="ck_knowledge_source_upload_intent",
     table=KnowledgeFileLifecycle.__table__,
 )

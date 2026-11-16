@@ -31,6 +31,8 @@ from management.services.model.names import get_model_name_from_config
 from management.services.file.upload import save_upload_file
 from contracts.errors.ingestion import ingestion_error_fields
 from infrastructure.trace.knowledge import trace_knowledge_operation
+from management.services.file.source_upload import upload_knowledge_source
+from nexent.storage.errors import OutcomeUnknown
 
 
 # Create upload directory
@@ -390,7 +392,7 @@ async def upload_files_impl(
                 file_name = result.get('file_name')
                 error_msg = result.get('error', 'Unknown error')
                 errors.append(f"Failed to upload {file_name}: {error_msg}")
-                if file_id:
+                if file_id and not result.get("outcome_unknown"):
                     error_fields = ingestion_error_fields(result, "UPLOAD")
                     updated_record = transition_file_record(
                         file_id,
@@ -568,22 +570,22 @@ async def upload_to_minio(
             # Read file content
             file_content = await f.read()
 
-            # Convert file content to BytesIO object
-            file_obj = BytesIO(file_content)
-
             # Store original filename before upload
             original_filename = f.filename or ""
 
-            # Upload file
-            upload_kwargs = {
-                "file_obj": file_obj,
-                "file_name": original_filename,
-                "prefix": actual_folder,
-                "file_size": len(file_content),
-            }
-            if lifecycle_record and lifecycle_record.get("object_name"):
-                upload_kwargs["object_name"] = lifecycle_record["object_name"]
-            result = upload_fileobj(**upload_kwargs)
+            if lifecycle_record:
+                content_type = get_content_type(original_filename)
+                await upload_knowledge_source(lifecycle_record, file_content, content_type)
+                result = {
+                    "success": True, "file_name": original_filename,
+                    "object_name": lifecycle_record["object_name"], "file_size": len(file_content),
+                    "content_type": content_type,
+                    "upload_time": datetime.now().isoformat(),  # noqa: DTZ005 - Preserve the existing result format.
+                    "url": f"/{lifecycle_record['bucket_name']}/{lifecycle_record['object_name']}",
+                }
+            else:
+                result = upload_fileobj(file_obj=BytesIO(file_content), file_name=original_filename,
+                                        prefix=actual_folder, file_size=len(file_content))
 
             # Preserve original filename in result (upload_fileobj uses it for object name generation)
             result["original_file_name"] = original_filename
@@ -594,6 +596,13 @@ async def upload_to_minio(
             await f.seek(0)
             results.append(result)
 
+        except OutcomeUnknown:
+            logger.warning("knowledge_source_upload_outcome_unknown file_id=%s", (lifecycle_record or {}).get("file_id"))
+            results.append({
+                "success": False, "file_name": f.filename, "original_file_name": f.filename,
+                "file_id": (lifecycle_record or {}).get("file_id"), "outcome_unknown": True,
+                "error_code": "SOURCE_UPLOAD_OUTCOME_UNKNOWN", "error": "Source upload requires reconciliation",
+            })
         except Exception as e:
             # Log single file upload failure but continue processing other files
             logger.error(

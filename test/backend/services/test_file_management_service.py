@@ -31,7 +31,8 @@ from contracts.errors.exceptions import AppException, QuotaExceededError
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
-patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
+_import_patches = [patch('botocore.client.BaseClient._make_api_call', return_value={})]
+_import_patches[0].start()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -39,10 +40,14 @@ storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
-patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
+_import_patches.append(patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock))
+_import_patches[-1].start()
+_import_patches.append(patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None))
+_import_patches[-1].start()
+_import_patches.append(patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock))
+_import_patches[-1].start()
+_import_patches.append(patch('infrastructure.object_storage.client.minio_client', minio_mock))
+_import_patches[-1].start()
 
 # Stub Elasticsearch service module to avoid initializing real client during import
 services_stub = types.ModuleType('services')
@@ -103,6 +108,10 @@ def _stub_transition_file_record(file_id, **fields):
 # Import the service module after mocking external dependencies
 file_management_service = importlib.import_module(
     'management.services.file.service')
+
+# Bootstrap patches must not leak into SDK validation or other collected tests.
+for _import_patch in reversed(_import_patches):
+    _import_patch.stop()
 
 upload_files_impl = file_management_service.upload_files_impl
 upload_to_minio = file_management_service.upload_to_minio
@@ -953,23 +962,16 @@ class TestUploadToMinio:
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_uses_lifecycle_object_and_id(self):
-        """Lifecycle identity must be passed through to the storage upload."""
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
+        """KB lifecycle uploads go through the managed source publisher."""
+        mock_file = MagicMock(filename="test.txt")
         mock_file.read = AsyncMock(return_value=b"test content")
         mock_file.seek = AsyncMock()
-
-        with patch_import_context("management.services.file.service.upload_fileobj", MagicMock(return_value={
-            "success": True, "file_name": "test.txt", "object_name": "folder/planned.txt"
-        })) as mock_upload:
-            results = await upload_to_minio(
-                files=[mock_file],
-                folder="folder",
-                file_records={0: {"file_id": "fid-1", "object_name": "folder/planned.txt"}},
-            )
-
-        assert results[0]["file_id"] == "fid-1"
-        assert mock_upload.call_args.kwargs["object_name"] == "folder/planned.txt"
+        record = {"file_id": "a" * 32, "object_name": "folder/planned.txt", "bucket_name": "files"}
+        with patch_import_context("management.services.file.service.upload_knowledge_source", AsyncMock()) as publish:
+            results = await upload_to_minio(files=[mock_file], folder="folder", file_records={0: record})
+        assert results[0]["file_id"] == record["file_id"]
+        assert results[0]["object_name"] == record["object_name"]
+        assert publish.call_args.args[:2] == (record, b"test content")
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_file_read_exception(self):

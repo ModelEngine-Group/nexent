@@ -14,6 +14,7 @@ case:
   objective: Exercise real Management job policy with real storage ports and broker delivery.
   preconditions:
   - Docker and cached postgres:15-alpine and redis:7-alpine images are available.
+  - Cached quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z is available for source publication.
   - Backend Python dependencies are installed.
   test_data:
     resources: Disposable databases and synthetic user/tenant/object references.
@@ -43,6 +44,9 @@ case:
   - order: 8
     action: Admit a KB cleansing request through actual resource catalogs and DAC, then revoke its account role and replace the file generation.
     expected: Current resource authorization succeeds; role revocation and a stale generation both refuse execution without exposing credentials.
+  - order: 9
+    action: Publish source bytes to real MinIO, pin them with PostgreSQL CAS, reconcile a lost reply, then execute the service upload helper using a real managed lane and production port composition.
+    expected: The pinned source is authorized, content generation survives state updates, reconciliation does not rewrite bytes and managed execution drains its workers.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -52,10 +56,11 @@ case:
   - Consumer stop closes its queue after durable acknowledgement without a new dispatch.
   - Parent lease checks renew only an authorized current attempt and reject cancelled work.
   - Resource catalogs enforce current membership, account roles and pinned source generation.
+  - Confirmed source binding and lost-reply reconciliation use real object/record ports without repeated writes.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
-  - Real PostgreSQL and Redis, RecordStore and WorkQueue, Management jobs and registry; real KB resource catalogs and DAC in step 8, controlled run callbacks, clock and parser result elsewhere.
+  - Real PostgreSQL, Redis and MinIO, storage ports, Management jobs and registry; real resource/DAC policy in step 8 and source publication in step 9, controlled run callbacks, clock and parser result elsewhere.
   observations:
   - Job identity, persisted artifact, execution count, rejected ownership, takeover and quarantine state.
   cleanup:
@@ -90,4 +95,9 @@ case:
     description: Actual resource records and DAC refuse revoked or stale cleansing requests.
     steps: [8]
     expected_results: [8]
+    forbidden_side_effects: [1]
+  - id: AC-07
+    description: Real source publication binds content identity and reconciles lost replies without rewriting.
+    steps: [9]
+    expected_results: [9]
     forbidden_side_effects: [1]

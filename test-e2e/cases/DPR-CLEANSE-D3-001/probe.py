@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Disposable PostgreSQL/Redis integration; parser output is a controlled fixture."""
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -38,6 +39,7 @@ from nexent.storage.models import (
     StorageScope,
 )
 from resource_probe import check_resources
+from source_probe import check_source_publication
 
 from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
 from infrastructure.redis.kv import RedisKeyValueConfig, RedisKeyValueStore
@@ -117,6 +119,23 @@ try:
         "redis:7-alpine",
     )
     containers.append(redis)
+    minio = docker(
+        "run",
+        "--rm",
+        "-d",
+        "--label",
+        f"nexent.test_run={run_id}",
+        "-e",
+        "MINIO_ROOT_USER=fixture-user",
+        "-e",
+        "MINIO_ROOT_PASSWORD=fixture-password",
+        "-p",
+        "127.0.0.1::9000",
+        "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z",
+        "server",
+        "/data",
+    )
+    containers.append(minio)
 
     def port(container, key):
         return json.loads(
@@ -162,7 +181,9 @@ try:
         filename="source.txt",
         idempotency_key="first",
     )
+    admission_before = datetime.now(timezone.utc)
     state = public.submit(request, context=context())
+    admission_after = datetime.now(timezone.utc)
     assert public.submit(request, context=context()).job_id == state.job_id
     lookup = FileCleanseLookup(run_id=state.run_id, job_id=state.job_id)
     for foreign in (service("user-b"), service(tenant="tenant-b")):
@@ -296,6 +317,7 @@ try:
     clock[0] += timedelta(seconds=120)
     assert worker.ready(context=context()) == ()
     check_resources(engine, request.source, public.records, context)
+    check_source_publication(engine, port(minio, "9000/tcp"), context)
     last = public.submit(
         request.model_copy(update={"idempotency_key": "consumer-stop"}),
         context=context(),
@@ -334,12 +356,9 @@ try:
         context=context(),
     ).items[0]
     assert (
-        abs(
-            (
-                datetime.fromisoformat(row["create_time"]) - datetime.now(timezone.utc)
-            ).total_seconds()
-        )
-        < 10
+        admission_before
+        <= datetime.fromisoformat(row["create_time"])
+        <= admission_after
     )
     dated = public.records.query(
         DATASET,
@@ -369,6 +388,18 @@ try:
         "consumer_stopped_closed": True,
         "lease_guard_renewal_and_cancel": True,
         "live_resource_authorization": True,
+        "source_publication_and_reconciliation": True,
+        "source_publication_hashes": {
+            path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+            for path in (
+                "backend/management/services/file/source_publish.py",
+                "backend/management/services/file/source_upload.py",
+                "backend/management/services/file/service.py",
+                "infrastructure/source_upload.py",
+                "infrastructure/rdb/source_binding.py",
+                "infrastructure/object_storage/composition.py",
+            )
+        },
     }
     print(json.dumps(result))
 finally:

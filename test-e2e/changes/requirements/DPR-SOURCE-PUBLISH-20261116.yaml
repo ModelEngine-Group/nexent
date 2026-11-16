@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-SOURCE-PUBLISH-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Pin actual KB upload sources through object and record ports
+  description: >-
+    Route lifecycle-backed KB uploads through a bounded service-owned lane,
+    persist expected hash before object writes and CAS-pin confirmed source identity.
+    Preserve uncertain uploads and reconcile explicit retries without rewriting.
+    Legacy recovery must not delete new source intents; automatic reconciliation remains pending.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Persist intent before source upload and CAS-pin version, size and independent SHA256.
+    - Reconcile lost object/database replies without uploading the bytes again.
+    - Refuse stale, foreign and changed inputs before overwriting.
+    - Preserve response shape and unknown UPLOADING records in partial batches.
+    - Bound managed execution and keep legacy recovery from deleting new intents.
+    reason: Prior authorization tests use already-pinned fixtures and do not prove actual upload routing or recovery.
+    test_selectors:
+    - test/backend/services/test_source_publish.py
+    - test/backend/services/test_source_upload_routing.py
+    - test/backend/services/test_source_upload_managed.py
+    - test/backend/infrastructure/test_source_upload_composition.py
+    - test/backend/services/test_file_management_service.py
+    - test/backend/services/test_startup_recovery_service.py
