@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-SOURCE-FINALIZE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Finalize recovered uploads through scoped accounting and quota reads
+  description: >-
+    Reconcile retained source identity, idempotently commit the ledger and source link in one transaction,
+    then perform an authoritative post-write quota check before publishing UPLOADED. Exceeded quota keeps
+    the retained charge and SOURCE_REVIEW state for later cleanup. Add numeric RecordStore sum and isolate
+    the process-local cache without importing old storage clients into the recovery path.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Complete recovered uploads only after retained-byte accounting and a fresh quota check.
+    - Preserve one charge through commit-reply loss, cancellation and generation conflicts.
+    - Enforce owner, tenant, active scope, numeric field and exact source identity.
+    - Include orphan charges, ignore deleted rows and preserve legacy quota-value parsing.
+    - Retain over-quota physical object charges without reporting success or deleting readonly objects.
+    - Keep cache invalidation/coalescing behavior when moving pure cache state out of old I/O imports.
+    reason: Existing explicit publication retries and combined record-port tests do not execute recovery accounting or quota admission. Reuse D3 for actual storage collaboration and UT for controlled faults; do not add a duplicate D1.
+    test_selectors:
+    - test/backend/services/test_source_finalize.py
+    - test/backend/infrastructure/test_record_sum.py
+    - test/backend/services/test_source_recovery.py
+    - test/backend/services/test_quota_service.py
+    - test/backend/services/test_quota_cache_concurrency.py
+  notes: >-
+    Existing Feature responsibility and self-contained preparation remain. The D3 owns ephemeral PostgreSQL,
+    Redis and MinIO containers and anonymous volumes, closes ports and worker handles, and runs cleanup by
+    owned IDs on success/failure. An actual object write loses its reply; only intent age and quota fixture
+    are controlled. New scalar aggregation never accepts SQL or provider expressions. This change does not
+    claim normal uploads, quota cleanup, cleansing ingress or data-process retirement are complete.

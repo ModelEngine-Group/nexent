@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from time import monotonic
 
+from management.services.file.source_finalize import SourceFinalizer
 from management.services.file.source_reconcile import SourceReconciler
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.concurrency.errors import ThreadManagerError
@@ -58,16 +59,27 @@ def reconcile_sources(owner_service, *, context, now=None):
             context.remaining()
             item = replace(context, deadline=min(context.deadline, monotonic() + 15))
             with source_recovery_ports(record, context=item) as (records, objects):
-                result = SourceReconciler(
-                    records, objects, clock=lambda: now
-                ).reconcile(
-                    record["file_id"],
-                    owner_service=owner_service,
-                    owner_user_id=record["created_by"],
-                    expected_version=record["version"],
-                    cutoff=cutoff,
-                    context=item,
-                )
+                result = "confirmed"
+                if record["stage"] == "SOURCE_UPLOAD":
+                    result = SourceReconciler(
+                        records, objects, clock=lambda: now
+                    ).reconcile(
+                        record["file_id"],
+                        owner_service=owner_service,
+                        owner_user_id=record["created_by"],
+                        expected_version=record["version"],
+                        cutoff=cutoff,
+                        context=item,
+                    )
+                if result == "confirmed":
+                    result = SourceFinalizer(records, objects).finish(
+                        record["file_id"],
+                        owner_user_id=record["created_by"],
+                        owner_service=owner_service,
+                        context=item,
+                        expected_version=record["version"]
+                        + (record["stage"] == "SOURCE_UPLOAD"),
+                    )
             counts[result] = counts.get(result, 0) + 1
         return counts
     finally:

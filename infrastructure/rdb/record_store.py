@@ -81,6 +81,7 @@ class SQLRecordStore:
                 "record.transaction",
                 "record.query",
                 "record.count",
+                "record.sum",
             }
         )
     )
@@ -481,6 +482,11 @@ class SQLRecordStore:
         from infrastructure.rdb.record_queries import count_records
 
         return count_records(self, dataset, query, context=context)
+
+    def sum(self, dataset, field, query, *, context):
+        from infrastructure.rdb.record_queries import sum_records
+
+        return sum_records(self, dataset, field, query, context=context)
 
     def claim(self, dataset, query, patch, *, limit=1, context):
         from infrastructure.rdb.record_queries import claim_records

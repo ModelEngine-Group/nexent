@@ -11,15 +11,21 @@ from sqlalchemy import URL, create_engine
 
 from infrastructure.object_storage.composition import bind_source_objects
 from infrastructure.rdb.source_binding import DATASET, bind_source_records
+from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
 
 
 @contextmanager
-def _source_ports(record, *, actor_id, writable, context):
+def _source_ports(record, *, actor_id, writable, context, with_policy=False):
     engine = source_engine(context)
     records = objects = None
     try:
-        scope = StorageScope("management", record["tenant_id"], actor_id, {DATASET})
-        records = bind_source_records(scope, engine)
+        namespaces = {DATASET, LEDGER, QUOTA} if with_policy else {DATASET}
+        scope = StorageScope("management", record["tenant_id"], actor_id, namespaces)
+        records = (
+            bind_upload_records(scope, engine, with_policy=True)
+            if with_policy
+            else bind_source_records(scope, engine)
+        )
         objects = bind_source_objects(
             record["tenant_id"],
             actor_id,
@@ -55,7 +61,11 @@ def source_upload_ports(record, *, context):
 
 def source_recovery_ports(record, *, context):
     return _source_ports(
-        record, actor_id="source-reconciliation", writable=False, context=context
+        record,
+        actor_id="source-reconciliation",
+        writable=False,
+        context=context,
+        with_policy=True,
     )
 
 

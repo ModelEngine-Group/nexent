@@ -116,6 +116,10 @@ class RecordStore(StoragePort, Protocol):
 
     def count(self, dataset: str, query: RecordQuery, *, context: OperationContext) -> int: ...
 
+    def sum(self, dataset: str, field: str, query: RecordQuery, *, context: OperationContext) -> int | float:
+        """Sum a catalog numeric field within scope; an empty set returns zero."""
+        ...
+
     def transaction(self, *, context: OperationContext) -> AbstractContextManager["RecordStore"]: ...
 
     def claim(

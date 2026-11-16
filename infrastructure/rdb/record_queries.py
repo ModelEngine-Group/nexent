@@ -4,6 +4,7 @@
 import base64
 import hashlib
 import json
+import math
 from dataclasses import asdict
 
 import sqlalchemy as sa
@@ -146,3 +147,29 @@ def claim_records(store, dataset, query, patch, *, limit, context):
             raise Conflict(operation_id=context.operation_id)
         result.append(store.get(dataset, key, fields=query.fields, context=context))
     return tuple(result)
+
+
+def sum_records(store, dataset, field, query, *, context):
+    from infrastructure.rdb.record_store import _predicate
+
+    definition, table, query = _normalized(store, dataset, query)
+    numeric = {
+        item.name: item.kind
+        for item in definition.fields
+        if item.kind in {"integer", "number"}
+    }
+    if not isinstance(field, str) or field not in numeric:
+        raise InvalidInput()
+    statement = sa.select(sa.func.sum(table.c[field])).where(
+        _predicate(table, query.where)
+    )
+    with store._session(context) as connection:
+        result = store._execute(connection, statement, context).scalar_one()
+        if result is None:
+            return 0
+        if numeric[field] == "integer":
+            return int(result)
+        value = float(result)
+        if not math.isfinite(value):
+            raise CapabilityUnsupported()
+        return value

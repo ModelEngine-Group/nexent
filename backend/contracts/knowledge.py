@@ -11,6 +11,8 @@ from enum import Enum
 if TYPE_CHECKING:
     from contracts.tool import ToolParamsRequest
 
+KEY_TENANT_HARD_LIMIT_BYTES = "KB_QUOTA_TENANT_HARD_LIMIT_BYTES"
+
 
 @dataclass
 class ResolvedKnowledgeScope:

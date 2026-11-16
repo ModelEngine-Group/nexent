@@ -18,12 +18,15 @@ from management.services.file.source_recovery import reconcile_sources
 from management.services.file.source_upload import upload_knowledge_source
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.storage.errors import OutcomeUnknown
-from nexent.storage.models import ObjectRef, StorageScope
+from nexent.storage.models import ObjectRef, RecordQuery, StorageScope
 
 from infrastructure.object_storage.port import ObjectBinding, S3ObjectStore
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
+from infrastructure.rdb.knowledge_storage_record import KnowledgeStorageObject
 from infrastructure.rdb.source_binding import DATASET, bind_source_records
+from infrastructure.rdb.tenant_config_record import TenantConfig
+from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
 
 
 def check_source_publication(engine, port, context):
@@ -55,11 +58,14 @@ def check_source_publication(engine, port, context):
     with closing(client_factory(5)) as client:
         client.create_bucket(Bucket="source-proof")
     table = KnowledgeFileLifecycle.__table__
+    KnowledgeStorageObject.__table__.create(engine, checkfirst=True)
+    TenantConfig.__table__.create(engine, checkfirst=True)
     with engine.begin() as conn:
         for file_id, key in (
             ("c" * 32, "source.txt"),
             ("d" * 32, "lost.txt"),
             ("f" * 32, "recover.txt"),
+            ("9" * 32, "quota.txt"),
         ):
             conn.execute(
                 table.insert().values(
@@ -90,7 +96,9 @@ def check_source_publication(engine, port, context):
             "",
             {"management"},
             writable=True,
-            exact_keys=frozenset({"source.txt", "lost.txt", "recover.txt"}),
+            exact_keys=frozenset(
+                {"source.txt", "lost.txt", "recover.txt", "quota.txt"}
+            ),
         ),
         client_factory,
     )
@@ -254,16 +262,83 @@ def check_source_publication(engine, port, context):
                     )
                 )
             assert reconcile_sources("nexent-config", context=context()) == {
-                "confirmed": 1
+                "uploaded": 1
             }
             row = records.get(DATASET, "f" * 32, context=context())
-            assert row["status"] == "UPLOADING" and row["stage"] == "SOURCE_CONFIRMED"
+            assert row["status"] == "UPLOADED" and row["stage"] == "UPLOAD"
+            assert row["storage_object_id"] is not None
             assert row["updated_by"] == "source-reconciliation"
             assert (
                 row["source_revision"] is not None
                 and row["source_sha256"] == source.sha256
             )
             assert lost.writes == 2
+            with engine.begin() as conn:
+                conn.execute(
+                    TenantConfig.__table__.insert().values(
+                        tenant_id="tenant-a",
+                        config_key="KB_QUOTA_TENANT_HARD_LIMIT_BYTES",
+                        config_value=str(len(data)),
+                        delete_flag="N",
+                    )
+                )
+            try:
+                uncertain.publish(
+                    "9" * 32,
+                    data,
+                    content_type="text/plain",
+                    expected_version=0,
+                    context=context(),
+                )
+            except OutcomeUnknown:
+                pass
+            else:
+                raise AssertionError(
+                    "quota fixture did not retain the lost-reply intent"
+                )
+            with engine.begin() as conn:
+                conn.execute(
+                    table.update()
+                    .where(table.c.file_id == "9" * 32)
+                    .values(
+                        source_upload_started_at=datetime.now(timezone.utc)
+                        - timedelta(minutes=10),
+                    )
+                )
+            assert reconcile_sources("nexent-config", context=context()) == {
+                "quota_review": 1
+            }
+            blocked = records.get(DATASET, "9" * 32, context=context())
+            assert (
+                blocked["status"] == "UPLOADING" and blocked["stage"] == "SOURCE_REVIEW"
+            )
+            assert blocked["error_code"] == "STORAGE_QUOTA_EXCEEDED"
+            accounting = bind_upload_records(
+                StorageScope(
+                    "management", "tenant-a", "proof", {DATASET, LEDGER, QUOTA}
+                ),
+                engine,
+                with_policy=True,
+            )
+            try:
+                assert (
+                    accounting.sum(
+                        LEDGER, "raw_bytes", RecordQuery(), context=context()
+                    )
+                    == len(data) * 2
+                )
+                assert (
+                    accounting.get(
+                        LEDGER, blocked["storage_object_id"], context=context()
+                    )["status"]
+                    == "COMMITTED"
+                )
+            finally:
+                accounting.close()
+            assert objects.stat(
+                ObjectRef("files", "quota.txt"), context=context()
+            ).size == len(data)
+            assert lost.writes == 3
         finally:
             for key, value in previous.items():
                 setattr(environment, key, value)

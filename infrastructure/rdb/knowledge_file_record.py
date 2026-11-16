@@ -55,6 +55,13 @@ class KnowledgeFileLifecycle(TableBase):
             ),
         ),
         Index(
+            "idx_knowledge_source_finalize",
+            "upload_owner_service", "source_upload_started_at", "source_reconcile_after",
+            postgresql_where=text(
+                "delete_flag = 'N' AND status = 'UPLOADING' AND stage IN ('SOURCE_UPLOAD', 'SOURCE_CONFIRMED', 'SOURCE_ACCOUNTED')"
+            ),
+        ),
+        Index(
             "uq_knowledge_file_lifecycle_active_identity",
             "tenant_id",
             "index_name",

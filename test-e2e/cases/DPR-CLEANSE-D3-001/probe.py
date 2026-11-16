@@ -393,12 +393,15 @@ try:
         "source_publication_and_reconciliation": True,
         "automatic_source_identity_reconciliation": True,
         "source_ledger_atomic_domain": True,
+        "recovery_accounting_and_quota": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
                 "backend/management/services/file/source_publish.py",
                 "backend/management/services/file/source_reconcile.py",
                 "backend/management/services/file/source_recovery.py",
+                "backend/management/services/file/source_finalize.py",
+                "backend/management/services/knowledge_base/usage_cache.py",
                 "backend/management/services/file/source_upload.py",
                 "backend/management/services/file/service.py",
                 "infrastructure/source_upload.py",
@@ -406,6 +409,8 @@ try:
                 "infrastructure/rdb/source_candidates.py",
                 "infrastructure/rdb/upload_records.py",
                 "infrastructure/rdb/knowledge_storage_record.py",
+                "infrastructure/rdb/record_queries.py",
+                "sdk/nexent/storage/interfaces.py",
                 "infrastructure/object_storage/composition.py",
             )
         },

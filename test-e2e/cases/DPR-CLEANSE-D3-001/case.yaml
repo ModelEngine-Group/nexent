@@ -49,10 +49,13 @@ case:
     expected: The pinned source is authorized, content generation survives state updates, reconciliation does not rewrite bytes and managed execution drains its workers.
   - order: 10
     action: Lose an actual object-write reply, age its durable intent and invoke production source discovery and per-tenant recovery composition.
-    expected: The original object is pinned without reupload, the system actor is audited and status remains UPLOADING until accounting is finalized.
+    expected: The original object is pinned without reupload, the system actor is audited and upload completes after its retained-byte charge and quota check succeed.
   - order: 11
     action: Use the production combined record composition to create a ledger row and update its source lifecycle in one PostgreSQL transaction, then test rollback and cross-tenant inspection.
     expected: Commit persists both records with audit/revisions; a controlled failure rolls back both, and another tenant cannot inspect either.
+  - order: 12
+    action: Recover another actual lost-reply source after limiting the tenant to its previously committed source bytes.
+    expected: The new source is charged and enters SOURCE_REVIEW without becoming UPLOADED; its retained object and charge remain inspectable and no write is repeated.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -63,12 +66,13 @@ case:
   - Parent lease checks renew only an authorized current attempt and reject cancelled work.
   - Resource catalogs enforce current membership, account roles and pinned source generation.
   - Confirmed source binding and lost-reply reconciliation use real object/record ports without repeated writes.
-  - Automatic discovery confirms aged source identity without marking accounting complete.
+  - Automatic discovery confirms aged source identity and finalizes upload only after accounting and quota checks.
   - Source lifecycle and storage ledger share atomic commit/rollback and tenant isolation.
+  - Over-quota recovery retains its physical source charge and blocks successful publication pending cleanup.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
-  - Real PostgreSQL, Redis and MinIO, storage ports, Management jobs and registry; real resource/DAC policy in step 8, source publication/recovery in steps 9-10 and record transactions in step 11; controlled run callbacks, intent age, rollback exception, clock and parser result elsewhere.
+  - Real PostgreSQL, Redis and MinIO, storage ports, Management jobs and registry; real resource/DAC policy in step 8, source recovery/quota in steps 9-10/12 and record transactions in step 11; controlled run callbacks, intent age, rollback exception, clock and parser result elsewhere.
   observations:
   - Job identity, persisted artifact, execution count, rejected ownership, takeover and quarantine state.
   cleanup:
@@ -110,7 +114,7 @@ case:
     expected_results: [9]
     forbidden_side_effects: [1]
   - id: AC-08
-    description: Automatic source recovery binds actual uncertain bytes with tenant-scoped ports and a distinct audited actor, without accounting publication.
+    description: Automatic recovery binds actual uncertain bytes with tenant-scoped ports and audited accounting, then completes upload within quota.
     steps: [10]
     expected_results: [10]
     forbidden_side_effects: [1]
@@ -118,4 +122,9 @@ case:
     description: Source and storage-ledger ports share one audited transaction domain with atomic rollback and tenant isolation.
     steps: [11]
     expected_results: [11]
+    forbidden_side_effects: [1]
+  - id: AC-10
+    description: Over-quota recovery blocks successful publication while retaining actual object accounting for later cleanup.
+    steps: [12]
+    expected_results: [12]
     forbidden_side_effects: [1]

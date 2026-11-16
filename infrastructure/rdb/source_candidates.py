@@ -33,6 +33,7 @@ def bind_source_candidates(owner_service, engine):
         "bucket_name",
         "object_name",
         "upload_owner_service",
+        "stage",
         "source_upload_started_at",
         "source_reconcile_after",
     ]
@@ -41,7 +42,9 @@ def bind_source_candidates(owner_service, engine):
         .where(
             table.c.upload_owner_service == owner_service,
             table.c.status == "UPLOADING",
-            table.c.stage == "SOURCE_UPLOAD",
+            table.c.stage.in_(
+                ("SOURCE_UPLOAD", "SOURCE_CONFIRMED", "SOURCE_ACCOUNTED")
+            ),
             table.c.source_upload_sha256.is_not(None),
             table.c.source_upload_started_at.is_not(None),
         )
