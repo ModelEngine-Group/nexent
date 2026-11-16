@@ -61,7 +61,8 @@ def test_forked_instance_rejected_before_touching_inherited_lock(mocker):
     lock.__enter__.assert_not_called()
 
 
-def test_parse_passes_explicit_model_paths(mocker):
+@pytest.mark.parametrize("method", ["file_process", "file_structure"])
+def test_parse_passes_explicit_model_paths(mocker, method):
     paths = {
         "table_transformer": "/models/table",
         "unstructured_default": "/models/layout.json",
@@ -69,15 +70,14 @@ def test_parse_passes_explicit_model_paths(mocker):
     runtime = parser.DocumentParserRuntime(1, [], paths)
     mocker.patch.object(runtime, "ensure_initialized")
     runtime._core = Mock()
-    expected = runtime._core.file_process.return_value
-    result = runtime.file_process(
-        file_data=b"data", filename="file.pdf", chunking_strategy="none"
-    )
+    expected = getattr(runtime._core, method).return_value
+    request = {"file_data": b"data", "filename": "file.pdf"}
+    if method == "file_process":
+        request["chunking_strategy"] = "none"
+    result = getattr(runtime, method)(**request)
     assert result is expected
-    runtime._core.file_process.assert_called_once_with(
-        file_data=b"data",
-        filename="file.pdf",
-        chunking_strategy="none",
+    getattr(runtime._core, method).assert_called_once_with(
+        **request,
         table_transformer_model_path=paths["table_transformer"],
         unstructured_default_model_initialize_params_json_path=paths[
             "unstructured_default"

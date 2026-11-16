@@ -5,9 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from management.services.file.cleanse import extract_uploaded_text
 
 from infrastructure.file_processing.conversion import convert_office_to_pdf
-from management.services.file.cleanse import extract_uploaded_text
 
 
 def test_cleansing_uses_structure_only_and_checks_source(mocker):
@@ -23,20 +23,25 @@ def test_cleansing_uses_structure_only_and_checks_source(mocker):
         sha256=hashlib.sha256(b"source").hexdigest(),
     )
     parser = SimpleNamespace(
-        file_process=Mock(
-            return_value=([{"content": "one", "metadata": {"page_number": 1}}], [])
+        file_structure=Mock(
+            return_value=([
+                {"content": "one", "metadata": {"page_number": 1}},
+                {"content": "table", "metadata": {"element_type": "Table", "languages": ["eng"]}},
+            ], [])
         )
     )
     value = prepare_artifact(
         b"source", "file.txt", source, "parser-1", parser=parser
     )
     assert value.blocks[0].content == "one"
-    assert value.blocks[0].location == {"page_number": 1}
-    assert parser.file_process.call_args.kwargs["chunking_strategy"] == "none"
-    parser.file_process.reset_mock()
+    assert value.blocks[0].location == {"page_number": 1, "filename": "file.txt"}
+    assert value.blocks[1].kind == "table"
+    assert value.blocks[1].location["languages"] == ["eng"]
+    parser.file_structure.assert_called_once_with(file_data=b"source", filename="file.txt")
+    parser.file_structure.reset_mock()
     with pytest.raises(ValueError, match="checksum"):
         prepare_artifact(b"changed", "file.txt", source, "parser-1", parser=parser)
-    parser.file_process.assert_not_called()
+    parser.file_structure.assert_not_called()
 
 
 def test_text_response_preserves_empty_chunks_and_output_shape(mocker):
@@ -56,17 +61,11 @@ def test_text_response_preserves_empty_chunks_and_output_shape(mocker):
     result = extract_uploaded_text(
         b"source", "document.txt", "basic", parser=parser, clock=lambda: 10.0
     )
-    assert result == dict(
-        success=True,
-        task_id=None,
-        filename="document.txt",
-        text="one\ntwo",
-        chunks=["one", "two", ""],
-        chunks_count=4,
-        text_length=7,
-        processing_time=0.0,
-        chunking_strategy="basic",
-    )
+    assert result == {
+        "success": True, "task_id": None, "filename": "document.txt", "text": "one\ntwo",
+        "chunks": ["one", "two", ""], "chunks_count": 4, "text_length": 7,
+        "processing_time": 0.0, "chunking_strategy": "basic",
+    }
     parser.file_process.assert_called_once_with(
         file_data=b"source", filename="document.txt", chunking_strategy="basic"
     )

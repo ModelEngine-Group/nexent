@@ -16,4 +16,6 @@ feature:
     description: Broker acknowledgement follows durable job policy and duplicates do not reexecute a completed job.
   - rule_id: DPR-CLEANSE-RULE-04
     description: Structural cleansing uses a process-owned parser and scoped object ports without old task or model repositories.
+  - rule_id: DPR-CLEANSE-RULE-05
+    description: Management preserves structure and Runtime performs final text/table chunking with the established format algorithms.
   required_test_stages: [D3]

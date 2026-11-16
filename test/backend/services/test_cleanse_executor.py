@@ -17,9 +17,9 @@ from test.backend.services.test_file_cleanse_objects import Store, source
 def test_executor_preserves_structure_and_pinned_version():
     store = Store()
     core = SimpleNamespace(
-        file_process=Mock(return_value=([{"content": "parsed"}], []))
+        file_structure=Mock(return_value=([{"content": "parsed"}], []))
     )
-    runtime = SimpleNamespace(file_process=core.file_process, ensure_initialized=Mock())
+    runtime = SimpleNamespace(file_structure=core.file_structure, ensure_initialized=Mock())
     executor = CleanseExecutor(
         runtime=runtime, objects=store, parser_version="parser-v1"
     )
@@ -31,8 +31,8 @@ def test_executor_preserves_structure_and_pinned_version():
     output = CleanseArtifact.model_validate_json(store.data[ref.key])
     assert output.parser_version == "parser-v1"
     assert output.blocks[0].content == "parsed"
-    core.file_process.assert_called_once_with(
-        file_data=b"source", filename="source.txt", chunking_strategy="none"
+    core.file_structure.assert_called_once_with(
+        file_data=b"source", filename="source.txt"
     )
 
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import os
 from io import BytesIO
@@ -136,6 +137,13 @@ class DataProcessCore:
             ValueError: Invalid parameters
             ImportError: Missing required dependencies
         """
+        return self._process(file_data, filename, chunking_strategy, processor, params, structure=False)
+
+    def file_structure(self, file_data: bytes, filename: str, processor: Optional[str] = None, **params):
+        """Extract format structure without choosing retrieval chunk boundaries."""
+        return self._process(file_data, filename, "none", processor, params, structure=True)
+
+    def _process(self, file_data, filename, chunking_strategy, processor, params, *, structure):
         # Parameter validation
         self._validate_parameters(chunking_strategy, processor)
 
@@ -191,9 +199,10 @@ class DataProcessCore:
                     "processor.name": processor_name,
                 },
             ):
-                chunks = processor_instance.process_file(
-                    file_data, chunking_strategy, filename=filename, **params
-                )
+                if structure:
+                    chunks = processor_instance.process_structure(file_data, filename=filename, **params)
+                else:
+                    chunks = processor_instance.process_file(file_data, chunking_strategy, filename=filename, **params)
                 monitoring_manager.set_span_attributes(**{"chunk.count": len(chunks)})
                 return chunks, img_info
         except Exception as e:

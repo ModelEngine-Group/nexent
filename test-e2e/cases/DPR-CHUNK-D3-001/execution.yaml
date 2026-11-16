@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DPR-CHUNK-D3-001
+timeout_seconds: 150
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_structural_chunk_parity
+acceptance_bindings:
+  AC-01: [test_structural_chunk_parity]
+  AC-02: [test_structural_chunk_parity]
+  AC-03: [test_structural_chunk_parity]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

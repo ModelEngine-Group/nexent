@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import io
 import os
 from typing import Dict, List, Optional
 
-from .base import FileProcessor
+from .base import STRUCTURE_METADATA_FIELDS, FileProcessor
 
 
 class UnstructuredProcessor(FileProcessor):
@@ -54,6 +55,28 @@ class UnstructuredProcessor(FileProcessor):
             List of standardized chunk dictionaries
         """
 
+        elements = self._partition(file_data, chunking_strategy, filename, params)
+        return self._process_elements(elements, chunking_strategy, filename)
+
+    def process_structure(self, file_data: bytes, filename: str, **params) -> List[Dict]:
+        if not file_data:
+            raise ValueError("Must provide binary file_data")
+        if filename.lower().endswith(".json"):
+            # Runtime reads the pinned source to preserve the existing JSON chunk algorithm.
+            return [{"content": "", "filename": filename,
+                     "metadata": {"element_type": "JSONSource", "source_format": "json"}}]
+        elements = self._partition(file_data, "none", filename, params)
+        rows = []
+        for element in elements:
+            if not hasattr(element, "text"):
+                continue
+            metadata = element.metadata.to_dict()
+            location = {name: metadata[name] for name in STRUCTURE_METADATA_FIELDS if name in metadata}
+            location["element_type"] = element.category
+            rows.append({"content": element.text, "filename": filename, "metadata": location})
+        return rows
+
+    def _partition(self, file_data, chunking_strategy, filename, params):
         # Validate input parameters
         if not file_data:
             raise ValueError("Must provide binary file_data")
@@ -74,7 +97,7 @@ class UnstructuredProcessor(FileProcessor):
             elements = partition(**partition_kwargs)
 
         # Process results
-        return self._process_elements(elements, chunking_strategy, filename)
+        return elements
 
     def _merge_params(self, user_params: Dict) -> Dict:
         """
@@ -270,6 +293,7 @@ class UnstructuredProcessor(FileProcessor):
             List of CompositeElement objects containing chunked text
         """
         from unstructured.documents.elements import CompositeElement
+
         from .json_chunk_processor import JSONChunkProcessor
 
         return [

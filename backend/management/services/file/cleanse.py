@@ -22,9 +22,7 @@ def prepare_artifact(
     """Extract structure and publish image blocks through the caller's scoped port."""
     if hashlib.sha256(file_content).hexdigest() != source.sha256:
         raise ValueError("Source checksum does not match")
-    chunks, images = parser.file_process(
-        file_data=file_content, filename=filename, chunking_strategy="none"
-    )
+    chunks, images = parser.file_structure(file_data=file_content, filename=filename)
     if images and (objects is None or context is None):
         raise ValueError("Image artifacts require the ObjectStore upload capability")
     blocks = []
@@ -32,13 +30,16 @@ def prepare_artifact(
         if "content" not in chunk:
             raise ValueError("Parser returned a structural block without content")
         content = chunk["content"]
+        location = {**(chunk.get("metadata") or {}), "filename": filename}
+        if chunk.get("language"):
+            location["languages"] = [chunk["language"]]
         blocks.append(
             CleanseBlock(
                 ordinal=len(blocks),
-                kind="text",
+                kind="table" if location.get("element_type") == "Table" else "text",
                 content=content,
                 sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                location=chunk.get("metadata") or {},
+                location=location,
             )
         )
     for image in images:

@@ -38,8 +38,7 @@ class Parser:
     def ensure_initialized(self):
         pass
 
-    def file_process(self, *, file_data, filename, chunking_strategy):
-        assert chunking_strategy == "none"
+    def file_structure(self, *, file_data, filename):
         return [{"content": file_data.decode("utf-8"), "metadata": {"page": 1}}], []
 
 
@@ -226,7 +225,7 @@ def check_execution(queue, row, context):
                 assert hashlib.sha256(data).hexdigest() == completed.artifact.sha256
                 artifact = CleanseArtifact.model_validate_json(data)
                 assert artifact.source == request.source and artifact.blocks[0].content
-                assert artifact.blocks[0].location == {"page": 1}
+                assert artifact.blocks[0].location == {"page": 1, "filename": request.filename}
             else:
                 try:
                     objects.stat(ObjectRef(ref.space, ref.key), context=context())

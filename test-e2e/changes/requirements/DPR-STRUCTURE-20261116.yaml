@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-STRUCTURE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Preserve document structure and move final format-aware chunking into Runtime
+  description: >-
+    Management explicitly calls SDK file_structure rather than merged none output. Runtime uses
+    the existing pure basic/by_title algorithms, workbook render boundaries and JSON source algorithm.
+    Existing public SDK file_process results remain unchanged. JSON source access must be pinned by
+    checksum, and no new fallback, retry or direct Management dependency is added to Runtime.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001, DPR-PARSER-D3-001]
+    added: [DPR-CHUNK-D3-001]
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve old public none behavior while returning title/table metadata through explicit structure extraction.
+    - Keep JSON source splitting and retrieval policy in Runtime and retain workbook rendering.
+    - Preserve source checksum, parser configuration, object publication and text endpoint behavior.
+    reason: >-
+      Reuse all original SDK and cleanse UT. New UT covers the explicit dispatch and format contracts,
+      and a real algorithm/process D3 proves the parity not established by isolated mocks. No duplicate D1.
+    test_selectors:
+    - test/sdk/data_process/test_structure.py
+    - test/backend/services/test_knowledge_chunking.py
+    - test/backend/services/test_file_cleanse_boundary.py
+    - test/backend/services/test_file_cleanse_objects.py
+    - test/backend/services/test_cleanse_executor.py
+    - test/backend/infrastructure/test_document_parser.py
+  notes: >-
+    The new Case proves Runtime chunking and has an explicit runtime responsibility override.
+    Preparation is self-contained with readonly source mounts and owned offline container cleanup.
+    It does not prove all file formats, signed AgentOS transport, model inference, final image builds
+    or completed data-process retirement. Runtime knowledge dependencies are a separate minimal extra.

@@ -159,7 +159,7 @@ def main():
     serve(
         stop,
         owner_id="cleanse-root-" + uuid4().hex,
-        parser_version=APP_VERSION + "-cleanse-v1",
+        parser_version=APP_VERSION + "-cleanse-v2",
     )
 
 

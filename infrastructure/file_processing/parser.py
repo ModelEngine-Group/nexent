@@ -82,18 +82,27 @@ class DocumentParserRuntime:
 
     def file_process(self, *, file_data, filename, chunking_strategy, **params):
         core = self.core
-        params.update(
-            table_transformer_model_path=self.model_paths.get("table_transformer"),
-            unstructured_default_model_initialize_params_json_path=self.model_paths.get(
-                "unstructured_default"
-            ),
-        )
         return core.file_process(
             file_data=file_data,
             filename=filename,
             chunking_strategy=chunking_strategy,
-            **params,
+            **self._parser_params(params),
         )
+
+    def file_structure(self, *, file_data, filename, **params):
+        core = self.core
+        return core.file_structure(
+            file_data=file_data, filename=filename, **self._parser_params(params)
+        )
+
+    def _parser_params(self, params):
+        return {
+            **params,
+            "table_transformer_model_path": self.model_paths.get("table_transformer"),
+            "unstructured_default_model_initialize_params_json_path": self.model_paths.get(
+                "unstructured_default"
+            ),
+        }
 
     def ensure_initialized(self) -> None:
         if self._pid != os.getpid():

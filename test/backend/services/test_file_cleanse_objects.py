@@ -71,7 +71,7 @@ def run(store, parser):
 def test_images_and_text_are_published_by_reference():
     store = Store()
     parser = SimpleNamespace(
-        file_process=Mock(
+        file_structure=Mock(
             return_value=(
                 [{"content": "paragraph", "metadata": {"page_number": 2}}],
                 [
@@ -94,14 +94,14 @@ def test_images_and_text_are_published_by_reference():
     assert image.sha256 == hashlib.sha256(b"image").hexdigest()
     assert result.sha256 == hashlib.sha256(store.data[result.key]).hexdigest()
     assert all(stream.closed for stream in store.readers)
-    assert parser.file_process.call_args.kwargs["chunking_strategy"] == "none"
+    parser.file_structure.assert_called_once_with(file_data=b"source", filename="source.txt")
     assert result.key.startswith("artifacts/")
 
 
 @pytest.mark.parametrize("failure", ["hash", "short", "long", "version", "size"])
 def test_invalid_source_never_reaches_parser_or_writes(failure):
     store = Store()
-    parser = SimpleNamespace(file_process=Mock())
+    parser = SimpleNamespace(file_structure=Mock())
     if failure == "hash":
         store.data["source.txt"] = b"change"
     elif failure == "short":
@@ -120,7 +120,7 @@ def test_invalid_source_never_reaches_parser_or_writes(failure):
         )
     with pytest.raises(ValueError):
         run(store, parser)
-    parser.file_process.assert_not_called()
+    parser.file_structure.assert_not_called()
     assert not store.writes
     assert all(stream.closed for stream in store.readers)
 
@@ -128,7 +128,7 @@ def test_invalid_source_never_reaches_parser_or_writes(failure):
 def test_invalid_image_does_not_publish_artifact():
     store = Store()
     parser = SimpleNamespace(
-        file_process=Mock(
+        file_structure=Mock(
             return_value=([], [{"image_bytes": b"image", "image_format": "exe"}])
         )
     )
@@ -140,7 +140,7 @@ def test_invalid_image_does_not_publish_artifact():
 def test_unconfirmed_image_never_becomes_an_artifact(mocker):
     store = Store()
     parser = SimpleNamespace(
-        file_process=Mock(
+        file_structure=Mock(
             return_value=([], [{"image_bytes": b"image", "image_format": "png"}])
         )
     )
@@ -162,7 +162,7 @@ def test_unconfirmed_image_never_becomes_an_artifact(mocker):
 def test_unconfirmed_artifact_is_rejected(mocker):
     store = Store()
     parser = SimpleNamespace(
-        file_process=Mock(return_value=([{"content": "text"}], []))
+        file_structure=Mock(return_value=([{"content": "text"}], []))
     )
     mocker.patch.object(
         store,

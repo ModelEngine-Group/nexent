@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-CHUNK-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-001]
+  business_rule_ids: [DPR-CLEANSE-RULE-04, DPR-CLEANSE-RULE-05]
+  title: Structural extraction and Runtime chunking preserve real SDK output
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Compare existing format-specific processing with Management structure and Runtime final chunking in a fresh parser-free process.
+  preconditions:
+  - Docker and the cached data-process dependencies image are available.
+  - The image contains Unstructured 0.18.14, OpenPyXL, python-docx and local NLTK data.
+  test_data:
+    formats: Generated TXT, DOCX with titles and table, valid/invalid JSON, two-sheet XLSX, Markdown, HTML and CSV.
+    execution: Current source mounts are readonly and the disposable container has no network.
+  steps:
+  - order: 1
+    action: Produce old SDK results for basic, by_title and none, then extract structural artifacts from the same eight fixed inputs.
+    expected: Existing none still merges text, titles and tables survive structure output, and JSON passes only a source descriptor before final chunking.
+  - order: 2
+    action: Pass artifacts into a fresh Runtime-only process and compare every final chunk including metadata with the old result.
+    expected: Twenty-four format/strategy combinations match exactly and Runtime does not import Management or heavyweight parsing/model providers.
+  - order: 3
+    action: Close the child process and remove the owned container and anonymous volumes.
+    expected: No test-owned container remains.
+  expected_results:
+  - Structural output preserves the information required for existing text, table, JSON and workbook boundaries.
+  - Actual Runtime chunks match the existing SDK content and metadata without parser or Management dependencies.
+  - Test-owned processes, containers and volumes are reclaimed.
+  forbidden_side_effects:
+  - No application services, model requests, credentials, network downloads or application data are used.
+  integration_boundary:
+  - Real SDK format parsers, Management artifact projection and Runtime pure chunk algorithms; synthetic sources and process transport only, no AgentOS HTTP or storage-provider claim.
+  observations:
+  - Exact chunk dictionaries, title/table categories, source hashes and Runtime import guard results.
+  cleanup:
+  - Remove only the uniquely named owned container including its anonymous volumes.
+  acceptance:
+  - id: AC-01
+    description: Structure output preserves format semantics while old public processing remains intact.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Actual Runtime text/table chunks match the previous algorithm and remain free of parser and Management imports.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: The verification owns and reclaims its resources.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
