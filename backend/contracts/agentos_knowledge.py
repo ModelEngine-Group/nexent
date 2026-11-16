@@ -170,7 +170,7 @@ class FileCleanseLookup(Contract):
     job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
-class FileCleanseState(FileCleanseLookup):
+class CleanseResult(Contract):
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     artifact: ObjectReference | None = None
     error_code: str | None = Field(default=None, max_length=128)
@@ -180,6 +180,10 @@ class FileCleanseState(FileCleanseLookup):
         if (self.status == "completed") != (self.artifact is not None):
             raise ValueError("Only completed cleansing has a confirmed artifact")
         return self
+
+
+class FileCleanseState(FileCleanseLookup, CleanseResult):
+    pass
 
 
 class KnowledgeOperation(str, Enum):

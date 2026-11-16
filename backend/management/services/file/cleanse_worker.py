@@ -7,7 +7,8 @@ from datetime import datetime
 from time import monotonic
 from types import MappingProxyType
 
-from contracts.agentos_knowledge import FileCleanseRequest, ObjectReference
+from contracts.agentos_knowledge import ObjectReference
+from contracts.knowledge_cleanse import parse_cleanse_request
 from nexent.storage.errors import InvalidInput, OutcomeUnknown, StorageError
 from nexent.storage.models import TaskEnvelope
 
@@ -86,7 +87,7 @@ class CleanseHandler:
         if row is None:
             return  # A terminal/owned duplicate must not execute the parser again.
         try:
-            request = FileCleanseRequest.model_validate(row["request_payload"])
+            request = parse_cleanse_request(row)
             self.authorize(row, request)
             if row["parser_version"] != self.jobs.parser_version:
                 self.jobs.transition(

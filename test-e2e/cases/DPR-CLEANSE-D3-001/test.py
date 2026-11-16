@@ -49,6 +49,8 @@ def test_durable_cleanse_dispatch(record_property):
         "lease_takeover_fenced",
         "unknown_outcome_quarantined",
         "utc_audit_with_non_utc_session",
+        "knowledge_scope_ownership",
+        "knowledge_dispatch",
     ):
         assert evidence[key] is True, key
     record_property("cleanse_job_probe", json.dumps(evidence, sort_keys=True))

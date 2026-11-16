@@ -9,8 +9,12 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from contracts.agentos_knowledge import (
     FileCleanseLookup,
     FileCleanseRequest,
-    FileCleanseState,
     ObjectReference,
+)
+from contracts.knowledge_cleanse import (
+    KnowledgeCleanseLookup,
+    KnowledgeCleanseRequest,
+    cleanse_state,
 )
 from nexent.storage.errors import Conflict, InvalidInput, NotFound
 from nexent.storage.models import (
@@ -38,23 +42,29 @@ class CleanseJobs:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _owned(self, lookup):
-        return both(
+        owner = both(
             Comparison("job_id", "eq", lookup.job_id),
-            Comparison("run_id", "eq", lookup.run_id),
             Comparison("user_id", "eq", self.records.scope.actor_id),
         )
+        if isinstance(lookup, FileCleanseLookup):
+            return both(
+                owner,
+                Comparison("scope_kind", "eq", "run"),
+                Comparison("run_id", "eq", lookup.run_id),
+            )
+        if isinstance(lookup, KnowledgeCleanseLookup):
+            return both(
+                owner,
+                Comparison("scope_kind", "eq", "knowledge"),
+                Comparison("knowledge_id", "eq", lookup.knowledge_id),
+                Comparison("file_id", "eq", lookup.file_id),
+                Comparison("file_version", "eq", lookup.file_version),
+            )
+        raise InvalidInput()
 
     @staticmethod
     def state(row):
-        return FileCleanseState(
-            run_id=row["run_id"],
-            job_id=row["job_id"],
-            status=row["status"],
-            artifact=ObjectReference.model_validate(row["artifact"])
-            if row["artifact"]
-            else None,
-            error_code=row["error_code"],
-        )
+        return cleanse_state(row)
 
     def _find(self, where, context):
         rows = self.records.query(
@@ -64,7 +74,9 @@ class CleanseJobs:
             raise NotFound()
         return rows[0]
 
-    def submit(self, request: FileCleanseRequest, *, context):
+    def submit(self, request: FileCleanseRequest | KnowledgeCleanseRequest, *, context):
+        if not isinstance(request, (FileCleanseRequest, KnowledgeCleanseRequest)):
+            raise InvalidInput()
         self.authorize(request)
         payload = request.model_dump(mode="json")
         digest = hashlib.sha256(
@@ -74,13 +86,42 @@ class CleanseJobs:
             [
                 self.records.scope.tenant_id,
                 self.records.scope.actor_id,
-                request.run_id,
+                request.run_id
+                if isinstance(request, FileCleanseRequest)
+                else [
+                    "knowledge",
+                    request.knowledge_id,
+                    request.file_id,
+                    request.file_version,
+                ],
                 request.idempotency_key,
             ],
             separators=(",", ":"),
         )
         job_id = uuid5(NAMESPACE_URL, identity).hex
-        lookup = FileCleanseLookup(run_id=request.run_id, job_id=job_id)
+        if isinstance(request, FileCleanseRequest):
+            lookup = FileCleanseLookup(run_id=request.run_id, job_id=job_id)
+            scope = {
+                "scope_kind": "run",
+                "run_id": request.run_id,
+                "knowledge_id": None,
+                "file_id": None,
+                "file_version": None,
+            }
+        else:
+            lookup = KnowledgeCleanseLookup(
+                knowledge_id=request.knowledge_id,
+                file_id=request.file_id,
+                file_version=request.file_version,
+                job_id=job_id,
+            )
+            scope = {
+                "scope_kind": "knowledge",
+                "run_id": None,
+                "knowledge_id": request.knowledge_id,
+                "file_id": request.file_id,
+                "file_version": request.file_version,
+            }
         try:
             existing = self._find(self._owned(lookup), context)
         except NotFound:
@@ -92,7 +133,7 @@ class CleanseJobs:
                     {
                         "job_id": job_id,
                         "user_id": self.records.scope.actor_id,
-                        "run_id": request.run_id,
+                        **scope,
                         "request_hash": digest,
                         "request_payload": payload,
                         "parser_version": self.parser_version,

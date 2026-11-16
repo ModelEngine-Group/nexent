@@ -16,6 +16,7 @@ from contracts.agentos_knowledge import (
     FileCleanseRequest,
     ObjectReference,
 )
+from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_jobs import CleanseJobs
 from management.services.file.cleanse_worker import (
     HANDLER,
@@ -168,6 +169,42 @@ try:
         assert consume_once(queue, registry, max_wait=0.5, context=context())
     assert len(executions) == 1
     assert public.inspect(lookup, context=context()).artifact == published()
+    kb_request = KnowledgeCleanseRequest(
+        knowledge_id=1,
+        file_id="b" * 32,
+        file_version=0,
+        **request.model_dump(exclude={"run_id"}),
+    )
+    kb = public.submit(kb_request, context=context())
+    kb_lookup = KnowledgeCleanseLookup(
+        knowledge_id=1,
+        file_id="b" * 32,
+        file_version=0,
+        job_id=kb.job_id,
+    )
+    assert "run_id" not in kb.model_dump()
+    assert public.submit(kb_request, context=context()).job_id == kb.job_id
+    assert kb.job_id != state.job_id
+    for foreign, query in (
+        (service("user-b"), kb_lookup),
+        (service(tenant="tenant-b"), kb_lookup),
+        (public, kb_lookup.model_copy(update={"knowledge_id": 2})),
+        (public, kb_lookup.model_copy(update={"file_id": "c" * 32})),
+        (public, kb_lookup.model_copy(update={"file_version": 1})),
+    ):
+        for method in (foreign.inspect, foreign.cancel):
+            try:
+                method(query, context=context())
+            except NotFound:
+                pass
+            else:
+                raise AssertionError("foreign knowledge context leaked or cancelled")
+    assert enqueue_ready(worker, queue, context=context()) == 1
+    assert enqueue_ready(worker, queue, context=context()) == 1
+    for _ in range(2):
+        assert consume_once(queue, registry, max_wait=0.5, context=context())
+    assert executions.count(kb.job_id) == 1
+    assert public.inspect(kb_lookup, context=context()).artifact == published()
     req2 = request.model_copy(update={"idempotency_key": "stale"})
     second = public.submit(req2, context=context())
     clock = [datetime.now(timezone.utc)]
@@ -227,6 +264,8 @@ try:
         "lease_takeover_fenced": True,
         "unknown_outcome_quarantined": True,
         "utc_audit_with_non_utc_session": True,
+        "knowledge_scope_ownership": True,
+        "knowledge_dispatch": True,
     }
     print(json.dumps(result))
 finally:

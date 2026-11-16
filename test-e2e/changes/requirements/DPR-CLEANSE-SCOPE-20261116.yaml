@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-SCOPE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Knowledge-file cleansing scope without synthetic runs
+  description: >-
+    Add Management-local knowledge/file/version admission and inspection contracts.
+    Preserve existing run identities, enforce disjoint scopes and decode authorized
+    snapshots before worker execution. Public handlers and real parser startup remain pending.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve run identity while separating KB file-version identities.
+    - Refuse mixed request contexts and foreign user/tenant/file/version inspection or cancellation.
+    - Decode and reauthorize the original KB snapshot before execution.
+    reason: Existing run-only job tests cannot prove ordinary KB upload ownership.
+    test_selectors:
+    - test/backend/services/test_knowledge_cleanse_jobs.py
+    - test/backend/services/test_cleanse_jobs.py
+    - test/backend/services/test_cleanse_worker.py

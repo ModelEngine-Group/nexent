@@ -20,11 +20,11 @@ case:
     execution: Controlled parser-result reference; no model or object provider is invoked.
   steps:
   - order: 1
-    action: Submit a request twice, then inspect it as another user or tenant.
-    expected: Submission returns the same job ID; foreign inspection is refused.
+    action: Submit run and knowledge-file requests twice; attempt inspection and cancellation from foreign users, tenants and knowledge/file/version contexts.
+    expected: Each scope keeps its stable job ID; scopes are disjoint and foreign access is refused.
   - order: 2
-    action: Publish the queued job twice through Redis and consume with the local registry.
-    expected: Execution occurs once and the durable completed artifact remains inspectable.
+    action: Publish each scoped job twice through Redis and consume with the local registry.
+    expected: Each job executes once and its durable completed artifact remains inspectable in its original scope.
   - order: 3
     action: Advance a controlled clock past a lease, take over the job and submit the old completion.
     expected: The old attempt cannot complete; the new owner can publish its result.
@@ -35,7 +35,7 @@ case:
     action: Read audit timestamps under a non-UTC PostgreSQL session and remove owned test resources.
     expected: UTC values and date filters remain correct; no test containers or anonymous volumes are retained.
   expected_results:
-  - Idempotent admission preserves user/tenant ownership.
+  - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
   - Lease takeover fences the previous attempt.
   - Recorded unknown outcomes are not blindly requeued.

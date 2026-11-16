@@ -51,18 +51,43 @@ class FileCleanseJob(TableBase):
         "run_id",
         sa.String(38),
         "Authorized AgentOS run requiring the source file.",
+        nullable=True,
+    )
+    scope_kind = column(
+        "scope_kind",
+        sa.String(30),
+        "Authorization context: run callback or knowledge file.",
         nullable=False,
+        server_default="run",
+    )
+    knowledge_id = column(
+        "knowledge_id",
+        sa.Integer,
+        "Knowledge base reference authorized by Management; knowledge scope only.",
+        nullable=True,
+    )
+    file_id = column(
+        "file_id",
+        sa.String(32),
+        "Stable knowledge file identifier; knowledge scope only.",
+        nullable=True,
+    )
+    file_version = column(
+        "file_version",
+        sa.Integer,
+        "Authorized knowledge file generation; knowledge scope only.",
+        nullable=True,
     )
     request_hash = column(
         "request_hash",
         sa.String(64),
-        "SHA256 of the canonical FileCleanseRequest payload.",
+        "SHA256 of the canonical scope-specific cleansing request payload.",
         nullable=False,
     )
     request_payload = column(
         "request_payload",
         sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
-        "Validated FileCleanseRequest only; no credentials or raw file bytes.",
+        "Validated run or knowledge cleansing request; no credentials or raw file bytes.",
         nullable=False,
     )
     parser_version = column(
@@ -133,6 +158,36 @@ for name, description in {
     cleanse_jobs.c[name].nullable = False
 cleanse_jobs.c.delete_flag.server_default = sa.DefaultClause("N")
 sa.Index(
+    "idx_file_cleanse_job_knowledge",
+    cleanse_jobs.c.tenant_id,
+    cleanse_jobs.c.knowledge_id,
+    cleanse_jobs.c.file_id,
+    cleanse_jobs.c.file_version,
+)
+sa.CheckConstraint(
+    sa.or_(
+        sa.and_(
+            cleanse_jobs.c.scope_kind == "run",
+            cleanse_jobs.c.run_id.is_not(None),
+            cleanse_jobs.c.knowledge_id.is_(None),
+            cleanse_jobs.c.file_id.is_(None),
+            cleanse_jobs.c.file_version.is_(None),
+        ),
+        sa.and_(
+            cleanse_jobs.c.scope_kind == "knowledge",
+            cleanse_jobs.c.run_id.is_(None),
+            cleanse_jobs.c.knowledge_id.is_not(None),
+            cleanse_jobs.c.knowledge_id > 0,
+            cleanse_jobs.c.file_id.is_not(None),
+            cleanse_jobs.c.file_id.regexp_match("^[0-9a-f]{32}$"),
+            cleanse_jobs.c.file_version.is_not(None),
+            cleanse_jobs.c.file_version >= 0,
+        ),
+    ),
+    name="ck_file_cleanse_job_scope",
+    table=cleanse_jobs,
+)
+sa.Index(
     "idx_file_cleanse_job_owner",
     cleanse_jobs.c.tenant_id,
     cleanse_jobs.c.user_id,
@@ -153,7 +208,7 @@ def bind_cleanse_jobs(scope, engine):
             "boolean"
             if field.name == "reconcile_required"
             else "integer"
-            if field.name in {"id", "revision"}
+            if field.name in {"id", "revision", "knowledge_id", "file_version"}
             else "object"
             if field.name in {"request_payload", "artifact"}
             else "string",
