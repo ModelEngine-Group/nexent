@@ -5294,6 +5294,7 @@
   "agentEvaluation.trialResult": "Trial Result",
   "agentEvaluation.trialRun": "Trial Run",
   "agentEvaluation.trialRunning": "Running trial, please wait...",
+  "agentEvaluation.trialFailed": "Trial run failed. Please check the configuration and try again.",
   "agentEvaluation.versionRequired": "Version *",
   "agentEvaluation.scoreMin": "Score Min",
   "agentEvaluation.scoreMax": "Score Max (≤100)",
