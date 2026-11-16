@@ -11,7 +11,7 @@ feature:
   - rule_id: SYS-CONFIG-RULE-01
     description: Only the frozen nineteen-key catalog is readable and writable through ops; unknown or invalid batches are rejected atomically.
   - rule_id: SYS-CONFIG-RULE-02
-    description: Explicit role permission is required for page and API access; SU and speed identities have no implicit bypass.
+    description: Page and API access require an explicit ops.configuration grant; role identity alone never bypasses permission checks.
   - rule_id: SYS-CONFIG-RULE-03
     description: Versioned SQL seeds built-in defaults without importing managed environment values or overwriting saved values.
   - rule_id: SYS-CONFIG-RULE-04

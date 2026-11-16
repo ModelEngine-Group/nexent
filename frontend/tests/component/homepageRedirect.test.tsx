@@ -83,11 +83,14 @@ test.each([
     target: "/agent-space",
   },
   { routes: ["/", "/agent-dev", "/models"], target: "/models" },
-])("skips section-only routes for default entry: $routes", ({ routes, target }) => {
-  state.routes = routes;
-  render(<Homepage />);
-  expect(state.replace).toHaveBeenCalledExactlyOnceWith(target);
-});
+])(
+  "skips section-only routes for default entry: $routes",
+  ({ routes, target }) => {
+    state.routes = routes;
+    render(<Homepage />);
+    expect(state.replace).toHaveBeenCalledExactlyOnceWith(target);
+  }
+);
 
 test("retains Home when permissions contain only section-only routes", () => {
   state.routes = ["/", "/resource-space", "/agent-dev"];

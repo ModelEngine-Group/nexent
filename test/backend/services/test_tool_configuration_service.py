@@ -695,7 +695,7 @@ class TestPythonTypeToJsonSchema:
         from typing import List, Dict, Any
 
         # test the None type
-        mock_python_type_to_json_schema.side_effect = lambda x: "NoneType" if x == type(
+        mock_python_type_to_json_schema.side_effect = lambda x: "NoneType" if x is type(
             None) else "array"
 
         from management.services.tool.configuration import python_type_to_json_schema
@@ -2178,7 +2178,8 @@ class TestBuildToolInfoFromLangchain:
         from management.services.tool.configuration import _build_tool_info_from_langchain
 
         # Create a mock tool with a callable that will raise TypeError on signature
-        mock_func = lambda: None  # A simple callable
+        def mock_func():
+            return None
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"
@@ -2198,7 +2199,8 @@ class TestBuildToolInfoFromLangchain:
         from management.services.tool.configuration import _build_tool_info_from_langchain
 
         # Create a mock tool with a callable that will raise ValueError on signature
-        mock_func = lambda: None
+        def mock_func():
+            return None
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"

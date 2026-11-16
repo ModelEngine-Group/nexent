@@ -66,7 +66,8 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
-const OPS_HTTP_BACKEND = process.env.OPS_HTTP_BACKEND || "http://localhost:5016";
+const OPS_HTTP_BACKEND =
+  process.env.OPS_HTTP_BACKEND || "http://localhost:5016";
 // Reuse the existing northbound service address, which conventionally ends with /api.
 const NORTHBOUND_HTTP_BACKEND = (
   process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
@@ -279,18 +280,9 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
-// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
-const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
-
-// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
 const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
 
 async function isSuperAdminRequest(req) {
-  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
-  if (IS_SPEED_MODE) {
-    return true;
-  }
-
   const cookies = parseCookies(req);
   const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
   if (!token) {
@@ -310,7 +302,12 @@ async function isSuperAdminRequest(req) {
 
     const data = await response.json();
     const userRole = data?.data?.user?.user_role;
-    return SUPER_ADMIN_ROLES.has(userRole);
+    const roles = data?.data?.user?.roles ?? [userRole];
+    return (
+      Array.isArray(roles) &&
+      roles.length === 1 &&
+      SUPER_ADMIN_ROLES.has(roles[0])
+    );
   } catch (error) {
     console.error(
       "[isSuperAdminRequest] Error checking super admin:",
@@ -818,7 +815,10 @@ function handleNorthboundProxy(pathname, req, res) {
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
 
-  if (pathname === "/api/system_configurations" || pathname.startsWith("/api/system_configurations/")) {
+  if (
+    pathname === "/api/system_configurations" ||
+    pathname.startsWith("/api/system_configurations/")
+  ) {
     req.url = req.url.replace(/^\/api(?=\/system_configurations)/, "");
     proxy.web(req, res, {
       target: OPS_HTTP_BACKEND,

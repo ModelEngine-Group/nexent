@@ -45,6 +45,7 @@ import type {
   HumanInteractionEvent,
 } from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
+import { fromMessageAnnotationWireItems } from "../utils/message-annotations";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -310,6 +311,9 @@ interface NexentRunConfig {
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
   onRunRejected?: (error: unknown, message?: ThreadMessage) => void;
+  // Structured reply annotations for the outgoing message; set when the
+  // composer keeps the library-managed send (in-flight attachment uploads).
+  messageAnnotations?: unknown;
   resume?: boolean;
   agentId?: number | string;
   agentVersionNo?: number;
@@ -1459,7 +1463,26 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
-    if (!isResume && !query) {
+    // Reply annotations: prefer the structured metadata on the outgoing user
+    // message (manual append path and retries); fall back to the runConfig
+    // channel used when in-flight uploads keep the library submission flow
+    // in charge of the append. Resolved before the empty-query guard because
+    // an annotation-only send (quoted reply, no typed text) carries an empty
+    // query; the backend merges the quotes into the model-facing text.
+    const messageAnnotations = fromMessageAnnotationWireItems(
+      lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              | { annotations?: unknown }
+              | undefined
+        )?.annotations
+        : undefined
+    );
+    const annotations = messageAnnotations.length
+      ? messageAnnotations
+      : fromMessageAnnotationWireItems(custom?.messageAnnotations);
+
+    if (!isResume && !query && !annotations.length) {
       log.warn("[ChatModelAdapter] No user query found in messages");
       return;
     }
@@ -1536,6 +1559,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         : undefined;
     if (!isResume && !isNl2Agent && clarificationResponse) {
       requestBody.clarification_response = clarificationResponse;
+    }
+    // Reply annotations travel as a structured request field; an
+    // annotation-only send keeps its empty query (see the guard above).
+    if (!isResume && !isNl2Agent && annotations.length) {
+      requestBody.annotations = annotations;
     }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
@@ -1653,6 +1681,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           query: String(requestBody.query || ""),
           clarification_response: requestBody.clarification_response as
             ClarificationResponse | undefined,
+          annotations: requestBody.annotations as
+            | import("@/types/conversation").ApiMessageAnnotation[]
+            | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;

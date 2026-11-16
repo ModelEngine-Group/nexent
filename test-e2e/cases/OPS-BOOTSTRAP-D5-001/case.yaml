@@ -24,7 +24,7 @@ case:
     expected: The launcher starts without an import violation or outbound connection.
   - order: 2
     action: Request liveness, readiness and OpenAPI through real HTTP.
-    expected: Health returns 200 with alive and ready; only health and system-configuration routes appear in OpenAPI, and an anonymous configuration request returns 401 without a database connection.
+    expected: Health returns 200 with alive and ready; health, operations-access and system-configuration routes appear in OpenAPI, and an anonymous configuration request returns 401 without a database connection.
   - order: 3
     action: Terminate the process, restart it on the same port, and repeat health requests before cleanup.
     expected: The replacement process becomes ready within the deadline and all child processes are reaped.
@@ -33,7 +33,7 @@ case:
     expected: The ops file contains both server startups and health access records; the first run is retained after restart.
   expected_results:
   - Startup and restart each reach readiness within 20 seconds without configured external services.
-  - Health responses match the process-local contract and only health and system-configuration APIs are exposed.
+  - Health responses match the process-local contract and health, operations-access and system-configuration APIs are exposed.
   - All owned subprocesses exit during cleanup.
   - Server and access logs are appended to the persistent ops file across process restarts.
   forbidden_side_effects:

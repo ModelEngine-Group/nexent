@@ -1,29 +1,40 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.agent import AgentRepositoryListingCreateRequest
-from contracts.knowledge import KnowledgeBaseResolution
-from contracts.skill import SkillResolution
-from contracts.tag import TagAssignmentFilter
-from contracts.errors.exceptions import AgentToolImportError
 import json
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from starlette.responses import JSONResponse, Response
 
-from contracts.errors.exceptions import SkillDuplicateError, UnauthorizedError
 from contracts.agent import AgentRepositoryListingCreateRequest
+from contracts.errors.exceptions import (
+    AgentToolImportError,
+    SkillDuplicateError,
+    UnauthorizedError,
+)
 from contracts.knowledge import KnowledgeBaseResolution
+from contracts.roles import has_any_role
 from contracts.skill import SkillResolution
 from contracts.tag import TagAssignmentFilter
+from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from management.services.monitor.audit import record_security_event
 from management.services.repository.agent.listing import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
     delete_official_agent_impl,
-    get_agent_repository_listing_detail_impl,
     get_agent_repository_icon_impl,
+    get_agent_repository_listing_detail_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
     list_agent_repository_tag_stats_impl,
@@ -32,10 +43,7 @@ from management.services.repository.agent.listing import (
     update_agent_repository_status_impl,
     upload_agent_repository_icon_impl,
 )
-from management.services.monitor.audit import record_security_event
 from management.services.repository.agent.sync import sync_official_agents
-from gateway.authentication.auth import get_current_user_context, get_current_user_id
-from contracts.errors.exceptions import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
@@ -85,7 +93,7 @@ async def get_agent_repository_icon_api(
 
 
 def _require_super_admin(user_role: str) -> None:
-    if user_role.upper() != "SU":
+    if not has_any_role(user_role, {'SU'}):
         raise UnauthorizedError("Super admin role is required")
 
 

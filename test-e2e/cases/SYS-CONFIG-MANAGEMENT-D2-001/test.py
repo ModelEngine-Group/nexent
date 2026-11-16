@@ -1,12 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D2 proof for the actual ops configuration HTTP application."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from fastapi.testclient import TestClient
+from gateway.authentication.auth import authenticate
 from ops.api.application import create_app
+from permissions.models import CurrentUser
 
 
 def _items():
@@ -27,79 +29,42 @@ def _items():
     ]
 
 
-def _scalar(value):
-    result = Mock()
-    result.scalar.return_value = value
-    return result
-
-
-def _authorization_session(role):
-    session = Mock()
-
-    def execute(statement, _params):
-        sql = str(statement)
-        if "FROM nexent.user_tenant_t" in sql:
-            raise RuntimeError('column "user_role" does not exist')
-        if "FROM nexent.user_account_t" in sql:
-            return _scalar(role)
-        if "FROM nexent.role_permission_t" in sql:
-            return _scalar("/system-config" if role == "OPS_ADMIN" else None)
-        raise AssertionError("Unexpected authorization query")
-
-    session.execute.side_effect = execute
-    context = Mock()
-    context.__enter__ = Mock(return_value=session)
-    context.__exit__ = Mock(return_value=False)
-    return context
+def _client(role=None):
+    app = create_app()
+    if role is not None:
+        user = CurrentUser(f"{role.lower()}-user", "tenant", role, roles=(role,))
+        app.dependency_overrides[authenticate] = lambda: user
+    return TestClient(app)
 
 
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
 def test_catalog_and_authorization_contract():
-    client = TestClient(create_app())
-    assert client.get("/system_configurations").status_code == 401
+    assert _client().get("/system_configurations").status_code == 401
 
-    with (
-        patch(
-            "ops.services.authorization._decode_user_id",
-            side_effect=lambda authorization: authorization.split()[-1],
-        ),
-        patch(
-            "ops.services.authorization.configuration_database.session",
-            side_effect=lambda: _authorization_session("OPS_ADMIN"),
-        ),
-        patch(
-            "ops.api.system_configurations.list_system_configurations",
-            return_value=_items(),
-        ) as list_configurations,
-    ):
-        response = client.get(
-            "/system_configurations", headers={"Authorization": "Bearer authorized"}
-        )
-    assert response.status_code == 200
-    assert response.json()["total"] == 19
-    assert {item["key"] for item in response.json()["items"]} == set(
-        DEFAULT_CATALOG.defaults
-    )
-    list_configurations.assert_called_once_with()
-
-    for role in ("SU", "ADMIN", "USER"):
+    for role in ("OPS", "SU"):
         with (
+            patch("permissions.operations.has_permission", return_value=True),
             patch(
-                "ops.services.authorization._decode_user_id",
-                return_value=f"{role.lower()}-user",
-            ),
-            patch(
-                "ops.services.authorization.configuration_database.session",
-                side_effect=lambda role=role: _authorization_session(role),
-            ),
+                "ops.api.system_configurations.list_system_configurations",
+                return_value=_items(),
+            ) as list_configurations,
+        ):
+            response = _client(role).get("/system_configurations")
+        assert response.status_code == 200
+        assert response.json()["total"] == 19
+        assert {item["key"] for item in response.json()["items"]} == set(
+            DEFAULT_CATALOG.defaults
+        )
+        list_configurations.assert_called_once_with()
+
+    for role in ("ADMIN", "USER"):
+        with (
+            patch("permissions.operations.has_permission", return_value=False),
             patch("ops.api.system_configurations.list_system_configurations") as query,
         ):
-            denied = client.get(
-                "/system_configurations",
-                headers={"Authorization": f"Bearer {role.lower()}-token"},
-            )
+            denied = _client(role).get("/system_configurations")
         assert denied.status_code == 403
         query.assert_not_called()
 
@@ -113,7 +78,7 @@ def test_catalog_and_authorization_contract():
             side_effect=RuntimeError("postgres://user:secret@example.invalid"),
         ),
     ):
-        failure = client.get(
+        failure = _client("OPS").get(
             "/system_configurations", headers={"Authorization": "Bearer authorized"}
         )
     assert failure.status_code == 503
@@ -124,7 +89,7 @@ def test_catalog_and_authorization_contract():
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
 def test_atomic_save_and_notification_degradation_contract():
-    client = TestClient(create_app())
+    client = _client("OPS")
     with (
         patch(
             "ops.api.system_configurations.authorize_operations",
@@ -186,7 +151,7 @@ def test_atomic_save_and_notification_degradation_contract():
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
 def test_current_recommendations_are_explicitly_unavailable():
-    client = TestClient(create_app())
+    client = _client("OPS")
     with patch(
         "ops.api.system_configurations.authorize_operations", return_value="ops-user"
     ):

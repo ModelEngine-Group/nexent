@@ -1,14 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 // Status codes for authentication
 export enum USER_ROLES {
   SU = "SU",
   ADMIN = "ADMIN",
   DEV = "DEV",
   USER = "USER",
-  SPEED = "SPEED",
+  OPS = "OPS",
   ASSET_OWNER = "ASSET_OWNER",
-  OPS_ADMIN = "OPS_ADMIN",
 }
 
 export const ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE";

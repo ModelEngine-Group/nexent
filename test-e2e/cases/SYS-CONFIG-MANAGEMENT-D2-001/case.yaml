@@ -14,12 +14,12 @@ case:
   objective: Exercise the actual ops HTTP application with controlled persistence and notification boundaries.
   preconditions: [Python backend dependencies and isolated test doubles for PostgreSQL and Redis are available.]
   test_data:
-    actors: [OPS_ADMIN, SU, ADMIN, USER, anonymous]
+    actors: [OPS, SU, ADMIN, USER, anonymous]
     batches: [valid changed keys, unknown key, wrong type, nonpositive value, malformed body]
   steps:
   - order: 1
     action: Query the catalog with each actor and with the database unavailable.
-    expected: Only explicit operations authorization returns exactly nineteen entries; unauthorized actors receive 401/403 and dependency failure returns a safe 503.
+    expected: OPS and SU with explicit operations permission return exactly nineteen entries; unauthorized actors receive 401/403 and dependency failure returns a safe 503.
   - order: 2
     action: Save valid, unknown, wrong-type, nonpositive and malformed batches, including a notification failure after commit.
     expected: Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
@@ -31,7 +31,7 @@ case:
   - Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
   - Current parameters have no executable automatic recommendation.
   forbidden_side_effects:
-  - No partial writes, implicit SU bypass, secret disclosure or consumer status fabrication.
+  - No partial writes, permission bypass, secret disclosure or consumer status fabrication.
   contract:
     protocol: HTTP JSON through the actual FastAPI ops application
     method: GET, PATCH, POST

@@ -1,13 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP and authorization contracts for ops system configuration."""
 
-from unittest.mock import Mock
-
-import jwt
 import pytest
 from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from fastapi.testclient import TestClient
+from gateway.authentication.auth import authenticate
 from ops.api.application import create_app
+from permissions.models import CurrentUser
 
 from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
@@ -34,8 +33,14 @@ def _items():
     ]
 
 
-def _client():
-    return TestClient(create_app())
+OPS_USER = CurrentUser("ops-user", "ops-tenant", "OPS", roles=("OPS",))
+
+
+def _client(user=OPS_USER):
+    app = create_app()
+    if user is not None:
+        app.dependency_overrides[authenticate] = lambda: user
+    return TestClient(app)
 
 
 def test_anonymous_request_is_rejected_before_configuration_lookup(mocker):
@@ -44,7 +49,7 @@ def test_anonymous_request_is_rejected_before_configuration_lookup(mocker):
         create=True,
     )
 
-    response = _client().get("/system_configurations")
+    response = _client(None).get("/system_configurations")
 
     assert response.status_code == 401
     lookup.assert_not_called()
@@ -122,7 +127,31 @@ def test_patch_only_returns_saved_values_and_notification_degradation(mocker):
     assert "revision" not in response.text
     assert "consumer" not in response.text
     save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="ops-user")
-    authorize.assert_called_once_with("Bearer token")
+    authorize.assert_called_once_with(OPS_USER, "ops.configuration:update")
+
+
+@pytest.mark.parametrize(
+    "role,expected_status",
+    [("OPS", 200), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
+)
+def test_standard_operations_scope_controls_catalog_access(mocker, role, expected_status):
+    user = CurrentUser("actor", "tenant", role, roles=(role,))
+    mocker.patch(
+        "permissions.operations.has_permission",
+        side_effect=lambda roles, _permission: bool(set(roles) & {"OPS", "SU"}),
+    )
+    query = mocker.patch(
+        "ops.api.system_configurations.list_system_configurations",
+        return_value=_items(),
+    )
+
+    response = _client(user).get("/system_configurations")
+
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        query.assert_called_once_with()
+    else:
+        query.assert_not_called()
 
 
 def test_invalid_business_batch_maps_to_400(mocker):
@@ -185,76 +214,29 @@ def test_current_numeric_parameters_have_no_recommendation(mocker, key):
 
 
 def test_authorizer_requires_explicit_route_permission(mocker):
+    from fastapi import HTTPException
     from ops.services.authorization import (
-        OperationsForbiddenError,
         authorize_operations,
     )
 
-    mocker.patch("ops.services.authorization._decode_user_id", return_value="su-user")
-    mocker.patch(
-        "ops.services.authorization.configuration_database.session",
-        return_value=_authorization_session("SU", None),
+    user = CurrentUser("user", "tenant", "USER", roles=("USER",))
+    scope = mocker.patch(
+        "ops.services.authorization.operations_scope",
+        side_effect=HTTPException(status_code=403, detail="Operations permission required"),
     )
 
-    with pytest.raises(OperationsForbiddenError):
-        authorize_operations("Bearer su-token")
+    with pytest.raises(HTTPException):
+        authorize_operations(user)
+    scope.assert_called_once_with(user, None, "ops.configuration:read")
 
 
 def test_authorizer_returns_user_for_operations_role(mocker):
     from ops.services.authorization import authorize_operations
 
-    decode = mocker.patch(
-        "ops.services.authorization._decode_user_id", return_value="ops-user"
-    )
-    mocker.patch(
-        "ops.services.authorization.configuration_database.session",
-        return_value=_authorization_session("OPS_ADMIN", "/system-config"),
+    scope = mocker.patch(
+        "ops.services.authorization.operations_scope",
+        return_value=None,
     )
 
-    assert authorize_operations("Bearer ops-token") == "ops-user"
-    decode.assert_called_once_with("Bearer ops-token")
-
-
-def test_invalid_jwt_is_unauthorized(mocker):
-    from ops.services.authorization import (
-        OperationsUnauthorizedError,
-        authorize_operations,
-    )
-
-    mocker.patch(
-        "ops.services.authorization.jwt.decode",
-        side_effect=jwt.InvalidTokenError("bad token"),
-    )
-
-    with pytest.raises(OperationsUnauthorizedError):
-        authorize_operations("Bearer invalid")
-
-
-def _scalar(value):
-    result = Mock()
-    result.scalar.return_value = value
-    return result
-
-
-def _session_context(session):
-    context = Mock()
-    context.__enter__ = Mock(return_value=session)
-    context.__exit__ = Mock(return_value=False)
-    return context
-
-
-def _authorization_session(role, permission):
-    session = Mock()
-
-    def execute(statement, _params):
-        sql = str(statement)
-        if "FROM nexent.user_tenant_t" in sql:
-            raise RuntimeError('column "user_role" does not exist')
-        if "FROM nexent.user_account_t" in sql:
-            return _scalar(role)
-        if "FROM nexent.role_permission_t" in sql:
-            return _scalar(permission)
-        raise AssertionError("Unexpected authorization query")
-
-    session.execute.side_effect = execute
-    return _session_context(session)
+    assert authorize_operations(OPS_USER, "ops.configuration:update") == "ops-user"
+    scope.assert_called_once_with(OPS_USER, None, "ops.configuration:update")

@@ -37,4 +37,5 @@ change:
     and controlled API boundary. Its first journey step and AC-01 are strengthened for personal-profile access.
     D1 would duplicate the frontend unit boundary; D2/D3 are unchanged because no backend API or service contract changes;
     D5 adds no separate proof surface beyond preserving the existing denied actor and precise self-service route.
-    The self-service route is evaluated outside accessibleRoutes, so the OPS_ADMIN SQL seed remains /system-config only.
+    The self-service route is evaluated outside accessibleRoutes. During synchronization with develop, OPS_ADMIN is
+    superseded by the standard OPS role and /ops/configuration grant; the /users self-service behavior remains unchanged.

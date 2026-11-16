@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: SKILLS-PATH-READ-PERF-20261113
+  change_type: refactor
+  title: Reuse request-local roots and batch skill configuration path checks
+  description: Reduce repeated realpath and existence work while preserving containment and immediate configuration freshness.
+  affected_features:
+    existing: [F-072]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-076, SKILL-LIST-CONTENT-D2-001]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Retain the current list/detail contract. Existing deployed D2 contracts are reused; isolated path containment, filesystem freshness and bounded operation counts are strengthened in traditional UT.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/management-skills-path-reads/.
+    Responsibility inherits F-072's skill domain. No new D1 duplicates unit assertions.
+    Existing D2 preparation and owned cleanup remain unchanged. Live comparison uses
+    the authorized local config container and the same existing tenant without writing
+    its skill data. Local before/after HTTP samples do not certify a new D5 load SLA.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Resolve the tenant root once per list and validate the shared skill root once per skill
+    - Reject traversal and escaping skill, directory and file symlinks while retaining safe internal symlinks
+    - Batch regular-file checks with stat fallback when directory enumeration is unavailable
+    - Observe configuration edits, replacement, deletion and creation on the next call without negative caching
+    - Preserve YAML precedence, missing-field removal, parse/read-error fallback and concurrent tenant isolation
+    reason: Existing overlay/cache tests do not prove request-local root reuse, batch checks or the optimized path security boundary.
+    test_selectors:
+    - test/sdk/skills/test_skill_path_batch.py
+    - test/backend/services/test_skill_config_paths.py
+    - test/backend/services/test_skill_list_optimization.py
+    - test/backend/services/test_skill_yaml_cache.py
+    - test/backend/services/test_skill_service.py
+    - test/backend/app/test_skill_list_scheduling.py
+    - test/backend/app/test_skill_app.py
+    - test/sdk/skills/test_skill_manager.py
+    - test/sdk/skills/test_skill_loader.py

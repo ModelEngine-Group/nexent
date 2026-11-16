@@ -26,10 +26,14 @@ change:
     decision: add
     test_selectors:
     - test/backend/ops/test_system_configurations.py
-    - test/backend/services/test_user_management_speed.py
+    - test/backend/services/test_user_management_service.py
+    - test/backend/permissions/test_operations.py
     behaviors:
     - Reject the retired user_tenant_t.user_role query and authorize through the active user_account_t role projection.
     - Resolve SPEED role permissions for the default speed identity even though ordinary login is disabled for that system account.
     - Preserve explicit OPS_ADMIN-only configuration access and deny SPEED and SU without additional grants.
     reason: Unit and API doubles reproduce the current schema and disabled SPEED projection; existing D2 and sidebar cases retain their separate HTTP and component boundaries.
-  notes: Existing SPEC at openspec/changes/add-system-configuration-page retains its permission requirements. No new formal Case is needed; the existing D2 script is strengthened and no SPEED or SU grant is introduced.
+  notes: >-
+    Existing SPEC at openspec/changes/add-system-configuration-page retains its explicit permission requirements. No new
+    formal Case is needed. During synchronization with develop, the retired SPEED fallback and its test are removed;
+    the canonical configuration route is /ops/configuration, and OPS/SU access requires the explicit ops.configuration grant.

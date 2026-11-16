@@ -725,6 +725,10 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
   );
   view.bootstrap = { generic_agent: { agent_id: 5, version_no: 2 } };
   const page = render(<WorkbenchPage />);
+  expect(conversationService.getKnowledgeCapabilities).not.toHaveBeenCalled();
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeOpenChange?.(true)
+  );
   expect(
     conversationService.getKnowledgeCapabilities
   ).toHaveBeenCalledExactlyOnceWith(5, 2);
@@ -766,6 +770,16 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
     )
   );
   expect(view.props?.knowledgeCapabilities).toBeNull();
+  const attempts = vi.mocked(conversationService.getKnowledgeCapabilities).mock
+    .calls.length;
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeRetry?.()
+  );
+  await waitFor(() =>
+    expect(conversationService.getKnowledgeCapabilities).toHaveBeenCalledTimes(
+      attempts + 1
+    )
+  );
 });
 
 it.each([true, false])(

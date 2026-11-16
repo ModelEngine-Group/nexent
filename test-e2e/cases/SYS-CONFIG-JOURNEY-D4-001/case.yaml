@@ -32,7 +32,7 @@ case:
   - Failure and navigation behavior never claim all consumers applied or discard unsaved edits.
   forbidden_side_effects:
   - No browser-local ops port, executable recommendation, revision conflict, application polling or secret displayed.
-  actor: OPS_ADMIN and a denied non-operations user
+  actor: OPS and a denied non-operations user
   journey: [Open system configuration, open personal profile, filter and edit drafts, confirm changed-key save, exercise failures and leave protection, restore original values]
   final_business_result: [Database changes are confirmed honestly while all unsaved newer drafts remain intact.]
   failure_evidence: [Playwright screenshots, traces and sanitized proxied request/response assertions]

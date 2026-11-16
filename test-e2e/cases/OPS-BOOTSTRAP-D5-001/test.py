@@ -98,6 +98,7 @@ runpy.run_path('ops_service.py', run_name='__main__')
                     assert schema['info']['title'] == 'Nexent Operations API'
                     assert set(schema['paths']) == {
                         '/system_configurations', '/system_configurations/recommendations',
+                        '/ops/authorization', '/ops/resources', '/ops/scope',
                     }
                 try:
                     opener.open(f'http://127.0.0.1:{port}/system_configurations', timeout=2)

@@ -56,8 +56,9 @@ def test_migration_defines_one_audited_scalar_table_and_safe_seed_protocol():
         in sql
     )
     assert "GRANT USAGE ON SCHEMA nexent TO nexent_configuration_reader" in sql
-    assert "'OPS_ADMIN'" in sql
-    assert "'/system-config'" in sql
+    assert "role_permission_t" not in sql
+    assert "'OPS_ADMIN'" not in sql
+    assert "'/system-config'" not in sql
 
 
 def test_model_matches_migration_shape():

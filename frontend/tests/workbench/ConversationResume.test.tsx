@@ -7,6 +7,7 @@ import { useConversationResume } from "@/features/workbench/hooks/useConversatio
 
 import { createConversationDetailLoader } from "@/lib/conversationDetails";
 import { QueryClient } from "@tanstack/react-query";
+import log from "@/lib/logger";
 
 const service = vi.hoisted(() => ({ getById: vi.fn() }));
 vi.mock("@/services/conversationService", () => ({
@@ -263,5 +264,100 @@ it.each(["completed", "streaming"])(
     expect(resume).toHaveBeenCalledTimes(status === "streaming" ? 1 : 0);
     unmount();
     client.clear();
+  }
+);
+
+it.each([
+  ["settled", "completed"],
+  ["pending", "completed"],
+  ["settled", "streaming"],
+  ["pending", "streaming"],
+  ["settled", "error"],
+  ["pending", "error"],
+] as const)(
+  "discards %s detail cached during a live run before reading fresh %s state",
+  async (cachedState, latestStatus) => {
+    let resolveStale!: (value: ReturnType<typeof conversation>) => void;
+    service.getById.mockReset().mockImplementationOnce(() =>
+      cachedState === "pending"
+        ? new Promise((resolve) => {
+            resolveStale = resolve;
+          })
+        : Promise.resolve(conversation())
+    );
+    const client = new QueryClient();
+    const details = createConversationDetailLoader(client, "live-run-cache");
+    const importHistory = vi.fn();
+    const resumeRun = vi.fn();
+    let running = true;
+    const props = {
+      runtime: {
+        thread: {
+          getState: () => ({ isRunning: running }),
+          import: importHistory,
+          resumeRun,
+        },
+      } as unknown as AssistantRuntime,
+      activeConversationId: "13",
+      activeThreadId: "local-13",
+      ready: true,
+      isThreadRunning: true,
+      selectedAgent: null,
+      chatMode: "execution" as const,
+      resumedConversationIdsRef: { current: new Set<number>() },
+      handleGenerationStopped: vi.fn(),
+      loadDetail: details.load,
+      invalidateDetail: details.invalidate,
+    };
+    const { rerender, unmount } = renderHook(useConversationResume, {
+      initialProps: props,
+    });
+    try {
+      const staleRead = details.load("13");
+      if (cachedState === "settled") await staleRead;
+      if (latestStatus === "error") {
+        service.getById.mockRejectedValue(new Error("fresh lookup failed"));
+      } else {
+        service.getById.mockResolvedValue({
+          ...conversation(),
+          streaming_message: { message_id: 2, status: latestStatus },
+        });
+      }
+      running = false;
+      // Completion must invalidate even before restoration becomes ready.
+      rerender({ ...props, isThreadRunning: false, ready: false });
+      if (cachedState === "pending") {
+        await act(async () => {
+          resolveStale(conversation());
+          await staleRead;
+        });
+      }
+      rerender({ ...props, isThreadRunning: false });
+      await waitFor(() => expect(service.getById).toHaveBeenCalledTimes(2));
+      await act(async () => {});
+      if (latestStatus === "streaming") {
+        expect(importHistory).toHaveBeenCalledOnce();
+        expect(resumeRun).toHaveBeenCalledOnce();
+        expect(resumeRun.mock.calls[0][0]).toMatchObject({
+          parentId: "1",
+          runConfig: { custom: { threadId: "13", resume: true } },
+        });
+      } else {
+        expect(importHistory).not.toHaveBeenCalled();
+        expect(resumeRun).not.toHaveBeenCalled();
+        if (latestStatus === "error") {
+          expect(log.error).toHaveBeenCalledWith(
+            expect.stringContaining("Failed to resume conversation 13"),
+            expect.objectContaining({ message: "fresh lookup failed" })
+          );
+        }
+      }
+      rerender({ ...props, isThreadRunning: false });
+      await act(async () => {});
+      expect(service.getById).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      client.clear();
+    }
   }
 );

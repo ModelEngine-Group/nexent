@@ -463,12 +463,21 @@ deployment_merge_env_from_example() {
       if (key != "") {
         existing[key] = 1
       }
+      # Preserve existing installations when adding the dedicated MCP key.
+      if (key == "TOKEN") {
+        legacy_mcp_token = $0
+        sub(/TOKEN[[:blank:]]*=/, "NEXENT_MCP_INTERNAL_TOKEN=", legacy_mcp_token)
+      }
       next
     }
     {
       key = assignment_key($0)
       if (key != "" && !(key in existing)) {
-        print $0
+        if (key == "NEXENT_MCP_INTERNAL_TOKEN" && legacy_mcp_token != "") {
+          print legacy_mcp_token
+        } else {
+          print $0
+        }
       }
     }
   ' "$env_file" "$example_file")" || {
@@ -1127,6 +1136,11 @@ deployment_apply_legacy_inputs() {
         DEPLOYMENT_COMPONENTS="infrastructure,application,data-process"
         ;;
     esac
+  fi
+
+  # Legacy component choices never disable authentication.
+  if [ "${DEPLOYMENT_VERSION:-}" = "speed" ]; then
+    DEPLOYMENT_VERSION="full"
   fi
 
   if [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then

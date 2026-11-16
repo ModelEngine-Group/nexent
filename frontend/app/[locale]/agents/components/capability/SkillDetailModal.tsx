@@ -107,6 +107,7 @@ export default function SkillDetailModal({
             tags: Array.isArray(detail.tags) ? detail.tags : [],
             content: detail.content || "",
           });
+          setSkillTabs([{ path: "SKILL.md", content: detail.content || "" }]);
         }
 
         const tabs = await loadSkillFileTabs(skillName);

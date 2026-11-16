@@ -87,18 +87,3 @@ BEGIN
     EXECUTE format('GRANT nexent_configuration_reader TO %I', current_user);
 END
 $system_configuration_role_grant$;
-
-INSERT INTO nexent.role_permission_t (
-    user_role,
-    permission_category,
-    permission_type,
-    permission_subtype
-)
-SELECT 'OPS_ADMIN', 'PAGE', 'LEFT_NAV_MENU', '/system-config'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM nexent.role_permission_t
-    WHERE user_role = 'OPS_ADMIN'
-      AND permission_type = 'LEFT_NAV_MENU'
-      AND permission_subtype = '/system-config'
-);

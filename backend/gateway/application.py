@@ -79,7 +79,9 @@ northbound_app = create_app(
     description="Northbound APIs for partners",
     version="1.0.0",
     cors_methods=["GET", "POST", "PUT", "DELETE"],
-    enable_monitoring=False,  # Disable monitoring if not needed
+    # Northbound monitoring carries OTel spans through the complete streaming
+    # response (#4334); kept enabled so traced requests stay observable.
+    enable_monitoring=True,
     lifespan=northbound_lifespan,
 )
 if hasattr(northbound_app, "state"):

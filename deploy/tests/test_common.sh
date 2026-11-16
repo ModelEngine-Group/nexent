@@ -323,6 +323,7 @@ deployment_prepare_config --local-config "$FULL_CONFIG" --use-local-config --app
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "use local config should keep saved data-process when legacy env exists"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "use local config should select data-process docker service"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "use local config should keep saved port policy over legacy mode"
+assert_eq "full" "$DEPLOYMENT_VERSION" "legacy speed input must retain authentication"
 assert_eq "local-latest" "$DEPLOYMENT_IMAGE_SOURCE" "use local config should keep saved image source over legacy mainland flag"
 unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 
@@ -1009,6 +1010,7 @@ DUPLICATE=second
 export EXPORTED_VALUE=custom
   LEADING_SPACE_VALUE=custom
 SPECIAL_EXISTING='literal $EXISTING # value \\ path'
+TOKEN='legacy $MCP_FIXTURE # token'
 EOF
 MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
 {
@@ -1023,6 +1025,7 @@ MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
   printf '%s\n' 'NEW_DUPLICATE=first-default'
   printf '%s\n' 'NEW_DUPLICATE=second-default'
   printf '%s\n' 'NEW_EMPTY='
+  printf '%s\n' 'NEXENT_MCP_INTERNAL_TOKEN=template-default'
 } > "$MERGE_ENV_ROOT/deploy/env/.env.example"
 cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/original.env"
 MERGE_OUTPUT="$(deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker")"
@@ -1045,6 +1048,9 @@ assert_contains "$MERGED_ENV_CONTENT" 'NEW_FIRST="  literal $NEW_VALUE # hash \\
 assert_contains "$MERGED_ENV_CONTENT" "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\"" "command substitutions should be appended without execution"
 assert_contains "$MERGED_ENV_CONTENT" $'NEW_DUPLICATE=first-default\nNEW_DUPLICATE=second-default\nNEW_EMPTY=' "new template assignments should retain template order and duplicates"
 assert_not_contains "$MERGE_OUTPUT" "custom" "merge logs should not expose environment values"
+assert_contains "$MERGED_ENV_CONTENT" "NEXENT_MCP_INTERNAL_TOKEN='legacy \$MCP_FIXTURE # token'" "upgrade should preserve the existing MCP token and its quoting"
+assert_not_contains "$MERGED_ENV_CONTENT" 'NEXENT_MCP_INTERNAL_TOKEN=template-default' "upgrade should prefer the existing token over the template default"
+assert_not_contains "$MERGE_OUTPUT" 'legacy $MCP_FIXTURE' "upgrade logs should not expose the token"
 [ ! -e "$MERGE_SIDE_EFFECT" ] || {
   echo "FAIL: .env merge should never execute template values"
   exit 1
@@ -1056,6 +1062,10 @@ cmp -s "$MERGE_ENV_ROOT/merged-snapshot.env" "$MERGE_ENV_ROOT/deploy/env/.env" |
   echo "FAIL: .env merge should not rewrite files when no variables are missing"
   exit 1
 }
+
+printf '%s\n' 'TOKEN=legacy' 'NEXENT_MCP_INTERNAL_TOKEN=' > "$MERGE_ENV_ROOT/deploy/env/.env"
+deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker" >/dev/null
+assert_eq 'NEXENT_MCP_INTERNAL_TOKEN=' "$(grep '^NEXENT_MCP_INTERNAL_TOKEN=' "$MERGE_ENV_ROOT/deploy/env/.env")" "the dedicated key should win even when explicitly empty"
 
 EMPTY_ENV_ROOT="$TMP_DIR/empty-env-root"
 mkdir -p "$EMPTY_ENV_ROOT/deploy/env"

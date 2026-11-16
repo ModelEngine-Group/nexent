@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+
+import { hasRole } from "@/lib/roles";
 
 import React, { useState, useEffect } from "react";
 import {
@@ -125,13 +126,12 @@ export default function UserProfileComp() {
   const [passwordForm] = Form.useForm();
 
   // Check if user is admin or super admin (cannot delete account)
-  const isAdminOrSuperAdmin =
-    user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
+  const isAdminOrSuperAdmin = hasRole(user, "ADMIN") || hasRole(user, "SU");
   const isCasUser = user?.authProvider === "cas";
   const getRoleDisplayName = (role: string) => {
     switch (role) {
-      case USER_ROLES.SPEED:
-        return t("auth.speed");
+      case USER_ROLES.OPS:
+        return t("user.role.ops");
       case USER_ROLES.SU:
         return t("auth.su");
       case USER_ROLES.ADMIN:
@@ -323,7 +323,9 @@ export default function UserProfileComp() {
                     {t("profile.role") || "Role"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    {getRoleDisplayName(user?.role || "user")}
+                    {(user?.roles ?? [user?.role || "USER"])
+                      .map(getRoleDisplayName)
+                      .join(" / ")}
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">

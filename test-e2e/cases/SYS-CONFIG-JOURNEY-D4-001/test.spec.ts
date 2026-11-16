@@ -102,11 +102,16 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
               user_email: authorized
                 ? "ops@example.invalid"
                 : "denied@example.invalid",
-              user_role: authorized ? "OPS_ADMIN" : "USER",
+              user_role: authorized ? "OPS" : "USER",
+              roles: authorized ? ["OPS"] : ["USER"],
               auth_provider: "local",
               groupIds: [],
-              permissions: [],
-              accessibleRoutes: authorized ? ["/system-config"] : ["/newchat"],
+              permissions: authorized
+                ? ["ops.configuration:read", "ops.configuration:update"]
+                : [],
+              accessibleRoutes: authorized
+                ? ["/ops/configuration"]
+                : ["/newchat"],
             },
           },
         },
@@ -186,7 +191,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
   await contract.precondition(
     contract.expectedIds("preconditions")[0],
     async () => {
-      await page.goto("/zh/system-config");
+      await page.goto("/zh/ops/configuration");
       await expect(
         page.getByRole("heading", { name: "系统配置", exact: true }),
       ).toBeVisible();
@@ -204,7 +209,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     await expect(page.getByText("无权限访问", { exact: true })).toHaveCount(0);
 
-    await page.goto("/zh/system-config");
+    await page.goto("/zh/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),
     ).toBeVisible();
@@ -222,7 +227,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await page.getByText("全部 19", { exact: true }).click();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
 
-    await page.goto("/en/system-config");
+    await page.goto("/en/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "System Configuration", exact: true }),
     ).toBeVisible();
@@ -234,7 +239,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(page.getByText("Tenant limit", { exact: true })).toBeVisible();
 
     authorized = false;
-    await page.goto("/zh/system-config");
+    await page.goto("/zh/ops/configuration");
     await expect(page.getByText("无权限访问", { exact: true })).toBeVisible();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(0);
     await expect(
@@ -249,7 +254,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     deniedActorChecked = true;
 
     authorized = true;
-    await page.goto("/zh/system-config");
+    await page.goto("/zh/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),
     ).toBeVisible();
@@ -401,7 +406,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
       )),
     );
     expect(leaveWarnings[0]).toBe("存在未保存的修改，确定离开当前页面吗？");
-    await expect(page).toHaveURL(/\/zh\/system-config$/);
+    await expect(page).toHaveURL(/\/zh\/ops\/configuration$/);
     await expect(input).toHaveValue("10");
   });
 

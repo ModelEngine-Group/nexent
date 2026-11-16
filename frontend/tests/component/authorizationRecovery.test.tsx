@@ -122,21 +122,36 @@ function pendingRequest() {
   return { promise, resolve, reject };
 }
 test("root resolves a single authorized route without a denial prompt", async () => {
-  const auth = response(["/system-config"]);
-  auth.user.role = USER_ROLES.OPS_ADMIN;
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
   state.request.mockResolvedValueOnce(auth);
   renderHome();
   const probe = screen.getByTestId("permissions");
   await waitFor(() =>
-    expect(state.replace).toHaveBeenCalledWith("/system-config")
+    expect(state.replace).toHaveBeenCalledWith("/ops/dashboard")
   );
   expect(probe).toHaveAttribute("data-denied", "false");
 });
 
 test("OPS admin can open personal profile with only the system configuration grant", async () => {
   state.pathname = "/zh/users";
-  const auth = response(["/system-config"]);
-  auth.user.role = USER_ROLES.OPS_ADMIN;
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("OPS user can open the legacy system configuration alias", async () => {
+  state.pathname = "/zh/system-config";
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
   state.request.mockResolvedValueOnce(auth);
   renderHome(false);
   const probe = screen.getByTestId("permissions");
@@ -160,7 +175,7 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
 });
 
-test.each([false, true])(
+test.each([false])(
   "failed authorization retries and applies permissions before redirect (speed=%s)",
   async (speed) => {
     state.speed = speed;

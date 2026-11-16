@@ -9,17 +9,15 @@ from contracts.configuration import (
     SystemConfigurationChangesRequest,
     SystemConfigurationRecommendationRequest,
 )
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from ops.services.authorization import (
-    OperationsForbiddenError,
-    OperationsUnauthorizedError,
-    authorize_operations,
-)
+from gateway.authentication.auth import authenticate
+from ops.services.authorization import authorize_operations
 from ops.services.system_configuration import (
     list_system_configurations,
     save_system_configurations,
 )
+from permissions.models import CurrentUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/system_configurations", tags=["system-configurations"])
@@ -31,18 +29,17 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
     )
 
 
-def _authorization_error(error: PermissionError) -> JSONResponse:
-    if isinstance(error, OperationsUnauthorizedError):
-        return _error(HTTPStatus.UNAUTHORIZED, "UNAUTHORIZED", str(error))
-    return _error(HTTPStatus.FORBIDDEN, "FORBIDDEN", str(error))
+def _authorization_error(error: HTTPException) -> JSONResponse:
+    code = "UNAUTHORIZED" if error.status_code == HTTPStatus.UNAUTHORIZED else "FORBIDDEN"
+    return _error(error.status_code, code, str(error.detail))
 
 
 @router.get("")
-def get_configurations(authorization: str | None = Header(None)):
+def get_configurations(user: CurrentUser = Depends(authenticate)):
     try:
-        authorize_operations(authorization)
+        authorize_operations(user)
         items = list_system_configurations()
-    except (OperationsUnauthorizedError, OperationsForbiddenError) as error:
+    except HTTPException as error:
         return _authorization_error(error)
     except Exception:  # noqa: BLE001 - return a safe dependency error
         logger.error("System configuration query failed")
@@ -57,12 +54,12 @@ def get_configurations(authorization: str | None = Header(None)):
 @router.patch("")
 def patch_configurations(
     request: SystemConfigurationChangesRequest,
-    authorization: str | None = Header(None),
+    user: CurrentUser = Depends(authenticate),
 ):
     try:
-        actor = authorize_operations(authorization)
+        actor = authorize_operations(user, "ops.configuration:update")
         result = save_system_configurations(request.changes, actor=actor)
-    except (OperationsUnauthorizedError, OperationsForbiddenError) as error:
+    except HTTPException as error:
         return _authorization_error(error)
     except ConfigurationValidationError as error:
         return _error(HTTPStatus.BAD_REQUEST, "INVALID_CONFIGURATION", str(error))
@@ -79,12 +76,12 @@ def patch_configurations(
 @router.post("/recommendations")
 def recommend_configuration(
     request: SystemConfigurationRecommendationRequest,
-    authorization: str | None = Header(None),
+    user: CurrentUser = Depends(authenticate),
 ):
     try:
-        authorize_operations(authorization)
+        authorize_operations(user)
         DEFAULT_CATALOG.definition(request.key)
-    except (OperationsUnauthorizedError, OperationsForbiddenError) as error:
+    except HTTPException as error:
         return _authorization_error(error)
     except ConfigurationValidationError as error:
         return _error(HTTPStatus.BAD_REQUEST, "INVALID_CONFIGURATION_KEY", str(error))

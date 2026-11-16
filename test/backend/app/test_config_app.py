@@ -51,11 +51,6 @@ from test.backend.app.test_app_factory import (
 class TestConfigAppIntegration:
     """Test class for config_app module integration with app_factory."""
 
-    def test_config_app_can_import_consts(self):
-        """Test that we can import from contracts.constants.environment."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        assert isinstance(IS_SPEED_MODE, bool)
-
     def test_config_app_can_import_app_factory(self):
         """Test that we can import create_app from app_factory."""
         from management.utils.app_factory import create_app
@@ -140,7 +135,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
-            "management.api.identity.mock_user_management": {"router": APIRouter()},
+            "ops.api.access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
             "management.api.prompt.prompt": {"router": APIRouter()},
@@ -195,7 +190,6 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
         const_module.ENABLE_AGENT_WORKBENCH = False
-        const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
@@ -246,42 +240,14 @@ class TestConfigAppRouterConfiguration:
             thread_lifecycle_module,
         )
 
-        module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
-        spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
-        config_app = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config_app)
-
-        assert all(router is not retired_router for router in config_app.app.included_routers)
-        assert api_key_router in config_app.app.included_routers
-        assert {route.path for route in api_key_router.routes} == {
-            "/api-keys",
-            "/api-keys/refresh",
-        }
-        assert [route[0] for route in config_app.app.get_routes] == [
-            "/internal/thread-capacity"
-        ]
-        assert asyncio.run(config_app.thread_capacity()) == {
-            "service_name": "config",
-            "active_count": 0,
-        }
-
-        asyncio.run(config_app.validate_external_service_configuration())
-        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
-            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
-                asyncio.run(config_app.validate_external_service_configuration())
-
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
-        schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
             "management.recovery"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
-        )
-        startup_recovery_module.schedule_workbench_main_backfill = (
-            schedule_workbench_main_backfill
         )
         monkeypatch.setitem(
             sys.modules,
@@ -314,6 +280,30 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
+        module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
+        spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
+        config_app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_app)
+
+        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert api_key_router in config_app.app.included_routers
+        assert {route.path for route in api_key_router.routes} == {
+            "/api-keys",
+            "/api-keys/refresh",
+        }
+        assert [route[0] for route in config_app.app.get_routes] == [
+            "/internal/thread-capacity"
+        ]
+        assert asyncio.run(config_app.thread_capacity()) == {
+            "service_name": "config",
+            "active_count": 0,
+        }
+
+        asyncio.run(config_app.validate_external_service_configuration())
+        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
+            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
+                asyncio.run(config_app.validate_external_service_configuration())
+
         validate_external = AsyncMock()
 
         async def exercise_lifespan():
@@ -337,7 +327,6 @@ class TestConfigAppRouterConfiguration:
             config_app.config_thread_manager
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
-        schedule_workbench_main_backfill.assert_not_called()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
@@ -446,27 +435,6 @@ class TestConfigAppMonitoring:
             with patch('management.utils.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None
-
-
-class TestConfigAppSpeedMode:
-    """Test class for speed mode configuration."""
-
-    def test_is_speed_mode_import(self):
-        """Test that IS_SPEED_MODE can be imported."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        assert isinstance(IS_SPEED_MODE, bool)
-
-    def test_speed_mode_conditional(self):
-        """Test speed mode conditional logic."""
-        from contracts.constants.environment import IS_SPEED_MODE
-        from management.utils.app_factory import create_app
-
-        # App should work regardless of speed mode
-        app = create_app()
-        assert app is not None
-
-        # Conditional should be a boolean
-        assert IS_SPEED_MODE in [True, False]
 
 
 class TestConfigAppRouterTypes:

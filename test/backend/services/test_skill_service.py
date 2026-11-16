@@ -371,6 +371,7 @@ def mock_update_skill_by_id(skill_id, skill_data, tenant_id=None, updated_by=Non
     return {"skill_id": skill_id, "name": skill_data.get("name", "updated")}
 
 database_skill_db_mock.list_skills = mock_list_skills
+database_skill_db_mock.get_tool_ids_by_skill_ids = lambda skill_ids: {skill_id: [] for skill_id in skill_ids}
 database_skill_db_mock.get_skill_by_name = mock_get_skill_by_name
 database_skill_db_mock.get_skill_by_id = mock_get_skill_by_id
 database_skill_db_mock.create_skill = mock_create_skill
@@ -1838,7 +1839,7 @@ class TestSkillServiceOverlayParams:
         skill_data = {"name": "test_skill"}
 
         with patch('os.path.isfile', return_value=True):
-            with patch('builtins.open', mock_open(read_data="key: value\n")):
+            with patch('builtins.open', mock_open(read_data=b"key: value\n")):
                 with patch('management.services.skill.service._parse_skill_params_from_config_bytes', return_value={"key": "value"}):
                     result = service._enrich_configs_from_yaml(skill_data)
 
