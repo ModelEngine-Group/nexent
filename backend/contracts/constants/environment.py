@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_bool_flag, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -27,10 +27,7 @@ DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
 # Downstream verification settings; Gateway owns its upstream configuration.
 # Staged compatibility flag; shipped deployment and the standalone image enable it.
-_GATEWAY_AUTH_FLAG = os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower()
-if _GATEWAY_AUTH_FLAG not in {'true', 'false'}:
-    raise ValueError('GATEWAY_AUTH_ENABLED must be true or false')
-GATEWAY_AUTH_ENABLED = _GATEWAY_AUTH_FLAG == 'true'
+GATEWAY_AUTH_ENABLED = parse_bool_flag(os.getenv('GATEWAY_AUTH_ENABLED', 'false'), 'GATEWAY_AUTH_ENABLED')
 GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
 GATEWAY_SERVICE_URL = os.getenv('GATEWAY_SERVICE_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
@@ -182,8 +179,7 @@ CAPACITY_SUGGESTION_ENABLED = os.getenv('CAPACITY_SUGGESTION_ENABLED', 'true').l
 CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Deployment Version Configuration
-DEPLOYMENT_VERSION = os.getenv('DEPLOYMENT_VERSION', 'full')
-IS_SPEED_MODE = DEPLOYMENT_VERSION == 'speed'
+DEPLOYMENT_VERSION = validate_deployment_version(os.getenv('DEPLOYMENT_VERSION', 'full'))
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv('ENABLE_AIDP_KNOWLEDGE', 'false').lower() in ('true', '1', 'yes', 'on')
@@ -358,7 +354,6 @@ _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIR
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
-
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = os.getenv('MONITORING_PROVIDER', '')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
@@ -391,7 +386,7 @@ MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv('MONITORING_EXCLUDED_EL
 MONITORING_EXCLUDED_SPAN_NAMES = os.getenv('MONITORING_EXCLUDED_SPAN_NAMES', 'knowledge.process.submit,knowledge.upload.batch')
 MONITORING_PROJECT_NAME = os.getenv('MONITORING_PROJECT_NAME', '')
 MONITORING_DASHBOARD_URL = os.getenv('MONITORING_DASHBOARD_URL', '')
-MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU,SPEED')
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROLES', 'SU')
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')

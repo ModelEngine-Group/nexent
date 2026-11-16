@@ -7,7 +7,7 @@ from uuid import uuid4
 import bcrypt
 import pytest
 
-from infrastructure.security.passwords import (
+from gateway.security.passwords import (
     hash_password,
     password_scheme,
     verify_password,

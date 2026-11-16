@@ -33,6 +33,12 @@ feature:
   - rule_id: AGENT-EDITOR-RULE-007
     description: Selected MCP tools appear as one row per named service, and edits
       from the group persist individual tool IDs without replacing unrelated bindings.
+  - rule_id: AGENT-EDITOR-RULE-008
+    description: NL2Agent and debug panel boundaries can be dragged within proportional
+      bounds, preserving normal widths and mounted conversations through visibility,
+      fullscreen and comparison transitions without writing Agent configuration.
+      NL2Agent resizing reserves at least 800px for configuration when space permits,
+      keeping the publication action on the same row as the workflow controls.
   required_test_stages:
   - D4
   source:
@@ -44,4 +50,5 @@ feature:
     - AGENT-EDITOR-REQ-005
     - AGENT-EDITOR-REQ-006
     - AGENT-EDITOR-REQ-007
+    - AGENT-PANEL-RESIZE-20261111
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

@@ -74,7 +74,6 @@ async def test_logout_transfers_verified_identity_and_preserves_idempotency(auth
 def auth_config(monkeypatch):
     monkeypatch.setattr(environment, "JWT_SECRET", KEY)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", KEY)
-    monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
     monkeypatch.setattr(application, "load_settings", lambda: GatewaySettings(jwt_secret=environment.JWT_SECRET,
                         jwt_issuer=environment.JWT_ISSUER, signing_secret=environment.GATEWAY_SIGNING_SECRET))
 
@@ -226,7 +225,7 @@ def test_compatibility_identity_helpers_consume_context_without_credential_queri
                                   "language": "en", "email": "fixture@example.test", "kind": "session"})
     try:
         assert auth.get_current_user_id(None) == ("u1", "t1")
-        assert auth.get_current_user_context(None) == ("u1", "t1", "ADMIN")
+        assert auth.get_current_user_context(None) == ("u1", "t1", ("ADMIN",))
         assert auth.get_current_user_info(None) == ("u1", "t1", "en")
         valid, user = auth.validate_token(None)
         assert valid and user.id == "u1" and user.email == "fixture@example.test"

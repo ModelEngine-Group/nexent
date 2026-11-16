@@ -26,6 +26,7 @@ const fixtures = vi.hoisted(() => ({
       : key;
   },
   groups: { groups: [] },
+  groupLookup: vi.fn(),
   predicates: [],
   deployment: { enableAidpKnowledge: false, isDeploymentReady: true },
 }));
@@ -41,7 +42,10 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { tenantId: "tenant" } }),
 }));
 vi.mock("@/hooks/group/useGroupList", () => ({
-  useGroupList: () => ({ data: fixtures.groups }),
+  useGroupList: (tenantId: string | null) => {
+    fixtures.groupLookup(tenantId);
+    return { data: fixtures.groups };
+  },
 }));
 vi.mock("@/hooks/agent/useToolList", () => ({
   useToolList: () => ({
@@ -661,4 +665,29 @@ it("Workbench knowledge footer has only shared Close/Confirm", async () => {
     within(footer).getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+});
+
+it("keeps closed knowledge group and catalog queries disabled", () => {
+  fixtures.groupLookup.mockClear();
+  const page = render(
+    <ConversationKnowledgeScopeModal
+      open={false}
+      value={null}
+      capabilities={capabilities}
+      onCancel={vi.fn()}
+      onConfirm={vi.fn()}
+    />
+  );
+  expect(fixtures.groupLookup).toHaveBeenLastCalledWith(null);
+  expect(knowledgeBaseService.getKnowledgeBasesInfo).not.toHaveBeenCalled();
+  page.rerender(
+    <ConversationKnowledgeScopeModal
+      open
+      value={null}
+      capabilities={capabilities}
+      onCancel={vi.fn()}
+      onConfirm={vi.fn()}
+    />
+  );
+  expect(fixtures.groupLookup).toHaveBeenLastCalledWith("tenant");
 });

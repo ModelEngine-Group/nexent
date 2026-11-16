@@ -12,15 +12,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from contracts.errors.exceptions import AccountConflictError
-from infrastructure.security import account_cli as cli
-from infrastructure.security.passwords import verify_password
+from management.cli import account as cli
+from gateway.security.passwords import verify_password
 
 
 @pytest.fixture
 def store(mocker):
     session = MagicMock()
     session.execute.return_value.first.return_value = None
-    session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU")]
+    session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(roles=["SU"])]
     mocker.patch("management.db.client.get_db_session", return_value=nullcontext(session))
     lock = mocker.patch("management.db.identity.account.lock_account_keys")
     lookup = mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
@@ -47,10 +47,10 @@ def test_existing_su_is_idempotent_without_password_work(store, check_only):
     store.member.assert_not_called()
 
 
-@pytest.mark.parametrize("flag,roles", [("Y", ["SU"]), ("N", []), ("N", ["SU", "USER"])])
+@pytest.mark.parametrize("flag,roles", [("Y", ("SU",)), ("N", ()), ("N", ("SU", "USER"))])
 def test_unavailable_or_non_su_identity_cannot_be_promoted(store, flag, roles):
     store.lookup.return_value = {"user_id": "original", "delete_flag": flag}
-    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r) for r in roles]
+    store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(roles=list(roles)) for _ in roles] or [SimpleNamespace(roles=[])]
     with pytest.raises(AccountConflictError, match="unavailable or non-SU"):
         cli.bootstrap_super_admin("su@example.com", "Password123")
     store.create.assert_not_called()

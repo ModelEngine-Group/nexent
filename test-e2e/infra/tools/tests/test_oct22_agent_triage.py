@@ -155,6 +155,11 @@ async def test_tpc_provider_keeps_auxiliary_calls_out_of_sequence_and_preserves_
         second = await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc'})
         assert second.json()['choices'][0]['message']['content'] == '<final_answer>OK</final_answer>'
         assert (await api.get(path + '/__stats')).json()['request_count'] == 2
+        assert (await api.post(path + '/__control', json={'responses': ['<final_answer>OK</final_answer>'], 'observation_marker': 123})).status_code == 400
+        assert (await api.post(path + '/__control', json={'responses': ['<final_answer>OK</final_answer>'], 'observation_marker': 'REAL_MARKER'})).status_code == 200
+        await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc', 'messages': []})
+        await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc', 'messages': [{'role': 'assistant', 'content': 'REAL_MARKER'}]})
+        assert (await api.get(path + '/__stats')).json()['observation_counts'] == [0, 1]
         assert (await api.delete(path)).status_code == 200
         assert (await api.get(path + '/__stats')).status_code == 404
     remote = httpx.ASGITransport(app=app, client=('192.0.2.1', 1234))
@@ -206,3 +211,31 @@ async def test_fault_model_reaches_inference_only_after_catalog_admission(monkey
             async with runtime_fault.owned_failure_model(owner, 'AGT-015'):
                 pytest.fail('Unadmitted fixture reached inference')
     assert writes[-1][0] == '/model/delete'
+
+
+def test_northbound_trace_poll_waits_for_runtime_batch(monkeypatch, tmp_path):
+    import importlib.util
+    case = Path(__file__).resolve().parents[3] / 'cases/NB-OTEL-001/test.py'
+    spec = importlib.util.spec_from_file_location('nb_trace_polling', case)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    trace_id = 'f' * 32
+    def span(route, span_id):
+        return {'name': route, 'attributes': {'http.route': route},
+                'context': {'trace_id': trace_id, 'span_id': span_id},
+                'start_time': '2026-11-13T00:00:00Z', 'end_time': '2026-11-13T00:00:01Z'}
+    north = span('/nb/v1/chat/run', '1' * 16)
+    runtime = span('/agent/internal/northbound/run', '2' * 16)
+    batches = iter([[north], [north, runtime]])
+    calls = []
+    def get(*args, **kwargs):
+        calls.append('read')
+        data = next(batches)
+        return SimpleNamespace(status_code=200, json=lambda: {'data': data})
+    monkeypatch.setattr(module.requests, 'get', get)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    monkeypatch.setenv('NEXENT_TEST_ARTIFACT_DIR', str(tmp_path))
+    result = module.read_trace({'phoenix_url': 'http://fixture', 'phoenix_project': 'test',
+                               'phoenix_api_key': 'fixture-phoenix', 'northbound_api_key': 'fixture-northbound'},
+                              trace_id, '/nb/v1/chat/run', require_runtime=True)
+    assert result == [north, runtime] and calls == ['read', 'read']

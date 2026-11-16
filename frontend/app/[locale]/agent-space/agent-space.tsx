@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useMemo, useState } from "react";
 import type { MenuProps } from "antd";
@@ -17,7 +17,7 @@ import {
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
@@ -45,7 +45,7 @@ export function AgentSpace({ active }: { active: boolean }) {
   const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const showAdminMenu = user?.role === USER_ROLES.ADMIN;
+  const showAdminMenu = hasRole(user, "ADMIN");
   const [searchQuery, setSearchQuery] = useState("");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []

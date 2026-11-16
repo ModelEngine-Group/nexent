@@ -8,6 +8,8 @@ import uuid
 from http import HTTPStatus
 from typing import Dict, Optional, Tuple
 
+from fastapi import HTTPException, Request
+
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
@@ -16,11 +18,15 @@ from contracts.authentication import (
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.errors.exceptions import (
     LimitExceededError,
+    SignatureValidationError,
     TokenExpiredError,
     UnauthorizedError,
 )
-from fastapi import HTTPException, Request
-from management.services.permission.identity.session import extract_bearer_token, require_active_account
+from contracts.roles import roles_from_record
+from management.services.permission.identity.credentials import (
+    extract_bearer_token,
+    require_active_account,
+)
 from gateway.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
@@ -84,7 +90,6 @@ def validate_aksk_authentication(
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from contracts.errors.exceptions import SignatureValidationError
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)
@@ -143,9 +148,14 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     membership = get_user_tenant_by_user_id(user_id)
     if not membership or not membership.get("tenant_id"):
         raise TokenExpiredError("No active tenant relationship for this access key")
-    return {"user_id": user_id, "tenant_id": membership["tenant_id"], "token_id": record.get("token_id")}
-
-
+    roles = roles_from_record(membership)
+    if not roles:
+        raise TokenExpiredError("No active roles for this account")
+    return {
+        "user_id": user_id,
+        "tenant_id": membership["tenant_id"],
+        "token_id": record.get("token_id"),
+    }
 
 
 def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None:

@@ -170,6 +170,14 @@ os.environ.setdefault('POSTGRES_PASSWORD', 'test_password')
 os.environ.setdefault('POSTGRES_DB', 'test_db')
 os.environ.setdefault('POSTGRES_PORT', '5432')
 
+# Northbound route manifest: gateway.routing resolves the manifest at import
+# time, and its default candidates assume a container layout (/app/deploy/...).
+# Point it at the repository-root manifest so /nb/ routes load in local runs.
+os.environ.setdefault(
+    'NORTHBOUND_MANIFEST_PATH',
+    os.path.abspath(os.path.join(_test_root, '..', 'deploy', 'northbound.yaml')),
+)
+
 
 class _PatchProxy:
     def __init__(self, owner):

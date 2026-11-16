@@ -19,15 +19,13 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
     from management.db.identity.user_tenant import insert_user_tenant
     from gateway.security.passwords import hash_password
     from sqlalchemy import select
-    from management.db.models import UserTenant, UserAccount
+    from management.db.models import UserTenant
 
     email = email.strip().lower()
     with get_db_session() as session:
         lock_account_keys(session, "super-admin-bootstrap", email)
         account = get_account_by_email(email, session)
         if account:
-            if (account.get("source_metadata") or {}).get("credential_migration_pending"):
-                raise AccountConflictError("Account credentials await migration; run the host migrate_docker.py --apply first")
             members = (
                 session.execute(
                     select(UserTenant).where(
@@ -41,7 +39,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             if (
                 account.get("delete_flag", "N") != "N"
                 or not members
-                or any(m.user_role != "SU" for m in members)
+                or any(tuple(getattr(m, "roles", None) or ()) != ("SU",) for m in members)
             ):
                 raise AccountConflictError(
                     "Bootstrap email belongs to an unavailable or non-SU identity"
@@ -50,19 +48,14 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         # A pre-cutover SU membership must be migrated, never replaced by a new ID.
         if session.execute(
             select(UserTenant.user_id).where(
-                UserTenant.user_role == "SU", UserTenant.delete_flag == "N"
+                UserTenant.roles.contains(["SU"]), UserTenant.delete_flag == "N"
             )
         ).first():
             raise AccountConflictError(
                 "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
             )
-        if session.execute(
-            select(UserTenant.user_id).where(
-                UserTenant.delete_flag == "N",
-                UserTenant.user_id.notin_(select(UserAccount.user_id).where(UserAccount.delete_flag == "N")),
-            )
-        ).first():
-            raise AccountConflictError("Active membership has no account profile; restore the original account before bootstrap")
+        # Historical inactive associations intentionally have no local account.
+        # Only an available account can reserve the current SU identity.
         if check_only:
             return {"exists": False}
         if (

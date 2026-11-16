@@ -1138,6 +1138,11 @@ deployment_apply_legacy_inputs() {
     esac
   fi
 
+  # Legacy component choices never disable authentication.
+  if [ "${DEPLOYMENT_VERSION:-}" = "speed" ]; then
+    DEPLOYMENT_VERSION="full"
+  fi
+
   if [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then
     case "${DEPLOYMENT_MODE:-}" in
       development)

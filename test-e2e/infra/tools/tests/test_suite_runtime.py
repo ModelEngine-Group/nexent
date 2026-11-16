@@ -135,6 +135,37 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(suite_notify.send_report(directory, {}), "NOT_TERMINAL")
                 send.assert_not_called()
 
+    def test_case_failures_continue_unless_an_environment_fault_marker_remains(self):
+        for outcome, fault in (("FAIL", False), ("TIMEOUT", False), ("CLEANUP_FAILED", False), ("PASS", True)):
+            with self.subTest(outcome=outcome, fault=fault), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary)
+                records = [{"case_id": case_id, "stage": "D5", "status": "active", "execution": {"test": True}}
+                           for case_id in ("FIRST", "INDEPENDENT")]
+                calls = []
+
+                def execute(command, cwd, env, log, timeout):
+                    if "--case" in command:
+                        case_id = command[command.index("--case") + 1]
+                        batch = Path(command[command.index("--batch-dir") + 1])
+                        calls.append(case_id)
+                        save(batch / "cases" / case_id / "receipt.json", {
+                            "case_id": case_id, "stage": "D5", "result": outcome if case_id == "FIRST" else "PASS"})
+                        if fault:
+                            save(home / "state/deployment-guard/pending.json", {"status": "PENDING"})
+                    return 0
+
+                with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                        patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                        patch.object(suite, "static_requirements", return_value=set()), \
+                        patch.object(suite, "static_inventory", return_value=[]), \
+                        patch.object(suite, "logged", side_effect=execute):
+                    self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}), 1)
+                batch = next((home / "runs/repository-daily").iterdir())
+                summary = json.loads((batch / "summary.json").read_text())
+                self.assertEqual(calls, ["FIRST"] if fault else ["FIRST", "INDEPENDENT"])
+                self.assertEqual(summary["execution_complete"], not fault)
+                self.assertEqual(summary["counts"].get(outcome), 1)
+
     def test_notification_deduplicates_uncertain_delivery(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
@@ -284,7 +315,7 @@ class SuiteTests(unittest.TestCase):
             self.assertIn("STEP-02", receipt["reason"])
             self.assertEqual(receipt["test_evidence"], ["d4/PW-TEST-01/trace.zip"])
 
-    def test_d5_cleanup_failure_stops_remaining_cases_and_finalizes_incomplete(self):
+    def test_unresolved_d5_environment_fault_stops_remaining_cases_and_finalizes_incomplete(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)
             records = [{"case_id": name, "stage": "D5", "status": "active", "execution": {"test": True}}
@@ -299,6 +330,7 @@ class SuiteTests(unittest.TestCase):
                     save(batch / "cases" / case_id / "receipt.json", {
                         "case_id": case_id, "stage": "D5", "result": "CLEANUP_FAILED",
                         "test_result": "PASS", "cleanup_exit_code": 1})
+                    save(home / "state/deployment-guard/pending.json", {"status": "PENDING"})
                     return 1
                 return 0
 

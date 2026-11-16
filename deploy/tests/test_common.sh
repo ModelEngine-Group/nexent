@@ -323,6 +323,7 @@ deployment_prepare_config --local-config "$FULL_CONFIG" --use-local-config --app
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "use local config should keep saved data-process when legacy env exists"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "use local config should select data-process docker service"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "use local config should keep saved port policy over legacy mode"
+assert_eq "full" "$DEPLOYMENT_VERSION" "legacy speed input must retain authentication"
 assert_eq "local-latest" "$DEPLOYMENT_IMAGE_SOURCE" "use local config should keep saved image source over legacy mainland flag"
 unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 

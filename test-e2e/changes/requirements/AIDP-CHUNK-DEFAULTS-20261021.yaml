@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-CHUNK-DEFAULTS-20261021
+  change_type: requirement
+  requirement_id: AIDP-CHUNK-DEFAULTS-20261021
+  title: Align AIDP knowledge base chunk defaults with AIDP product defaults and make chunk tokens/overlap editable
+  description: >-
+    AIDP knowledge base creation now defaults to 512 chunk tokens with 10 percent overlap (51 tokens),
+    similarity 0 and Top K 10. The detail Information tab shows chunk tokens and overlap in create order,
+    and the detail edit modal reuses the create page chunk-mode cards. UpdateKbRequest accepts
+    chunk_token_num and chunk_overlap_num so an existing knowledge base can change its chunking.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-111]
+    retired: []
+  affected_cases:
+    existing: [API-AUTO-FECE331C989B771F, PW-KB-AIDP-01]
+    added: [API-AIDP-CHUNK-01, PW-KB-AIDP-02]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/ext_components/aidp/test_aidp_mgmt_app.py
+    behaviors:
+      - CreateKbRequest applies the AIDP defaults of 512 chunk tokens, 51 overlap tokens, similarity 0 and Top K 10 when the caller omits them.
+      - UpdateKbRequest accepts chunk_token_num and chunk_overlap_num so an existing knowledge base chunking can be changed, while the half-of-chunk-size ceiling still rejects an oversized overlap.
+      - The detail response normalization surfaces chunk_token_num and chunk_overlap_num as top level fields so the Information tab renders stored values instead of a dash.
+    reason: >-
+      Field ranges, strict typing and the overlap ceiling are isolated validation branches and stay in
+      traditional UT. The new formal Cases prove the running HTTP contract and the browser journey those
+      unit assertions cannot: that the defaults reach the AIDP upstream payload and that an edited chunk
+      setting survives a detail reload.
+  no_case_change_reason: ''
+  notes: >-
+    Source commits 01400d399 (align chunk settings with AIDP defaults) and a7048be7d (correct
+    knowledge-detail pagination and wrap-up gaps). Proof-gap table lives in the Design notes of the
+    owning feature F-111. API-AUTO-FECE331C989B771F and PW-KB-AIDP-01 are reused unchanged; neither
+    previously asserted a chunk default or an editable chunk setting.
+    Separately observed while authoring these Cases: UpdateKbRequest.validate_chunk_settings only
+    enforces the overlap ceiling when chunk_token_num and chunk_overlap_num arrive together, and
+    chunk_overlap_num declares no upper bound. A PUT sending chunk_overlap_num alone is accepted.
+    That defect is out of scope for this requirement record and is not asserted; it needs its own
+    bugfix record before a regression can be written.

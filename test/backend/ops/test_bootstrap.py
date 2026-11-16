@@ -29,7 +29,8 @@ def test_health_follows_application_lifetime():
         assert client.get('/health/live').status_code == 200
         assert client.get('/health/ready').status_code == 200
         assert client.get('/health/ready').json() == {'status': 'ready'}
-        assert client.get('/openapi.json').json()['paths'] == {}
+        assert set(client.get('/openapi.json').json()['paths']) == {'/ops/authorization', '/ops/resources', '/ops/scope'}
+        assert client.get('/ops/authorization').status_code == 401
         assert client.get('/docs').status_code == 200
 
     assert app.state.ready is False
@@ -103,3 +104,13 @@ def test_invalid_configuration_fails_with_setting_name(overrides, setting):
     assert result.returncode != 0
     assert 'ValueError' in result.stderr
     assert setting in result.stderr
+
+
+def test_operations_import_does_not_initialize_business_monitoring():
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; import ops.api.application; "
+         "assert 'infrastructure.observability.bootstrap' not in sys.modules; "
+         "assert 'management.utils.app_factory' not in sys.modules"],
+        cwd=BACKEND, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

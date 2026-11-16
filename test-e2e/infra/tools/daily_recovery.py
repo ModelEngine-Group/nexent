@@ -12,6 +12,7 @@ import re
 import yaml
 
 from local_preflight import env_file
+from recovery_io import protected_write
 from suite_runtime import BatchLock, deployment_lock_owned, now, save
 
 MODE_MARKER = "state/deployment-exceptions/pending.json"
@@ -112,15 +113,8 @@ class DailyRetry:
             previous = document(batch / "status.json")
             if previous.get("status") not in {"INCOMPLETE", "FAILED", "PASSED", "COMPLETE"}:
                 raise RuntimeError("Deployment journal has no terminal owner evidence")
-            journal = next((p for p in (batch / "checkpoints/results.jsonl", batch / "results.journal.jsonl")
-                            if p.exists() or p.is_symlink()), None)
-            if journal is not None:
-                for line in plain(journal).read_text(encoding="utf-8").splitlines():
-                    row = json.loads(line)
-                    if row.get("stage") == "D5" and row.get("result") in {"TIMEOUT", "CLEANUP_FAILED"}:
-                        raise RuntimeError("Previous D5 timeout/cleanup failure requires environment safety review")
-            elif previous.get("stages", {}).get("D5", "PENDING") != "PENDING":
-                raise RuntimeError("Previous D5 execution has no recovery evidence")
+            # Historical Case receipts are reporting evidence, not deployment recovery authority.
+            # The active fault lease/marker is checked by prepare_daily_retry before any writes.
             if not isinstance(files, list) or len(files) != 4 or document(backup / "index.json") != {"files": files}:
                 raise ValueError("incomplete backup index")
             originals = {}
@@ -164,21 +158,49 @@ class DailyRetry:
             raise RuntimeError("Deployment recovery backup/configuration failed safety validation") from None
 
     def prepare(self):
-        from deployment_exceptions import protected_write
         plain(self.archive)
         self.archive.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.archive.mkdir(mode=0o700)
         protected_write(self.archive / "pending.json", self.marker_bytes)
         # Preserve every current file before the first configuration write.
+        before_images = {}
         for index, path in enumerate(self.originals):
             if path.exists():
-                protected_write(self.archive / str(index), path.read_bytes())
-        self.record("PREPARED_FOR_REDEPLOY")
+                content = path.read_bytes()
+                protected_write(self.archive / str(index), content)
+                before_images[str(index)] = hashlib.sha256(content).hexdigest()
+            else:
+                before_images[str(index)] = None
+        self.record("PREPARED_FOR_REDEPLOY", before_images=before_images)
         for path, content in self.originals.items():
             if content is None:
                 path.unlink(missing_ok=True)
             else:
                 protected_write(path, content)
+
+    def resume_prepared(self):
+        """Revalidate the supervisor's before-images without writing a second backup."""
+        receipt = document(self.receipt)
+        if (receipt.get("status") != "PREPARED_FOR_REDEPLOY"
+                or receipt.get("evidence_backup") != str(self.archive)
+                or receipt.get("previous_batch") != self.payload["batch"]
+                or plain(self.archive / "pending.json").read_bytes() != self.marker_bytes):
+            raise RuntimeError("Prepared Daily recovery receipt differs from its journal")
+        before_images = receipt.get("before_images")
+        if not isinstance(before_images, dict) or set(before_images) != {str(i) for i in range(len(self.originals))}:
+            raise RuntimeError("Prepared Daily recovery before-image index is incomplete")
+        for index, digest in before_images.items():
+            path = plain(self.archive / index)
+            if digest is None:
+                if path.exists():
+                    raise RuntimeError("Unexpected prepared recovery before-image")
+            elif (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                  or hashlib.sha256(path.read_bytes()).hexdigest() != digest):
+                raise RuntimeError("Prepared recovery before-image checksum differs")
+        for path, content in self.originals.items():
+            actual = plain(path).read_bytes() if path.exists() else None
+            if actual != content:
+                raise RuntimeError("Prepared Local configuration changed before execution")
 
     def record(self, status, **details):
         save(self.receipt, {"status": status, "at": now(), "previous_batch": self.payload["batch"],
@@ -186,7 +208,7 @@ class DailyRetry:
 
 
 @contextmanager
-def prepare_daily_retry(repo, home, directory):
+def prepare_daily_retry(repo, home, directory, *, prepared=False):
     """Require the checkout lease; retain the marker until a verified new campaign owns it."""
     if not deployment_lock_owned(repo):
         raise RuntimeError("Daily recovery requires the checkout deployment lock")
@@ -195,8 +217,11 @@ def prepare_daily_retry(repo, home, directory):
         if (home / FAULT_MARKER).exists() or (home / FAULT_MARKER).is_symlink():
             raise RuntimeError("Pending D5 fault recovery needs container/data safety review before synchronization")
     retry = DailyRetry(repo, home, directory) if (home / MODE_MARKER).exists() or (home / MODE_MARKER).is_symlink() else None
+    if retry is None and prepared and (directory / "recovery.json").exists():
+        if document(directory / "recovery.json").get("status") == "PREPARED_FOR_REDEPLOY":
+            raise RuntimeError("Prepared Daily recovery journal disappeared before execution")
     if retry is not None:
-        retry.prepare()
+        retry.resume_prepared() if prepared else retry.prepare()
     token = _RETRY.set(retry)
     try:
         yield retry

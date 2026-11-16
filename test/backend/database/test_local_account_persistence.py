@@ -2,14 +2,14 @@
 """Account persistence contracts with only the database connection isolated."""
 
 from contextlib import nullcontext
-from uuid import UUID
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 from sqlalchemy.dialects import postgresql
 
 from contracts.errors.exceptions import AccountConflictError
-from infrastructure.security.passwords import hash_password
+from gateway.security.passwords import hash_password
 from management.db.identity import account
 from management.db.models import UserAccount
 
@@ -157,5 +157,6 @@ def test_profile_email_change_normalizes_and_keeps_current_identity(session, moc
     lookup.assert_called_once_with("updated@example.com", session)
     query = compiled(session.execute.call_args.args[0])
     assert query.params["user_email"] == "updated@example.com"
-    assert query.params["user_role"] == "DEV"
+    assert query.params["user_roles"] == ["DEV"]
+    assert "user_role" not in query.params
     assert query.params["updated_by"] == "actor"

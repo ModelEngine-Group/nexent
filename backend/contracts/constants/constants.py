@@ -139,7 +139,7 @@ ASSET_OWNER_ATTACHMENTS_PREFIX = 'attachments/asset_owner'
 ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL = 'ASSET_OWNER_USE_OAUTH'
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
-CAN_EDIT_ALL_USER_ROLES = {'SU', 'ADMIN', 'SPEED', 'ASSET_OWNER'}
+CAN_EDIT_ALL_USER_ROLES = {'SU', 'ADMIN', 'ASSET_OWNER'}
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = 'READ_ONLY'
 PERMISSION_EDIT = 'EDIT'
@@ -166,7 +166,7 @@ RATE_LIMIT_EXCEEDED_DETAIL = 'Too Many Requests: rate limit exceeded'
 QUOTA_PAYLOAD_DESCRIPTION = 'Quota payload'
 PERSONAL_KB_CAPACITY_READ_PERMISSION = 'kb.capacity:read'
 PERSONAL_KB_CAPACITY_MANAGE_PERMISSION = 'kb.capacity:manage'
-TARGET_TENANT_ID_DESCRIPTION = 'Target tenant ID (SU/SPEED only)'
+TARGET_TENANT_ID_DESCRIPTION = 'Target tenant ID (SU only)'
 INTERNAL_INDEX_NAME_DESC = 'Internal index_name from knowledge_record_t'
 ACTIVE_STATUSES = ('UPLOADING', 'UPLOADED', 'PROCESSING', 'FORWARDING', 'FAILED', 'COMPLETED')
 HIDDEN_STATUSES = ('DELETE_REQUESTED', 'DELETED')

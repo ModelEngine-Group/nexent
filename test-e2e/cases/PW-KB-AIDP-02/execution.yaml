@@ -1,0 +1,32 @@
+schema_version: '1.0'
+case_id: PW-KB-AIDP-02
+# The journey always runs against the controlled AIDP served by the
+# ext-knowledge mock (seed aidp-kb-product); there is no profile selection,
+# no machine-local journey file and no real AIDP environment.
+required_mock_services:
+- knowledge-provider
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-KB-AIDP-02
+notes: >-
+  Companion to PW-KB-AIDP-01, which owns the AIDP binding and retrieval proof.
+  This journey covers only chunk configuration and therefore creates and
+  deletes its own run-owned knowledge base instead of reusing the seed.
+acceptance_bindings:
+  AC-01:
+  - PW-KB-AIDP-02
+  AC-02:
+  - PW-KB-AIDP-02
+  AC-03:
+  - PW-KB-AIDP-02
+  AC-04:
+  - PW-KB-AIDP-02
+  AC-05:
+  - PW-KB-AIDP-02
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups:
+  - llm_agent

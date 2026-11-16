@@ -247,6 +247,7 @@ async def check_mcp_service_health(
     tenant_id: str,
     user_id: str,
     mcp_id: int,
+    persist_status: bool = True,
 ) -> str:
     """Check MCP service health by ID.
 
@@ -276,12 +277,13 @@ async def check_mcp_service_health(
     # as healthy (consistent with the enable/disable path).
     config_json = record.get("config_json")
     if isinstance(config_json, dict) and "openapi" in config_json:
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=True,
-        )
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=True,
+            )
         return "healthy"
 
     authorization_token = record.get("authorization_token")
@@ -294,29 +296,32 @@ async def check_mcp_service_health(
             custom_headers=custom_headers,
         )
     except MCPConnectionError:
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=False,
-        )
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=False,
+            )
         raise
     except Exception as exc:
         logger.error(f"MCP health check failed: {exc}")
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=False,
+            )
+        raise MCPConnectionError(str(exc) or "MCP connection failed")
+
+    if persist_status:
         update_mcp_record_status_by_id(
             mcp_id=mcp_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            status=False,
+            status=status,
         )
-        raise MCPConnectionError(str(exc) or "MCP connection failed")
-
-    update_mcp_record_status_by_id(
-        mcp_id=mcp_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        status=status,
-    )
 
     if not status:
         raise MCPConnectionError("MCP connection failed")

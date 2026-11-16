@@ -12,6 +12,10 @@ feature:
     description: new/existing conversation、agent_name/query/model override、SSE
   - rule_id: F-146-RULE-02
     description: Northbound chat defaults to one complete root final_answer; explicit final_answer_mode=delta retains incremental answer phases. Invalid modes return 422 before execution.
+  - rule_id: F-146-RULE-03
+    description: When telemetry is enabled and routes included, Northbound server
+      spans last through final ASGI send and propagate W3C context to Runtime/Agent;
+      errors or HTTP disconnect close the span without changing persisted-run continuation.
   required_test_stages:
   - D2
   - D3

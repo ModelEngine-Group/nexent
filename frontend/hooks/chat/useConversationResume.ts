@@ -37,12 +37,28 @@ export function useConversationResume({
   invalidateDetail?: (id: string) => void;
 }) {
   const pendingResumes = useRef(new Set<number>());
+  const runningConversationIdRef = useRef<number | undefined>(undefined);
   // A route change tears down the local stream, while the backend keeps the
   // conversation marked as streaming. Reconnect the assistant-ui runtime when
   // the historical load reports that state.
   useEffect(() => {
     const pending = pendingResumes.current;
     const numericConversationId = Number(activeConversationId);
+    const previousRunningId = runningConversationIdRef.current;
+    runningConversationIdRef.current =
+      isThreadRunning &&
+      Number.isInteger(numericConversationId) &&
+      numericConversationId > 0
+        ? numericConversationId
+        : undefined;
+    // Other consumers may cache incomplete history during a live run. Discard
+    // it when that run ends or leaves the active conversation, before recovery.
+    if (
+      previousRunningId !== undefined &&
+      previousRunningId !== runningConversationIdRef.current
+    ) {
+      invalidateDetail?.(String(previousRunningId));
+    }
     if (isThreadRunning) {
       resumedConversationIdsRef.current?.delete(numericConversationId);
       if (numericConversationId > 0)

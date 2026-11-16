@@ -55,6 +55,16 @@ from nexent.multi_modal.utils import parse_s3_url
 logger = logging.getLogger("northbound_service")
 
 
+# Runtime metadata validation reason -> northbound API error code.
+# MCP header passthrough failures (Phase 1) map to their dedicated codes so
+# callers can distinguish "bad reserved field" from generic metadata errors.
+_RUNTIME_METADATA_ERROR_CODE_MAP = {
+    RuntimeMetadataValidationCode.METADATA_TOO_LARGE: ErrorCode.CHAT_METADATA_TOO_LARGE,
+    RuntimeMetadataValidationCode.MCP_HEADER_KEY_FORBIDDEN: ErrorCode.CHAT_MCP_HEADER_KEY_FORBIDDEN,
+    RuntimeMetadataValidationCode.MCP_HEADER_VALUE_TOO_LARGE: ErrorCode.CHAT_MCP_HEADER_VALUE_TOO_LARGE,
+    RuntimeMetadataValidationCode.MCP_HEADER_ROUTE_NOT_FOUND: ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND,
+}
+
 
 
 def _build_northbound_file_descriptor(
@@ -373,10 +383,8 @@ async def start_streaming_chat(
             try:
                 validate_runtime_metadata(metadata)
             except RuntimeMetadataValidationError as exc:
-                error_code = (
-                    ErrorCode.CHAT_METADATA_TOO_LARGE
-                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
-                    else ErrorCode.CHAT_METADATA_INVALID
+                error_code = _RUNTIME_METADATA_ERROR_CODE_MAP.get(
+                    exc.code, ErrorCode.CHAT_METADATA_INVALID
                 )
                 raise AppException(
                     error_code,

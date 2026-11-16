@@ -167,3 +167,37 @@ def test_tpc_d3_001_real_model_reads_skill(tmp_path, tpc_fixture):
         request(cfg, 'DELETE', f'/conversation/{cid}')
 
 pytestmark = [pytest.mark.case_id("TPC-D3-001"), pytest.mark.stage("D3")]
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_tpc_d3_001_mixed_answer_streams_and_action_continues(legacy, tmp_path, tpc_fixture):
+    cfg = tpc_fixture.copy()
+    code = CODE.replace('tpc-quality-check', cfg['skill_name'])
+    response_text = code + '<final_answer>EARLY_MODEL_TEXT</final_answer>'
+    if legacy:
+        response_text = '```<run>\n' + code.removeprefix('<code>').removesuffix('</code>') + '\n```<final_answer>EARLY_MODEL_TEXT</final_answer>'
+    request(cfg, 'POST', '/__control', {'responses': [response_text, '<final_answer>' + FINAL + '</final_answer>'],
+                                      'observation_marker': SKILL_MARKER}, provider=True)
+    cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC ordinary mixed stream'})['data']['conversation_id']
+    try:
+        events = run_agent(cfg, cid)
+        history = request(cfg, 'GET', f'/conversation/{cid}')
+        stats = request(cfg, 'GET', '/__stats', provider=True)
+        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR') or tmp_path)
+        evidence.mkdir(parents=True, exist_ok=True)
+        (evidence / f'tpc-mixed-{int(legacy)}.json').write_text(json.dumps(
+            {'events': events, 'history': history, 'provider': stats}, ensure_ascii=False, indent=2))
+        assert not any(e.get('type') == 'error' for e in events)
+        tool_indices = [i for i, e in enumerate(events) if e.get('type') == 'tool' and e.get('tool_name') == 'read_skill_md']
+        assert len(tool_indices) == 1
+        early = ''.join(str(e.get('content', '')) for e in events[:tool_indices[0]] if e.get('type') == 'final_answer')
+        assert early == 'EARLY_MODEL_TEXT'
+        assert stats['request_count'] == 2 and stats['observation_counts'] == [0, 1]
+        assert sum(e.get('type') == 'parse' for e in events) == 1
+        assert any(e.get('type') == 'execution_logs' and SKILL_MARKER in str(e.get('content')) for e in events)
+        for sequence in (events, units(history)):
+            assert final_answer_text(sequence) == FINAL
+            assert any(e.get('type') == 'execution_logs' and SKILL_MARKER in str(e.get('content')) for e in sequence)
+    finally:
+        request(cfg, 'DELETE', f'/conversation/{cid}')
+        request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)

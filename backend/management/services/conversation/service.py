@@ -18,10 +18,16 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.constants.constants import MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.agent import AgentRequest
-from contracts.conversation import MessageRequest, MessageUnit
+from contracts.conversation import (
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    MessageRequest,
+    MessageUnit,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
-from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.conversation.repository import branch_conversation, create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
     get_last_unit_for_message,
@@ -91,6 +97,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     }
     if message_data.get('clarification_response') is not None:
         message_data_copy['clarification_response'] = message_data['clarification_response']
+    if message_data.get('annotations') is not None:
+        message_data_copy['annotations'] = message_data['annotations']
     return create_conversation_message(
         message_data_copy, user_id, status=status, message_source=message_source,
     )
@@ -263,6 +271,10 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     # run_agent_stream for the LLM call only.
     raw_query = strip_current_time_prefix(request.query)
 
+    # Normalize annotations (defensive caps) before persistence; None skips
+    # the structured unit entirely.
+    annotations = normalize_message_annotations(getattr(request, "annotations", None))
+
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
@@ -271,6 +283,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         minio_files=request.minio_files,
         **({'clarification_response': request.clarification_response}
            if getattr(request, 'clarification_response', None) is not None else {}),
+        **({'annotations': annotations} if annotations is not None else {}),
     )
     save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id,
@@ -427,6 +440,52 @@ def create_new_conversation(
         raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
+        raise Exception(str(e))
+
+
+def branch_conversation_service(
+    conversation_id: int,
+    turn_index: int,
+    user_id: str,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Branch a conversation into a new one up to and including the given turn
+
+    Args:
+        conversation_id: Source conversation ID
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User ID that must own the source conversation
+        source_message_id: Exact persisted answer in the requested turn
+        answer_index: 1-based runtime answer version when no persisted ID is available
+
+    Returns:
+        Dict[str, Any]: New conversation data
+
+    Raises:
+        ConversationNotFoundError: When the source conversation does not exist
+    """
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+    try:
+        target = {}
+        if source_message_id is not None:
+            target["source_message_id"] = source_message_id
+        if answer_index is not None:
+            target["answer_index"] = answer_index
+        conversation_data = branch_conversation(
+            conversation_id, turn_index, user_id=user_id, **target
+        )
+        if conversation_data is None:
+            raise ConversationNotFoundError(
+                "Conversation does not exist or has been deleted"
+            )
+        return conversation_data
+    except (AppException, ConversationNotFoundError, ValueError):
+        raise
+    except Exception as e:
+        logging.error(f"Failed to branch conversation: {str(e)}")
         raise Exception(str(e))
 
 
@@ -883,6 +942,12 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 message_item['clarification_response'] = response
                         except (ValueError, TypeError):
                             logger.warning("Skipping invalid clarification response message_id=%s", message_id)
+                    elif unit.get('unit_type') == MESSAGE_ANNOTATIONS_UNIT_TYPE:
+                        annotations = parse_message_annotation_unit(unit.get('unit_content'))
+                        if annotations is not None:
+                            message_item['annotations'] = [
+                                item.model_dump(mode="json") for item in annotations
+                            ]
 
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:

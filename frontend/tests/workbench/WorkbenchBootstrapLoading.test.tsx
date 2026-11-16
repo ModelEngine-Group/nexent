@@ -73,7 +73,9 @@ function Workbench() {
       resourcesResolving={session.workbenchState.resolving}
     >
       <textarea aria-label="输入消息" />
-      {reason && <p role="alert">{reason}</p>}
+      {!session.isLoadingWorkbenchBootstrap && reason && (
+        <p role="alert">{reason}</p>
+      )}
     </WorkbenchLoadingBoundary>
   );
 }
@@ -94,9 +96,9 @@ it.each(["enabled", "disabled", "rejected"])(
         <Workbench />
       </WorkbenchSessionProvider>
     );
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     await act(async () => {
       if (outcome === "rejected") reject(new Error("capability load failed"));
       else

@@ -49,6 +49,9 @@ from management.services.agent.execution import (
     _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
+from management.services.agent.preparation.run import (
+    preflight_mcp_header_passthrough,
+)
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -97,6 +100,7 @@ from infrastructure.concurrency import (
 )
 from management.utils.request_context import get_user_language
 from infrastructure.serialization.runtime_metadata import (
+    strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
 
@@ -350,6 +354,16 @@ async def run_agent_stream(
                 error_code,
                 details={"reason": exc.code.value},
             ) from exc
+    # Validation passed — now compute a clean copy without transport-only
+    # reserved fields (``_mcp_headers``, ``_mcp_headers_by_server``, and any
+    # future ``_``-prefixed key) for every persistence path below.  We never
+    # mutate ``agent_request.metadata`` in place because ``apply_mcp_header_
+    # passthrough`` later still needs to read the reserved fields from it.
+    clean_metadata = (
+        strip_reserved_runtime_metadata_fields(agent_request.metadata)
+        if metadata_update_requested
+        else {}
+    )
     metadata_entrypoint = getattr(
         agent_request, "_runtime_metadata_entrypoint", "native"
     )
@@ -458,7 +472,7 @@ async def run_agent_stream(
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
-            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
+            conversation_kwargs["runtime_metadata"] = clean_metadata
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -483,7 +497,7 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=agent_request.metadata or {},
+                    metadata=clean_metadata,
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
             except RuntimeMetadataVersionConflict as exc:
@@ -515,15 +529,13 @@ async def run_agent_stream(
             )
 
         if agent_request.is_debug:
-            metadata_snapshot = (
-                dict(agent_request.metadata or {}) if metadata_update_requested else {}
-            )
+            metadata_snapshot = clean_metadata
             metadata_version = None
         elif is_new_conversation:
             metadata_snapshot = dict(
                 conversation_data.get(
                     "runtime_metadata",
-                    agent_request.metadata if metadata_update_requested else {},
+                    clean_metadata if metadata_update_requested else {},
                 )
                 or {}
             )
@@ -547,7 +559,7 @@ async def run_agent_stream(
                 resolved_metadata = resolve_conversation_runtime_metadata(
                     conversation_id=agent_request.conversation_id,
                     user_id=resolved_user_id,
-                    request_metadata=agent_request.metadata,
+                    request_metadata=clean_metadata if metadata_update_requested else None,
                     update_requested=metadata_update_requested,
                     expected_version=agent_request.expected_metadata_version,
                 )
@@ -947,6 +959,41 @@ async def run_agent_stream(
         stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
+
+    # -------------------------------------------------------------------
+    # Phase-1 MCP header passthrough preflight — MUST run BEFORE the
+    # StreamingResponse is committed so AppException 010111 surfaces
+    # as HTTP 400 instead of getting swallowed into an SSE error event later.
+    # -------------------------------------------------------------------
+    if agent_request.metadata is not None and agent_request.agent_id is not None:
+        try:
+            _pf = preflight_mcp_header_passthrough(
+                agent_id=int(agent_request.agent_id),
+                tenant_id=resolved_tenant_id,
+                user_id=str(user_id or ""),
+                version_no=int(agent_request.version_no or 0),
+                metadata=agent_request.metadata,
+            )
+            if _pf is not None:
+                # Real function returns a coroutine; AsyncMock returns an
+                # awaitable; a plain MagicMock returns a MagicMock that is
+                # NOT awaitable — guard against that so existing tests that
+                # only patch generate_stream don't crash on this new step.
+                import inspect as _inspect
+
+                if _inspect.isawaitable(_pf):
+                    await _pf
+        except Exception as exc:
+            # AppException propagates as HTTP 400 — this is the desired
+            # northbound contract.  Anything else here is a code bug; reraise
+            # so FastAPI surfaces 500.
+            if isinstance(exc, AppException):
+                raise
+            logger.error(
+                "preflight_mcp_header_passthrough raised unexpected exception",
+                exc_info=True,
+            )
+            raise
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():

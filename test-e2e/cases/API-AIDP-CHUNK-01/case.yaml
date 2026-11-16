@@ -1,0 +1,152 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AIDP-CHUNK-01
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识库分块参数：创建默认512/51与similarity 0、更新可改、overlap上限、详情回读｜接口契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: >-
+    证明 AIDP 知识库分块配置的 HTTP 契约：创建时省略分块字段则按 512 token / 51 token 重叠 /
+    similarity 0 / Top K 10 的 AIDP 默认值下发到上游；更新接口接受 chunk_token_num 与
+    chunk_overlap_num 使已建知识库可调整分块；重叠超过分块一半时创建与更新都被拒；详情接口把
+    分块字段作为顶层字段回读。
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过，AIDP ext mock（knowledge-provider）已就绪。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建知识库名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 测试账号具备 AIDP 知识库创建与编辑权限；embedding model 取自 AIDP 模型模板接口的可用项。
+  test_data:
+    run_id_prefix: aidp-chunk
+    create_minimal_payload:
+      description: run-owned AIDP knowledge base for chunk defaults
+      chunk_fields_omitted: true
+    expected_defaults:
+      chunk_token_num: 512
+      chunk_overlap_num: 51
+      topk: 10
+      similarity: 0
+    update_payload:
+      chunk_token_num: 1024
+      chunk_overlap_num: 102
+    overlap_ceiling_cases:
+    - chunk_token_num: 512
+      chunk_overlap_num: 257
+    - chunk_token_num: 256
+      chunk_overlap_num: 129
+    boundary_accepted_cases:
+    - chunk_token_num: 512
+      chunk_overlap_num: 256
+    - chunk_token_num: 256
+      chunk_overlap_num: 128
+  steps:
+  - order: 1
+    action: 生成唯一 run_id，通过 POST /aidp-mgmt/knowledge-bases 创建知识库，请求体显式省略 chunk_token_num、chunk_overlap_num、topk 与 similarity，其余必填字段（name、description、embedding_model）提供有效值。
+    expected: 返回 200 且响应体含新建知识库的 kds_id；创建过程中无未处理异常。
+  - order: 2
+    action: 读取 AIDP ext mock 记录的创建上游请求体，核对分块与检索默认字段。
+    expected: 上游请求体携带 chunk_token_num=512、chunk_overlap_num=51、topk=10、similarity=0，与 AIDP 产品默认值一致，而不是旧默认值 1024/128/0.6。
+  - order: 3
+    action: 通过 GET /aidp-mgmt/knowledge-bases/{kds_id} 读取详情，检查分块字段是否作为顶层字段返回。
+    expected: 响应顶层包含 chunk_token_num 与 chunk_overlap_num，取值分别为 512 与 51，且不出现 null 或以字符串形式返回的分块值。
+  - order: 4
+    action: 通过 PUT /aidp-mgmt/knowledge-bases/{kds_id} 提交 chunk_token_num=1024 与 chunk_overlap_num=102，仅改分块字段。
+    expected: 返回 200；响应为成功结果，未触发「至少一个可更新字段」的 400。
+  - order: 5
+    action: 重新 GET 详情，核对分块字段已按更新值生效，且 name、description、embedding_model 等未提交字段保持原值。
+    expected: chunk_token_num=1024、chunk_overlap_num=102；未提交字段与更新前一致，证明更新是字段级部分更新而非整体覆盖。
+  - order: 6
+    action: 依次提交 create 与 update 两类越界重叠：创建 chunk_token_num=512/chunk_overlap_num=257、更新同一知识库为 chunk_token_num=256/chunk_overlap_num=129。
+    expected: 两个请求均返回 4xx 校验错误并指明 chunk_overlap_num 不得超过 chunk_token_num 的一半；知识库分块配置保持步骤 5 的值，不出现半写入。
+  - order: 7
+    action: 提交重叠恰好等于分块一半的边界值：创建 chunk_token_num=512/chunk_overlap_num=256，更新为 256/128。
+    expected: 两个请求均被接受（上限为「不超过一半」，等于一半合法）；详情回读得到对应值。
+  - order: 8
+    action: 用 UserB/OtherTenant 账号对同一 kds_id 提交 update 分块请求，并在结束后清理 run-owned 知识库。
+    expected: 跨租户更新被拒（401/403/404），原分块配置不被修改；清理成功，且每次失败的越界请求都未产生重复资源或脏状态。
+  expected_results:
+  - 省略分块字段创建时，上游收到 AIDP 默认值 512/51、topk 10、similarity 0。
+  - 详情接口把 chunk_token_num 与 chunk_overlap_num 作为顶层字段回读，取值与上游一致。
+  - 更新接口接受分块字段并做字段级部分更新，未提交字段不受影响。
+  - 重叠超过分块一半时创建与更新均被 4xx 拒绝，等于一半时被接受。
+  - 跨租户分块更新被拒，原配置不被修改，测试无残留资源。
+  forbidden_side_effects:
+  - 越界请求导致知识库分块配置被部分写入或回退到默认值。
+  - 更新分块时覆盖未提交的 name、description、embedding_model 等字段。
+  - 跨租户请求修改到他人的知识库配置。
+  - 测试结束后在 AIDP 上游或权限表残留 run-owned 知识库记录。
+  acceptance:
+  - id: AC-01
+    description: Creating an AIDP knowledge base without chunk fields sends the AIDP defaults 512 tokens, 51 overlap tokens, Top K 10 and similarity 0 to the upstream provider.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects: []
+  - id: AC-02
+    description: The detail endpoint returns chunk_token_num and chunk_overlap_num as top level fields matching the stored values.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects: []
+  - id: AC-03
+    description: Updating only chunk fields succeeds, persists both values, and leaves every unsubmitted field unchanged.
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 2
+  - id: AC-04
+    description: An overlap above half of the chunk size is rejected on create and on update, while exactly half is accepted.
+    steps:
+    - 6
+    - 7
+    expected_results:
+    - 4
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-05
+    description: A cross-tenant chunk update is denied and the original configuration is preserved.
+    steps:
+    - 8
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 3
+    - 4
+  source:
+    notes: >-
+      Derived from commits 01400d399 and a7048be7d. The CreateKbRequest field defaults and the
+      UpdateKbRequest model validator are the authoritative contract; AIDP upstream preconditions come
+      from backend/ext_components/aidp/apps/aidp_mgmt_app.py.
+      Observed product gap, deliberately NOT asserted here: UpdateKbRequest.validate_chunk_settings only
+      compares the two fields when both are supplied, and chunk_overlap_num has no upper bound of its
+      own. A PUT carrying chunk_overlap_num alone (e.g. 9999) therefore passes validation and can write
+      an overlap far beyond the chunk size. This Case covers the two-field path only; the single-field
+      path needs a bugfix decision before it can be asserted.
+  contract:
+    protocol: HTTP API
+    method: POST, PUT, GET
+    endpoint: /aidp-mgmt/knowledge-bases, /aidp-mgmt/knowledge-bases/{kds_id}
+    request_expectations:
+    - POST 省略 chunk_token_num、chunk_overlap_num、topk、similarity 时使用 AIDP 默认值，不要求调用方显式传值。
+    - chunk_token_num 接受 256 到 4096 的整数，chunk_overlap_num 接受不小于 0 的整数，非整数类型被拒绝。
+    - chunk_overlap_num 不得超过 chunk_token_num 的一半；创建与更新执行同一上限。
+    - PUT 允许只提交 chunk_token_num 与 chunk_overlap_num，其余字段按 exclude_none 语义不参与更新。
+    response_expectations:
+    - POST 成功返回 200 并带 kds_id；上游请求体携带生效后的分块与检索字段。
+    - GET 详情将 chunk_token_num 与 chunk_overlap_num 归一化为顶层字段，数值类型而非字符串。
+    - PUT 成功返回 200，响应内容来自上游更新结果；空 payload 返回 400 并带可读说明。
+    - 越界重叠返回 4xx 校验错误，错误信息指明 chunk_overlap_num 与 chunk_token_num 的关系。
