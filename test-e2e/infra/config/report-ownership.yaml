@@ -73,6 +73,7 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  DPR-WEB-IMAGE: runtime
   DPR-CLEANSE: knowledge
   DPR-KNOWLEDGE: runtime
   AOS-MODEL: model

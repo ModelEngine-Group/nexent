@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-WEB-IMAGE-D3-001
+timeout_seconds: 30
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_web_image_runtime
+acceptance_bindings:
+  AC-01: [test_web_image_runtime]
+  AC-02: [test_web_image_runtime]
+  AC-03: [test_web_image_runtime]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+# The fixed script owns its loopback server, handler tasks and managed worker.

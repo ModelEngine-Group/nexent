@@ -1,7 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 import json
-import os
 from datetime import datetime
 
 # Create all necessary mocks
@@ -50,9 +50,6 @@ def exa_search_tool(mock_observer):
         # Directly set a mock object for tool.exa
         tool.exa = mock_exa_client
 
-    # Set environment variables
-    os.environ["DATA_PROCESS_SERVICE"] = "http://test-service"
-    tool.data_process_service = "http://test-service"
 
     return tool
 

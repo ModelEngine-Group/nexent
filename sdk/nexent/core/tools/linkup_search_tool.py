@@ -1,14 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
-import os
 
 from linkup import LinkupClient, LinkupSearchImageResult, LinkupSearchTextResult
-from smolagents.tools import Tool
 from pydantic import Field
+from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.pydantic_utils import unwrap_field_info
-from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
+from ..utils.search_images import publish_filtered_images
+from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+
 
 logger = logging.getLogger("linkup_search_tool")
 
@@ -62,7 +64,7 @@ class LinkupSearchTool(Tool):
         self.max_results = max(1, min(int(unwrap_field_info(max_results) or 3), 100))
         self.record_ops = 1
         self.image_filter = image_filter
-        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.image_filterer = None
 
     def forward(self, query: str) -> str:
         # Perform linkup search
@@ -140,64 +142,4 @@ class LinkupSearchTool(Tool):
         return json.dumps(search_results_return, ensure_ascii=False)
 
     def _filter_images(self, images_list_url, query):
-        """
-        Execute image filtering operation directly using the data processing service
-        :param images_list_url: List of image URLs to filter
-        :param query: Search query, used to filter images related to the query
-        """
-        import asyncio
-        import aiohttp
-        try:
-            # Define positive and negative prompts
-            positive_prompt = query
-            negative_prompt = "logo or banner or background or advertisement or icon or avatar"
-
-            # Define the async function to perform the filtering
-            async def process_images():
-                # Maximum number of concurrent requests
-                semaphore = asyncio.Semaphore(10)  # Limit concurrent requests
-
-                # Create a ClientSession
-                connector = aiohttp.TCPConnector(limit=0)
-                timeout = aiohttp.ClientTimeout(total=2)
-
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                    # Create a function to process a single image
-                    async def process_single_image(img_url):
-                        async with semaphore:
-                            try:
-                                api_url = f"{self.data_process_service}/tasks/filter_important_image"
-                                data = {
-                                    'image_url': img_url,
-                                    'positive_prompt': positive_prompt,
-                                    'negative_prompt': negative_prompt
-                                }
-                                async with session.post(api_url, data=data) as response:
-                                    if response.status != 200:
-                                        logger.info(f"API error for {img_url}: {response.status}")
-                                        return None
-                                    result = await response.json()
-                                    if result.get("is_important", False):
-                                        logger.info(f"Important image: {img_url}")
-                                        return img_url
-                                    return None
-                            except Exception as e:
-                                logger.info(f"Error processing image {img_url}: {str(e)}")
-                                return None
-                    tasks = [process_single_image(url) for url in images_list_url]
-                    results = await asyncio.gather(*tasks)
-                    filtered_images = [url for url in results if url is not None]
-                    if self.observer:
-                        filtered_images_json = json.dumps({"images_url": filtered_images}, ensure_ascii=False)
-                        self.observer.add_message("", ProcessType.PICTURE_WEB, filtered_images_json)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(process_images())
-            finally:
-                loop.close()
-        except Exception as e:
-            logger.info(f"Image filtering error: {str(e)}")
-            if self.observer:
-                filtered_images_json = json.dumps({"images_url": images_list_url}, ensure_ascii=False)
-                self.observer.add_message("", ProcessType.PICTURE_WEB, filtered_images_json)
+        publish_filtered_images(self.observer, self.image_filterer, images_list_url, query)

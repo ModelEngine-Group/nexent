@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-WEB-IMAGE-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Move external search image consumers from data-process into Runtime
+  description: >-
+    Runtime injects a local image filtering callable into Exa, Tavily and Linkup.
+    SDK consumers no longer read DATA_PROCESS_SERVICE or post to the old task API.
+    Infrastructure owns external web reads and Runtime owns decisions in the current
+    managed tool worker; preserve existing image events and failure outcomes without new retries.
+  affected_features:
+    existing: []
+    added: [DPR-WEB-IMAGE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DPR-WEB-IMAGE-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve ordered image events, disabled filtering and existing batch failure semantics.
+    - Reject missing injection and local, S3 or data inputs without a web request.
+    - Bound downloads, reject late native results, make no extra attempt and close images/responses.
+    - Export and rebind authorized stored tools before injecting Runtime-owned execution metadata.
+    reason: >-
+      Existing web tool tests mostly stub the image method. Add actual SDK method assertions
+      and focused Runtime/Infrastructure UT; the D3 adds real sockets, deadlines, managed
+      execution and all three actual SDK consumers. No duplicate formal D1 is added or removed.
+    test_selectors:
+    - test/backend/services/test_web_image_filter.py
+    - test/backend/app/test_agentos_prepared_local_tool.py
+    - test/sdk/core/tools/test_web_image_injection.py
+    - test/sdk/core/tools/test_exa_search_tool.py
+    - test/sdk/core/tools/test_tavily_search_tool.py
+  notes: >-
+    The script owns its loopback listener, tasks and ThreadManager without external assets.
+    Runtime image dependencies/assets, KB object-image authorization and the complete
+    data-process container retirement remain pending. Native CLIP cannot be forcibly
+    terminated by a Python deadline; its current managed worker remains the owner until return.

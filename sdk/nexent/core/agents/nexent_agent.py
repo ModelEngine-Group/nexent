@@ -430,6 +430,14 @@ class NexentAgent:
                     tool_config.metadata.get("allowed_index_names")
                     if tool_config.metadata else None
                 )
+            elif class_name in {"ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"}:
+                filtered_params = {key: value for key, value in params.items() if key not in {"observer", "image_filterer"}}
+                image_filterer = (tool_config.metadata or {}).get("image_filterer")
+                if not callable(image_filterer):
+                    raise ValueError("Web search requires a runtime image_filterer")
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.image_filterer = image_filterer
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()

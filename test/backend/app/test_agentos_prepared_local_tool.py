@@ -11,6 +11,7 @@ from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.agents.nexent_agent import NexentAgent
+from test.sdk.core.model_service.conftest import openai_profile  # noqa: F401
 
 
 @pytest.fixture
@@ -217,14 +218,18 @@ async def test_request_connection_overrides_use_an_encrypted_scoped_reference(mo
         assert rebound.metadata["rerank_model"] is hydrate.return_value
 
 
-def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_tool):
+def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_tool, openai_profile):  # noqa: F811
     from contracts.agentos import PreparedEvaluationRun
-    from infrastructure.agent_model_config import create_model_config_from_record
-    from infrastructure.local_tool_execution import LOCAL_PARAMETER_OVERRIDES_METADATA, build_local_tool
     from management.services.agent import tool_identity
     from management.services.agent.preparation import evaluation_snapshot, local_tool
     from nexent.core.agents.agent_model import AgentConfig
     from runtime.agentos import prepared_local_tool
+
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.local_tool_execution import (
+        LOCAL_PARAMETER_OVERRIDES_METADATA,
+        build_local_tool,
+    )
     from test.backend.app.test_agentos_prepared_evaluation import model_record
 
     parameters = {"api_key": "nested-request-only-key"}
@@ -232,6 +237,21 @@ def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_to
     tool.params.update(parameters)
     tool.metadata = {LOCAL_PARAMETER_OVERRIDES_METADATA: parameters}
     record = model_record(model_id=11)
+    from nexent.core.model_service.profiles.outlet_storage import (
+        encode_resolved_model_profile,
+    )
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = openai_profile.model_dump()
+    references = model_service_references()
+    for name in ("auth", "code_converter", "native_converter"):
+        data["bindings"][name] = references[name][0].model_dump()
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 11
+    data["identity"]["tenant_id"] = "tenant-a"
+    record.update(encode_resolved_model_profile(ResolvedModelProfile.model_validate(data), registered_references=references))
+    mocker.patch("management.services.agent.preparation.model_bindings.get_model_by_model_id", return_value=record)
+    mocker.patch("management.services.agent.preparation.model_bindings.read_agent_model_overrides", return_value={})
     model = create_model_config_from_record(record)
     child = AgentConfig(
         agent_id=8, version_no=4, name="child", description="child", model_name=model.cite_name, tools=[tool],
@@ -257,6 +277,7 @@ def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_to
         restored.resource.subagents[0], ServicePrincipal("user-a", "tenant-a"), "zh",
     )
     assert rebuilt["dify_search"].params["api_key"] == parameters["api_key"]
+
 
 
 def test_local_deepseek_reconstruction_uses_runtime_language(mocker, stored_tool):
@@ -384,3 +405,32 @@ def test_workspace_and_ssh_tools_restore_persisted_parameters_without_exposing_t
         assert (tmp_path / "prepared.txt").read_text(encoding="utf-8") == "AgentOS file"
     elif name == "terminal":
         assert (tool.ssh_host, tool.ssh_user, tool.password) == ("runtime-ssh.invalid", "runner", "private-ssh-key")
+
+
+@pytest.mark.parametrize(("name", "class_name", "key_name"), [
+    ("exa_search", "ExaSearchTool", "exa_api_key"),
+    ("tavily_search", "TavilySearchTool", "tavily_api_key"),
+    ("linkup_search", "LinkupSearchTool", "linkup_api_key"),
+])
+def test_web_search_installs_runtime_image_filter_after_rebinding(mocker, stored_tool, name, class_name, key_name):
+    """UT-BE-DPR-WEB-IMAGE-02: export, rebind and SDK installation use a local port."""
+    from management.services.agent.preparation import local_tool
+    from runtime.agentos import prepared_local_tool
+
+    row = {**stored_tool, "name": name, "class_name": class_name, "instance_params": {}, "params": [
+        {"name": key_name, "default": "synthetic-key"},
+        {"name": "max_results", "default": 3}, {"name": "image_filter", "default": True},
+    ]}
+    tool = ToolConfig(
+        class_name=class_name, name=name, source="local", description="Search", output_type="string",
+        params={item["name"]: item["default"] for item in row["params"]},
+    )
+    reference = local_tool.export_local_tool(tool, [row], 7, 3, "tenant-a", "en")
+    assert "synthetic-key" not in reference.model_dump_json()
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
+    resource = SimpleNamespace(agent_id=7, version_no=3, tools=[reference])
+    rebound = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "en")[name]
+    assert callable(rebound.metadata["image_filterer"])
+    instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    assert instance.image_filterer is rebound.metadata["image_filterer"]
+    assert not hasattr(instance, "data_process_service")

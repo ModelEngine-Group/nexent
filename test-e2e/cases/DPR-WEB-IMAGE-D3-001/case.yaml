@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-RUNTIME
+case:
+  case_id: DPR-WEB-IMAGE-D3-001
+  feature_id: DPR-WEB-IMAGE
+  requirement_ids: [DPR-004]
+  business_rule_ids: [DPR-WEB-IMAGE-RULE-01, DPR-WEB-IMAGE-RULE-02]
+  title: Runtime filters real web images and emits SDK events without data-process
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual HTTP deadlines, managed Runtime execution and all three SDK image consumers.
+  preconditions:
+  - Local Python dependencies and an available loopback listener are required.
+  - No application database, model provider, credentials or data-process service is used.
+  test_data:
+    resources: Synthetic PNG images at and below 200 pixels, a 404 and a hanging response.
+    execution: Runtime IMAGE_FILTER is explicitly false; no CLIP model or external search request is needed.
+  steps:
+  - order: 1
+    action: Start an owned loopback image server and invoke the actual Runtime callable from a ThreadManager tool lane for each SDK tool.
+    expected: Runtime makes one GET per URL and the event contains only valid large images in input order.
+  - order: 2
+    action: Include a hanging image alongside valid images and keep the main event loop active.
+    expected: The per-image total deadline rejects the hanging image without retry and without blocking the service loop.
+  - order: 3
+    action: Close the listener, response handlers and manager after consuming the actual SDK observer events.
+    expected: Owned tasks finish, the listener refuses connections and no managed execution remains stuck.
+  expected_results:
+  - Exa, Tavily and Linkup emit one picture_web event with the two large image URLs and no old service attribute.
+  - Each route is requested exactly once per tool, the hanging route is excluded and the service loop continues.
+  - Owned sockets, tasks and managed threads are reclaimed.
+  forbidden_side_effects:
+  - No data-process HTTP request, database access, external provider call, new retry or background restart occurs.
+  integration_boundary:
+  - Actual local TCP HTTP, Infrastructure reader, Runtime callable, ThreadManager and SDK tools/observer; search-provider execution and CLIP quality are excluded.
+  observations:
+  - Requested paths, event JSON, elapsed time, heartbeat and owned cleanup receipts.
+  cleanup:
+  - Close only the owned listener and handler tasks and drain the owned manager.
+  acceptance:
+  - id: AC-01
+    description: All actual SDK consumers preserve the local image event and make no old service request.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Real slow HTTP is bounded without retry while the service loop remains active.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Owned resources are reclaimed after actual execution.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

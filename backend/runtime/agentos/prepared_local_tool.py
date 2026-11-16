@@ -186,5 +186,9 @@ def materialize_local_tools(
             from infrastructure.object_storage.client import minio_client
 
             tool.metadata = {"minio_client": minio_client, "user_id": actor.user_id, "tenant_id": actor.tenant_id}
+        elif tool.class_name in {"ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"}:
+            from runtime.images import web_image_filter
+
+            tool.metadata = {"image_filterer": web_image_filter()}
         tools[binding_id] = tool
     return tools
