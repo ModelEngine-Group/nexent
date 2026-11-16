@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-PARSER-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Infrastructure parsing core and Management cleansing execution
+  description: >-
+    Extract lazy process-owned parsing initialization from old tasks and compose
+    structural cleansing in Management without old storage/model lookups.
+    Production worker startup, hard timeouts and weight preload acceptance remain pending.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DPR-PARSER-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Initialize the SDK lazily and publish its core only after successful preload.
+    - Refuse inherited process instances before touching their locks.
+    - Preserve existing parser business behavior while moving initialization lookup sites.
+    - Enforce pinned parser versions and admission/warmup deadlines before storage access.
+    reason: Existing job tests inject parser results and cannot prove parser lifecycle or composition.
+    test_selectors:
+    - test/backend/infrastructure/test_document_parser.py
+    - test/backend/services/test_cleanse_executor.py
+    - test/backend/data_process/test_parser_runtime_prefork.py
+    - test/backend/data_process/test_celery_prefork_coverage.py

@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+from infrastructure.file_processing import parser as document_parser
+
 
 def _configure_celery_environment(monkeypatch):
     broker_url = "redis://localhost:6379/0"
@@ -416,7 +418,7 @@ def test_parser_runtime_initialization_and_image_append(parser_runtime, monkeypa
     fake_package = types.ModuleType("nexent.data_process")
     fake_package.DataProcessCore = Core
     monkeypatch.setitem(sys.modules, "nexent.data_process", fake_package)
-    monkeypatch.setattr(parser_runtime, "_configure_third_party_model_paths", lambda paths: paths)
+    monkeypatch.setattr(document_parser, "_configure_third_party_model_paths", lambda paths: paths)
     runtime = parser_runtime.ParserRuntime(2, ["unstructured_default"])
     runtime.ensure_initialized()
     runtime.ensure_initialized()
@@ -583,18 +585,18 @@ def test_parser_runtime_configuration_prepare_params_and_minio(parser_runtime, m
     config_dir.mkdir()
     config_file = config_dir / "config.json"
     config_file.write_text("{}", encoding="utf-8")
-    assert parser_runtime._normalize_model_config_path(str(config_dir)) == str(config_file)
-    assert parser_runtime._normalize_model_config_path(None) is None
-    assert parser_runtime._normalize_model_config_path(str(tmp_path / "missing.json")) == str(tmp_path / "missing.json")
+    assert document_parser._normalize_model_config_path(str(config_dir)) == str(config_file)
+    assert document_parser._normalize_model_config_path(None) is None
+    assert document_parser._normalize_model_config_path(str(tmp_path / "missing.json")) == str(tmp_path / "missing.json")
 
     table_path = tmp_path / "table-model"
     table_path.mkdir()
-    configured = parser_runtime._configure_third_party_model_paths(
+    configured = document_parser._configure_third_party_model_paths(
         {"unstructured_default": str(config_file), "table_transformer": str(table_path)}
     )
     assert configured["unstructured_default"] == str(config_file)
     assert parser_runtime.os.environ["UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"] == str(config_file)
-    assert parser_runtime._configure_third_party_model_paths(
+    assert document_parser._configure_third_party_model_paths(
         {"unstructured_default": str(config_file), "table_transformer": str(tmp_path / "bad")}
     )["table_transformer"] == str(tmp_path / "bad")
 
@@ -1171,7 +1173,7 @@ def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runt
     assert runtime.core is runtime._core
 
     failed = parser_runtime.ParserRuntime(1, [])
-    monkeypatch.setattr(parser_runtime, "_configure_third_party_model_paths", lambda _paths: (_ for _ in ()).throw(ValueError("bad model path")))
+    monkeypatch.setattr(document_parser, "_configure_third_party_model_paths", lambda _paths: (_ for _ in ()).throw(ValueError("bad model path")))
     with pytest.raises(ValueError, match="bad model path"):
         failed.ensure_initialized()
     assert failed._core is None and failed.initialized is False

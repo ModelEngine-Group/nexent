@@ -14,4 +14,6 @@ feature:
     description: Only the current attempt may complete; recorded unknown outcomes block automatic replay.
   - rule_id: DPR-CLEANSE-RULE-03
     description: Broker acknowledgement follows durable job policy and duplicates do not reexecute a completed job.
+  - rule_id: DPR-CLEANSE-RULE-04
+    description: Structural cleansing uses a process-owned parser and scoped object ports without old task or model repositories.
   required_test_stages: [D3]

@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: DPR-PARSER-D3-001
+timeout_seconds: 150
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_process_owned_parser
+acceptance_bindings:
+  AC-01: [test_process_owned_parser]
+  AC-02: [test_process_owned_parser]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

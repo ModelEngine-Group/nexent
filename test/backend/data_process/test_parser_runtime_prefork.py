@@ -1,6 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import os
 import sys
 import types
-import os
+
+from infrastructure.file_processing import parser as document_parser
 
 
 def test_parser_runtime_initializes_core_inside_ensure(monkeypatch):
@@ -18,9 +21,13 @@ def test_parser_runtime_initializes_core_inside_ensure(monkeypatch):
     fake_data_process = types.ModuleType("nexent.data_process")
     fake_data_process.DataProcessCore = FakeCore
     monkeypatch.setitem(sys.modules, "nexent.data_process", fake_data_process)
-    monkeypatch.setattr(parser_runtime, "_configure_third_party_model_paths", lambda paths: paths)
+    monkeypatch.setattr(
+        document_parser, "_configure_third_party_model_paths", lambda paths: paths
+    )
 
-    runtime = parser_runtime.ParserRuntime(thread_count=2, preload_models=["unstructured_default"])
+    runtime = parser_runtime.ParserRuntime(
+        thread_count=2, preload_models=["unstructured_default"]
+    )
     assert runtime.initialized is False
     runtime.ensure_initialized()
 
@@ -30,9 +37,14 @@ def test_parser_runtime_initializes_core_inside_ensure(monkeypatch):
 
 
 def test_native_thread_limits_are_set_before_child_import(monkeypatch):
-    from data_process.parser_runtime import _set_native_thread_limits
+    from infrastructure.file_processing.parser import _set_native_thread_limits
 
     _set_native_thread_limits(2)
 
-    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    for name in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
         assert os.environ[name] == "2"

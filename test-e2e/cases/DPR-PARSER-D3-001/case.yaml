@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-PARSER-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-001]
+  business_rule_ids: [DPR-CLEANSE-RULE-04]
+  title: Process-isolated Management cleansing with the real document SDK
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the actual Linux fork and SDK parsing boundary without old task or repository imports.
+  preconditions:
+  - Docker and cached nexent/nexent-data-process:latest dependencies image are available.
+  - The image contains libmagic, OpenPyXL, Unstructured and NLTK data at /opt/models/nltk_data.
+  test_data:
+    resources: Synthetic text and spreadsheet bytes, controlled in-memory ObjectStore capability.
+    execution: Current source mounts are read-only; network access is disabled.
+  steps:
+  - order: 1
+    action: Construct an uninitialized runtime in a Linux parent and attempt to use it from a fork child.
+    expected: No heavy SDK is imported in the parent and inherited runtime access is rejected.
+  - order: 2
+    action: Construct and warm a new child runtime and cleanse text and spreadsheet inputs using Management.
+    expected: The same Core is reused, native limits match configuration, and checksummed artifacts contain the input text and cells.
+  - order: 3
+    action: Block imports of old task, Runtime and Management database modules throughout execution and reclaim the child and container.
+    expected: Cleansing succeeds without forbidden imports and no owned process or container remains.
+  expected_results:
+  - Parent remains uninitialized and the fork child rejects its inherited runtime.
+  - Real SDK parsing produces checked structural artifacts and reuses one child Core.
+  - Forbidden imports remain unused and owned resources are reclaimed.
+  forbidden_side_effects:
+  - No application services, credentials, model endpoints, broker or network downloads are used.
+  integration_boundary:
+  - Linux process isolation, Infrastructure parser initialization, actual SDK algorithms and Management executor; controlled ObjectStore only.
+  observations:
+  - Parent/child PIDs, native thread settings, rejected inheritance, artifact checksums and parsed contents.
+  cleanup:
+  - Terminate only the owned child on timeout and remove only the test-owned container.
+  acceptance:
+  - id: AC-01
+    description: Parser initialization remains process-owned across actual fork.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Management executes actual structural parsing without old business dependencies.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]
