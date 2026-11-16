@@ -13,12 +13,15 @@ from infrastructure.storage.catalog import (
 DATASET = "knowledge_source_bindings"
 
 
-def bind_source_records(scope, engine):
+def source_catalog():
     table = KnowledgeFileLifecycle.__table__
     names = [
         "file_id",
         "tenant_id",
         "knowledge_id",
+        "index_name",
+        "storage_object_id",
+        "uploaded_at",
         "created_by",
         "updated_by",
         "create_time",
@@ -46,7 +49,14 @@ def bind_source_records(scope, engine):
         FieldDefinition(
             name,
             "integer"
-            if name in {"knowledge_id", "source_generation", "version", "file_size"}
+            if name
+            in {
+                "knowledge_id",
+                "source_generation",
+                "version",
+                "file_size",
+                "storage_object_id",
+            }
             else "string",
             nullable=table.c[name].nullable,
         )
@@ -61,21 +71,25 @@ def bind_source_records(scope, engine):
         tenant_field="tenant_id",
         active_field="delete_flag",
     )
+    audit = RecordAudit(
+        "create_time",
+        "update_time",
+        "created_by",
+        "updated_by",
+        extra_dates=frozenset(
+            {"source_upload_started_at", "source_reconcile_after", "uploaded_at"}
+        ),
+    )
+    return definition, table, audit
+
+
+def bind_source_records(scope, engine):
+    definition, table, audit = source_catalog()
     return SQLRecordStore(
         scope,
         DatasetCatalog((definition,)),
         {DATASET: table},
         engine,
         revision_fields={DATASET: "version"},
-        audit_mappings={
-            DATASET: RecordAudit(
-                "create_time",
-                "update_time",
-                "created_by",
-                "updated_by",
-                extra_dates=frozenset(
-                    {"source_upload_started_at", "source_reconcile_after"}
-                ),
-            )
-        },
+        audit_mappings={DATASET: audit},
     )

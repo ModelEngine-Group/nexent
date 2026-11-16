@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-UPLOAD-RECORDS-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Bind source lifecycle and storage ledger in one record transaction domain
+  description: >-
+    Move the physical ledger model into Infrastructure and add an audited tenant-scoped
+    record composition supporting source/ledger atomic writes. Preserve legacy model import
+    users and existing identity constraints. Complete quota-aware upload finalization in the next integration step.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Commit or roll back source and ledger records in one transaction.
+    - Preserve tenant scope, generated audit fields, integer CAS and existing object uniqueness.
+    - Reject runtime role, foreign tenant writes, protected audit changes and invalid sizes or versions.
+    - Keep existing Management imports bound to the same Infrastructure-owned model.
+    reason: Existing storage-ledger DAL mocks do not exercise two logical datasets in one actual adapter transaction. Existing D3 adds real PostgreSQL proof; a duplicate formal D1 is unnecessary.
+    test_selectors:
+    - test/backend/infrastructure/test_upload_records.py
+    - test/backend/database/test_knowledge_storage_object_db.py
+  notes: >-
+    Responsibility inherits the existing Feature routing. The D3 continues its declared self-contained
+    PostgreSQL/Redis/MinIO preparation and owned container/volume cleanup on success or failure.
+    Step 11 uses real production mappings and PostgreSQL transactions with only a controlled
+    pre-commit exception. This proves the storage domain, not completed upload recovery or quota behavior.

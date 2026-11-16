@@ -40,6 +40,7 @@ from nexent.storage.models import (
 )
 from resource_probe import check_resources
 from source_probe import check_source_publication
+from upload_records_probe import check_upload_transactions
 
 from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
 from infrastructure.redis.kv import RedisKeyValueConfig, RedisKeyValueStore
@@ -374,6 +375,7 @@ try:
             )
         ).scalar_one()
     assert comments == len(cleanse_jobs.columns)
+    check_upload_transactions(engine, context)
     result = {
         "column_comments": comments,
         "admission_replay": True,
@@ -390,6 +392,7 @@ try:
         "live_resource_authorization": True,
         "source_publication_and_reconciliation": True,
         "automatic_source_identity_reconciliation": True,
+        "source_ledger_atomic_domain": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
@@ -401,6 +404,8 @@ try:
                 "infrastructure/source_upload.py",
                 "infrastructure/rdb/source_binding.py",
                 "infrastructure/rdb/source_candidates.py",
+                "infrastructure/rdb/upload_records.py",
+                "infrastructure/rdb/knowledge_storage_record.py",
                 "infrastructure/object_storage/composition.py",
             )
         },
