@@ -40,8 +40,6 @@ def resolve_gateway_identity(query: dict) -> dict:
     if kind == "session" and role == ASSET_OWNER_ROLE and not tenant_id:
         tenant_id = ASSET_OWNER_TENANT_ID
     if kind == "session" and role == "SU" and not tenant_id:
-        # Bootstrap intentionally stores SU without a physical tenant. Preserve
-        # the established session context; ordinary roles and API keys stay strict.
         tenant_id = DEFAULT_TENANT_ID
     if not tenant_id or not role:
         raise IdentityError("No active membership")
