@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-NORMAL-SOURCE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Share normal and recovery upload accounting and remove duplicate commit helpers
+  description: >-
+    Normal managed uploads publish and account their sources through the same scoped transaction
+    as recovery. Preserve batch quota and compensation behavior, and do not publish a cancelled
+    lifecycle as successful. Delete the obsolete second HEAD/commit helper and its deletion-failure
+    recharge branch; already committed retained objects remain charged.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Account normal uploads before returning their lifecycle snapshots, without duplicate charges.
+    - Preserve unknown results after confirmed object writes for both storage and unexpected accounting errors.
+    - Retain batch quota checks and compensate only confirmed successful objects in the current batch.
+    - Reject cancelled completion, invalid authoritative sizes, missing sources and deleted charges.
+    - Support zero-byte sources and reject boolean sizes equal to zero or one.
+    reason: >-
+      Existing helper UT is replaced at the active SourceFinalizer.account boundary when the obsolete
+      function is removed. The four removed test functions had eight variants covering authoritative
+      size/missing/nonactive results; their relevant obligations move to real scoped accounting tests.
+      Preserve all formal D1; strengthen the existing D3 managed helper rather than adding a duplicate.
+    test_selectors:
+    - test/backend/services/test_source_finalize_account.py
+    - test/backend/services/test_source_upload_managed.py
+    - test/backend/services/test_source_upload_routing.py
+    - test/backend/services/test_file_management_service.py
+    - test/backend/services/test_knowledge_storage_service.py
+    - test/backend/infrastructure/test_source_upload_composition.py
+  notes: >-
+    Existing responsibility and self-contained preparation stay unchanged. D3 owns temporary PostgreSQL,
+    Redis and MinIO containers and volumes, drains the managed lane and closes ports on all outcomes.
+    Normal helper replay retains its real ledger ID. Quota fixtures include the newly charged normal
+    source so the over-quota scenario still proves rejection of the additional recovered source.
+    Full normal batch quota APIs still use the existing business policy; remaining storage migration,
+    cleanup coordination and data-process retirement are not claimed complete.

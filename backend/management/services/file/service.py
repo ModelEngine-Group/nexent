@@ -367,8 +367,6 @@ async def upload_files_impl(
             record = lifecycle_records_by_index.get(file_index)
             file_id = result.get("file_id") or (record or {}).get("file_id")
             if result.get("success"):
-                uploaded_filenames.append(result.get("file_name"))
-                uploaded_file_paths.append(result.get("object_name"))
                 if file_id:
                     updated_record = transition_file_record(
                         file_id,
@@ -383,11 +381,19 @@ async def upload_files_impl(
                     if updated_record:
                         lifecycle_records_by_index[file_index] = updated_record
                         record = updated_record
+                    elif not record or record.get("status") != "UPLOADED":
+                        errors.append(
+                            f"Failed to upload {result.get('file_name')}: "
+                            "Upload state changed before completion"
+                        )
+                        continue
                     if record and file_id:
                         # ``uploaded_filenames`` only contains successful uploads. Keep
                         # the corresponding lifecycle records in the same success order
                         # so a partial batch cannot update the wrong file name.
                         successful_lifecycle_records.append(record)
+                uploaded_filenames.append(result.get("file_name"))
+                uploaded_file_paths.append(result.get("object_name"))
             else:
                 file_name = result.get('file_name')
                 error_msg = result.get('error', 'Unknown error')
@@ -480,29 +486,10 @@ async def upload_files_impl(
 
         if storage_context and uploaded_file_paths:
             from management.services.knowledge_base.storage import (
-                commit_uploaded_object,
                 compensate_uploaded_objects,
             )
 
             try:
-                for object_name in uploaded_file_paths:
-                    committed = commit_uploaded_object(
-                        context=storage_context,
-                        object_name=object_name,
-                        created_by=user_id,
-                    )
-                    if committed:
-                        for record in lifecycle_records_by_index.values():
-                            if record.get("object_name") == object_name and committed.get("storage_object_id"):
-                                updated_record = transition_file_record(
-                                    record["file_id"],
-                                    storage_object_id=committed["storage_object_id"],
-                                    expected_statuses=("UPLOADED",),
-                                    updated_by=user_id,
-                                )
-                                if updated_record:
-                                    record.update(updated_record)
-                                break
                 quota_service.invalidate_usage_cache(storage_context.tenant_id)
                 quota_status = quota_service.check_hard_limit_post_write(
                     0,

@@ -869,8 +869,8 @@ class TestUploadFilesImpl:
         upload_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_upload_files_impl_lifecycle_upload_and_commit_failures(self):
-        """Upload and storage-commit failures should update lifecycle records and compensate storage."""
+    async def test_upload_files_impl_lifecycle_upload_and_post_check_failures(self):
+        """Upload and post-write failures update lifecycle records and compensate storage."""
         mock_file = MagicMock(filename="broken.txt", size=3)
         context = SimpleNamespace(
             tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1", ingroup_permission="SHARED"
@@ -921,10 +921,10 @@ class TestUploadFilesImpl:
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}
                 ])), \
-                patch_import_object_context(knowledge_storage_stub, "commit_uploaded_object", side_effect=RuntimeError("commit failed")), \
+                patch.object(FakeQuota, "check_hard_limit_post_write", side_effect=RuntimeError("post-write failed")), \
                 patch_import_object_context(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
-            with pytest.raises(RuntimeError, match="commit failed"):
+            with pytest.raises(RuntimeError, match="post-write failed"):
                 await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
 
         assert commit_transition.call_args_list[-1].kwargs["stage"] == "STORAGE_COMMIT"
@@ -1637,11 +1637,7 @@ class TestUploadQuotaEnforcement:
         quota_service.check_hard_limit_post_write.assert_called_once_with(
             0, index_name="kb-index"
         )
-        knowledge_storage_stub.commit_uploaded_object.assert_called_once_with(
-            context=context,
-            object_name="knowledge_base/quota.txt",
-            created_by="user-id",
-        )
+        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
         quota_service.invalidate_usage_cache.assert_called_once_with("tenant-id")
         assert result.quota_status == {"stage": "post"}
 
@@ -1854,19 +1850,15 @@ class TestUploadQuotaEnforcement:
         knowledge_storage_stub.commit_uploaded_object.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("failure_stage", ["ledger", "post-check"])
-    async def test_failure_compensates_only_new_batch(self, failure_stage, monkeypatch):
+    async def test_post_write_failure_compensates_only_new_batch(self, monkeypatch):
         upload = MagicMock(filename="quota.txt", size=128)
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
-        failure = RuntimeError(f"{failure_stage} failed")
-        if failure_stage == "ledger":
-            knowledge_storage_stub.commit_uploaded_object.side_effect = failure
-        else:
-            quota_service.check_hard_limit_post_write.side_effect = failure
+        failure = RuntimeError("post-check failed")
+        quota_service.check_hard_limit_post_write.side_effect = failure
         upload_results = [
             {
                 "success": True,
@@ -1904,12 +1896,11 @@ class TestUploadQuotaEnforcement:
             ],
             updated_by=None,
         )
-        expected_invalidations = 1 if failure_stage == "ledger" else 2
-        assert quota_service.invalidate_usage_cache.call_count == expected_invalidations
+        assert quota_service.invalidate_usage_cache.call_count == 2
         quota_service.invalidate_usage_cache.assert_called_with("tenant-id")
 
     @pytest.mark.asyncio
-    async def test_different_object_names_are_committed_separately(self, monkeypatch):
+    async def test_different_object_names_are_returned_without_recommitting(self, monkeypatch):
         uploads = [
             MagicMock(filename="same.txt", size=4),
             MagicMock(filename="same.txt", size=4),
@@ -1938,18 +1929,15 @@ class TestUploadQuotaEnforcement:
                 },
             ]),
         ):
-            await upload_files_impl(
+            result = await upload_files_impl(
                 destination="minio",
                 file=uploads,
                 index_name="kb-index",
                 uploader_tenant_id="tenant-id",
             )
 
-        assert knowledge_storage_stub.commit_uploaded_object.call_count == 2
-        assert {
-            call.kwargs["object_name"]
-            for call in knowledge_storage_stub.commit_uploaded_object.call_args_list
-        } == {"knowledge_base/object-a", "knowledge_base/object-b"}
+        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
+        assert set(result[1]) == {"knowledge_base/object-a", "knowledge_base/object-b"}
 
 
 class TestCheckFileAccessBatch:

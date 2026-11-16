@@ -49,7 +49,8 @@ async def test_unknown_upload_is_explicit_and_never_uses_legacy_fallback(mocker)
 
 
 @pytest.mark.asyncio
-async def test_unknown_batch_retains_uploading_intent(mocker):
+@pytest.mark.parametrize("outcome", ["unknown", "cancelled"])
+async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcome):
     import sys
     from types import SimpleNamespace
 
@@ -80,6 +81,17 @@ async def test_unknown_batch_retains_uploading_intent(mocker):
         },
     )
     mocker.patch.object(service, "_validate_knowledge_file_sizes", new=AsyncMock())
+    upload_result = {
+        "success": False,
+        "file_id": record["file_id"],
+        "file_name": "source.txt",
+        "outcome_unknown": True,
+        "error": "requires reconciliation",
+    }
+    if outcome == "cancelled":
+        upload_result.update(
+            success=True, object_name=record["object_name"], file_size=6
+        )
     mocker.patch.object(
         service, "_get_complete_upload_batch_size", new=AsyncMock(return_value=6)
     )
@@ -90,17 +102,7 @@ async def test_unknown_batch_retains_uploading_intent(mocker):
     mocker.patch.object(
         service,
         "upload_to_minio",
-        new=AsyncMock(
-            return_value=[
-                {
-                    "success": False,
-                    "file_id": record["file_id"],
-                    "file_name": "source.txt",
-                    "outcome_unknown": True,
-                    "error": "requires reconciliation",
-                }
-            ]
-        ),
+        new=AsyncMock(return_value=[upload_result]),
     )
     mocker.patch.object(service, "get_vector_db_core")
     mocker.patch.object(
@@ -108,7 +110,9 @@ async def test_unknown_batch_retains_uploading_intent(mocker):
         "list_files",
         new=AsyncMock(return_value={"files": []}),
     )
-    transition = mocker.patch.object(service, "transition_file_record")
+    transition = mocker.patch.object(
+        service, "transition_file_record", return_value=None
+    )
     result = await service.upload_files_impl(
         "minio",
         [Mock(filename="source.txt")],
@@ -117,6 +121,10 @@ async def test_unknown_batch_retains_uploading_intent(mocker):
         user_id="user-a",
         uploader_tenant_id="tenant-a",
     )
-    transition.assert_not_called()
+    if outcome == "unknown":
+        transition.assert_not_called()
+    else:
+        transition.assert_called_once()
+        assert transition.call_args.kwargs["status"] == "UPLOADED"
     errors, paths, names = result
     assert errors and not paths and not names

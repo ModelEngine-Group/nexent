@@ -140,7 +140,7 @@ class SourceFinalizer:
         )
         return total <= limit
 
-    def finish(
+    def account(
         self, file_id, *, owner_user_id, owner_service, context, expected_version=None
     ):
         original = self._owned(
@@ -166,7 +166,7 @@ class SourceFinalizer:
                 self._same_source(row, original, binding)
                 ledger = self._ledger(tx, row, context)
                 if row["status"] == "UPLOADED":
-                    return "uploaded"
+                    return row
                 if ledger is None:
                     ledger = tx.create(
                         LEDGER,
@@ -190,9 +190,32 @@ class SourceFinalizer:
                         },
                         context,
                     )
+                return tx.get(DATASET, file_id, context=context)
         finally:
             # A commit reply may be lost; invalidate stale quota displays either way.
             invalidate_usage_cache(original["tenant_id"])
+
+    def finish(
+        self, file_id, *, owner_user_id, owner_service, context, expected_version=None
+    ):
+        original = self.account(
+            file_id,
+            owner_user_id=owner_user_id,
+            owner_service=owner_service,
+            context=context,
+            expected_version=expected_version,
+        )
+        if original["status"] == "UPLOADED":
+            return "uploaded"
+        binding = {
+            name: original[name]
+            for name in (
+                "source_space",
+                "source_key",
+                "source_revision",
+                "source_sha256",
+            )
+        }
         # The charge is visible before the fresh authoritative quota read.
         with self.records.transaction(context=context) as tx:
             row = self._owned(tx, file_id, owner_user_id, owner_service, context)

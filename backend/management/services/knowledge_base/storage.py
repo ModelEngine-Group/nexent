@@ -13,10 +13,9 @@ from urllib.parse import urlparse
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, PERMISSION_EDIT
 from contracts.constants.environment import MINIO_DEFAULT_BUCKET
-from management.db.file.attachment import delete_file, get_file_size_from_minio_strict
+from management.db.file.attachment import delete_file
 from management.db.knowledge_base.repository import get_knowledge_record
-from contracts.constants.constants import COMMITTED_STATUS
-from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, commit_storage_object, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
+from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
 
 logger = logging.getLogger(__name__)
 
@@ -292,40 +291,6 @@ def release_storage_charge(
     return released
 
 
-def commit_uploaded_object(
-    context: KnowledgeStorageContext,
-    object_name: str,
-    created_by: Optional[str] = None,
-) -> Dict:
-    """Read authoritative MinIO size and idempotently commit one source object."""
-    raw_bytes = get_file_size_from_minio_strict(
-        object_name=object_name,
-        bucket=context.bucket_name,
-    )
-    if raw_bytes is None:
-        raise FileNotFoundError(f"MinIO object does not exist: {object_name}")
-    if not isinstance(raw_bytes, int) or isinstance(raw_bytes, bool) or raw_bytes < 0:
-        raise ValueError(f"Invalid authoritative object size for {object_name}")
-
-    record = commit_storage_object(
-        tenant_id=context.tenant_id,
-        knowledge_id=context.knowledge_id,
-        index_name=context.index_name,
-        bucket_name=context.bucket_name,
-        object_name=object_name,
-        raw_bytes=raw_bytes,
-        created_by=created_by,
-        updated_by=created_by,
-    )
-    if (
-        not record
-        or record.get("status") != COMMITTED_STATUS
-        or record.get("delete_flag") != "N"
-    ):
-        raise RuntimeError(f"Failed to commit storage accounting for {object_name}")
-    return record
-
-
 def compensate_uploaded_objects(
     context: KnowledgeStorageContext,
     object_names: Iterable[str],
@@ -344,20 +309,7 @@ def compensate_uploaded_objects(
                     object_name,
                     delete_result.get("error", "unknown deletion error"),
                 )
-                try:
-                    # If the database failure was transient, a retry keeps the
-                    # retained object charged instead of leaving it invisible.
-                    commit_uploaded_object(
-                        context=context,
-                        object_name=object_name,
-                        created_by=updated_by,
-                    )
-                except Exception:
-                    logger.critical(
-                        "KB source object %s remains in MinIO and could not be charged",
-                        object_name,
-                        exc_info=True,
-                    )
+                # Upload accounting is already committed; retain it until deletion is confirmed.
                 continue
 
             if not mark_storage_object_deleted(

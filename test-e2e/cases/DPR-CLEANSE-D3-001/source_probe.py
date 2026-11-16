@@ -230,6 +230,15 @@ def check_source_publication(engine, port, context):
                     record, data, "text/plain", manager=manager, timeout=15
                 )
                 assert confirmed.sha256 == source.sha256
+                assert (
+                    record["stage"] == "SOURCE_ACCOUNTED"
+                    and record["storage_object_id"]
+                )
+                charged_id = record["storage_object_id"]
+                replay = await upload_knowledge_source(
+                    record, data, "text/plain", manager=manager, timeout=15
+                )
+                assert replay == confirmed and record["storage_object_id"] == charged_id
             finally:
                 drained = await manager.shutdown(timeout=5)
                 assert not drained.stuck_execution_ids
@@ -278,7 +287,7 @@ def check_source_publication(engine, port, context):
                     TenantConfig.__table__.insert().values(
                         tenant_id="tenant-a",
                         config_key="KB_QUOTA_TENANT_HARD_LIMIT_BYTES",
-                        config_value=str(len(data)),
+                        config_value=str(len(data) * 2),
                         delete_flag="N",
                     )
                 )
@@ -325,7 +334,7 @@ def check_source_publication(engine, port, context):
                     accounting.sum(
                         LEDGER, "raw_bytes", RecordQuery(), context=context()
                     )
-                    == len(data) * 2
+                    == len(data) * 3
                 )
                 assert (
                     accounting.get(

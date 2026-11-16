@@ -8,7 +8,6 @@ import pytest
 from management.services.knowledge_base import storage as storage_service
 
 KnowledgeStorageContext = storage_service.KnowledgeStorageContext
-commit_uploaded_object = storage_service.commit_uploaded_object
 compensate_uploaded_objects = storage_service.compensate_uploaded_objects
 get_committed_bytes_by_kb = storage_service.get_committed_bytes_by_kb
 get_committed_source_bytes_by_paths = storage_service.get_committed_source_bytes_by_paths
@@ -415,101 +414,6 @@ def test_release_storage_charge_invalidates_only_after_ledger_release():
     invalidate.assert_called_once_with("tenant-a")
 
 
-def test_commit_uploaded_object_uses_authoritative_size(storage_context):
-    with patch.object(
-        storage_service,
-        "get_file_size_from_minio_strict",
-        return_value=321,
-    ) as get_size, patch.object(
-        storage_service,
-        "commit_storage_object",
-        return_value={
-            "object_name": "knowledge_base/object-a",
-            "status": "COMMITTED",
-            "delete_flag": "N",
-        },
-    ) as commit:
-        result = commit_uploaded_object(
-            context=storage_context,
-            object_name="knowledge_base/object-a",
-            created_by="user-a",
-        )
-
-    assert result == {
-        "object_name": "knowledge_base/object-a",
-        "status": "COMMITTED",
-        "delete_flag": "N",
-    }
-    get_size.assert_called_once_with(
-        object_name="knowledge_base/object-a",
-        bucket="test-bucket",
-    )
-    commit.assert_called_once_with(
-        tenant_id="tenant-a",
-        knowledge_id=7,
-        index_name="kb-a",
-        bucket_name="test-bucket",
-        object_name="knowledge_base/object-a",
-        raw_bytes=321,
-        created_by="user-a",
-        updated_by="user-a",
-    )
-
-
-@pytest.mark.parametrize("raw_size", [-1, True, "321"])
-def test_commit_uploaded_object_rejects_invalid_authoritative_size(
-    storage_context,
-    raw_size,
-):
-    with patch.object(
-        storage_service,
-        "get_file_size_from_minio_strict",
-        return_value=raw_size,
-    ), patch.object(
-        storage_service,
-        "commit_storage_object",
-    ) as commit:
-        with pytest.raises(ValueError, match="Invalid authoritative"):
-            commit_uploaded_object(storage_context, "object-a")
-    commit.assert_not_called()
-
-
-def test_commit_uploaded_object_rejects_confirmed_missing_object(storage_context):
-    with patch.object(
-        storage_service,
-        "get_file_size_from_minio_strict",
-        return_value=None,
-    ), patch.object(storage_service, "commit_storage_object") as commit:
-        with pytest.raises(FileNotFoundError, match="does not exist"):
-            commit_uploaded_object(storage_context, "missing-object")
-    commit.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "ledger_result",
-    [
-        {},
-        {"status": "DELETED", "delete_flag": "Y"},
-        {"status": "COMMITTED", "delete_flag": "Y"},
-    ],
-)
-def test_commit_uploaded_object_rejects_non_active_ledger_result(
-    storage_context,
-    ledger_result,
-):
-    with patch.object(
-        storage_service,
-        "get_file_size_from_minio_strict",
-        return_value=0,
-    ), patch.object(
-        storage_service,
-        "commit_storage_object",
-        return_value=ledger_result,
-    ):
-        with pytest.raises(RuntimeError, match="Failed to commit"):
-            commit_uploaded_object(storage_context, "empty-object")
-
-
 def test_compensation_releases_only_successfully_deleted_objects(storage_context):
     with patch.object(
         storage_service,
@@ -522,11 +426,7 @@ def test_compensation_releases_only_successfully_deleted_objects(storage_context
         storage_service,
         "mark_storage_object_deleted",
         return_value=True,
-    ) as mark_deleted, patch.object(
-        storage_service,
-        "commit_uploaded_object",
-        return_value={"status": "COMMITTED", "delete_flag": "N"},
-    ) as retry_commit:
+    ) as mark_deleted:
         compensate_uploaded_objects(
             context=storage_context,
             object_names=["new-a", "new-b"],
@@ -539,11 +439,6 @@ def test_compensation_releases_only_successfully_deleted_objects(storage_context
         bucket_name="test-bucket",
         object_name="new-a",
         updated_by="user-a",
-    )
-    retry_commit.assert_called_once_with(
-        context=storage_context,
-        object_name="new-b",
-        created_by="user-a",
     )
 
 
@@ -565,24 +460,19 @@ def test_compensation_tolerates_missing_row_and_cleanup_exception(storage_contex
     mark_deleted.assert_called_once()
 
 
-def test_compensation_logs_when_retry_charge_also_fails(storage_context):
+def test_compensation_retains_charge_when_object_deletion_fails(storage_context):
     with patch.object(
         storage_service,
         "delete_file",
         return_value={"success": False, "error": "still present"},
     ), patch.object(
         storage_service,
-        "commit_uploaded_object",
-        side_effect=RuntimeError("ledger unavailable"),
-    ) as retry_commit:
+        "mark_storage_object_deleted",
+    ) as release:
         compensate_uploaded_objects(
             context=storage_context,
             object_names=["failed-delete"],
             updated_by="user-a",
         )
 
-    retry_commit.assert_called_once_with(
-        context=storage_context,
-        object_name="failed-delete",
-        created_by="user-a",
-    )
+    release.assert_not_called()

@@ -45,8 +45,8 @@ case:
     action: Admit a KB cleansing request through actual resource catalogs and DAC, then revoke its account role and replace the file generation.
     expected: Current resource authorization succeeds; role revocation and a stale generation both refuse execution without exposing credentials.
   - order: 9
-    action: Publish source bytes to real MinIO, pin them with PostgreSQL CAS, reconcile a lost reply, then execute the service upload helper using a real managed lane and production port composition.
-    expected: The pinned source is authorized, content generation survives state updates, reconciliation does not rewrite bytes and managed execution drains its workers.
+    action: Publish source bytes to real MinIO, pin them with PostgreSQL CAS, reconcile a lost reply, then execute and replay the normal service upload helper using a real managed lane and production port composition.
+    expected: The pinned source is authorized, content generation survives state updates, reconciliation does not rewrite bytes, normal helper replay preserves one charge and managed execution drains its workers.
   - order: 10
     action: Lose an actual object-write reply, age its durable intent and invoke production source discovery and per-tenant recovery composition.
     expected: The original object is pinned without reupload, the system actor is audited and upload completes after its retained-byte charge and quota check succeed.
@@ -109,7 +109,7 @@ case:
     expected_results: [8]
     forbidden_side_effects: [1]
   - id: AC-07
-    description: Real source publication binds content identity and reconciles lost replies without rewriting.
+    description: Real source publication binds content identity, reconciles lost replies without rewriting and replays normal managed upload with one charge.
     steps: [9]
     expected_results: [9]
     forbidden_side_effects: [1]

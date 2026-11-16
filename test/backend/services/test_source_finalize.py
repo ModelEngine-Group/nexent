@@ -20,9 +20,9 @@ publication = source_fixtures.publication
 
 
 @pytest.fixture
-def finalization(publication, monkeypatch):
+def finalization(publication, monkeypatch, request):
     publisher, source, objects, update = publication
-    publish(publisher)
+    publish(publisher, getattr(request, "param", b"source"))
     update(upload_owner_service="nexent-config")
     engine = source._engine
     # SQLite needs INTEGER for automatic IDs; PostgreSQL sequence behavior is proved in D3.

@@ -42,7 +42,9 @@ def binding_values(source):
 
 def confirmed_reference(metadata, target, digest, size):
     if (
-        metadata.ref.space != target.space
+        type(metadata.size) is not int
+        or metadata.size < 0
+        or metadata.ref.space != target.space
         or metadata.ref.key != target.key
         or metadata.ref.version is None
         or metadata.sha256 != digest

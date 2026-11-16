@@ -10,7 +10,7 @@ from nexent.storage.models import StorageScope
 from sqlalchemy import URL, create_engine
 
 from infrastructure.object_storage.composition import bind_source_objects
-from infrastructure.rdb.source_binding import DATASET, bind_source_records
+from infrastructure.rdb.source_binding import DATASET
 from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
 
 
@@ -19,13 +19,9 @@ def _source_ports(record, *, actor_id, writable, context, with_policy=False):
     engine = source_engine(context)
     records = objects = None
     try:
-        namespaces = {DATASET, LEDGER, QUOTA} if with_policy else {DATASET}
+        namespaces = {DATASET, LEDGER, QUOTA} if with_policy else {DATASET, LEDGER}
         scope = StorageScope("management", record["tenant_id"], actor_id, namespaces)
-        records = (
-            bind_upload_records(scope, engine, with_policy=True)
-            if with_policy
-            else bind_source_records(scope, engine)
-        )
+        records = bind_upload_records(scope, engine, with_policy=with_policy)
         objects = bind_source_objects(
             record["tenant_id"],
             actor_id,
