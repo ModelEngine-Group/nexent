@@ -455,7 +455,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
     )
 
     assert root_modules == ["__init__.py"]
-    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
+    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'northbound', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 
 

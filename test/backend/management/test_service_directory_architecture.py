@@ -181,7 +181,7 @@ MIGRATED_MODULES = {
     'model/voice.py',
     'monitor/audit.py',
     'monitor/identity.py',
-    'northbound.py',
+    'northbound/service.py',
     'notification/service.py',
     'permission/api_keys.py',
     'permission/asset_owner.py',

@@ -30,6 +30,7 @@ config:
   timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
+    gatewayUrl: "http://nexent-northbound:5013"
     configUrl: "http://nexent-config:5010"
     elasticsearchService: "http://nexent-config:5010/api"
     runtimeUrl: "http://nexent-runtime:5014"
