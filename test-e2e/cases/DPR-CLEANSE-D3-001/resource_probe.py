@@ -1,9 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real resource records, tenant-scoped catalogs and Management DAC authorization."""
 
-from contracts.knowledge_cleanse import KnowledgeCleanseRequest
+from contracts.constants import environment
+from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.cleanse_jobs import CleanseJobs
+from management.services.file.knowledge_cleanse_service import KnowledgeCleanseService
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
 
@@ -83,7 +85,63 @@ def check_resources(engine, source, records, context):
     jobs = CleanseJobs(
         records, authorize=authorization.authorize, parser_version="parser-v1"
     )
-    state = jobs.submit(request, context=context())
+    settings = {
+        "POSTGRES_USER": engine.url.username,
+        "NEXENT_POSTGRES_PASSWORD": engine.url.password,
+        "POSTGRES_HOST": engine.url.host,
+        "POSTGRES_PORT": str(engine.url.port),
+        "POSTGRES_DB": engine.url.database,
+    }
+    previous = {name: getattr(environment, name) for name in settings}
+    try:
+        for name, value in settings.items():
+            setattr(environment, name, value)
+        api = KnowledgeCleanseService(parser_version="parser-v1")
+        state = api.submit(
+            request, tenant_id="tenant-a", user_id="user-a", context=context()
+        )
+        assert (
+            api.submit(
+                request, tenant_id="tenant-a", user_id="user-a", context=context()
+            ).job_id
+            == state.job_id
+        )
+        lookup = KnowledgeCleanseLookup(
+            knowledge_id=1, file_id=request.file_id, file_version=0, job_id=state.job_id
+        )
+        assert (
+            api.inspect(
+                lookup, tenant_id="tenant-a", user_id="user-a", context=context()
+            )
+            == state
+        )
+        try:
+            api.inspect(
+                lookup, tenant_id="tenant-b", user_id="user-a", context=context()
+            )
+        except ScopeDenied:
+            pass
+        else:
+            raise AssertionError("production admission exposed another tenant's job")
+        cancelled = api.submit(
+            request.model_copy(update={"idempotency_key": "cancelled"}),
+            tenant_id="tenant-a",
+            user_id="user-a",
+            context=context(),
+        )
+        cancelled_lookup = lookup.model_copy(update={"job_id": cancelled.job_id})
+        assert (
+            api.cancel(
+                cancelled_lookup,
+                tenant_id="tenant-a",
+                user_id="user-a",
+                context=context(),
+            ).status
+            == "cancelled"
+        )
+    finally:
+        for name, value in previous.items():
+            setattr(environment, name, value)
     handle = jobs.claim(
         "authorized-worker", job_id=state.job_id, lease_seconds=60, context=context()
     )

@@ -398,6 +398,8 @@ try:
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
+                "backend/management/services/file/knowledge_cleanse_service.py",
+                "infrastructure/knowledge_cleanse.py",
                 "backend/management/services/file/source_publish.py",
                 "backend/management/services/file/source_reconcile.py",
                 "backend/management/services/file/source_recovery.py",

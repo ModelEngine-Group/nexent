@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-ADMISSION-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Compose KB cleansing admission with live authorization and owned storage ports
+  description: >-
+    Management exposes KB-only submit, inspect and cancel as domain operations. Infrastructure
+    owns one bounded record engine and two least-privilege handles for durable jobs and readonly
+    authorization records. Each operation rechecks the current DAC and pinned source generation.
+    Admission persists a job without invoking the broker; existing ready dispatch remains separate.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve replay, inspect and cancellation with live tenant, user and KB authorization.
+    - Refuse revoked accounts, stale generations, run scope and invalid identities before mutation.
+    - Respect expired budgets and close every owned handle after success, binding failure or cleanup failure.
+    reason: >-
+      Existing authorization and durable-job UT already cover isolated policy. Add facade collaboration
+      and lifecycle tests, reuse the real PostgreSQL D3 for production composition, and preserve all
+      existing formal D1 without introducing duplicate cases.
+    test_selectors:
+    - test/backend/services/test_knowledge_cleanse_service.py
+    - test/backend/infrastructure/test_knowledge_cleanse_composition.py
+  notes: >-
+    Responsibility and self-contained preparation remain unchanged. D3 uses only its disposable
+    PostgreSQL, Redis and MinIO, restores temporary settings, and cleans owned containers and volumes.
+    No production HTTP route or consumer is enabled by this change. Runtime KB processing and
+    data-process retirement remain pending; READ COMMITTED authorization is not a serializable grant.
