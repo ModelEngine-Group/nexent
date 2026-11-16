@@ -1427,7 +1427,7 @@ const ThreadListItem: FC<
         variant === "time"
           ? "group/item relative flex h-10 items-center rounded-lg px-3 hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
           : cn(
-              "group/item flex h-10 items-center rounded-lg hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
+              "group/item relative flex h-10 items-center rounded-lg hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
             )
       }
     >
@@ -1665,7 +1665,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           <ThreadListItemMorePrimitive.Trigger
             aria-label={t("chat.threadList.moreActions", { title })}
             className={cn(
-              "size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
+              "absolute right-3 top-1/2 size-7 -translate-y-1/2 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
             )}
           >
             <MoreHorizontalIcon className="size-4" />

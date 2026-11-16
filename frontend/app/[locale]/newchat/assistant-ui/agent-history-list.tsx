@@ -1542,7 +1542,7 @@ function AgentHistoryRow({
       data-conversation-id={conversationId}
       onClickCapture={() => indicators.acknowledge(conversationId)}
       className={cn(
-        "group/item flex h-10 w-full min-w-0 items-center rounded-lg hover:bg-[#e5e7eb]",
+        "group/item relative flex h-10 w-full min-w-0 items-center rounded-lg hover:bg-[#e5e7eb]",
         active && "bg-[#e5e7eb]"
       )}
     >
@@ -1670,7 +1670,7 @@ function AgentHistoryRow({
               <button
                 type="button"
                 aria-label={t("chat.threadList.moreActions", { title })}
-                className="mr-1 size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
+                className="absolute right-2 top-1/2 size-7 -translate-y-1/2 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreHorizontalIcon className="mx-auto size-4" />

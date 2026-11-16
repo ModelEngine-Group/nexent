@@ -70,6 +70,7 @@ it("reserves metadata width while hover and focus hide time", () => {
   const time = screen.getByText("2m ago");
   expect(title).toHaveClass("truncate", "min-w-0");
   expect(time).toHaveClass(
+    "min-w-7",
     "group-hover/item:invisible",
     "group-focus-within/item:invisible"
   );

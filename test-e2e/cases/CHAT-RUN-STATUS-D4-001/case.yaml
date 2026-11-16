@@ -28,7 +28,7 @@ case:
     expected: Retry uses the same running-to-completed transition and row reselection clears the completion dot without creating a new conversation or replaying another run.
   - order: 4
     action: Inspect each long history title at rest, hover its title, then focus the action button and leave the row.
-    expected: Both pages show the full overflow title in the same tooltip, display only time or actions, and retain identical title width before, during and after hover or focus.
+    expected: Both pages show the full overflow title in the same tooltip, align time and actions at the same trailing right edge and vertical center, display only one of them, and retain identical title width before, during and after hover or focus.
   expected_results:
   - Both page entries use the same status and acknowledgement behavior for new runs and retries.
   - Hover and focus never overlap the menu, and read-only interaction sends no run request.

@@ -73,13 +73,13 @@ export function ConversationHistoryLabel({
         {title}
       </OverflowTooltipText>
       {status}
-      {time && (
+      {(time || showActions) && (
         <span
-          data-history-time
+          data-history-time={time ? true : undefined}
           className={cn(
-            "shrink-0 whitespace-nowrap text-xs text-muted-foreground",
+            "flex h-7 shrink-0 items-center justify-center whitespace-nowrap text-xs text-muted-foreground",
             showActions &&
-              "group-hover/item:invisible group-focus-within/item:invisible"
+              "min-w-7 group-hover/item:invisible group-focus-within/item:invisible"
           )}
         >
           {time}

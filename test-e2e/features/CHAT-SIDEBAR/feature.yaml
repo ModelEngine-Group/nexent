@@ -10,7 +10,7 @@ feature:
     and server-ID batch deletion preserve sidebar state.
   business_rules:
   - rule_id: CHAT-SIDEBAR-RULE-013
-    description: Workbench and Agent-chat history rows use the same overflow-only title tooltip and reserve stable title, time and action space. Hover or keyboard focus shows row actions while hiding time without reclaiming its width, so truncation never expands during hover. Short titles have no redundant tooltip, and rename, selection, pinning and batch operations retain their existing behavior.
+    description: Workbench and Agent-chat history rows use the same overflow-only title tooltip and reserve stable title space with time and actions sharing one trailing area. Hover or keyboard focus shows row actions while hiding time without reclaiming its width, so truncation never expands during hover. Short titles have no redundant tooltip, and rename, selection, pinning and batch operations retain their existing behavior.
   - rule_id: CHAT-SIDEBAR-RULE-012
     description: Workbench and Agent-chat new runs and retries share owning-thread run indicators. Successful completion remains unread until that conversation is selected or interacted with; a new run clears the prior indication. Hover and keyboard focus hide status to give row menus space without marking read. Switching away does not complete a running thread, and failed or cancelled runs do not show a successful completion dot. Reading history starts no execution and status state adds no persistence or polling.
   - rule_id: CHAT-SIDEBAR-RULE-011

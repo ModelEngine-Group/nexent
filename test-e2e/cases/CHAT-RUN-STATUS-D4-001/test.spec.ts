@@ -226,6 +226,17 @@ journey("CHAT-RUN-STATUS-D4-001", async ({ page, contract }) => {
         ),
       ).toBe(true);
       const width = (await title.boundingBox())!.width;
+      const timeBounds = (await time.boundingBox())!;
+      const menuBounds = (await menu.boundingBox())!;
+      await expect(menu).toHaveCSS("position", "absolute");
+      expect(timeBounds.x + timeBounds.width).toBeCloseTo(
+        menuBounds.x + menuBounds.width,
+        0,
+      );
+      expect(timeBounds.y + timeBounds.height / 2).toBeCloseTo(
+        menuBounds.y + menuBounds.height / 2,
+        0,
+      );
       await title.hover();
       await expect(entry.getByRole("tooltip")).toHaveText(HISTORY_TITLE);
       await expect(time).toBeHidden();
