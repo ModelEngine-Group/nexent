@@ -35,7 +35,8 @@ sys.modules['infrastructure.rdb.client'].minio_client = MagicMock()
 sys.modules['transformers'] = MagicMock()
 sys.modules['transformers'].CLIPProcessor = MagicMock()
 sys.modules['transformers'].CLIPModel = MagicMock()
-sys.modules['nexent'] = MagicMock()
+sys.modules['nexent'] = types.ModuleType('nexent')
+sys.modules['nexent'].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent")]
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
@@ -303,8 +304,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIsNone(service.redis_client)
         self.assertIsNone(service.redis_pool)
 
-    @patch('data_process.services.tasks.CLIPModel.from_pretrained')
-    @patch('data_process.services.tasks.CLIPProcessor.from_pretrained')
+    @patch('transformers.CLIPModel.from_pretrained')
+    @patch('transformers.CLIPProcessor.from_pretrained')
     def test_init_clip_model_success(self, mock_processor, mock_model):
         """
         Test successful CLIP model initialization.
@@ -320,14 +321,14 @@ class TestDataProcessService(unittest.TestCase):
         mock_processor.return_value = MagicMock()
 
         # Initialize CLIP model
-        self.service._init_clip_model()
+        self.service.image_filter._init_clip_model()
 
         # Verify CLIP model was properly initialized
-        self.assertTrue(self.service.clip_available)
-        self.assertIsNotNone(self.service.model)
-        self.assertIsNotNone(self.service.processor)
+        self.assertTrue(self.service.image_filter.clip_available)
+        self.assertIsNotNone(self.service.image_filter.model)
+        self.assertIsNotNone(self.service.image_filter.processor)
 
-    @patch('data_process.services.tasks.CLIPModel.from_pretrained')
+    @patch('transformers.CLIPModel.from_pretrained')
     def test_init_clip_model_failure(self, mock_model):
         """
         Test CLIP model initialization failure.
@@ -343,12 +344,12 @@ class TestDataProcessService(unittest.TestCase):
         mock_model.side_effect = Exception("Failed to load model")
 
         # Initialize CLIP model
-        self.service._init_clip_model()
+        self.service.image_filter._init_clip_model()
 
         # Verify CLIP model was not initialized
-        self.assertFalse(self.service.clip_available)
-        self.assertIsNone(self.service.model)
-        self.assertIsNone(self.service.processor)
+        self.assertFalse(self.service.image_filter.clip_available)
+        self.assertIsNone(self.service.image_filter.model)
+        self.assertIsNone(self.service.image_filter.processor)
 
     def test_check_image_size(self):
         """
@@ -361,18 +362,18 @@ class TestDataProcessService(unittest.TestCase):
         3. Custom minimum thresholds can be applied when specified
         """
         # Test with valid image size
-        self.assertTrue(self.service.check_image_size(300, 300))
-        self.assertTrue(self.service.check_image_size(200, 200))
+        self.assertTrue(self.service.image_filter.check_image_size(300, 300))
+        self.assertTrue(self.service.image_filter.check_image_size(200, 200))
 
         # Test with invalid image size
-        self.assertFalse(self.service.check_image_size(100, 300))
-        self.assertFalse(self.service.check_image_size(300, 100))
-        self.assertFalse(self.service.check_image_size(100, 100))
+        self.assertFalse(self.service.image_filter.check_image_size(100, 300))
+        self.assertFalse(self.service.image_filter.check_image_size(300, 100))
+        self.assertFalse(self.service.image_filter.check_image_size(100, 100))
 
         # Test with custom minimum size
-        self.assertTrue(self.service.check_image_size(
+        self.assertTrue(self.service.image_filter.check_image_size(
             150, 150, min_width=100, min_height=100))
-        self.assertFalse(self.service.check_image_size(
+        self.assertFalse(self.service.image_filter.check_image_size(
             150, 150, min_width=200, min_height=200))
 
     async def async_test_start_stop(self):
@@ -1407,8 +1408,8 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_load_image_local_file_exception())
 
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
-    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter._init_clip_model')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_size_filter(self, mock_init_clip, mock_check_size, mock_load_image):
         """
@@ -1440,7 +1441,7 @@ class TestDataProcessService(unittest.TestCase):
 
     @patch('data_process.services.tasks.IMAGE_FILTER', False)
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_filter_disabled(self, mock_check_size, mock_load_image):
         """
@@ -1467,7 +1468,7 @@ class TestDataProcessService(unittest.TestCase):
 
     @patch('data_process.services.tasks.IMAGE_FILTER', True)
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
     @patch('torch.no_grad')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_with_clip(self, mock_no_grad, mock_check_size, mock_load_image):
@@ -1489,9 +1490,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_check_size.return_value = True  # Image meets size requirements
 
         # Setup CLIP model mocks
-        self.service.clip_available = True
-        self.service.model = MagicMock()
-        self.service.processor = MagicMock()
+        self.service.image_filter.clip_available = True
+        self.service.image_filter.model = MagicMock()
+        self.service.image_filter.processor = MagicMock()
 
         # Setup model outputs
         mock_outputs = MagicMock()
@@ -1500,10 +1501,10 @@ class TestDataProcessService(unittest.TestCase):
         mock_probs[0].tolist.return_value = [0.3, 0.7]  # [negative, positive]
         mock_logits.softmax.return_value = mock_probs
         mock_outputs.logits_per_image = mock_logits
-        self.service.model.return_value = mock_outputs
+        self.service.image_filter.model.return_value = mock_outputs
 
         # Setup processor
-        self.service.processor.return_value = {"inputs": "processed"}
+        self.service.image_filter.processor.return_value = {"inputs": "processed"}
 
         # Filter image
         result = await self.service.filter_important_image(
@@ -1519,13 +1520,13 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result["probabilities"]["negative"], 0.3)
 
         # Verify CLIP was used
-        self.service.processor.assert_called_once()
-        self.service.model.assert_called_once()
+        self.service.image_filter.processor.assert_called_once()
+        self.service.image_filter.model.assert_called_once()
 
     @patch('data_process.services.tasks.IMAGE_FILTER', True)
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
-    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter._init_clip_model')
     @patch('data_process.services.tasks.logger')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_clip_not_available(self, mock_logger, mock_init_clip, mock_check_size, mock_load_image):
@@ -1545,7 +1546,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_check_size.return_value = True  # Image meets size requirements
 
         # Make CLIP unavailable
-        self.service.clip_available = False
+        self.service.image_filter.clip_available = False
 
         # Filter image
         result = await self.service.filter_important_image("http://example.com/image.png")
@@ -1557,9 +1558,9 @@ class TestDataProcessService(unittest.TestCase):
 
     @patch('data_process.services.tasks.IMAGE_FILTER', True)
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
-    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
-    @patch('data_process.services.tasks.logger')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter._init_clip_model')
+    @patch('nexent.multi_modal.image_filter.logger')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_clip_processing_failure(self, mock_logger, mock_init_clip, mock_check_size, mock_load_image):
         """
@@ -1584,12 +1585,12 @@ class TestDataProcessService(unittest.TestCase):
         mock_check_size.return_value = True  # Image meets size requirements
 
         # Setup CLIP model mocks
-        self.service.clip_available = True
-        self.service.model = MagicMock()
-        self.service.processor = MagicMock()
+        self.service.image_filter.clip_available = True
+        self.service.image_filter.model = MagicMock()
+        self.service.image_filter.processor = MagicMock()
 
         # Setup processor to raise exception during processing
-        self.service.processor.side_effect = Exception(
+        self.service.image_filter.processor.side_effect = Exception(
             "CLIP model processing failed")
 
         # Filter image
@@ -1605,16 +1606,16 @@ class TestDataProcessService(unittest.TestCase):
         mock_logger.warning.assert_called_once()
         warning_call = mock_logger.warning.call_args[0][0]
         self.assertIn(
-            "CLIP processing failed, using size-only filter", warning_call)
-        self.assertIn("CLIP model processing failed", warning_call)
+            "clip_inference_failed", warning_call)
+        self.assertEqual(mock_logger.warning.call_args[0][1], "Exception")
 
         # Verify CLIP was attempted
-        self.service.processor.assert_called_once()
+        self.service.image_filter.processor.assert_called_once()
 
     @patch('data_process.services.tasks.IMAGE_FILTER', True)
     @patch('data_process.services.tasks.DataProcessService.load_image')
-    @patch('data_process.services.tasks.DataProcessService.check_image_size')
-    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter.check_image_size')
+    @patch('nexent.multi_modal.image_filter.ImageImportanceFilter._init_clip_model')
     @patch('data_process.services.tasks.logger')
     @patch('PIL.Image.new')
     @pytest.mark.asyncio
@@ -1639,9 +1640,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_check_size.return_value = True  # Image meets size requirements
 
         # Setup CLIP model mocks
-        self.service.clip_available = True
-        self.service.model = MagicMock()
-        self.service.processor = MagicMock()
+        self.service.image_filter.clip_available = True
+        self.service.image_filter.model = MagicMock()
+        self.service.image_filter.processor = MagicMock()
 
         # Make the image mode conversion fail to trigger the outer exception handler
         mock_image_new.side_effect = Exception("Image conversion failed")
@@ -1658,7 +1659,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_logger.error.assert_called_once()
         error_call = mock_logger.error.call_args[0][0]
         self.assertIn(
-            "Error processing image: Image conversion failed", error_call)
+            "image_filter_failed", error_call)
 
         # Verify image conversion was attempted
         mock_image_new.assert_called_once()
@@ -2732,7 +2733,7 @@ class TestDataProcessService(unittest.TestCase):
     def test_filter_important_image_clip_success(self):
         """When CLIP is available, returns probabilities based on model output."""
         service = DataProcessService()
-        service.clip_available = True
+        service.image_filter.clip_available = True
 
         img = Image.new('RGB', (256, 256), color='green')
 
@@ -2756,8 +2757,8 @@ class TestDataProcessService(unittest.TestCase):
         fake_logits.softmax.return_value = fake_probs
         fake_model = MagicMock(return_value=MagicMock(logits_per_image=fake_logits))
 
-        service.processor = MagicMock(return_value={'input_ids': 'ids'})
-        service.model = fake_model
+        service.image_filter.processor = MagicMock(return_value={'input_ids': 'ids'})
+        service.image_filter.model = fake_model
 
         from data_process.services import tasks as _dps
         torch_mod = MagicMock()
@@ -2768,8 +2769,8 @@ class TestDataProcessService(unittest.TestCase):
             return img
 
         with patch.object(_dps, 'IMAGE_FILTER', True), \
-             patch.object(_dps, 'torch', torch_mod), \
-             patch.object(service, 'check_image_size', return_value=True), \
+             patch.dict(sys.modules, {'torch': torch_mod}), \
+             patch.object(service.image_filter, 'check_image_size', return_value=True), \
              patch.object(service, 'load_image', side_effect=_fake_load_image):
             result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
 
@@ -2779,13 +2780,13 @@ class TestDataProcessService(unittest.TestCase):
     def test_filter_important_image_clip_exception_falls_back_to_size(self):
         """When CLIP raises during inference, fall back to size-based check."""
         service = DataProcessService()
-        service.clip_available = True
+        service.image_filter.clip_available = True
 
         img = Image.new('RGB', (256, 256), color='green')
 
         fake_processor = MagicMock(side_effect=RuntimeError('CLIP boom'))
-        service.processor = fake_processor
-        service.model = MagicMock()
+        service.image_filter.processor = fake_processor
+        service.image_filter.model = MagicMock()
 
         from data_process.services import tasks as _dps
         torch_mod = MagicMock()
@@ -2796,8 +2797,8 @@ class TestDataProcessService(unittest.TestCase):
             return img
 
         with patch.object(_dps, 'IMAGE_FILTER', True), \
-             patch.object(_dps, 'torch', torch_mod), \
-             patch.object(service, 'check_image_size', return_value=False), \
+             patch.dict(sys.modules, {'torch': torch_mod}), \
+             patch.object(service.image_filter, 'check_image_size', return_value=False), \
              patch.object(service, 'load_image', side_effect=_fake_load_image):
             result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
 
@@ -2806,7 +2807,7 @@ class TestDataProcessService(unittest.TestCase):
     def test_filter_important_image_rgba_conversion(self):
         """RGBA images are converted to RGB before CLIP inference."""
         service = DataProcessService()
-        service.clip_available = True
+        service.image_filter.clip_available = True
 
         img = Image.new('RGBA', (256, 256), color=(255, 0, 0, 128))
 
@@ -2829,8 +2830,8 @@ class TestDataProcessService(unittest.TestCase):
         fake_logits.softmax.return_value = fake_probs
         fake_model = MagicMock(return_value=MagicMock(logits_per_image=fake_logits))
 
-        service.processor = MagicMock(return_value={'input_ids': 'ids'})
-        service.model = fake_model
+        service.image_filter.processor = MagicMock(return_value={'input_ids': 'ids'})
+        service.image_filter.model = fake_model
 
         from data_process.services import tasks as _dps
         torch_mod = MagicMock()
@@ -2841,12 +2842,47 @@ class TestDataProcessService(unittest.TestCase):
             return img
 
         with patch.object(_dps, 'IMAGE_FILTER', True), \
-             patch.object(_dps, 'torch', torch_mod), \
-             patch.object(service, 'check_image_size', return_value=True), \
+             patch.dict(sys.modules, {'torch': torch_mod}), \
+             patch.object(service.image_filter, 'check_image_size', return_value=True), \
              patch.object(service, 'load_image', side_effect=_fake_load_image):
             result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
 
         self.assertFalse(result['is_important'])
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_image_filter_adapter_closes_its_loaded_image(mocker, enabled):
+    """UT-BE-DPR-IMAGE-01: delegate configuration/prompts and close owned input."""
+    image = Image.new("RGB", (200, 200))
+    service = DataProcessService()
+    mocker.patch('data_process.services.tasks.IMAGE_FILTER', enabled)
+    load = mocker.patch.object(service, 'load_image', new=AsyncMock(return_value=image))
+    classify = mocker.patch.object(service.image_filter, 'filter', return_value={"is_important": True})
+    assert asyncio.run(service.filter_important_image('data:image/example', 'keep', 'discard')) == {
+        "is_important": True,
+    }
+    load.assert_awaited_once_with('data:image/example')
+    classify.assert_called_once_with(
+        image, enabled=enabled, positive_prompt='keep', negative_prompt='discard',
+    )
+    with pytest.raises(ValueError, match='closed image'):
+        image.getpixel((0, 0))
+
+
+def test_image_filter_adapter_closes_image_after_conversion_error(mocker):
+    """UT-BE-DPR-IMAGE-01: conversion failure adds no attempt or success result."""
+    image = Image.new('RGBA', (200, 200))
+    service = DataProcessService()
+    service.image_filter.clip_available = True
+    mocker.patch('data_process.services.tasks.IMAGE_FILTER', True)
+    load = mocker.patch.object(service, 'load_image', new=AsyncMock(return_value=image))
+    convert = mocker.patch('nexent.multi_modal.image_filter.Image.new', side_effect=ValueError('conversion failed'))
+    with pytest.raises(Exception, match='Error processing image: conversion failed'):
+        asyncio.run(service.filter_important_image('data:image/example'))
+    load.assert_awaited_once()
+    convert.assert_called_once()
+    with pytest.raises(ValueError, match='closed image'):
+        image.getpixel((0, 0))
 
 
 if __name__ == '__main__':

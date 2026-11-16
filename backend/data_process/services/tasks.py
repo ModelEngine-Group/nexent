@@ -15,12 +15,16 @@ from typing import Any
 import aiohttp
 import redis
 from celery import states
-from PIL import Image
-
-from contracts.constants.environment import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
 from contracts.constants.constants import MAX_CONCURRENT_CONVERSIONS
+from contracts.constants.environment import (
+    CLIP_MODEL_PATH,
+    IMAGE_FILTER,
+    REDIS_BACKEND_URL,
+    REDIS_URL,
+)
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, OfficeConversionException
+from contracts.errors.ingestion import classify_ingestion_exception
 from contracts.knowledge import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
@@ -29,28 +33,17 @@ from data_process.utils import (
     get_task_info,
 )
 from data_process.utils import get_task_details as get_task_details_info
-from management.db.file.attachment import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
+from management.db.file.attachment import (
+    delete_file,
+    file_exists,
+    get_file_size_from_minio,
+    get_file_stream,
+    upload_file,
+)
 from management.services.file.upload import convert_office_to_pdf
-from contracts.errors.ingestion import classify_ingestion_exception
+from nexent.multi_modal.image_filter import ImageImportanceFilter
+from PIL import Image
 
-
-# Optional heavy dependencies are loaded only when their feature is used.  The
-# names remain patchable for compatibility with existing tests/integrations.
-class _LazyModelFactory:
-    def __init__(self, attribute: str):
-        self.attribute = attribute
-
-    def from_pretrained(self, *args, **kwargs):
-        from transformers import CLIPModel as _CLIPModel
-        from transformers import CLIPProcessor as _CLIPProcessor
-
-        factory = _CLIPModel if self.attribute == "CLIPModel" else _CLIPProcessor
-        return factory.from_pretrained(*args, **kwargs)
-
-
-torch = None
-CLIPModel = _LazyModelFactory("CLIPModel")
-CLIPProcessor = _LazyModelFactory("CLIPProcessor")
 DataProcessCore = None
 
 
@@ -71,8 +64,7 @@ class DataProcessService:
         # Initialize components in a modular way
         self._init_redis_client()
 
-        # Don't init clip model here, otherwise it will drastically slow down the first call from data process.
-        # self._init_clip_model()
+        self.image_filter = ImageImportanceFilter(CLIP_MODEL_PATH)
 
         # Suppress PIL warning about palette images
         warnings.filterwarnings(
@@ -105,24 +97,6 @@ class DataProcessService:
                     "REDIS_BACKEND_URL not set, Redis client not initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize Redis client: {e!s}")
-
-    def _init_clip_model(self):
-        """Initializes the CLIP model and processor."""
-        if getattr(self, 'clip_available', False):
-            return
-        self.model = None
-        self.processor = None
-        self.clip_available = False
-        try:
-            global CLIPModel, CLIPProcessor
-            self.model = CLIPModel.from_pretrained(CLIP_MODEL_PATH)
-            self.processor = CLIPProcessor.from_pretrained(CLIP_MODEL_PATH)
-            self.clip_available = True
-            logger.info("CLIP model loaded successfully")
-        except Exception as e:
-            logger.warning(
-                f"Failed to load CLIP model, size-only filtering will be used: {e!s}")
-            self.clip_available = False
 
     async def start(self):
         """Start the data processing service"""
@@ -318,22 +292,6 @@ class DataProcessService:
         # May got multiple tasks for the same index
         return [task for task in task_list if task.get('index_name') == index_name]
 
-    def check_image_size(self, width: int, height: int, min_width: int = 200, min_height: int = 200) -> bool:
-        """Check if the image dimensions meet the minimum requirements
-
-        Args:
-            width: Image width
-            height: Image height
-            min_width: Minimum width requirement
-            min_height: Minimum height requirement
-
-        Returns:
-            bool: Returns True if image dimensions meet requirements, False otherwise
-        """
-        if width < min_width or height < min_height:
-            return False
-        return True
-
     async def load_image(self, image_url: str) -> Image.Image | None:
         """Asynchronously load an image from URL, local file path, or base64 string
 
@@ -448,123 +406,20 @@ class DataProcessService:
 
     async def filter_important_image(self, image_url: str, positive_prompt: str = "an important image",
                                      negative_prompt: str = "an unimportant image") -> dict[str, Any]:
-        """Filter whether an image is important using CLIP model
-
-        Args:
-            image_url: URL to the image
-            positive_prompt: Text describing an important image
-            negative_prompt: Text describing an unimportant image
-
-        Returns:
-            Dict[str, Any]: JSON object with is_important boolean and confidence score
-        """
+        """Load the legacy image input and delegate its decision to the SDK."""
+        image = None
         try:
-            # Process image from URL
-            img = await self.load_image(image_url)
-
-            if img is None or not self.check_image_size(img.width, img.height):
-                logger.info(
-                    f"Image not loaded or does not meet minimum size requirements (200x200 pixels): {image_url}")
-                return {
-                    "is_important": False,
-                    "confidence": 0.0,
-                    "probabilities": {
-                        "positive": 0.0,
-                        "negative": 0.0
-                    }
-                }
-
-            # If IMAGE_FILTER is False, or CLIP model is not available, skip CLIP calculation and return as important
-            if not IMAGE_FILTER:
-                logger.info(
-                    f"IMAGE_FILTER is disabled, returning image as important: {image_url}")
-                return {
-                    "is_important": True,
-                    "confidence": 1.0,
-                    "probabilities": {
-                        "positive": 1.0,
-                        "negative": 0.0
-                    }
-                }
-
-            # Lazy load CLIP model
-            if not self.clip_available:
-                self._init_clip_model()
-
-            if not self.clip_available:
-                logger.warning(
-                    f"CLIP model not available, returning image as important: {image_url}")
-                return {
-                    "is_important": True,
-                    "confidence": 1.0,
-                    "probabilities": {
-                        "positive": 1.0,
-                        "negative": 0.0
-                    }
-                }
-
-            # Convert RGBA to RGB if necessary
-            if img.mode == 'RGBA':
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[3])
-                img = background
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-
-            # Try to use CLIP model with fallback to size-only filter
-            try:
-                global torch
-                if torch is None:
-                    import torch as _torch
-
-                    torch = _torch
-
-                # Prepare inputs for CLIP
-                inputs = self.processor(
-                    text=[negative_prompt, positive_prompt],
-                    images=img,
-                    return_tensors="pt",
-                    padding=True
-                )
-
-                # Get model outputs
-                with torch.no_grad():
-                    outputs = self.model(**inputs)
-
-                # Get image-text similarity scores
-                logits_per_image = outputs.logits_per_image
-                probs = logits_per_image.softmax(dim=1)
-
-                # Extract probabilities
-                neg_prob, pos_prob = probs[0].tolist()
-
-                # Determine if image is important based on probability
-                is_important = pos_prob > 0.6 and neg_prob < 0.5
-
-                return {
-                    "is_important": bool(is_important),
-                    "confidence": float(pos_prob),
-                    "probabilities": {
-                        "positive": float(pos_prob),
-                        "negative": float(neg_prob)
-                    }
-                }
-            except Exception as e:
-                # CLIP model processing failed, fall back to size-only filtering
-                logger.warning(
-                    f"CLIP processing failed, using size-only filter: {e!s}")
-                return {
-                    "is_important": True,
-                    "confidence": 0.8,  # Arbitrary high confidence value
-                    "probabilities": {
-                        "positive": 0.8,
-                        "negative": 0.2
-                    }
-                }
-
-        except Exception as e:
-            logger.error(f"Error processing image: {e!s}")
-            raise Exception(f"Error processing image: {e!s}")
+            image = await self.load_image(image_url)
+            return self.image_filter.filter(
+                image, enabled=IMAGE_FILTER,
+                positive_prompt=positive_prompt, negative_prompt=negative_prompt,
+            )
+        except Exception as error:
+            logger.error("image_filter_failed exception_type=%s", type(error).__name__)
+            raise Exception(f"Error processing image: {error!s}") from error
+        finally:
+            if image is not None:
+                image.close()
 
     async def create_batch_tasks_impl(self, authorization: str | None, request: BatchTaskRequest):
         task_ids = []
