@@ -3,6 +3,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   Alert,
   App,
@@ -20,6 +21,7 @@ import { ChevronRight, RefreshCw, Save, Search, X } from "lucide-react";
 import { useSystemConfigurations } from "@/hooks/system/useSystemConfigurations";
 import type { SystemConfigurationChanges } from "@/types/systemConfiguration";
 import { ConfigRow } from "./components/ConfigRow";
+import { ConfigSummary } from "./components/ConfigSummary";
 import {
   SaveReviewModal,
   type ConfigChange,
@@ -33,6 +35,11 @@ import {
 } from "./systemConfigData";
 
 type GroupFilter = "all" | ConfigGroupId;
+
+const CONFIG_PAGE_STYLE = {
+  "--color-text-secondary": "var(--palette-gray-60)",
+  "--color-icon-tertiary": "var(--palette-gray-60)",
+} as CSSProperties;
 
 export function SystemConfigPage() {
   const { t } = useTranslation("common");
@@ -157,8 +164,12 @@ export function SystemConfigPage() {
   });
 
   return (
-    <div className="min-h-full bg-[var(--color-bg-2)]">
-      <div className="mx-auto w-full max-w-[1320px] px-8 pt-7">
+    <div
+      data-testid="config-page"
+      className="min-h-full bg-[var(--color-bg-5)]"
+      style={CONFIG_PAGE_STYLE}
+    >
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-7 sm:px-6 lg:px-8">
         <header className="flex items-start justify-between gap-6">
           <div>
             <div className="flex items-center gap-1.5 text-[12px] text-[var(--color-text-secondary)]">
@@ -182,53 +193,89 @@ export function SystemConfigPage() {
                 />
               }
               onClick={() => void refetch()}
-            />
+            >
+              <span className="hidden sm:inline">
+                {t("systemConfig.refresh")}
+              </span>
+            </Button>
           </Tooltip>
         </header>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3 border-y border-[var(--color-border-separator)] py-4">
-          <Input
-            allowClear
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            prefix={
-              <Search className="h-4 w-4 text-[var(--color-icon-tertiary)]" />
-            }
-            placeholder={t("systemConfig.searchPlaceholder")}
-            className="!w-[300px]"
-          />
-          <Segmented
-            value={groupFilter}
-            onChange={(value) => setGroupFilter(value as GroupFilter)}
-            options={[
-              {
-                label: `${t("systemConfig.filter.all")} ${items.length}`,
-                value: "all",
-              },
-              ...CONFIG_GROUPS.map((group) => ({
-                label: `${t(group.labelKey)} ${items.filter((item) => item.group === group.id).length}`,
-                value: group.id,
-              })),
-            ]}
-          />
-          <label className="ml-auto flex cursor-pointer items-center gap-2 text-[12px] text-[var(--color-text-secondary)]">
-            <Switch
-              size="small"
-              checked={onlyModified}
-              onChange={setOnlyModified}
+        <Alert
+          className="mt-5"
+          type="info"
+          showIcon
+          title={t("systemConfig.notice")}
+        />
+
+        {!isLoading && !error ? (
+          <div className="mt-4">
+            <ConfigSummary
+              itemCount={items.length}
+              groupCount={CONFIG_GROUPS.length}
+              modifiedCount={changes.length}
             />
-            {t("systemConfig.onlyModified")}
-          </label>
+          </div>
+        ) : null}
+
+        <div data-testid="config-filter" className="mt-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="w-full md:w-[300px]">
+              <label
+                htmlFor="system-config-search"
+                className="mb-1 block text-[12px] font-medium text-[var(--color-text-secondary)]"
+              >
+                {t("systemConfig.searchLabel")}
+              </label>
+              <Input
+                id="system-config-search"
+                allowClear
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                prefix={
+                  <Search className="h-4 w-4 text-[var(--color-icon-tertiary)]" />
+                }
+                placeholder={t("systemConfig.searchPlaceholder")}
+                className="w-full"
+              />
+            </div>
+            <div className="max-w-full">
+              <Segmented
+                className="[&_.ant-segmented-group]:flex-wrap"
+                value={groupFilter}
+                onChange={(value) => setGroupFilter(value as GroupFilter)}
+                options={[
+                  {
+                    label: `${t("systemConfig.filter.all")} ${items.length}`,
+                    value: "all",
+                  },
+                  ...CONFIG_GROUPS.map((group) => ({
+                    label: `${t(group.labelKey)} ${items.filter((item) => item.group === group.id).length}`,
+                    value: group.id,
+                  })),
+                ]}
+              />
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-[var(--color-text-secondary)] md:ml-auto">
+              <Switch
+                size="small"
+                checked={onlyModified}
+                onChange={setOnlyModified}
+                aria-label={t("systemConfig.onlyModified")}
+              />
+              {t("systemConfig.onlyModified")}
+            </label>
+          </div>
         </div>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="mt-6 flex justify-center rounded-lg border border-[var(--color-border-separator)] bg-[var(--color-bg-5)] py-20 shadow-sm">
             <Spin aria-label={t("systemConfig.loading")} />
           </div>
         ) : null}
         {error ? (
           <Alert
-            className="mt-6"
+            className="mt-6 rounded-lg shadow-sm"
             type="error"
             showIcon
             message={error.message}
@@ -246,8 +293,8 @@ export function SystemConfigPage() {
               );
               if (!groupItems.length) return null;
               return (
-                <section key={group.id} className="mt-7">
-                  <div className="mb-3 flex items-end justify-between">
+                <section key={group.id} className="mt-6">
+                  <div className="mb-3 flex items-end justify-between gap-4">
                     <div>
                       <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
                         {t(group.labelKey)}
@@ -262,28 +309,33 @@ export function SystemConfigPage() {
                       })}
                     </span>
                   </div>
-                  <div className="overflow-x-auto border-y border-[var(--color-border-separator)]">
-                    <div className="min-w-[860px]">
-                      <div className="grid grid-cols-[minmax(280px,1.7fr)_190px_160px_32px] gap-4 border-b border-[var(--color-border-separator)] bg-[var(--color-table-header)] px-5 py-2 text-[11px] text-[var(--color-text-secondary)]">
-                        <span>{t("systemConfig.table.parameter")}</span>
-                        <span>{t("systemConfig.table.value")}</span>
-                        <span>{t("systemConfig.table.range")}</span>
-                        <span />
-                      </div>
-                      <div className="divide-y divide-[var(--color-border-separator-subtle)]">
-                        {groupItems.map((item) => (
-                          <ConfigRow
-                            key={item.key}
-                            item={item}
-                            value={valueOf(item)}
-                            modified={isModified(item)}
-                            errorKey={errorByKey[item.key]}
-                            onValueChange={(value) => updateDraft(item, value)}
-                            onReset={() =>
-                              updateDraft(item, item.default_value)
-                            }
-                          />
-                        ))}
+                  <div className="overflow-hidden rounded-lg border border-[var(--color-border-separator-subtle)] bg-[var(--color-bg-5)] shadow-sm">
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[860px]">
+                        <div className="grid grid-cols-[minmax(280px,1.7fr)_190px_160px_180px_32px] gap-4 border-b border-[var(--color-border-separator-subtle)] bg-[var(--color-table-header)] px-5 py-2 text-[11px] text-[var(--color-text-secondary)]">
+                          <span>{t("systemConfig.table.parameter")}</span>
+                          <span>{t("systemConfig.table.value")}</span>
+                          <span>{t("systemConfig.table.range")}</span>
+                          <span>{t("systemConfig.table.effect")}</span>
+                          <span />
+                        </div>
+                        <div className="divide-y divide-[var(--color-border-separator-subtle)]">
+                          {groupItems.map((item) => (
+                            <ConfigRow
+                              key={item.key}
+                              item={item}
+                              value={valueOf(item)}
+                              modified={isModified(item)}
+                              errorKey={errorByKey[item.key]}
+                              onValueChange={(value) =>
+                                updateDraft(item, value)
+                              }
+                              onReset={() =>
+                                updateDraft(item, item.default_value)
+                              }
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -292,41 +344,42 @@ export function SystemConfigPage() {
             })
           : null}
         {!isLoading && !error && !visibleItems.length ? (
-          <Empty className="mt-10" description={t("systemConfig.empty")} />
+          <div className="mt-6 rounded-lg border border-[var(--color-border-separator)] bg-[var(--color-bg-5)] py-10 shadow-sm">
+            <Empty description={t("systemConfig.empty")} />
+          </div>
+        ) : null}
+        {changes.length ? (
+          <div className="sticky bottom-4 z-30 rounded-lg border border-[var(--color-border-separator)] bg-[var(--color-bg-5)] px-4 py-3 shadow-lg">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="rounded-xs bg-[var(--color-select)] px-2 py-0.5 text-[12px] font-medium text-[var(--color-brand)]">
+                {changes.length}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-[var(--color-text-primary)]">
+                  {t("systemConfig.saveBar.count", { count: changes.length })}
+                </div>
+                {hasErrors ? (
+                  <div className="text-[11px] text-[var(--color-error)]">
+                    {t("systemConfig.saveBar.invalid")}
+                  </div>
+                ) : null}
+              </div>
+              <Button icon={<X className="h-4 w-4" />} onClick={discardChanges}>
+                {t("systemConfig.discard")}
+              </Button>
+              <Button
+                type="primary"
+                icon={<Save className="h-4 w-4" />}
+                disabled={hasErrors}
+                onClick={() => setReviewOpen(true)}
+              >
+                {t("systemConfig.saveBar.action")}
+              </Button>
+            </div>
+          </div>
         ) : null}
         <div className="h-16" />
       </div>
-
-      {changes.length ? (
-        <div className="sticky bottom-0 z-30 border-t border-[var(--color-border-separator)] bg-[var(--color-bg-2)] px-8 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
-          <div className="mx-auto flex max-w-[1320px] items-center gap-3">
-            <span className="rounded-xs bg-[var(--color-select)] px-2 py-0.5 text-[12px] font-medium text-[var(--color-brand)]">
-              {changes.length}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-[var(--color-text-primary)]">
-                {t("systemConfig.saveBar.count", { count: changes.length })}
-              </div>
-              {hasErrors ? (
-                <div className="text-[11px] text-[var(--color-error)]">
-                  {t("systemConfig.saveBar.invalid")}
-                </div>
-              ) : null}
-            </div>
-            <Button icon={<X className="h-4 w-4" />} onClick={discardChanges}>
-              {t("systemConfig.discard")}
-            </Button>
-            <Button
-              type="primary"
-              icon={<Save className="h-4 w-4" />}
-              disabled={hasErrors}
-              onClick={() => setReviewOpen(true)}
-            >
-              {t("systemConfig.saveBar.action")}
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
       <SaveReviewModal
         open={reviewOpen}

@@ -69,7 +69,7 @@ function PermissionsProbe() {
     isAuthzReady,
     isAuthorized,
     isLoading,
-  isAuthzPromptModalOpen,
+    isAuthzPromptModalOpen,
     canAccessRoute,
     refetch,
   } = useAuthorizationContext();
@@ -131,6 +131,18 @@ test("root resolves a single authorized route without a denial prompt", async ()
     expect(state.replace).toHaveBeenCalledWith("/system-config")
   );
   expect(probe).toHaveAttribute("data-denied", "false");
+});
+
+test("OPS admin can open personal profile with only the system configuration grant", async () => {
+  state.pathname = "/zh/users";
+  const auth = response(["/system-config"]);
+  auth.user.role = USER_ROLES.OPS_ADMIN;
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
 });
 
 async function retryButton() {

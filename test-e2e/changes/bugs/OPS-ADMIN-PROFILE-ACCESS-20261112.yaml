@@ -1,0 +1,40 @@
+schema_version: "1.0"
+change:
+  change_id: OPS-ADMIN-PROFILE-ACCESS-20261112
+  change_type: bugfix
+  bug_id: OPS-ADMIN-PROFILE-ACCESS-20261112
+  title: Allow operations administrators to open their personal profile
+  description: Preserve explicit system-configuration authorization while restoring the signed-in personal-profile route for OPS_ADMIN.
+  observed_behavior: An authenticated OPS_ADMIN with only the seeded /system-config route is denied /users by the frontend route guard and redirected to the homepage.
+  expected_behavior: The exact /users page remains available to every authenticated role as a self-service route. OPS_ADMIN can open it without another navigation grant, while /system-config and all other protected routes retain their existing authorization rules.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Authorization component tests do not cover OPS_ADMIN visiting /users with only /system-config, and the existing OPS_ADMIN D4 fixture never leaves the configuration page to exercise the account-menu destination.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYSTEM-CONFIGURATION]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [SYS-CONFIG-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Keep an OPS_ADMIN with only /system-config authorized on /users without a denial prompt or homepage redirect.
+      - Preserve explicit grants for system configuration, Workbench and other protected routes, including the existing denied-actor checks.
+    reason: The real authorization provider and hook are exercised with controlled router and HTTP boundaries. The existing D4 adds the browser journey; no Python behavior changes and no duplicate formal D1 is needed.
+    test_selectors:
+      - frontend/tests/component/authorizationRecovery.test.tsx
+  notes: >-
+    The usable baseline is openspec/changes/add-system-configuration-page, especially proposal AC-06 and design D-01.
+    Existing authorizationRecovery tests and SYS-CONFIG-JOURNEY-D4-001 were inspected before selecting coverage.
+    The formal gap is a missing assertion, not a missing Case: the D4 already supplies the exact OPS_ADMIN fixture
+    and controlled API boundary. Its first journey step and AC-01 are strengthened for personal-profile access.
+    D1 would duplicate the frontend unit boundary; D2/D3 are unchanged because no backend API or service contract changes;
+    D5 adds no separate proof surface beyond preserving the existing denied actor and precise self-service route.
+    The self-service route is evaluated outside accessibleRoutes, so the OPS_ADMIN SQL seed remains /system-config only.

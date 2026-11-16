@@ -199,6 +199,9 @@ export function useAuthorization(): AuthorizationContextType {
   // Share pages are always accessible to any logged-in user (covers /share/...).
   const isSharePage = cleanPath.startsWith("/share/");
 
+  // Personal profile is a self-service page available to every signed-in role.
+  const isUserProfilePage = cleanPath === "/users";
+
   // Support prefix matching so nested routes such as /evaluation/{id} are
   // covered by /evaluation.
   const isWithinAccessiblePrefix = accessibleRoutes.some(
@@ -208,6 +211,7 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     cleanPath === "/" ||
     isSharePage ||
+    isUserProfilePage ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;
 

@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -29,7 +30,17 @@ vi.mock("@/services/systemConfigurationService", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: { count?: number }) => {
+      const templates: Record<string, string> = {
+        "systemConfig.metric.managedValue": "{{count}}",
+        "systemConfig.metric.groupsValue": "{{count}}",
+        "systemConfig.metric.modifiedValue": "{{count}}",
+      };
+      return (templates[key] ?? key).replace(
+        "{{count}}",
+        String(options?.count ?? "")
+      );
+    },
   }),
 }));
 
@@ -132,6 +143,36 @@ test("renders the exact catalog with search and no recommendation or consumer st
   expect(
     await screen.findByTestId("config-row-MAX_TENANT_COUNT")
   ).toBeInTheDocument();
+  const summary = screen.getByTestId("config-summary");
+  expect(screen.getByRole("alert")).toBeInTheDocument();
+  expect(document.querySelector(".ant-card")).toBeInTheDocument();
+  expect(document.querySelector(".lucide-database")).toBeInTheDocument();
+  expect(screen.getByLabelText("systemConfig.searchLabel")).toBeInTheDocument();
+  expect(
+    screen.getByRole("switch", { name: "systemConfig.onlyModified" })
+  ).toBeInTheDocument();
+  expect(within(summary).getAllByTestId(/^config-summary-/)).toHaveLength(4);
+  expect(screen.getByTestId("config-summary-managed")).toHaveTextContent("19");
+  expect(screen.getByTestId("config-summary-groups")).toHaveTextContent("4");
+  expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("0");
+  expect(screen.getByTestId("config-summary-source")).toHaveTextContent(
+    "PostgreSQL"
+  );
+  expect(screen.getByTestId("config-page")).toHaveClass(
+    "bg-[var(--color-bg-5)]"
+  );
+  expect(screen.getByTestId("config-filter")).not.toHaveClass("border");
+  expect(screen.getByTestId("config-filter")).not.toHaveClass("shadow-sm");
+  expect(screen.getAllByText("systemConfig.hotUpdateTag")).toHaveLength(19);
+  expect(
+    screen.getAllByText("systemConfig.hotUpdateTag")[0].closest(".ant-tag")
+  ).not.toBeNull();
+  expect(
+    within(screen.getByTestId("config-row-MAX_TENANT_COUNT")).getByRole(
+      "button",
+      { name: /detail.openFor/ }
+    )
+  ).toHaveClass("ant-btn-text");
   expect(screen.getAllByTestId(/^config-row-/)).toHaveLength(19);
   expect(screen.queryByText("systemConfig.recommend")).not.toBeInTheDocument();
   expect(
@@ -144,6 +185,66 @@ test("renders the exact catalog with search and no recommendation or consumer st
     }
   );
   expect(screen.getAllByTestId(/^config-row-/)).toHaveLength(1);
+});
+
+test("expands real parameter details without revision or consumer status", async () => {
+  const baseline = item("MAX_TENANT_COUNT", 90);
+  baseline.default_value = 100;
+  state.list.mockResolvedValue({ items: [baseline], total: 1 });
+  renderPage();
+
+  const row = await screen.findByTestId("config-row-MAX_TENANT_COUNT");
+  const toggle = within(row).getByRole("button", {
+    name: /systemConfig.detail.openFor/,
+  });
+  fireEvent.click(toggle);
+
+  const detail = await screen.findByTestId("config-detail-MAX_TENANT_COUNT");
+  expect(
+    document.querySelector("#config-input-MAX_TENANT_COUNT")
+  ).not.toBeNull();
+  expect(detail).toHaveTextContent("systemConfig.detail.savedValue");
+  expect(detail).toHaveTextContent("systemConfig.detail.defaultValue");
+  expect(detail).toHaveTextContent("90");
+  expect(detail).toHaveTextContent("100");
+  expect(detail).toHaveTextContent("PostgreSQL");
+  expect(detail).toHaveTextContent("systemConfig.group.tenant");
+  expect(detail).toHaveTextContent("systemConfig.integerType");
+  expect(detail).toHaveTextContent("systemConfig.effect.nextRun");
+  expect(detail).not.toHaveTextContent("revision");
+  expect(detail).not.toHaveTextContent("consumerCount");
+  fireEvent.click(toggle);
+  expect(
+    screen.queryByTestId("config-detail-MAX_TENANT_COUNT")
+  ).not.toBeInTheDocument();
+});
+
+test("updates the modified summary count as drafts change", async () => {
+  renderPage();
+
+  const input = await screen.findByLabelText(
+    "systemConfig.param.MAX_TENANT_COUNT.label"
+  );
+  expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("0");
+  fireEvent.change(input, { target: { value: "5" } });
+  expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("1");
+  fireEvent.click(screen.getByRole("button", { name: /discard/ }));
+  expect(screen.getByTestId("config-summary-modified")).toHaveTextContent("0");
+});
+
+test("places the save bar inside the configuration content container", async () => {
+  renderPage();
+
+  const input = await screen.findByLabelText(
+    "systemConfig.param.MAX_TENANT_COUNT.label"
+  );
+  fireEvent.change(input, { target: { value: "5" } });
+  const saveButton = screen.getByRole("button", { name: /saveBar.action/ });
+  const saveBar = saveButton.parentElement?.parentElement;
+  const filter = screen.getByTestId("config-filter");
+
+  expect(saveBar).not.toBeNull();
+  expect(saveBar?.parentElement).toBe(filter.parentElement);
 });
 
 test("submits only changed keys and resets a field to its default", async () => {
@@ -164,6 +265,12 @@ test("submits only changed keys and resets a field to its default", async () => 
     "systemConfig.param.MAX_TENANT_COUNT.label"
   );
   fireEvent.change(input, { target: { value: "95" } });
+  fireEvent.click(
+    within(await screen.findByTestId("config-row-MAX_TENANT_COUNT")).getByRole(
+      "button",
+      { name: /detail.openFor/ }
+    )
+  );
   fireEvent.click(screen.getByRole("button", { name: /resetDefaultFor/ }));
   fireEvent.click(screen.getByRole("button", { name: /saveBar.action/ }));
   fireEvent.click(
@@ -239,4 +346,5 @@ test("shows a retryable query error without demo content", async () => {
     screen.getByRole("button", { name: "systemConfig.retry" })
   ).toBeInTheDocument();
   expect(screen.queryByText("systemConfig.demoBadge")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("config-summary")).not.toBeInTheDocument();
 });

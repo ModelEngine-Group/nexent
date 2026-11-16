@@ -72,6 +72,50 @@ def test_conversation_creation_uses_refreshed_limit(mocker):
     assert error.value.details["limit"] == 1
 
 
+def test_conversation_turn_limit_boundaries_and_bypasses(mocker):
+    from contracts.constants.constants import MESSAGE_ROLE
+    from contracts.conversation import MessageSource
+    from management.db.conversation import repository
+
+    session = Mock()
+    session.scalar.return_value = 1
+    getter = mocker.patch.object(
+        repository,
+        "get_config_snapshot",
+        return_value=_snapshot(MAX_CONVERSATION_TURNS=1),
+    )
+
+    with pytest.raises(AppException) as error:
+        repository._enforce_conversation_turn_limit(
+            session, 42, MESSAGE_ROLE["USER"], "user-1"
+        )
+
+    assert error.value.details == {
+        "resource": "conversation_turns",
+        "scope": "conversation",
+        "limit": 1,
+        "current_count": 1,
+    }
+    getter.assert_called_once_with()
+
+    session.scalar.return_value = 0
+    repository._enforce_conversation_turn_limit(
+        session, 42, MESSAGE_ROLE["USER"], "user-1"
+    )
+
+    getter.reset_mock()
+    for role, user_id, source in (
+        (MESSAGE_ROLE["ASSISTANT"], "user-1", MessageSource.CHAT),
+        (MESSAGE_ROLE["USER"], "user-1", MessageSource.AUTOMATION),
+        (MESSAGE_ROLE["USER"], None, MessageSource.CHAT),
+    ):
+        session.scalar.return_value = 1
+        repository._enforce_conversation_turn_limit(
+            session, 42, role, user_id, source
+        )
+    getter.assert_not_called()
+
+
 def test_identity_limit_uses_snapshot_instead_of_import_time_constant(mocker):
     from management.db.identity import user_tenant
 

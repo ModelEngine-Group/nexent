@@ -197,6 +197,17 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
   );
 
   await contract.step(contract.expectedIds("steps")[0], async () => {
+    await page.goto("/zh/users");
+    await expect(page).toHaveURL(/\/zh\/users$/);
+    await expect(
+      page.getByRole("heading", { name: "个人信息", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("无权限访问", { exact: true })).toHaveCount(0);
+
+    await page.goto("/zh/system-config");
+    await expect(
+      page.getByRole("heading", { name: "系统配置", exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("推荐", { exact: true })).toHaveCount(0);
     await expect(page.getByText("应用详情", { exact: true })).toHaveCount(0);
     await expect(page.getByText("当前版本", { exact: true })).toHaveCount(0);
@@ -255,12 +266,35 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
       exact: true,
     });
     await otherInput.fill("123");
+    const filterBox = await page.getByTestId("config-filter").boundingBox();
+    const saveBarBox = await page
+      .getByRole("button", { name: "保存修改", exact: true })
+      .locator("xpath=../..")
+      .boundingBox();
+    expect(filterBox).not.toBeNull();
+    expect(saveBarBox).not.toBeNull();
+    if (!filterBox || !saveBarBox)
+      throw new Error("Save bar alignment requires visible layout boxes");
+    expect({
+      left: saveBarBox.x,
+      right: saveBarBox.x + saveBarBox.width,
+    }).toEqual({
+      left: filterBox.x,
+      right: filterBox.x + filterBox.width,
+    });
     await page.getByRole("button", { name: "放弃", exact: true }).click();
     await expect(otherInput).toHaveValue("100");
     await expect(
       page.getByRole("button", { name: "保存修改", exact: true }),
     ).toHaveCount(0);
 
+    await page
+      .getByTestId("config-row-MAX_TENANT_COUNT")
+      .getByRole("button", {
+        name: "展开租户数量上限详情",
+        exact: true,
+      })
+      .click();
     await page
       .getByRole("button", {
         name: "将租户数量上限恢复为默认值",
