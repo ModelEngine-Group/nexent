@@ -41,6 +41,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+management-cleanse = [
+    # Required by the existing Management queue-control callers until their migration.
+    "celery>=5.3.6",
+    "huggingface_hub>=0.30.0,<1.0",
+    "nexent[data_process,performance]",
+]
+runtime-images = [
+    "nexent[performance]",
+    "torch>=2.6.0,<3",
+    "transformers>=4.25.1,<5",
+]
 data-process = [
     "celery>=5.3.6",
     "flower>=2.0.1",

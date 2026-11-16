@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+ARG MODEL_DEPENDENCY_VARIANT=cpu
 FROM python:3.11-slim AS base
 ARG MIRROR
 ARG APT_MIRROR
@@ -69,6 +70,33 @@ RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
 COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
+RUN /opt/backend/.venv/bin/python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
+
+FROM builder AS management-deps
+ARG MIRROR
+ARG TARGETARCH
+ARG MODEL_DEPENDENCY_VARIANT
+RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    case "$MODEL_DEPENDENCY_VARIANT" in \
+        cpu) dependency_index=pytorch-cpu ;; \
+        gpu) dependency_index=pytorch-nvidia ;; \
+        *) echo "Unsupported MODEL_DEPENDENCY_VARIANT: $MODEL_DEPENDENCY_VARIANT" >&2; exit 1 ;; \
+    esac && \
+    uv sync --no-editable --link-mode copy --extra management-cleanse --index "$dependency_index" \
+        $(test -n "$MIRROR" && echo "--default-index $MIRROR")
+
+FROM builder AS runtime-deps
+ARG MIRROR
+ARG TARGETARCH
+ARG MODEL_DEPENDENCY_VARIANT
+RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    case "$MODEL_DEPENDENCY_VARIANT" in \
+        cpu) dependency_index=pytorch-cpu ;; \
+        gpu) dependency_index=pytorch-nvidia ;; \
+        *) echo "Unsupported MODEL_DEPENDENCY_VARIANT: $MODEL_DEPENDENCY_VARIANT" >&2; exit 1 ;; \
+    esac && \
+    uv sync --no-editable --link-mode copy --extra runtime-knowledge --extra runtime-images --index "$dependency_index" \
+        $(test -n "$MIRROR" && echo "--default-index $MIRROR")
 
 FROM base AS backend-common
 
@@ -77,7 +105,6 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 WORKDIR /opt/backend
 
-COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
@@ -87,7 +114,6 @@ COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/mi
 COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
-RUN /opt/backend/.venv/bin/python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
 
@@ -103,17 +129,32 @@ EXPOSE 5010
 FROM backend-common AS management
 
 ARG TARGETARCH
-# Office preview runs locally in Management and needs no data-process HTTP hop.
+# Structural parsing and Office preview execute only in Management.
 RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libreoffice-writer libreoffice-calc libreoffice-impress
+        libreoffice-writer libreoffice-calc libreoffice-impress \
+        pandoc poppler-utils tesseract-ocr libmagic1 libgl1 libglib2.0-0
+
+COPY --from=management-deps /opt/backend/.venv /opt/backend/.venv
+RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
+    mkdir -p /opt/models && \
+    cp -a /tmp/model-assets/nltk_data /opt/models/nltk_data && \
+    cp -a /tmp/model-assets/table-transformer-structure-recognition /opt/models/table-transformer-structure-recognition && \
+    cp -a /tmp/model-assets/yolox /opt/models/yolox && \
+    python -c "import json; from pathlib import Path; p = Path('/opt/models/table-transformer-structure-recognition/config.json'); c = json.loads(p.read_text()); assert c['model_type'] == 'table-transformer'; c['use_pretrained_backbone'] = False; p.write_text(json.dumps(c, indent=2) + '\n')" && \
+    chown -R root:root /opt/models/nltk_data && \
+    chmod -R u+rwX,go+rX,go-w /opt/models/nltk_data
+ENV NLTK_DATA=/opt/models/nltk_data \
+    TABLE_TRANSFORMER_MODEL_PATH=/opt/models/table-transformer-structure-recognition \
+    UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH=/opt/models/yolox/config.json \
+    MANAGEMENT_FILE_CLEANSE_ENABLED=true
 
 ENV NEXENT_SQL_STARTUP_MODE=migrate
 COPY infrastructure /opt/infrastructure
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/sql/migrations /opt/deploy/sql/migrations
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 
@@ -140,6 +181,15 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 # Runtime target excludes Management business code.
 FROM backend-common AS runtime
 
+COPY --from=runtime-deps /opt/backend/.venv /opt/backend/.venv
+RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
+    mkdir -p /opt/models && \
+    cp -a /tmp/model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32 && \
+    cp -a /tmp/model-assets/nltk_data /opt/models/nltk_data && \
+    chown -R root:root /opt/models/nltk_data && \
+    chmod -R u+rwX,go+rX,go-w /opt/models/nltk_data
+ENV NLTK_DATA=/opt/models/nltk_data \
+    CLIP_MODEL_PATH=/opt/models/clip-vit-base-patch32
 ENV NEXENT_SQL_STARTUP_MODE=off
 COPY infrastructure /opt/infrastructure
 
@@ -161,6 +211,7 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 
 # Keep the existing full backend as the default build target.
 FROM backend-common AS final
+COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/

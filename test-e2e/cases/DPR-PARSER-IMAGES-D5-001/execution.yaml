@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-PARSER-IMAGES-D5-001
+timeout_seconds: 420
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_role_parser_images
+acceptance_bindings:
+  AC-01: [test_role_parser_images]
+  AC-02: [test_role_parser_images]
+  AC-03: [test_role_parser_images]
+  AC-04: [test_role_parser_images]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

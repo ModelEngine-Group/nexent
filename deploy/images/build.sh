@@ -61,7 +61,7 @@ usage() {
   --version VERSION          镜像 tag，例如 v2.2.1 或 latest。默认读取根目录 VERSION
   --registry general|mainland
   --dependency-variant cpu|gpu
-                             data-process 依赖变体，默认 cpu
+                             Management、Runtime 与 data-process 模型依赖变体，默认 cpu
   --terminal-variant slim|conda
                              terminal 镜像变体，默认 slim
   --push
@@ -96,7 +96,7 @@ Options:
   --version VERSION          Image tag, for example v2.2.1 or latest. Defaults to root VERSION.
   --registry general|mainland
   --dependency-variant cpu|gpu
-                             data-process dependency variant. Defaults to cpu.
+                             Management, Runtime and data-process model dependencies. Defaults to cpu.
   --terminal-variant slim|conda
                              terminal image variant. Defaults to slim.
   --push
@@ -406,9 +406,9 @@ case "$DEPENDENCY_VARIANT" in
   cpu|gpu) ;;
   *)
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "不支持的 data-process 依赖变体：$DEPENDENCY_VARIANT" >&2
+      echo "不支持的模型依赖变体：$DEPENDENCY_VARIANT" >&2
     else
-      echo "Unsupported data-process dependency variant: $DEPENDENCY_VARIANT" >&2
+      echo "Unsupported model dependency variant: $DEPENDENCY_VARIANT" >&2
     fi
     exit 1
     ;;
@@ -435,29 +435,48 @@ run_cmd() {
   fi
 }
 
+model_asset_file() {
+  [ -s "$1" ] && ! head -c 128 "$1" | LC_ALL=C grep -a -q '^version https://git-lfs.github.com/spec/'
+}
+
 model_assets_complete() {
   local model_assets_dir="$1"
-
-  [ -f "$model_assets_dir/clip-vit-base-patch32/config.json" ] && \
-    [ -d "$model_assets_dir/nltk_data" ] && \
-    [ -d "$model_assets_dir/table-transformer-structure-recognition" ] && \
-    [ -d "$model_assets_dir/yolox" ]
+  local role="${2:-data-process}"
+  model_asset_file "$model_assets_dir/nltk_data/tokenizers/punkt_tab/english/collocations.tab" || return 1
+  case "$role" in
+    management)
+      model_asset_file "$model_assets_dir/yolox/config.json" && \
+      model_asset_file "$model_assets_dir/yolox/yolox_l0.05.onnx" && \
+      if [ -e "$model_assets_dir/table-transformer-structure-recognition/model.safetensors" ]; then
+        model_asset_file "$model_assets_dir/table-transformer-structure-recognition/model.safetensors"
+      else
+        model_asset_file "$model_assets_dir/table-transformer-structure-recognition/pytorch_model.bin"
+      fi
+      ;;
+    runtime)
+      model_asset_file "$model_assets_dir/clip-vit-base-patch32/config.json" && \
+      model_asset_file "$model_assets_dir/clip-vit-base-patch32/pytorch_model.bin"
+      ;;
+    data-process) model_assets_complete "$model_assets_dir" management && model_assets_complete "$model_assets_dir" runtime ;;
+    *) return 1 ;;
+  esac
 }
 
 prepare_model_assets() {
   [ "$DRY_RUN" = true ] && return 0
 
+  local role="${1:-data-process}"
   local project_model_assets="$PROJECT_ROOT/model-assets"
   local home_model_assets="${HOME:-}/model-assets"
   local model_assets_repo="${MODEL_ASSETS_REPO:-}"
   local tmp_model_assets
 
-  if model_assets_complete "$project_model_assets"; then
+  if model_assets_complete "$project_model_assets" "$role"; then
     echo "Using existing model-assets at $project_model_assets"
     return 0
   fi
 
-  if [ -n "${HOME:-}" ] && model_assets_complete "$home_model_assets"; then
+  if [ -n "${HOME:-}" ] && model_assets_complete "$home_model_assets" "$role"; then
     echo "Copying cached model-assets from $home_model_assets"
     mkdir -p "$project_model_assets"
     cp -R "$home_model_assets"/. "$project_model_assets"/
@@ -465,11 +484,11 @@ prepare_model_assets() {
   fi
 
   command -v git >/dev/null 2>&1 || {
-    echo "git is required to clone model-assets for data-process builds." >&2
+    echo "git is required to clone model-assets for $role builds." >&2
     exit 1
   }
   git lfs version >/dev/null 2>&1 || {
-    echo "git-lfs is required to pull model-assets for data-process builds." >&2
+    echo "git-lfs is required to pull model-assets for $role builds." >&2
     exit 1
   }
 
@@ -487,7 +506,7 @@ prepare_model_assets() {
   GIT_LFS_SKIP_SMUDGE=1 git clone "$model_assets_repo" "$tmp_model_assets"
   (
     cd "$tmp_model_assets"
-    GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
+    git lfs pull
     rm -rf .git .gitattributes
   )
   mkdir -p "$project_model_assets"
@@ -525,8 +544,14 @@ build_selected_image() {
   case "$1" in
     gateway) build_one nexent-gateway "$DOCKERFILE_DIR/gateway/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
     main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    management) build_one nexent-management "$DOCKERFILE_DIR/main/Dockerfile" --target management "${PY_MIRROR_ARGS[@]}" ;;
-    runtime) build_one nexent-runtime "$DOCKERFILE_DIR/main/Dockerfile" --target runtime "${PY_MIRROR_ARGS[@]}" ;;
+    management|runtime)
+      local role="$1"
+      local image_name="nexent-$role"
+      [ "$DEPENDENCY_VARIANT" = "gpu" ] && image_name="${image_name}-gpu"
+      prepare_model_assets "$role"
+      build_one "$image_name" "$DOCKERFILE_DIR/main/Dockerfile" --target "$role" \
+        --build-arg MODEL_DEPENDENCY_VARIANT="$DEPENDENCY_VARIANT" "${PY_MIRROR_ARGS[@]}"
+      ;;
     web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" \
       --build-arg MAX_KNOWLEDGE_FILE_SIZE_MB="${MAX_KNOWLEDGE_FILE_SIZE_MB:-100}" \
       "${WEB_MIRROR_ARGS[@]}" ;;

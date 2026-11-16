@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-PARSER-IMAGES-20261117
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Assign parser and CLIP dependencies and weights to their service images
+  description: >-
+    Build Management with structural parsing/OCR dependencies and extraction models;
+    build Runtime with pure chunking and local CLIP. Preserve existing CPU flags and
+    add explicit GPU variant selection without automatic retry or service fallback.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-ROOT-D3-001]
+    added: [DPR-PARSER-IMAGES-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Existing management/runtime flags and list syntax retain separate targets and latest tags.
+    - Explicit CPU/GPU variants select their dependency index and distinct optional GPU tags.
+    - Asset preparation checks only each role's weights and rejects LFS pointer files.
+    - Management owns parser extras/native utilities; Runtime owns chunking/CLIP; Flower is excluded.
+    - Management ships the complete immutable migration bundle for durable cleanse and KB job tables.
+    - Existing independent source and Compose/Helm/Gateway launch contracts remain intact.
+    reason: >-
+      Existing deployment UT covers target selection but not role dependencies or
+      weights. Extend it; actual built-image imports and inference require D5.
+      Baked backbone initialization configuration is proved by actual native D5
+      tensor equality rather than a unit test mirroring a dictionary assignment.
+      Preserve existing D1 without adding duplicate unit wrappers.
+    test_selectors:
+    - test/backend/deploy/test_service_image_sources.py
+    - test/backend/deploy/test_parser_image_build.py
+    - test/backend/deploy/test_gateway_image.py
+  notes: >-
+    D5 runs uniquely labelled containers over the actual latest images. It is parser
+    image acceptance, not complete API startup or final data-process retirement.
+    Root D3 is reused with NEXENT_CLEANSE_TEST_IMAGE pointing to Management.

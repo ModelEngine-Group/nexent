@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: FILE-CLEANSE
+case:
+  case_id: DPR-PARSER-IMAGES-D5-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-001]
+  business_rule_ids: [DPR-CLEANSE-RULE-04, DPR-CLEANSE-RULE-05, DPR-CLEANSE-RULE-10]
+  title: Independent parser and CLIP images run with offline role-owned dependencies
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual role-specific image packages, weights and native execution without a data-process service.
+  preconditions:
+  - Run build.sh --management --runtime --version latest --load from the current repository with complete model assets.
+  - Docker has the resulting nexent/nexent-management:latest and nexent/nexent-runtime:latest CPU images.
+  test_data:
+    resources: Synthetic text, JSON, XLSX and RGB image data inside uniquely owned containers.
+    execution: Real SDK parsing/model loaders, CLIP inference and final chunking; no model/provider mocks or application storage.
+  steps:
+  - order: 1
+    action: Inspect both actual images and run their probes without a network or peer source mounts.
+    expected: Each role has its own venv/source/weights, no peer backend directory, no Flower, only Management has OCR/inference parser dependencies, and Management includes the complete immutable migration bundle.
+  - order: 2
+    action: In Management preload YOLOX/table-transformer and parse text, JSON and XLSX structure offline.
+    expected: Both extraction models load without a separate backbone download and their backbone tensors match the checkpoint; text/XLSX retain synthetic content and JSON produces the established empty JSONSource marker; CLIP weights are absent and parser utilities exist.
+  - order: 3
+    action: In Runtime execute text and pinned-source JSON final chunking and real local CLIP inference on a synthetic image.
+    expected: Both chunk paths retain synthetic content, CLIP model/processor are loaded and finite probabilities come from inference; extraction weights are absent.
+  - order: 4
+    action: Remove only uniquely labelled Case containers including anonymous volumes.
+    expected: No owned container remains and unrelated application services are unchanged.
+  expected_results:
+  - Actual service image dependencies and source/weight directories follow their role boundaries.
+  - Management loads extraction models and parses synthetic files offline with its own native utilities.
+  - Runtime chunks and runs CLIP offline without parser inference packages or extraction weights.
+  - Owned resources are reclaimed without changing application data or containers.
+  forbidden_side_effects:
+  - No model download, application database access, old data-process service, package-install fallback or unrelated resource mutation occurs.
+  risk_type: DEPLOYMENT
+  risk: Missing or mixed-role dependencies cause independent images to fail native execution or silently download weights.
+  condition:
+  - Use actual CPU service images built from the current tree and disable all container networking.
+  metrics:
+  - Peer backend and foreign-role model directory counts.
+  - Successful native parser model loads and actual CLIP inference output.
+  - Owned containers remaining after cleanup.
+  thresholds:
+  - Zero peer backend directories, foreign-role weights, Flower packages or model downloads.
+  - Two Management extraction models and one Runtime CLIP model load from baked paths; synthetic parser/chunk content remains present.
+  - Zero owned containers remain.
+  recovery_expectations:
+  - Remove only the Case containers and anonymous volumes; leave built images available for subsequent integration and do not change the developer stack.
+  integration_boundary:
+  - Actual built Docker images, native libraries, model assets and SDK algorithms with networking disabled.
+  observations:
+  - Image IDs, installed package identities, directories, model-loaded flags, parser content and finite inference output.
+  cleanup:
+  - Remove exact unique-label Case container IDs and anonymous volumes on success or failure.
+  acceptance:
+  - id: AC-01
+    description: Actual images contain only the intended role's backend source, parser/CLIP packages and model assets.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Management performs offline extraction model loading with checkpoint-identical backbone tensors and structural parsing using its own dependencies.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Runtime performs actual CLIP inference and final chunking offline without extraction components.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Test-owned containers are reclaimed and unowned application state is untouched.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
