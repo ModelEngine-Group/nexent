@@ -184,6 +184,7 @@ class MemoryIndexService:
         query_text: Optional[str] = None,
         weight_accurate: float = 0.3,
         embedding_model: Any = None,
+        request_timeout: float | None = None,
     ) -> List[Dict[str, Any]]:
         """Run a memory search scoped to the agent's isolation boundary.
 
@@ -255,6 +256,7 @@ class MemoryIndexService:
             embedding=embedding,
             isolation_filter=isolation_filter,
             top_k=top_k,
+            **({"request_timeout": request_timeout} if request_timeout is not None else {}),
         )
 
     # ------------------------------------------------------------------ #
@@ -285,6 +287,7 @@ class MemoryIndexService:
         embedding: List[float],
         isolation_filter: List[Dict[str, Any]],
         top_k: int,
+        request_timeout: float | None = None,
     ) -> List[Dict[str, Any]]:
         """Pure kNN branch (unchanged from the previous release)."""
         query = {
@@ -299,9 +302,14 @@ class MemoryIndexService:
         }
 
         try:
-            response = self.vdb_core.search(index_name=index_name, query=query)
+            response = self.vdb_core.search(
+                index_name=index_name, query=query,
+                **({"request_timeout": request_timeout} if request_timeout is not None else {}),
+            )
             response_body = response.body if hasattr(response, "body") else response
         except Exception:
+            if request_timeout is not None:
+                raise
             logger.exception("search_similar failed for %s", index_name)
             return []
 

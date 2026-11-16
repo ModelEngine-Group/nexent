@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -78,7 +80,9 @@ function buildCronExpr(
   return `${minute} ${hour} * * *`;
 }
 
-export function DreamingConfigCards() {
+export function DreamingConfigCards({
+  memoryAllowed = true,
+}: { memoryAllowed?: boolean } = {}) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
 
@@ -310,6 +314,15 @@ export function DreamingConfigCards() {
     return { status: "warning" as const, text: t("dreaming.run.skipped") };
   })();
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
+  const noVersionReason = latestRun?.reason;
+  const showReason =
+    noVersionReason &&
+    [
+      "memory_disabled",
+      "no_candidates",
+      "no_eligible_candidates",
+      "no_new_evidence",
+    ].includes(noVersionReason);
 
   if (loading) {
     return <Card className="memory-config-card" loading />;
@@ -489,7 +502,12 @@ export function DreamingConfigCards() {
               <Button onClick={() => setAdvancedOpen(true)}>
                 {t("dreaming.advanced.open")}
               </Button>
-              <Button type="primary" loading={running} onClick={handleRunNow}>
+              <Button
+                type="primary"
+                loading={running}
+                disabled={!memoryAllowed}
+                onClick={handleRunNow}
+              >
                 {t("dreaming.run.executeNow")}
               </Button>
             </Flex>
@@ -590,6 +608,11 @@ export function DreamingConfigCards() {
                   : t("dreaming.schedule.neverRun"),
               })}
             </Text>
+            {showReason && (
+              <Text type="secondary" className="w-full text-xs">
+                {t(`dreaming.reason.${noVersionReason}`)}
+              </Text>
+            )}
             {latestRun?.status === "failed" && latestRun.error && (
               <Text type="danger" className="w-full text-xs">
                 {latestRun.error}

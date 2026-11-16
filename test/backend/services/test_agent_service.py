@@ -4926,7 +4926,7 @@ async def test_prepare_agent_run(
     assert agent_run_info == mock_run_info
     assert memory_context == mock_memory_context
     mock_build_memory_context.assert_called_once_with(
-        "test_user", "test_tenant", 1, skip_query=False
+        "test_user", "test_tenant", 1, skip_query=True
     )
     mock_create_run_info.assert_called_once_with(
         agent_id=1,
@@ -5133,7 +5133,7 @@ async def test_run_agent_stream(mock_generate_stream, mock_save_messages, mock_b
     response = await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     assert isinstance(response, StreamingResponse)
     mock_save_messages.assert_called_once_with(mock_agent_request, target='user', user_id=None, tenant_id=None)
-    mock_generate_stream.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
+    mock_generate_stream.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=True, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
     completion_callback = execution_future.add_done_callback.call_args.args[0]
     completion_callback(execution_future)
     capacity_manager.release_agent_capacity.assert_called_once_with('agent-capacity-test')
@@ -5142,7 +5142,7 @@ async def test_run_agent_stream(mock_generate_stream, mock_save_messages, mock_b
     mock_build_mem_ctx.reset_mock()
     await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     mock_save_messages.assert_not_called()
-    mock_build_mem_ctx.assert_called_once_with(None, None, 1, skip_query=True)
+    mock_build_mem_ctx.assert_not_called()
     mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=True))
 
 
@@ -5283,7 +5283,7 @@ async def test_non_debug_producer_survives_sse_disconnect(mock_save_messages, mo
     assert channel._history == ['data: first\n\n', 'data: second\n\n']
     assert producer_tasks.isdisjoint(agent_subscription._agent_stream_producer_tasks)
     complete_channel_mock.assert_awaited_once_with(conversation_id=mock_agent_request.conversation_id, user_id='u', status='completed')
-    generate_stream_mock.assert_called_once_with(mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=channel)
+    generate_stream_mock.assert_called_once_with(mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=True, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=channel)
 
 
 @pytest.mark.asyncio
@@ -6438,7 +6438,7 @@ async def test_generate_stream_preserves_active_run_error_and_releases_reservati
 @patch('management.services.configuration.user.memory.build_memory_context')
 @patch('management.services.agent.subscription.save_messages')
 @patch('management.services.agent.subscription.generate_stream')
-async def test_run_agent_stream_no_memory(mock_gen_no_mem, mock_save_messages, mock_build_mem_ctx, mock_resolve, mock_agent_request, mock_http_request):
+async def test_run_agent_stream_defers_memory_policy_to_compiler(mock_gen_no_mem, mock_save_messages, mock_build_mem_ctx, mock_resolve, mock_agent_request, mock_http_request):
 
     async def mock_stream():
         yield 'c1'
@@ -6446,7 +6446,7 @@ async def test_run_agent_stream_no_memory(mock_gen_no_mem, mock_save_messages, m
     mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=False))
     resp = await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     assert isinstance(resp, StreamingResponse)
-    mock_gen_no_mem.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
+    mock_gen_no_mem.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=True, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
 
 
 @pytest.mark.asyncio
@@ -15737,7 +15737,7 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
         user_id="user1",
         tenant_id="tenant1",
         language="en",
-        allow_memory_search=False,
+        allow_memory_search=True,
     )
     fake_preprocess_manager.register_preprocess_task.assert_not_called()
     # preprocess_manager.unregister_preprocess_task was removed together with

@@ -445,6 +445,7 @@ async def export_agent_by_agent_id(
         allow_mcp_header_passthrough=agent_info.get(
             "allow_mcp_header_passthrough", False
         ),
+        enable_memory=agent_info.get("enable_memory") is not False,
         enable_protocol_repair_retry=agent_info.get("enable_protocol_repair_retry")
         is True,
         verification_config=agent_info.get("verification_config"),
@@ -626,6 +627,7 @@ async def import_agent_by_agent_id(
             "allow_mcp_header_passthrough": getattr(
                 import_agent_info, "allow_mcp_header_passthrough", False
             ),
+            "enable_memory": getattr(import_agent_info, "enable_memory", True),
             "enable_protocol_repair_retry": getattr(
                 import_agent_info, "enable_protocol_repair_retry", False
             ),

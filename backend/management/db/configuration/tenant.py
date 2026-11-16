@@ -122,6 +122,27 @@ def get_single_config_info(tenant_id: str, select_key: str):
             return {}
 
 
+def upsert_single_tenant_setting(tenant_id: str, key: str, value: str, actor_user_id: str) -> None:
+    """Serialize the initial insert and later updates of a single tenant setting."""
+    with get_db_session() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:setting))"),
+            {"setting": f"tenant-config:{tenant_id}:{key}"},
+        )
+        row = session.query(TenantConfig).filter_by(
+            tenant_id=tenant_id, config_key=key, delete_flag="N",
+        ).first()
+        if row is None:
+            row = TenantConfig(
+                tenant_id=tenant_id, config_key=key, value_type="single",
+                created_by=actor_user_id, delete_flag="N",
+            )
+            session.add(row)
+        row.config_value = value
+        row.user_id = actor_user_id
+        row.updated_by = actor_user_id
+
+
 def insert_config(insert_data: Dict[str, Any]):
     with get_db_session() as session:
         try:

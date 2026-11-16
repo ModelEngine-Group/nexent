@@ -134,7 +134,7 @@ async def prepare_agent_run(
     """
 
     memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
+        user_id, tenant_id, agent_request.agent_id, skip_query=True
     )
 
     create_run_kwargs = {
@@ -234,6 +234,9 @@ async def prepare_agent_run(
     agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
+    memory_context.user_config.memory_switch = (
+        allow_memory_search and agent_run_info.agent_config.automatic_memory_enabled is True
+    )
     agent_run_info.conversation_id = agent_request.conversation_id
     agent_run_info.user_id = user_id
 
@@ -331,18 +334,8 @@ async def generate_stream(
             user_id=user_id,
         )
 
-    memory_enabled_runtime = False
     agent_run_info = None
     try:
-        if enable_memory:
-            # Resolve the user-level switch for tool loading only.
-            memory_context_preview = build_memory_context(
-                user_id, tenant_id, agent_request.agent_id
-            )
-            memory_enabled_runtime = bool(
-                memory_context_preview.user_config.memory_switch
-            )
-
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
         try:
@@ -354,7 +347,7 @@ async def generate_stream(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
-                allow_memory_search=memory_enabled_runtime,
+                allow_memory_search=enable_memory and not agent_request.is_debug,
                 **prepare_kwargs,
             )
         except AgentRunAlreadyActiveError:

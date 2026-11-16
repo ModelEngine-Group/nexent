@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the embedding modality adapters (base + OpenAI/DashScope/Jina/SiliconFlow)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -560,3 +562,75 @@ def test_multimodal_legacy_attributes():
     assert adapter.model == "mm-model"
     assert adapter.embedding_model_name == "mm-model"
     assert adapter.model_type == "multimodal"
+
+
+@pytest.mark.parametrize("payload", [{"data": None}, {"data": []}, {"data": [{"embedding": None}]}])
+def test_openai_embedding_rejects_invalid_rows_without_retry(payload):
+    from nexent.core.gateway.modality.embedding.openai import InvalidEmbeddingResponse
+
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+    with patch.object(adapter, "_make_request", return_value=payload) as request:
+        with pytest.raises(InvalidEmbeddingResponse):
+            adapter.get_embeddings("sample")
+        request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bounded_embedding_wait_cancels_slow_http_response(monkeypatch):
+    import asyncio
+    import httpx
+
+    from nexent.core.gateway.modality.embedding import openai
+
+    calls = []
+    cancelled = asyncio.Event()
+    original = httpx.AsyncClient
+
+    async def slow_http(request):
+        calls.append(request)
+        try:
+            await asyncio.sleep(60)
+        finally:
+            cancelled.set()
+
+    def client(**kwargs):
+        return original(transport=httpx.MockTransport(slow_http), **kwargs)
+
+    monkeypatch.setattr(openai.httpx, "AsyncClient", client)
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+    with pytest.raises(TimeoutError):
+        await adapter.get_embeddings_with_deadline("sample", timeout=0.03)
+    assert len(calls) == 1
+    assert cancelled.is_set()
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected_error"),
+    [(b'{"data":[{"embedding":[0.2,0.8]}]}', None), (b"not-json", "Invalid embedding JSON")],
+)
+@pytest.mark.asyncio
+async def test_bounded_embedding_http_response_is_decoded_once(monkeypatch, reply, expected_error):
+    import json
+
+    import httpx
+
+    from nexent.core.gateway.modality.embedding import openai
+
+    calls = []
+    original = httpx.AsyncClient
+
+    async def model(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, content=reply)
+
+    def client(**kwargs):
+        return original(transport=httpx.MockTransport(model), **kwargs)
+
+    monkeypatch.setattr(openai.httpx, "AsyncClient", client)
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+    if expected_error:
+        with pytest.raises(openai.InvalidEmbeddingResponse, match=expected_error):
+            await adapter.get_embeddings_with_deadline("sample", timeout=1)
+    else:
+        assert await adapter.get_embeddings_with_deadline("sample", timeout=1) == [[0.2, 0.8]]
+    assert [request["input"] for request in calls] == [["sample"]]

@@ -22,7 +22,9 @@ Usage from the agent build path::
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from time import monotonic
 from typing import Any, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
@@ -49,8 +51,13 @@ logger = logging.getLogger("memory_backend_adapter")
 
 async def _backend_store_hook(
     payload: Dict[str, Any],
+    *,
+    deadline: float | None = None,
+    write_allowed=None,
 ) -> Dict[str, Any]:
     """Adapter for ``MemoryService.store_memory`` -> ``MemoryRecordService``."""
+    if deadline is not None and (monotonic() >= deadline or not write_allowed()):
+        raise PermissionError("Automatic memory is disabled or expired")
     service = get_memory_record_service()
     layer_value = payload.get("layer", MemoryLayer.AGENT.value)
     if isinstance(layer_value, MemoryLayer):
@@ -64,12 +71,19 @@ async def _backend_store_hook(
     embedding = payload.get("embedding")
     embedding_model_info = None
 
-    if embedding is None and layer_value == MemoryLayer.AGENT.value:
+    if (embedding is None or deadline is not None) and layer_value == MemoryLayer.AGENT.value:
         embedding_model_info = _resolve_tenant_embedding_model_info(tenant_id)
         if embedding_model_info is None:
             raise MemoryRecordError(
                 "Failed to store memory: tenant embedding model is not configured"
             )
+
+    if deadline is not None and embedding_model_info is not None and not embedding:
+        from management.services.memory.runtime_embedding import compute_runtime_embedding
+
+        embedding = await compute_runtime_embedding(
+            payload["content"], embedding_model_info, tenant_id=tenant_id, deadline=deadline,
+        )
 
     result = service.create_memory(
         tenant_id=tenant_id,
@@ -87,10 +101,15 @@ async def _backend_store_hook(
         embedding=embedding,
         embedding_model_info=embedding_model_info,
         actor="agent",
+        **({"deadline": deadline, "write_allowed": write_allowed} if deadline is not None else {}),
     )
 
     try:
-        await _fanout_external_ingest(payload, result)
+        if deadline is None:
+            await _fanout_external_ingest(payload, result)
+        elif monotonic() < deadline and write_allowed():
+            async with asyncio.timeout(max(0, deadline - monotonic())):
+                await _fanout_external_ingest(payload, result)
     except Exception as exc:
         logger.warning(
             "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
@@ -207,12 +226,33 @@ async def _backend_search_hook(
     ]
 
 
+def _runtime_store(tenant_id: str, user_id: str, agent_id: str, version_no: int | None):
+    async def store(payload):
+        from management.services.memory.access import can_write_automatic_memory
+        from management.services.memory.runtime_io import memory_write_deadline, run_memory_io
+
+        if (payload["tenant_id"], payload["user_id"], str(payload.get("agent_id"))) != (tenant_id, user_id, agent_id):
+            raise PermissionError("Automatic memory scope does not match the Agent run")
+        deadline = memory_write_deadline()
+
+        def allowed():
+            return can_write_automatic_memory(tenant_id, user_id, agent_id, version_no)
+
+        def write():
+            return asyncio.run(_backend_store_hook(payload, deadline=deadline, write_allowed=allowed))
+
+        return await run_memory_io("memory-store", write, deadline=deadline, lane="memory-write")
+
+    return store
+
+
 def build_memory_service_for_agent(
     *,
     tenant_id: str,
     user_id: str,
     agent_id: str,
     embedding_model_info: Optional[EmbeddingModelInfo] = None,
+    version_no: int | None = None,
 ) -> MemoryService:
     """Construct a per-agent ``MemoryService`` wired to the backend hooks.
 
@@ -222,7 +262,7 @@ def build_memory_service_for_agent(
     return MemoryService(
         embedding_model=None,
         embedding_model_info=embedding_model_info,
-        backend_store=_backend_store_hook,
+        backend_store=_runtime_store(tenant_id, user_id, agent_id, version_no),
         backend_search=_backend_search_hook,
     )
 
@@ -241,7 +281,9 @@ def build_memory_service_for_dreaming() -> MemoryService:
         backend_search=None,
     )
 
-def build_memory_service_for_fa_extraction() -> MemoryService:
+def build_memory_service_for_fa_extraction(
+    *, tenant_id: str, user_id: str, agent_id: str, version_no: int | None = None,
+) -> MemoryService:
     """Return a facade for final-answer memory extraction.
 
     Reuses the same backend store hook as StoreMemoryTool. The extraction
@@ -250,6 +292,6 @@ def build_memory_service_for_fa_extraction() -> MemoryService:
     return MemoryService(
         embedding_model=None,
         embedding_model_info=None,
-        backend_store=_backend_store_hook,
+        backend_store=_runtime_store(tenant_id, user_id, agent_id, version_no),
         backend_search=None,
     )

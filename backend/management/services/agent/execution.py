@@ -84,6 +84,8 @@ from management.services.conversation.service import (
     save_message,
     update_message_status,
 )
+from management.services.memory.access import can_write_automatic_memory
+from management.services.memory.runtime_io import memory_deadline, memory_write_deadline, optional_memory_io
 from management.services.memory.extraction import (
     FaMemoryExtractor,
 )
@@ -108,6 +110,7 @@ logger = logging.getLogger(__name__)
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
+_MAX_BACKGROUND_MEMORY_TASKS = 8
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
@@ -1087,9 +1090,16 @@ async def _stream_agent_chunks(
         # the new layered architecture (agents may only write to
         # ``agent.short_term``).
 
+        memory_agent_id = str(getattr(agent_request, "agent_id", ""))
+        memory_agent_version = getattr(agent_run_info.agent_config, "version_no", None)
+
+        def allow_memory_write():
+            return can_write_automatic_memory(tenant_id, user_id, memory_agent_id, memory_agent_version)
+
         if (
             terminal_status == "completed"
             and streaming_message_id is not None
+            and len(_external_memory_ingest_tasks) < _MAX_BACKGROUND_MEMORY_TASKS
             and memory_ctx is not None
             and getattr(
                 getattr(memory_ctx, "user_config", None), "memory_switch", False
@@ -1098,6 +1108,8 @@ async def _stream_agent_chunks(
 
             async def _per_turn_supplement() -> None:
                 try:
+                    if not allow_memory_write():
+                        return
                     units = get_units_by_message(streaming_message_id)
                     ingest_units = [
                         MemoryIngestUnit(
@@ -1124,12 +1136,17 @@ async def _stream_agent_chunks(
                 except Exception as exc:
                     logger.warning("Per-turn supplement failed: %s", exc)
 
-            supplement_task = asyncio.create_task(_per_turn_supplement())
+            supplement_task = asyncio.create_task(optional_memory_io(
+                "memory-ingest", lambda: asyncio.run(_per_turn_supplement()),
+                deadline=memory_write_deadline(), lane="memory-write",
+            ))
             _external_memory_ingest_tasks.add(supplement_task)
             supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
 
         if (
-            final_answer_content
+            terminal_status == "completed"
+            and final_answer_content
+            and len(_fa_extraction_tasks) < _MAX_BACKGROUND_MEMORY_TASKS
             and memory_ctx is not None
             and getattr(
                 getattr(memory_ctx, "user_config", None), "memory_switch", False
@@ -1138,8 +1155,15 @@ async def _stream_agent_chunks(
 
             async def _run_fa_extraction() -> None:
                 try:
-                    config = tenant_config_manager.get_model_config(
-                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+                    def resolve_model():
+                        if not allow_memory_write():
+                            return None
+                        return tenant_config_manager.get_model_config(
+                            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id,
+                        )
+
+                    config = await optional_memory_io(
+                        "memory-extraction-config", resolve_model, deadline=memory_deadline(),
                     )
                     if not config:
                         logger.warning(
@@ -1183,7 +1207,10 @@ async def _stream_agent_chunks(
                         conversation_id=str(
                             getattr(agent_request, "conversation_id", "")
                         ),
-                        memory_service=build_memory_service_for_fa_extraction(),
+                        memory_service=build_memory_service_for_fa_extraction(
+                            tenant_id=tenant_id, user_id=user_id, agent_id=memory_agent_id,
+                            version_no=memory_agent_version,
+                        ),
                         model_client=_ModelAdapter(model),
                     )
                     result = await extractor.extract_and_store(

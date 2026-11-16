@@ -34,6 +34,7 @@ export type AgentDraft = Pick<
   | "provide_run_summary"
   | "allow_chat_metadata"
   | "enable_protocol_repair_retry"
+  | "enable_memory"
   | "enable_context_manager"
   | "is_a2a"
   | "verification_config"
@@ -125,6 +126,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   provide_run_summary: agent.provide_run_summary,
   allow_chat_metadata: agent.allow_chat_metadata ?? false,
   enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+  enable_memory: agent.enable_memory ?? true,
   enable_context_manager: agent.enable_context_manager,
   is_a2a: agent.is_a2a,
   verification_config: agent.verification_config,
@@ -294,6 +296,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.allow_chat_metadata !== undefined
     ? { allow_chat_metadata: patch.allow_chat_metadata }
     : {}),
+  ...(patch.enable_memory !== undefined
+    ? { enable_memory: patch.enable_memory }
+    : {}),
   ...(patch.enable_protocol_repair_retry !== undefined
     ? { enable_protocol_repair_retry: patch.enable_protocol_repair_retry }
     : {}),
@@ -310,9 +315,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt !== undefined
-    ? { prompt: patch.prompt }
-    : {}),
+  ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools

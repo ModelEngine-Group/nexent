@@ -17,6 +17,7 @@ distinct memory.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -269,6 +270,8 @@ class MemoryRecordService:
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
         created_by: Optional[str] = None,
         actor: str = "agent",
+        deadline: float | None = None,
+        write_allowed=None,
     ) -> Dict[str, Any]:
         """Create (or upsert) a memory record.
 
@@ -317,21 +320,42 @@ class MemoryRecordService:
                 "Failed to store memory: tenant embedding model is not configured"
             )
 
-        if not embedding and embedding_model_info is not None:
+        if deadline is None and not embedding and embedding_model_info is not None:
             embedding = _compute_content_embedding(content, embedding_model_info)
+        def check_automatic_write():
+            if deadline is None:
+                return
+            if not embedding:
+                raise MemoryRecordError("Memory embedding is unavailable")
+            if time.monotonic() >= deadline:
+                raise MemoryRecordError("Memory write deadline expired")
+            if write_allowed is not None and not write_allowed():
+                raise PermissionError("Automatic memory was disabled")
+            if time.monotonic() >= deadline:
+                raise MemoryRecordError("Memory write deadline expired")
 
+        if deadline is not None and not embedding:
+            raise MemoryRecordError("Memory embedding is unavailable")
         existing = memory_record_db.find_by_idempotency(
             tenant_id=tenant_id,
             idempotency_key=record["idempotency_key"],
         )
+        check_automatic_write()
         if existing is not None:
             if existing.get("content") == content:
+                indexed = False
+                if deadline is not None and index_name:
+                    indexed = self.index_service.index_record(
+                        {**record, "memory_id": existing["memory_id"]}, embedding, embedding_model_info,
+                    )
+                    if not indexed:
+                        raise MemoryRecordError("Memory indexing is incomplete")
                 return {
                     "memory_id": existing.get("memory_id"),
                     "layer": layer,
                     "memory_type": resolved_type,
                     "event": "UNCHANGED",
-                    "indexed": False,
+                    "indexed": indexed,
                 }
             memory_id = memory_record_db.upsert_memory_record_by_idempotency(
                 {
@@ -353,6 +377,7 @@ class MemoryRecordService:
             )
             indexed = False
             if index_name and memory_id:
+                check_automatic_write()
                 indexed = self.index_service.index_record(
                     record={
                         "memory_id": memory_id,
@@ -370,6 +395,8 @@ class MemoryRecordService:
                     embedding=embedding,
                     embedding_model_info=embedding_model_info,
                 )
+            if deadline is not None and not indexed:
+                raise MemoryRecordError("Memory indexing is incomplete")
             return {
                 "memory_id": memory_id,
                 "layer": layer,
@@ -384,6 +411,7 @@ class MemoryRecordService:
 
         indexed = False
         if index_name:
+            check_automatic_write()
             indexed = self.index_service.index_record(
                 record={
                     "memory_id": memory_id,
@@ -402,6 +430,8 @@ class MemoryRecordService:
                 embedding_model_info=embedding_model_info,
             )
 
+        if deadline is not None and not indexed:
+            raise MemoryRecordError("Memory indexing is incomplete")
         return {
             "memory_id": memory_id,
             "layer": layer,

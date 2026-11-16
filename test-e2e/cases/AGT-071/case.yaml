@@ -38,12 +38,16 @@ case:
   - order: 6
     action: 撤销故障，保留同一 Provider、组织、Agent 和本地记忆；通过 Nexent 写入全新独立的外部恢复事实并直接检索，开启新会话只查询该事实的唯一查询标识，核对 Runtime wire 增量、外部记忆上下文和最终回答后清理。
     expected: 同一 Provider 在故障解除后能够写入和检索，Runtime 确实调用外部检索并注入恢复事实，真实模型回答包含只存在于该事实中的答案。前序对话不能靠通用词匹配挤占恢复事实；不重建 Provider、不清空共享数据、不移除本地记忆来规避故障。清理独占资产，清理失败独立报告。
+  - order: 7
+    action: 逐一关闭独占租户、个人、个人 Agent 黑名单与已发布 Agent 版本的自动记忆，逐项发起正常会话。
+    expected: 每次均有终止事件且 Mock 检索计数不增加，直接读取已有用户长期记忆仍成功。
   expected_results:
   - 实际插件 HTTP 写入及检索成功，不伪造结果。
   - 真实 Agent 检索并消费外部记忆，而非仅测试 Mock 自身。
   - 热更新影响后续新会话，保留此前脱敏证据，凭据不回传。
   - 外部异常和超时可诊断，本地记忆仍可用，撤销故障后外部记忆恢复。
   - 独占资产被清理，证据保留在本地并脱敏。
+  - 三层设置和个人 Agent 禁用名单可以阻止自动检索，已有长期记忆仍可读取。
   forbidden_side_effects:
   - 不修改共享用户记忆、租户默认模型、其他 Provider 或其他命名空间的故障/数据。
   acceptance:
@@ -56,6 +60,11 @@ case:
     description: 配置热更新、故障降级、恢复与安全清理
     steps: [4, 5, 6]
     expected_results: [3, 4, 5]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: 生效的租户、用户、Agent 版本及个人禁用名单阻止自动检索，并保留已有长期记忆
+    steps: [7]
+    expected_results: [6]
     forbidden_side_effects: [1]
   execution:
     profiles:

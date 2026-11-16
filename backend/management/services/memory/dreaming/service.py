@@ -20,6 +20,10 @@ from nexent.memory.dreaming import (
     select_candidates,
     units_from_decisions,
 )
+from management.services.memory.access import (
+    dreaming_allowed, memory_allowed_for_config, source_agent_allows_memory,
+)
+from management.services.configuration.user.memory import get_user_configs
 from management.services.memory.records import get_memory_record_service
 
 logger = logging.getLogger("memory_dreaming_service")
@@ -38,13 +42,17 @@ class DreamingConflictError(RuntimeError):
     pass
 
 
+class DreamingDisabledError(RuntimeError):
+    """Policy changed before a Dreaming publication could be committed."""
+
+
 class MemoryDreamingService:
     def __init__(self, record_service: Any = None, summarizer: Any = None):
         self.record_service = record_service or get_memory_record_service()
         self.summarizer = summarizer
 
     def _run_light(
-        self, tenant_id: str, user_id: str, agent_id: str, window_days: int
+        self, tenant_id: str, user_id: str, agent_id: str, window_days: int, records: List[dict],
     ) -> Dict[int, Dict[str, Any]]:
         stats = memory_retrieval_hit_db.aggregate_dreaming_stats(
             tenant_id,
@@ -52,8 +60,12 @@ class MemoryDreamingService:
             None if agent_id == USER_DREAMING_SCOPE else agent_id,
             since=_utcnow() - timedelta(days=max(1, window_days)),
         )
-        by_id = {int(item["memory_id"]): item for item in stats}
-        for item in stats:
+        authorized_ids = {int(record["memory_id"]) for record in records}
+        by_id = {
+            int(item["memory_id"]): item for item in stats
+            if int(item["memory_id"]) in authorized_ids
+        }
+        for item in by_id.values():
             memory_record_db.update_memory_record(
                 item["memory_id"],
                 tenant_id,
@@ -71,22 +83,26 @@ class MemoryDreamingService:
             )
         return by_id
 
-    def _run_rem(
-        self,
-        tenant_id: str,
-        user_id: str,
-        agent_id: str,
-        stats: Dict[int, Dict[str, Any]],
-    ) -> List[Any]:
+    @staticmethod
+    def _eligible_source_records(tenant_id, user_id, agent_id):
         records = memory_record_db.list_memory_records(
-            tenant_id,
-            user_id=user_id,
-            agent_id=None if agent_id == USER_DREAMING_SCOPE else agent_id,
-            layer="agent",
-            memory_type="short_term",
-            status="active",
-            limit=None,
+            tenant_id, user_id=user_id, agent_id=None if agent_id == USER_DREAMING_SCOPE else agent_id,
+            layer="agent", memory_type="short_term", status="active", limit=None, strict=True,
         )
+        config = get_user_configs(user_id)
+        allowed = {}
+        for record in records:
+            source = str(record.get("agent_id") or "")
+            if source not in allowed:
+                allowed[source] = (
+                    memory_allowed_for_config(config, source)
+                    and source_agent_allows_memory(tenant_id, source)
+                )
+        return [record for record in records if allowed[str(record.get("agent_id") or "")]]
+
+    def _run_rem(
+        self, tenant_id: str, records: List[dict], stats: Dict[int, Dict[str, Any]],
+    ) -> List[Any]:
         cutoff = _utcnow() - timedelta(days=DREAMING_MAX_AGE_DAYS)
         candidates = []
         for record in records:
@@ -97,8 +113,20 @@ class MemoryDreamingService:
                 if created_at.replace(tzinfo=None) < cutoff:
                     continue
             evidence = stats.get(int(record["memory_id"]), {})
+            window_record = {
+                **record,
+                "recall_count": evidence.get("hit_count", 0),
+                "daily_count": len(evidence.get("days", ())),
+                "grounded_count": evidence.get("grounded_count", 0),
+                "last_recalled_at": evidence.get("last_recalled_at"),
+                "query_hashes": sorted(evidence.get("query_hashes", ())),
+                "recall_days": sorted(evidence.get("days", ())),
+            }
+            if evidence:
+                window_record["light_hits"] = int(record.get("light_hits") or 0) + 1
+                window_record["last_light_at"] = _utcnow()
             candidate = build_candidate(
-                record, float(evidence.get("total_retrieval_score") or 0)
+                window_record, float(evidence.get("total_retrieval_score") or 0),
             )
             memory_record_db.update_memory_record(
                 candidate.memory_id,
@@ -169,6 +197,21 @@ class MemoryDreamingService:
             agent_id=agent_id,
             backoff_base_seconds=DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS,
         )
+        if not dreaming_allowed(tenant_id, user_id):
+            raise DreamingDisabledError
+        new_evidence_ids = {str(evidence_id) for unit in new_units for evidence_id in unit.evidence_ids}
+        source_ids = {
+            str(decision.candidate.agent_id)
+            for decision in decisions
+            if str(decision.candidate.memory_id) in new_evidence_ids
+        }
+        user_config = get_user_configs(user_id)
+        if any(
+            not memory_allowed_for_config(user_config, source_id)
+            or not source_agent_allows_memory(tenant_id, source_id)
+            for source_id in source_ids
+        ):
+            raise DreamingDisabledError
         version = memory_long_term_db.create_and_activate(
             tenant_id=tenant_id,
             scope="user",
@@ -258,12 +301,15 @@ class MemoryDreamingService:
                 )
                 return result
             try:
-                stats = self._run_light(tenant_id, user_id, agent_id, window_days)
+                if not dreaming_allowed(tenant_id, user_id):
+                    raise DreamingDisabledError
+                records = self._eligible_source_records(tenant_id, user_id, agent_id)
+                stats = self._run_light(tenant_id, user_id, agent_id, window_days, records)
                 memory_dreaming_db.update_audit(
                     run_id,
                     {"current_phase": "rem", "light_count": len(stats)},
                 )
-                candidates = self._run_rem(tenant_id, user_id, agent_id, stats)
+                candidates = self._run_rem(tenant_id, records, stats)
                 memory_dreaming_db.update_audit(
                     run_id,
                     {"current_phase": "deep", "rem_count": len(candidates)},
@@ -312,17 +358,13 @@ class MemoryDreamingService:
                     "long_term_max_chars": effective_long_term_max_chars,
                     "summarization_max_attempts": effective_summarization_max_attempts,
                 }
-                # The model client owns request timeouts. Running the builder inline lets
-                # its retry/fallback contract handle timeout exceptions and prevents an
-                # uncancellable executor thread from outliving a completed audit.
-                version = self._build_version(
-                    tenant_id,
-                    user_id,
-                    agent_id,
-                    run_id,
-                    decisions,
-                    config_snapshot,
-                )
+                logger.info("event=dreaming_thresholds run_id=%s parameters=%s", run_id, config_snapshot)
+                promoted_count = sum(decision.promote for decision in decisions)
+                version = None
+                if promoted_count:
+                    version = self._build_version(
+                        tenant_id, user_id, agent_id, run_id, decisions, config_snapshot,
+                    )
                 results = [
                     {
                         "memory_id": decision.candidate.memory_id,
@@ -337,10 +379,18 @@ class MemoryDreamingService:
                     }
                     for decision in decisions
                 ]
-                promoted_count = sum(decision.promote for decision in decisions)
+                reason = None
+                if version is None:
+                    if not candidates:
+                        reason = "no_candidates"
+                    elif not promoted_count:
+                        reason = "no_eligible_candidates"
+                    else:
+                        reason = "no_new_evidence"
                 result = {
                     "run_id": run_id,
                     "status": "completed",
+                    "reason": reason,
                     "light_count": len(stats),
                     "rem_count": len(candidates),
                     "promoted_count": promoted_count,
@@ -351,6 +401,7 @@ class MemoryDreamingService:
                 memory_dreaming_db.finish_audit(
                     run_id,
                     status="completed",
+                    reason=reason,
                     light_count=len(stats),
                     rem_count=len(candidates),
                     promoted_count=promoted_count,
@@ -361,6 +412,9 @@ class MemoryDreamingService:
                     ),
                 )
                 return result
+            except DreamingDisabledError:
+                memory_dreaming_db.finish_audit(run_id, status="skipped", reason="memory_disabled")
+                return {"run_id": run_id, "status": "skipped", "reason": "memory_disabled"}
             except Exception as exc:
                 logger.exception(
                     "Dreaming failed for tenant=%s user=%s agent=%s run=%s",

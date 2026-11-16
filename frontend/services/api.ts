@@ -600,6 +600,7 @@ export const API_ENDPOINTS = {
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
       embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
+      tenantSwitch: `${API_BASE_URL}/memory/config/tenant-switch`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>

@@ -194,14 +194,14 @@ def test_ac005_upload_normalization(monkeypatch, value):
     assert module.normalize_skill_upload(b"PKdata", "md") == (b"PKdata", "md")
 
 
-@pytest.mark.parametrize("enabled,debug", [(False, False), (True, False), (False, True), (True, True)])
-def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
+@pytest.mark.parametrize("debug", [False, True])
+def test_ac008_shared_run_preparation(monkeypatch, debug):
     calls = []
     dependency(monkeypatch, "nexent.monitor", AgentRunMetadata=types.SimpleNamespace)
 
     def memory(*args, **kwargs):
         calls.append((args, kwargs))
-        return types.SimpleNamespace(user_config=types.SimpleNamespace(memory_switch=enabled, agent_share_option="private"))
+        raise AssertionError("Monitoring setup must defer memory policy reads to the compiler")
 
     dependency(monkeypatch, "management.services.configuration.user.memory", build_memory_context=memory)
     dependency(monkeypatch, "infrastructure.observability.bootstrap", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
@@ -211,14 +211,14 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
     )
     context = module.build_agent_run_context(request, "user", "tenant", "en", extra_metadata={"background": True})
-    assert context.enable_memory is (enabled and not debug)
-    assert calls == [(("user", "tenant", 3), {"skip_query": debug})]
-    assert context.metadata.memory_enabled is enabled
+    assert context.enable_memory is (not debug)
+    assert not calls
+    assert context.metadata.memory_enabled is (False if debug else None)
     assert context.metadata.user_id == "user"
     assert context.metadata.user_email == "person@example.com"
     assert context.metadata.history_count == 2
     assert context.metadata.minio_files_count == 0
-    assert context.metadata.extra_metadata == {"agent_share_option": "private", "background": True}
+    assert context.metadata.extra_metadata == {"background": True}
 
 
 @pytest.fixture

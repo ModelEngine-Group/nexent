@@ -18,8 +18,6 @@ Routes retained:
 - DELETE `/memory/config/disable_useragent/{agent_id}`: Remove a disabled user-agent id.
 """
 
-from contracts.memory import MemoryAgentShareMode
-from contracts.errors.exceptions import UnauthorizedError
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -29,7 +27,7 @@ from fastapi import APIRouter, Body, Header, Path, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from contracts.constants.constants import MEMORY_AGENT_SHARE_KEY, MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, BOOLEAN_TRUE_VALUES
-from contracts.memory import MemoryAgentShareMode
+from contracts.memory import MemoryAgentShareMode, TenantMemorySettingsRequest
 from contracts.errors.exceptions import UnauthorizedError
 from management.services.configuration.user.memory import (
     add_disabled_agent_id,
@@ -42,6 +40,10 @@ from management.services.configuration.user.memory import (
     set_dreaming_switch,
     set_external_provider_top_k,
 )
+from contracts.roles import has_any_role, roles_from_record
+from management.db.configuration.tenant import upsert_single_tenant_setting
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.services.memory.access import TENANT_MEMORY_SWITCH_KEY, tenant_memory_enabled
 from management.db.memory import dreaming as memory_dreaming_db
 from management.services.memory.records import (
     get_tenant_embedding_status,
@@ -66,6 +68,30 @@ def load_configs(authorization: Optional[str] = Header(None)):
     except Exception as e:
         logger.error("load_configs failed: %s", e)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Failed to load configuration")
+
+
+def _can_edit_tenant_memory(user_id: str) -> bool:
+    return has_any_role(roles_from_record(get_user_tenant_by_user_id(user_id) or {}), {"ADMIN"})
+
+
+@router.get("/config/tenant-switch")
+def get_tenant_memory_switch(authorization: Optional[str] = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    return {"enabled": tenant_memory_enabled(tenant_id), "can_edit": _can_edit_tenant_memory(user_id)}
+
+
+@router.put("/config/tenant-switch")
+def update_tenant_memory_switch(
+    request: TenantMemorySettingsRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id = get_current_user_id(authorization)
+    if not _can_edit_tenant_memory(user_id):
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Tenant memory settings require the ADMIN role")
+    upsert_single_tenant_setting(
+        tenant_id, TENANT_MEMORY_SWITCH_KEY, "Y" if request.enabled else "N", user_id,
+    )
+    return {"enabled": request.enabled, "can_edit": True}
 
 
 @router.get("/config/embedding-status")

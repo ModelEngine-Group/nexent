@@ -248,6 +248,7 @@ def list_memory_records(
     limit: int = 100,
     offset: int = 0,
     include_deleted: bool = False,
+    strict: bool = False,
 ) -> List[Dict[str, Any]]:
     """List memory records with the standard isolation filters.
 
@@ -343,6 +344,8 @@ def list_memory_records(
                 result.append(item)
             return result
         except Exception:
+            if strict:
+                raise
             session.rollback()
             logger.exception("list_memory_records failed")
             return []
