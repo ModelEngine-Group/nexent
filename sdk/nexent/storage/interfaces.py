@@ -117,6 +117,12 @@ class RecordStore(StoragePort, Protocol):
 
     def transaction(self, *, context: OperationContext) -> AbstractContextManager["RecordStore"]: ...
 
+    def claim(
+        self, dataset: str, query: RecordQuery, patch: FieldPatch, *, limit: int = 1, context: OperationContext
+    ) -> tuple[Record, ...]:
+        """Claim a bounded candidate set inside a transaction; require skip-locked capability."""
+        ...
+
 
 class ObjectStore(StoragePort, Protocol):
     def put(

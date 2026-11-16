@@ -298,3 +298,79 @@ def test_transaction_has_one_commit(stores):
         assert len(commits) == 1
     finally:
         sa.event.remove(a._engine, "commit", committed)
+
+
+def test_query_pages_are_scoped_ordered_and_projected(stores):
+    from nexent.storage.models import PageRequest, RecordQuery, Sort
+
+    a, b = stores
+    for store, key in [(a, "z"), (b, "foreign"), (a, "b"), (a, "a")]:
+        store.create("jobs", {"id": key, "status": "queued"}, context=context())
+    query = RecordQuery(fields=("id",), order_by=(Sort("status"),))
+    page = a.query("jobs", query, PageRequest(limit=2), context=context())
+    assert page.items == ({"id": "a"}, {"id": "b"})
+    assert page.next_cursor
+    final = a.query(
+        "jobs", query, PageRequest(limit=2, cursor=page.next_cursor), context=context()
+    )
+    assert final.items == ({"id": "z"},) and final.next_cursor is None
+    assert a.count("jobs", RecordQuery(), context=context()) == 3
+    assert b.count("jobs", RecordQuery(), context=context()) == 1
+
+
+@pytest.mark.parametrize("change", ["tenant", "query", "size", "malformed"])
+def test_query_cursor_cannot_be_reused_under_other_scope(stores, change):
+    from nexent.storage.models import PageRequest, RecordQuery
+
+    a, b = stores
+    for key in ("a", "b"):
+        a.create("jobs", {"id": key, "status": "queued"}, context=context())
+    cursor = a.query(
+        "jobs", RecordQuery(), PageRequest(limit=1), context=context()
+    ).next_cursor
+    store = b if change == "tenant" else a
+    query = RecordQuery(fields=("id",)) if change == "query" else RecordQuery()
+    page = PageRequest(
+        limit=2 if change == "size" else 1,
+        cursor="invalid" if change == "malformed" else cursor,
+    )
+    with pytest.raises(InvalidInput):
+        store.query("jobs", query, page, context=context())
+
+
+def test_query_filters_cannot_override_tenant(stores):
+    from nexent.storage.models import Comparison, PageRequest, RecordQuery
+
+    a, b = stores
+    b.create("jobs", {"id": "foreign", "status": "queued"}, context=context())
+    query = RecordQuery(where=Comparison("tenant", "eq", "b"))
+    assert a.query("jobs", query, PageRequest(), context=context()).items == ()
+    assert a.count("jobs", query, context=context()) == 0
+    with pytest.raises(InvalidInput):
+        a.query(
+            "jobs",
+            RecordQuery(fields=("private_sql",)),
+            PageRequest(),
+            context=context(),
+        )
+
+
+def test_claim_requires_postgresql_transaction(stores):
+    from nexent.storage.models import RecordQuery
+
+    a, _ = stores
+    assert "record.claim.skip_locked" not in a.capabilities.supported
+    with pytest.raises(CapabilityUnsupported):
+        a.claim(
+            "jobs",
+            RecordQuery(),
+            FieldPatch(set_values={"status": "running"}),
+            context=context(),
+        )
+    with a.transaction(context=context()) as tx, pytest.raises(CapabilityUnsupported):
+        tx.claim(
+            "jobs",
+            RecordQuery(),
+            FieldPatch(set_values={"status": "running"}),
+            context=context(),
+        )

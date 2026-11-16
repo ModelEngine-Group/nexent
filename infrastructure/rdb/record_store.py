@@ -37,6 +37,21 @@ def _predicate(table, value):
         operation = sa.and_ if value.operator == "and" else sa.or_
         return operation(*(_predicate(table, term) for term in value.terms))
     column = table.c[value.field]
+    if (
+        isinstance(column.type, sa.DateTime)
+        and value.value is not None
+        and value.operator != "is_null"
+    ):
+        from dataclasses import replace
+
+        from infrastructure.rdb.record_audit import timestamp
+
+        value = replace(
+            value,
+            value=[timestamp(item) for item in value.value]
+            if value.operator == "in"
+            else timestamp(value.value),
+        )
     operations = {
         "eq": lambda: column == value.value,
         "ne": lambda: column != value.value,
@@ -51,7 +66,7 @@ def _predicate(table, value):
 
 
 class SQLRecordStore:
-    """Initial key-addressed subset; query/claim capabilities are deliberately absent."""
+    """Scoped record operations with explicit per-backend capabilities."""
 
     capabilities = CapabilitySet(
         frozenset(
@@ -62,11 +77,16 @@ class SQLRecordStore:
                 "record.delete",
                 "record.cas",
                 "record.transaction",
+                "record.query",
+                "record.count",
             }
         )
     )
 
-    def __init__(self, scope, catalog, tables, engine, *, revision_fields):
+    def __init__(
+        self, scope, catalog, tables, engine, *, revision_fields, audit_mappings=None
+    ):
+        self._audits = MappingProxyType(dict(audit_mappings or {}))
         self._scope = scope
         self._catalog = catalog
         self._tables = MappingProxyType(dict(tables))
@@ -76,6 +96,10 @@ class SQLRecordStore:
         self._thread = None
         self._closed = False
         self._deadline = None
+        if engine.dialect.name == "postgresql":
+            self.capabilities = CapabilitySet(
+                self.capabilities.supported | {"record.claim.skip_locked"}
+            )
         if engine.dialect.name not in {"postgresql", "sqlite"}:
             raise CapabilityUnsupported()
         if engine.get_execution_options().get("isolation_level") == "AUTOCOMMIT":
@@ -100,7 +124,44 @@ class SQLRecordStore:
                 "object": sa.JSON,
                 "array": sa.JSON,
             }
+            audit = self._audits.get(name)
+            if audit is not None and (
+                len(audit.fields) != 4 or not audit.fields <= fields
+            ):
+                raise InvalidInput()
+            if audit is not None:
+                if audit.fields & {
+                    definition.primary_key,
+                    definition.tenant_field,
+                    definition.active_field,
+                    revision,
+                }:
+                    raise InvalidInput()
+                if definition.active_field:
+                    if audit.inactive_value == definition.active_value:
+                        raise InvalidInput()
+                    catalog.query(
+                        name,
+                        scope,
+                        RecordQuery(
+                            where=Comparison(
+                                definition.active_field, "eq", audit.inactive_value
+                            )
+                        ),
+                    )
             for field in definition.fields:
+                if (
+                    audit is not None
+                    and field.name in audit.fields - audit.dates
+                    and field.kind != "string"
+                ):
+                    raise CapabilityUnsupported()
+                if audit is not None and field.name in audit.dates:
+                    if field.kind != "string" or not isinstance(
+                        table.c[field.name].type, sa.DateTime
+                    ):
+                        raise CapabilityUnsupported()
+                    continue
                 if not isinstance(
                     table.c[field.name].type, supported[field.kind]
                 ) or isinstance(table.c[field.name].type, sa.Enum):
@@ -150,6 +211,7 @@ class SQLRecordStore:
             self._tables,
             self._engine,
             revision_fields=self._revisions,
+            audit_mappings=self._audits,
         )
         bound._connection = connection
         bound._thread = get_ident()
@@ -251,7 +313,7 @@ class SQLRecordStore:
             row = self._execute(connection, statement, context).mappings().first()
             if row is None:
                 return None
-            result = dict(row)
+            result = self._neutral(dataset, row)
             try:
                 json.dumps(result, allow_nan=False)
             except (TypeError, ValueError):
@@ -260,6 +322,9 @@ class SQLRecordStore:
 
     def create(self, dataset, values, *, context):
         definition, table = self._definition(dataset, write=True)
+        audit = self._audits.get(dataset)
+        if audit is not None and audit.fields & values.keys():
+            raise ScopeDenied()
         data = self._values(dataset, values)
         if not self.scope.system:
             if (
@@ -279,6 +344,8 @@ class SQLRecordStore:
         if revision in data:
             raise InvalidInput()
         data[revision] = 1
+        if audit is not None:
+            data.update(audit.values(self.scope.actor_id, create=True))
         with self._session(context) as connection:
             row = (
                 self._execute(
@@ -291,9 +358,9 @@ class SQLRecordStore:
                 .mappings()
                 .one()
             )
-            return dict(row)
+            return self._neutral(dataset, row)
 
-    def patch(self, dataset, key, patch: FieldPatch, *, expected=None, context):
+    def _patch_values(self, dataset, patch):
         definition, table = self._definition(dataset, write=True)
         if not isinstance(patch, FieldPatch):
             raise InvalidInput()
@@ -304,6 +371,9 @@ class SQLRecordStore:
             definition.active_field,
             self._revisions[dataset],
         }
+        audit = self._audits.get(dataset)
+        if audit is not None:
+            protected.update(audit.fields)
         if names & protected:
             raise ScopeDenied()
         if len(names) != len(patch.set_values) + len(patch.unset_fields) + len(
@@ -318,6 +388,12 @@ class SQLRecordStore:
             if isinstance(delta, bool) or not isinstance(delta, (int, float)):
                 raise InvalidInput()
             data[field] = table.c[field] + delta
+        if audit is not None:
+            data.update(audit.values(self.scope.actor_id))
+        return definition, table, data
+
+    def patch(self, dataset, key, patch: FieldPatch, *, expected=None, context):
+        _, table, data = self._patch_values(dataset, patch)
         revision = self._revisions[dataset]
         data[revision] = table.c[revision] + 1
         where = self._where(dataset, key)
@@ -339,7 +415,7 @@ class SQLRecordStore:
 
     def delete(self, dataset, key, *, expected=None, context):
         definition, table = self._definition(dataset, write=True)
-        if definition.active_field:
+        if definition.active_field and dataset not in self._audits:
             raise CapabilityUnsupported(operation_id=context.operation_id)
         where = self._where(dataset, key)
         if expected is not None:
@@ -349,14 +425,34 @@ class SQLRecordStore:
                 where, table.c[self._revisions[dataset]] == int(expected.value)
             )
         with self._session(context) as connection:
-            result = self._execute(connection, table.delete().where(where), context)
+            statement = table.delete().where(where)
+            if definition.active_field:
+                audit = self._audits[dataset]
+                values = audit.values(self.scope.actor_id)
+                values[definition.active_field] = audit.inactive_value
+                values[self._revisions[dataset]] = table.c[self._revisions[dataset]] + 1
+                statement = table.update().where(where).values(**values)
+            result = self._execute(connection, statement, context)
             return DeleteReceipt(context.operation_id, bool(result.rowcount))
 
+    def _neutral(self, dataset, row):
+        audit = self._audits.get(dataset)
+        return audit.neutral(row) if audit is not None else dict(row)
+
     def query(self, dataset, query, page, *, context):
-        raise CapabilityUnsupported(operation_id=context.operation_id)
+        from infrastructure.rdb.record_queries import query_records
+
+        return query_records(self, dataset, query, page, context=context)
 
     def count(self, dataset, query, *, context):
-        raise CapabilityUnsupported(operation_id=context.operation_id)
+        from infrastructure.rdb.record_queries import count_records
+
+        return count_records(self, dataset, query, context=context)
+
+    def claim(self, dataset, query, patch, *, limit=1, context):
+        from infrastructure.rdb.record_queries import claim_records
+
+        return claim_records(self, dataset, query, patch, limit=limit, context=context)
 
     def close(self):
         self._closed = True

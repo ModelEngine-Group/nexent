@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-RECORD-CLAIM-20261116
+  change_type: requirement
+  requirement_id: SI-REQ-002
+  title: Scoped record queries and transactional claims for durable tasks
+  description: >-
+    Complete bounded query/count, scope-bound continuation cursors, trusted UTC
+    audit mappings, soft deletion and PostgreSQL skip-locked transactional claim.
+    Existing application repositories and workers remain unchanged.
+  affected_features:
+    existing: [SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Existing record/catalog UT covers isolated policies and transaction ownership.
+    Strengthen it for query/audit/claim behavior and run a separate isolated
+    PostgreSQL protocol probe. No new API or worker is mounted in this slice;
+    full durable-job and two-service acceptance remains pending in DPR.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Bound and project queries with deterministic ordering and tenant/active filters.
+    - Reject malformed continuation cursors and reuse across queries or scopes.
+    - Maintain trusted UTC audit fields and soft deletion with revision CAS.
+    - Require a PostgreSQL transaction for skip-locked claims and roll back failures.
+    - Preserve deadline, cancellation, unknown-commit and escaped-handle behavior.
+    reason: Existing key-addressed tests do not prove queries, audit mappings or claims.
+    test_selectors:
+    - test/backend/infrastructure/test_record_store.py
+    - test/backend/infrastructure/test_record_audit.py
+    - test/backend/infrastructure/test_storage_catalog.py
