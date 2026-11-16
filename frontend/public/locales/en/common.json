@@ -60,7 +60,7 @@
     "install": "Install",
     "installed": "Installed",
     "installAnother": "Install another copy",
-    "sourceAlreadyAvailable": "This is an existing source skill. Manage it in My installed skills.",
+    "sourceAlreadyAvailable": "Manage or remove skills in My installed skills.",
     "sourceUnknown": "Legacy installation source is unlinked. Manage copies in My resources.",
     "operationFailed": "Operation failed. Check permissions and references, then retry.",
     "title": "Resource repository",

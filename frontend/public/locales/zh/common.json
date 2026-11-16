@@ -60,7 +60,7 @@
     "install": "安装",
     "installed": "已安装",
     "installAnother": "安装新副本",
-    "sourceAlreadyAvailable": "这是已有的原始技能，请到“我安装的”中管理。",
+    "sourceAlreadyAvailable": "请到“我安装的”中管理或移除技能。",
     "sourceUnknown": "历史安装来源未关联，请到我的资源管理",
     "operationFailed": "操作失败，请检查权限及资源引用后重试",
     "title": "资源仓库",

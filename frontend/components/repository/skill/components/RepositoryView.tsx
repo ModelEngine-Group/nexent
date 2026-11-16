@@ -4,8 +4,7 @@
 
 import RepositoryDisplayControls from "@/components/repository/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { Button, Input, Modal, Tooltip } from "antd";
-import { useState } from "react";
+import { Button, Input, Tooltip } from "antd";
 import { Copy, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
@@ -36,7 +35,7 @@ export function RepositoryView({
   onPageSizeChange,
   onRetry,
   onInstall,
-  onUninstall,
+  enhanced = false,
   onDetailClick,
   showAdminMenu,
   onTakeDown,
@@ -59,10 +58,7 @@ export function RepositoryView({
   onPageSizeChange: (size: number) => void;
   onRetry: () => void;
   onInstall: (listing: SkillRepositoryListingItem) => void;
-  onUninstall?: (
-    listing: SkillRepositoryListingItem,
-    copy: { skill_id: number; name: string },
-  ) => void;
+  enhanced?: boolean;
   onDetailClick: (listing: SkillRepositoryListingItem) => void;
   showAdminMenu: boolean;
   onTakeDown: (listing: SkillRepositoryListingItem) => void;
@@ -71,61 +67,45 @@ export function RepositoryView({
 }) {
   const { t } = useTranslation("common");
   const presentation = useRepositoryPresentation();
-  const [uninstallTargetId, setUninstallTargetId] = useState<number | null>(
-    null,
-  );
-  const uninstallTarget = listings.find(
-    (listing) => listing.skill_repository_id === uninstallTargetId,
-  );
   const renderInstallAction = (listing: SkillRepositoryListingItem) => {
     const installed = listing.installation_state === "installed";
     const unknown =
       !listing.installation_state || listing.installation_state === "unknown";
-    const copies = listing.installed_copies ?? [];
     const busy = installingRepositoryId === listing.skill_repository_id;
     return (
       <span className="inline-flex items-center gap-2">
         <Tooltip
           title={
-            onUninstall && unknown
+            enhanced && unknown
               ? t("resourceCenter.sourceUnknown")
-              : onUninstall && installed && !copies.length
+              : enhanced && installed
                 ? t("resourceCenter.sourceAlreadyAvailable")
                 : undefined
           }
         >
           <Button
-            type={onUninstall ? "default" : "text"}
-            size={onUninstall ? "middle" : "small"}
+            type={enhanced ? "default" : "text"}
+            size={enhanced ? "middle" : "small"}
             className={
-              onUninstall
+              enhanced
                 ? "h-8 min-w-[88px] max-w-[190px] rounded px-4 text-sm font-normal leading-[22px]"
                 : undefined
             }
-            icon={onUninstall ? undefined : <Copy className="size-3.5" />}
+            icon={enhanced ? undefined : <Copy className="size-3.5" />}
             loading={busy}
-            disabled={
-              Boolean(onUninstall) &&
-              (unknown ||
-                (installed && !copies.some((copy) => copy.can_uninstall)))
-            }
+            disabled={enhanced && (unknown || installed)}
             onClick={(event) => {
               event.stopPropagation();
               if (busy) return;
-              if (!onUninstall || (!installed && !unknown)) {
+              if (!enhanced || (!installed && !unknown)) {
                 onInstall(listing);
-              } else if (installed && onUninstall) {
-                if (copies.length === 1 && copies[0].can_uninstall)
-                  onUninstall(listing, copies[0]);
-                else if (copies.some((copy) => copy.can_uninstall))
-                  setUninstallTargetId(listing.skill_repository_id);
               }
             }}
           >
             {t(
-              onUninstall
+              enhanced
                 ? installed
-                  ? "resourceCenter.uninstall"
+                  ? "resourceCenter.installed"
                   : "resourceCenter.install"
                 : "skillRepository.repository.copy",
             )}
@@ -216,35 +196,6 @@ export function RepositoryView({
           </>
         </AsyncContent>
       </div>
-      <Modal
-        open={Boolean(
-          uninstallTarget && uninstallTarget.installation_state === "installed",
-        )}
-        title={t("resourceCenter.uninstall")}
-        closable={{ "aria-label": t("common.close") }}
-        onCancel={() => setUninstallTargetId(null)}
-        footer={null}
-        centered
-      >
-        <div className="flex flex-col gap-2">
-          {(uninstallTarget?.installed_copies ?? []).map((copy) => (
-            <Button
-              key={copy.skill_id}
-              disabled={
-                !copy.can_uninstall ||
-                installingRepositoryId === uninstallTargetId
-              }
-              onClick={() => {
-                if (!uninstallTarget || !copy.can_uninstall) return;
-                setUninstallTargetId(null);
-                onUninstall?.(uninstallTarget, copy);
-              }}
-            >
-              {copy.name}
-            </Button>
-          ))}
-        </div>
-      </Modal>
     </div>
   );
 }

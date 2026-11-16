@@ -10,8 +10,6 @@ import {
 } from "@/hooks/useRepositoryQueryState";
 import { useEffect, useMemo, useState } from "react";
 import { App, Input, Modal } from "antd";
-import { useQueryClient } from "@tanstack/react-query";
-import { uninstallSkillRepositoryCopy } from "@/services/skillRepositoryService";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
@@ -48,7 +46,6 @@ export function SkillSpace({
   enhanced?: boolean;
   sortByPublished?: boolean;
 }) {
-  const queryClient = useQueryClient();
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const { user } = useAuthorizationContext();
@@ -294,34 +291,7 @@ export function SkillSpace({
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
           onRetry={() => refetchRepository()}
-          onUninstall={
-            enhanced
-              ? (listing, copy) =>
-                  modal.confirm({
-                    title: t("resourceCenter.uninstall"),
-                    content: copy.name,
-                    centered: true,
-                    okText: t("common.confirm"),
-                    cancelText: t("common.cancel"),
-                    okButtonProps: { danger: true },
-                    onOk: async () => {
-                      try {
-                        await uninstallSkillRepositoryCopy(
-                          listing.skill_repository_id,
-                          copy.skill_id
-                        );
-                        await queryClient.invalidateQueries({
-                          predicate: ({ queryKey }) =>
-                            /skill/i.test(String(queryKey[0])),
-                        });
-                      } catch (error) {
-                        message.error(t("resourceCenter.operationFailed"));
-                        throw error;
-                      }
-                    },
-                  })
-              : undefined
-          }
+          enhanced={enhanced}
           onInstall={handleInstall}
           onDetailClick={openDetail}
           showAdminMenu={isAdmin}

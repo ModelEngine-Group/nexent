@@ -45,9 +45,9 @@ function renderActions(
   installingRepositoryId: number | null = null,
   installationState: SkillRepositoryListingItem["installation_state"] = "not_installed",
   copies: NonNullable<SkillRepositoryListingItem["installed_copies"]> = [],
+  enhanced = true,
 ) {
   const install = vi.fn();
-  const uninstall = vi.fn();
   const detail = vi.fn();
   render(
     <RepositoryPresentationContext.Provider
@@ -76,7 +76,7 @@ function renderActions(
         onPageSizeChange={vi.fn()}
         onRetry={vi.fn()}
         onInstall={install}
-        onUninstall={uninstall}
+        enhanced={enhanced}
         onDetailClick={detail}
         showAdminMenu={false}
         onTakeDown={vi.fn()}
@@ -85,87 +85,64 @@ function renderActions(
       />
     </RepositoryPresentationContext.Provider>,
   );
-  return { install, uninstall, detail };
+  return { install, detail };
 }
 
 const copy = { skill_id: 11, name: "My Skill", can_uninstall: true };
 
-describe("skill repository install and uninstall actions", () => {
+describe("skill repository install and installed actions", () => {
+  it("preserves the legacy repository copy action", () => {
+    const { install } = renderActions(null, "installed", [copy], false);
+    const button = screen.getByRole("button", {
+      name: "skillRepository.repository.copy",
+    });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(install).toHaveBeenCalledOnce();
+  });
+
   it("installs an unavailable skill with one button and no dropdown", () => {
-    const { install, uninstall } = renderActions();
+    const { install } = renderActions();
     fireEvent.click(
       screen.getByRole("button", { name: "resourceCenter.install" }),
     );
     expect(install).toHaveBeenCalledOnce();
     expect(install.mock.calls[0][0].skill_repository_id).toBe(7);
-    expect(uninstall).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("button", { name: "resourceCenter.actions" }),
     ).toBeNull();
   });
 
-  it("shows only the uninstall button for the linked copy", () => {
-    const { install, uninstall } = renderActions(null, "installed", [copy]);
-    expect(screen.queryByText("resourceCenter.installed")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "resourceCenter.uninstall" }),
-    );
-    expect(uninstall).toHaveBeenCalledOnce();
-    expect(uninstall.mock.calls[0][1]).toEqual(copy);
-    expect(install).not.toHaveBeenCalled();
-  });
-
-  it.each([{ copies: [] }, { copies: [{ ...copy, can_uninstall: false }] }])(
-    "protects source skills and read-only copies from removal",
+  it.each([
+    { copies: [] },
+    { copies: [copy] },
+    { copies: [{ ...copy, can_uninstall: false }] },
+    { copies: [copy, { ...copy, skill_id: 12, name: "Second copy" }] },
+  ])(
+    "shows installed without a removal action for copies: %j",
     ({ copies }) => {
-      const { install, uninstall } = renderActions(null, "installed", copies);
-      expect(screen.queryByText("resourceCenter.installed")).toBeNull();
+      const { install } = renderActions(null, "installed", copies);
       const button = screen.getByRole("button", {
-        name: "resourceCenter.uninstall",
+        name: "resourceCenter.installed",
       });
       expect(button).toBeDisabled();
       fireEvent.click(button);
-      expect(uninstall).not.toHaveBeenCalled();
       expect(install).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: "resourceCenter.uninstall" }),
+      ).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
     },
   );
 
-  it("chooses the installed copy before confirming uninstall", async () => {
-    const { uninstall } = renderActions(null, "installed", [
-      copy,
-      { ...copy, skill_id: 12, name: "Second copy", can_uninstall: false },
-    ]);
-    fireEvent.click(
-      screen.getByRole("button", { name: "resourceCenter.uninstall" }),
-    );
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(uninstall).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Second copy" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "My Skill" }));
-    expect(uninstall.mock.calls[0][1]).toEqual(copy);
-  });
-
-  it("cancels copy selection without uninstalling", () => {
-    const { uninstall } = renderActions(null, "installed", [
-      copy,
-      { ...copy, skill_id: 12, name: "Second copy" },
-    ]);
-    fireEvent.click(
-      screen.getByRole("button", { name: "resourceCenter.uninstall" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "common.close" }));
-    expect(uninstall).not.toHaveBeenCalled();
-  });
-
   it("does not guess installation state for unlinked historical skills", () => {
-    const { install, uninstall } = renderActions(null, "unknown");
+    const { install } = renderActions(null, "unknown");
     const button = screen.getByRole("button", {
       name: "resourceCenter.install",
     });
     expect(button).toBeDisabled();
     fireEvent.click(button);
     expect(install).not.toHaveBeenCalled();
-    expect(uninstall).not.toHaveBeenCalled();
   });
 
   it("blocks repeated clicks while installation is pending", () => {
