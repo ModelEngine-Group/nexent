@@ -28,6 +28,9 @@ def test_role_parser_images(record_property):
         "runtime.agentos.tools": "backend/runtime/agentos/tools.py",
         "nexent.core.tools.analyze_text_file_tool": "sdk/nexent/core/tools/analyze_text_file_tool.py",
         "management.services.tool.text_validation": "backend/management/services/tool/text_validation.py",
+        "management.services.file.image_content": "backend/management/services/file/image_content.py",
+        "infrastructure.file_processing.image_sources": "infrastructure/file_processing/image_sources.py",
+        "nexent.multi_modal.image_codec": "sdk/nexent/multi_modal/image_codec.py",
         "nexent.multi_modal.image_filter": "sdk/nexent/multi_modal/image_filter.py",
     }
     try:

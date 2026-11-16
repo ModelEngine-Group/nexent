@@ -2177,41 +2177,7 @@ class TestDataProcessService(unittest.TestCase):
             "WAIT_FOR_PROCESSING",
         )
 
-    @pytest.mark.asyncio
-    async def async_test_convert_to_base64(self):
-        """
-        Minimal branch coverage for convert_to_base64:
-        - When image.format is set(e.g., PNG)
-        - When image.format is None (defaults to JPEG)
-        """
-        # PNG branch
-        img_png = Image.new('RGB', (10, 10), color='red')
-        img_png.format = 'PNG'
-        b64_png, content_type_png = await self.service.convert_to_base64(img_png)
-        self.assertTrue(isinstance(b64_png, str) and len(b64_png) > 0)
-        self.assertEqual(content_type_png, 'image/png')
-        decoded_png = base64.b64decode(b64_png)
-        opened_png = Image.open(io.BytesIO(decoded_png))
-        self.assertEqual(opened_png.format, 'PNG')
-        self.assertEqual(opened_png.size, (10, 10))
 
-        # Default JPEG branch
-        # format is None by default
-        img_jpeg = Image.new('RGB', (8, 8), color='blue')
-        self.assertIsNone(img_jpeg.format)
-        b64_jpeg, content_type_jpeg = await self.service.convert_to_base64(img_jpeg)
-        self.assertTrue(isinstance(b64_jpeg, str) and len(b64_jpeg) > 0)
-        self.assertEqual(content_type_jpeg, 'image/jpeg')
-        decoded_jpeg = base64.b64decode(b64_jpeg)
-        opened_jpeg = Image.open(io.BytesIO(decoded_jpeg))
-        self.assertEqual(opened_jpeg.format, 'JPEG')
-        self.assertEqual(opened_jpeg.size, (8, 8))
-
-    def test_convert_to_base64(self):
-        """
-        Test wrapper to run async test for convert_to_base64.
-        """
-        asyncio.run(self.async_test_convert_to_base64())
 
 
     @patch('data_process.services.tasks.convert_office_to_pdf',

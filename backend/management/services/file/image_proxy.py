@@ -9,7 +9,8 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
+from management.services.file.image_content import fetch_image_content
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -265,7 +266,7 @@ async def _fetch_image_directly(safe_url: str):
             }
 
 
-async def proxy_image_impl(decoded_url: str):
+async def proxy_image_impl(decoded_url: str, *, user_id=None, tenant_id=None):
     # Fast path #1: AIDP image URLs need a Bearer token. Short-circuit here
     # before the loopback check because the AIDP host may happen to resolve
     # to a loopback address in dev, and we'd skip the auth header if that
@@ -273,30 +274,12 @@ async def proxy_image_impl(decoded_url: str):
     if _is_aidp_url(decoded_url):
         return await _fetch_aidp_image(decoded_url)
 
-    # Fast path #2: loopback URLs (in-process / local dev), fetch directly.
-    # This avoids an extra hop through the data-processing service for
-    # local images. For any other URL (including all external / knowledge-
-    # base images such as AIDP from a different deployment), fall back to
-    # the data-process service proxy, which is the existing safe path
-    # that CodeQL does not flag.
+    # Loopback retains its existing raw-byte response contract.
     safe_url = _validate_loopback_url(decoded_url)
     if safe_url is not None:
         return await _fetch_image_directly(safe_url)
 
-    # Create session to call the data processing service
-    async with aiohttp.ClientSession() as session:
-        # Call the data processing service to load the image
-        data_process_url = f"{DATA_PROCESS_SERVICE}/tasks/load_image?url={decoded_url}"
-
-        async with session.get(data_process_url) as response:
-            if response.status != HTTPStatus.OK:
-                error_text = await response.text()
-                logger.error(
-                    f"Failed to fetch image from data process service: {error_text}")
-                return {"success": False, "error": "Failed to fetch image or image format not supported"}
-
-            result = await response.json()
-            return result
+    return await fetch_image_content(decoded_url, user_id=user_id, tenant_id=tenant_id)
 
 
 

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-IMAGE-PROXY-D3-001
+timeout_seconds: 120
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_image_proxy_sources
+acceptance_bindings:
+  AC-01: [test_image_proxy_sources]
+  AC-02: [test_image_proxy_sources]
+  AC-03: [test_image_proxy_sources]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+# The script owns its MinIO container, source sockets, clients and managed pool.

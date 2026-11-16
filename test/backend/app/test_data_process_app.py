@@ -83,14 +83,6 @@ class _ServiceStub:
             "failed_count": 0,
         }
 
-    async def load_image(self, url: str):
-        if url == "none":
-            return None
-        return object()
-
-    async def convert_to_base64(self, image: object) -> tuple[str, str]:
-        return ("ZmFrZSBiYXNlNjQ=", "image/png")
-
     async def get_all_tasks(self) -> list[dict[str, Any]]:
         return [
             {
@@ -397,27 +389,8 @@ def test_batch_tasks_http_exception(monkeypatch):
     assert resp.status_code == HTTPStatus.NOT_ACCEPTABLE
 
 
-def test_load_image_success_and_not_found():
-    app = _build_app()
-    client = TestClient(app)
-    ok = client.get("/tasks/load_image", params={"url": "u"})
-    assert ok.status_code == 200
-    assert ok.json()["success"] is True
-    nf = client.get("/tasks/load_image", params={"url": "none"})
-    assert nf.status_code == 404
 
 
-def test_load_image_internal_error(monkeypatch):
-    from data_process.api.tasks import routes as app_module
-
-    async def err(url: str):
-        raise RuntimeError("bad")
-
-    monkeypatch.setattr(app_module.service, "load_image", err, raising=True)
-    app = _build_app()
-    client = TestClient(app)
-    resp = client.get("/tasks/load_image", params={"url": "x"})
-    assert resp.status_code == 500
 
 
 def test_filter_important_image_http_exception(monkeypatch):
@@ -568,3 +541,8 @@ def test_retired_text_endpoint_is_not_exposed():
     client = TestClient(_build_app())
     response = client.post("/tasks/process_text_file", files={"file": ("source.txt", b"text")})
     assert response.status_code == 404
+
+
+def test_retired_load_image_route_is_absent():
+    client = TestClient(_build_app())
+    assert client.get("/tasks/load_image", params={"url": "u"}).status_code == 404

@@ -30,4 +30,6 @@ feature:
     description: Management owns structural parser dependencies and extraction weights; Runtime owns pure chunking and CLIP with no peer source or extraction models.
   - rule_id: DPR-CLEANSE-RULE-11
     description: Runtime text analysis uses run-bound AgentOS cleansing and exact temporary object ports; confirmed release precedes source cleanup without retries or the retired text API.
+  - rule_id: DPR-CLEANSE-RULE-12
+    description: Management image proxy preserves image formats through Infrastructure reads and SDK encoding without the retired load_image HTTP endpoint or retries.
   required_test_stages: [D3, D5]

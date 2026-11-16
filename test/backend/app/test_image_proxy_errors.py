@@ -58,3 +58,27 @@ def test_successful_image_response_remains_unchanged(client, mocker, response_fo
         assert response.content == content
         assert response.headers["content-type"] == "image/png"
         assert response.headers["cache-control"] == "public, max-age=3600"
+
+
+def test_s3_route_propagates_verified_identity(client, mocker):
+    mocker.patch.object(image_app, "get_current_user_id", return_value=("owner", "tenant"))
+    fetch = mocker.patch.object(image_app, "proxy_image_impl", new_callable=AsyncMock,
+                              return_value={"success": True, "base64": "AQ==", "content_type": "image/png"})
+    response = client.get("/image", params={"url": "s3://files/attachments/owner/a.png"},
+                          headers={"Authorization": "Bearer synthetic"})
+    assert response.status_code == 200
+    fetch.assert_awaited_once_with("s3://files/attachments/owner/a.png", user_id="owner", tenant_id="tenant")
+
+
+@pytest.mark.parametrize("response_format,status", [("json", 200), ("stream", 502)])
+def test_timeout_is_redacted_warning_once(client, mocker, caplog, response_format, status):
+    fetch = mocker.patch.object(image_app, "proxy_image_impl", new_callable=AsyncMock,
+                              side_effect=TimeoutError("secret-value"))
+    response = client.get("/image", params={"url": "https://example.test/a?token=secret-value", "format": response_format})
+    assert response.status_code == status
+    assert "secret-value" not in response.text
+    assert "secret-value" not in caplog.text
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelname == "WARNING"
+    assert "image_proxy_timeout phase=content threshold_seconds=5" in caplog.text
+    fetch.assert_awaited_once()

@@ -533,16 +533,6 @@ class DataProcessService:
             "failed_count": failed_count,
         }
 
-    async def convert_to_base64(self, image):
-        # Convert PIL image to base64
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format=image.format or 'JPEG')
-        img_byte_arr.seek(0)
-        # Convert to base64
-        image_data = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-        # Determine correct content_type
-        content_type = f"image/{image.format.lower() if image.format else 'jpeg'}"
-        return image_data, content_type
 
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:

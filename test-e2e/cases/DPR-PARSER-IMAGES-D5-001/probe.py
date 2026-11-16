@@ -205,7 +205,10 @@ else:
                "runtime.text_cleanse", "runtime.agentos.tools", "nexent.core.tools.analyze_text_file_tool"]
 
 if role == "management":
-    modules.append("management.services.tool.text_validation")
+    modules.extend(["management.services.tool.text_validation", "management.services.file.image_content",
+                    "infrastructure.file_processing.image_sources"])
+
+modules.append("nexent.multi_modal.image_codec")
 
 evidence["source_hashes"] = {
     name: hashlib.sha256(

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-IMAGE-PROXY-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Retire the old image proxy HTTP hop
+  description: Preserve public image output through Management, Infrastructure and SDK while removing the no-caller load_image route.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-PARSER-IMAGES-D5-001]
+    added: [DPR-IMAGE-PROXY-D3-001]
+    modified: [DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve RGB formats, transparent-image white background and JSON/stream projection.
+    - Verify source selection, exact read-only ObjectStore and actor propagation.
+    - Bound the whole generic request and close images, sessions and storage on failure without retry.
+    - Preserve AIDP credential isolation and loopback raw bytes, and reject private filesystem paths.
+    reason: Existing UT proves AIDP/loopback and old delegation; replace retired-hop assertions with the actual new boundary. D3 adds real protocols rather than another D1 copy. It owns its uniquely labelled MinIO, HTTP sockets and managed pool; no shared preparation factories are required.
+    test_selectors:
+    - test/sdk/multi_modal/test_image_codec.py
+    - test/backend/services/test_image_content.py
+    - test/backend/services/test_image_sources.py
+    - test/backend/services/test_image_service.py
+    - test/backend/services/test_image_aidp.py
+    - test/backend/app/test_image_app.py
+    - test/backend/app/test_image_proxy_errors.py
+    - test/backend/app/test_data_process_app.py
+    - test/backend/services/test_data_process_service.py

@@ -138,35 +138,6 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: str | Non
         )
 
 
-@router.get("/load_image")
-async def load_image(url: str):
-    """
-    Load an image from URL and return it as base64 encoded data
-
-    Parameters:
-        url: Image URL to load
-
-    Returns:
-        JSON object containing base64 encoded image data and content type
-    """
-    try:
-        # Use the service to load the image
-        image = await service.load_image(url)
-
-        if image is None:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Failed to load image or image format not supported"
-            )
-
-        image_data, content_type = await service.convert_to_base64(image)
-        return JSONResponse(
-            status_code=HTTPStatus.OK, content={"success": True, "base64": image_data, "content_type": content_type}
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error loading image: {e!s}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error loading image: {e!s}")
 
 
 @router.get("")

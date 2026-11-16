@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-IMAGE-PROXY-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-004, DPR-006]
+  business_rule_ids: [DPR-CLEANSE-RULE-12]
+  title: Management image proxy reads real sources without data-process
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual image-source HTTP and scoped ObjectStore integration with the public Management response contract.
+  preconditions:
+  - Docker, cached MinIO and the configured Python dependencies are available.
+  test_data:
+    resources: Owned MinIO, local HTTP image source, Management ASGI route and managed worker pool.
+    fixtures: RGB and RGBA PNG bytes, malformed image and synthetic actor with an owned attachment.
+  steps:
+  - order: 1
+    action: Request PNG and RGBA images through the generic HTTP path using a URL with multiple query parameters, then request JSON and stream formats.
+    expected: Source query is preserved; RGB stays PNG and RGBA uses white-background JPEG with identical JSON/stream bytes.
+  - order: 2
+    action: Read an owned S3 image and a data URI, then a foreign attachment and an invalid image.
+    expected: Permitted sources decode correctly; forbidden or invalid sources fail without revealing image bytes or falling back to data-process.
+  - order: 3
+    action: Close HTTP resources, drain managed workers and remove the owned MinIO container and volumes.
+    expected: No owned resources remain and no data-process service was started.
+  expected_results:
+  - Image normalization and public response projection survive real HTTP acquisition.
+  - Exact ObjectStore reads and inline decoding work, while denied and invalid requests fail.
+  - Owned resources are reclaimed without retries or old-service traffic.
+  forbidden_side_effects:
+  - No application storage, real model provider, data-process endpoint or arbitrary filesystem path is accessed.
+  integration_boundary:
+  - Management API and orchestration, Infrastructure HTTP and ObjectStore, SDK encoding, managed worker and real MinIO.
+  - Actor identity is a controlled verified-principal fixture; this case does not reprove Gateway signatures or historical KB ACL migration.
+  observations:
+  - Decoded image mode/format/pixels, HTTP query, content type, denied response and cleanup receipt.
+  cleanup:
+  - Close source sockets, ASGI clients and workers; remove only exact unique-label MinIO resources.
+  acceptance:
+  - id: AC-01
+    description: HTTP content and public JSON/stream remain correct.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Scoped S3 and data sources work and forbidden/invalid input fails.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Owned resources close without the retired service.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
