@@ -318,7 +318,7 @@ try:
     clock[0] += timedelta(seconds=120)
     assert worker.ready(context=context()) == ()
     check_resources(engine, request.source, public.records, context)
-    check_source_publication(engine, port(minio, "9000/tcp"), context, queue)
+    check_source_publication(engine, port(minio, "9000/tcp"), context, queue, url)
     last = public.submit(
         request.model_copy(update={"idempotency_key": "consumer-stop"}),
         context=context(),
@@ -396,9 +396,15 @@ try:
         "recovery_accounting_and_quota": True,
         "ledger_access_snapshot_and_release": True,
         "knowledge_worker_and_partitioned_artifact": True,
+        "dispatch_root_stop_and_crash_fence": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
+                "backend/management/services/file/cleanse_root.py",
+                "backend/management/services/file/cleanse_jobs.py",
+                "backend/management/services/file/cleanse_worker.py",
+                "infrastructure/rdb/cleanse_dispatch.py",
+                "infrastructure/knowledge_cleanse.py",
                 "backend/management/services/file/knowledge_cleanse_worker.py",
                 "infrastructure/file_processing/objects.py",
                 "backend/management/services/file/knowledge_cleanse_service.py",

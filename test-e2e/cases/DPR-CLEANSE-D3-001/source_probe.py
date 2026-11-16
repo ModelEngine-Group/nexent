@@ -12,8 +12,8 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from contracts.constants import environment
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
-from ledger_probe import check_ledger_access
 from execution_probe import check_execution
+from ledger_probe import check_ledger_access
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.source_publish import SourcePublisher
 from management.services.file.source_recovery import reconcile_sources
@@ -31,7 +31,7 @@ from infrastructure.rdb.tenant_config_record import TenantConfig
 from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
 
 
-def check_source_publication(engine, port, context, queue):
+def check_source_publication(engine, port, context, queue, redis_url):
     def client_factory(remaining):
         return boto3.client(
             "s3",
@@ -199,6 +199,8 @@ def check_source_publication(engine, port, context, queue):
             )
         record = records.get(DATASET, "e" * 32, context=context())
         settings = {
+            "REDIS_URL": redis_url,
+            "REDIS_BACKEND_URL": redis_url,
             "POSTGRES_HOST": engine.url.host,
             "POSTGRES_PORT": str(engine.url.port),
             "POSTGRES_USER": engine.url.username,

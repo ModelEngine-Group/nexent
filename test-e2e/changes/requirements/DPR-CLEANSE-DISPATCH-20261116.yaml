@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-DISPATCH-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Bind tenant cleansing queues and dispatch roots with pre-execution crash fencing
+  description: >-
+    Infrastructure owns fixed-namespace WorkQueue and KV handles, and grants readonly KB scheduling
+    metadata for system discovery. Management scans pending jobs, closes discovery before parser forks,
+    and uses independent bounded tenant attempts in a single-thread root. Before any execution, persist
+    reconciliation-required under the active owner and lease; only confirmed completion clears it.
+    Root loss must never turn an admitted side effect into blind lease-expiry replay.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001, DPR-PARSER-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Hide payloads and completed, run-scoped or reconciliation-required work from system dispatch discovery.
+    - Bind only Management tenant queue and KV, closing every constructed handle on all exits.
+    - Close discovery before parsing, bound attempts, respect stop and propagate storage errors without added retries.
+    - Persist execution intent before parsing and refuse takeover after a crashed dispatch lease expires.
+    reason: >-
+      Reuse real record/job collaboration and the existing actual storage D3; add unit assertions for
+      root ownership and provider grants. Preserve all formal D1 without manufacturing duplicate cases.
+    test_selectors:
+    - test/backend/infrastructure/test_cleanse_dispatch.py
+    - test/backend/infrastructure/test_cleanse_queue.py
+    - test/backend/services/test_cleanse_root.py
+    - test/backend/services/test_knowledge_cleanse_worker.py
+  notes: >-
+    Existing responsibility and self-contained preparation remain. Actual integration uses owned
+    PostgreSQL, Redis and MinIO with a controlled parser; a stop Event and root-loss exception are
+    controlled boundaries. This does not prove API process supervision, OS signal delivery or complete
+    native parser plus storage deployment. No new producer or lifespan default is enabled yet.

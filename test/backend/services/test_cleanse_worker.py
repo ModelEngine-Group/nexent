@@ -184,3 +184,47 @@ def test_confirmed_artifact_after_lease_expiry_requires_reconciliation(setup):
     assert result.error_code == "CLEANSE_OUTCOME_UNKNOWN"
     assert result.artifact is None
     assert jobs.ready(context=context()) == ()
+
+
+def test_unconfirmed_execution_intent_never_calls_parser(setup):
+    make, _ = setup
+    public, jobs = make(), make("worker")
+    state = public.submit(request(), context=context())
+    jobs.begin_execution = Mock(side_effect=OutcomeUnknown())
+    execute = Mock()
+    CleanseHandler(
+        jobs,
+        owner_id="worker",
+        lease_seconds=60,
+        authorize_execution=Mock(),
+        execute=execute,
+    )(task(state), context=context())
+    execute.assert_not_called()
+    result = public.inspect(
+        FileCleanseLookup(job_id=state.job_id, run_id=state.run_id), context=context()
+    )
+    assert result.error_code == "CLEANSE_OUTCOME_UNKNOWN"
+
+
+def test_cancel_before_execution_intent_never_calls_parser(setup):
+    make, _ = setup
+    public, jobs = make(), make("worker")
+    state = public.submit(request(), context=context())
+    lookup = FileCleanseLookup(job_id=state.job_id, run_id=state.run_id)
+    begin = jobs.begin_execution
+
+    def cancelled(handle, *, context):
+        public.cancel(lookup, context=context)
+        return begin(handle, context=context)
+
+    jobs.begin_execution = cancelled
+    execute = Mock()
+    CleanseHandler(
+        jobs,
+        owner_id="worker",
+        lease_seconds=60,
+        authorize_execution=Mock(),
+        execute=execute,
+    )(task(state), context=context())
+    execute.assert_not_called()
+    assert public.inspect(lookup, context=context()).status == "cancelled"

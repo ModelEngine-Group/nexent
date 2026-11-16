@@ -23,6 +23,11 @@ class _TaskFailed(Exception):
     """A worker reported a deterministic execution failure, without private details."""
 
 
+def ensure_isolation_available():
+    if _unreclaimed:
+        raise Unavailable()
+
+
 def _encode(value):
     try:
         encoded = json.dumps(value, allow_nan=False, separators=(",", ":")).encode()
@@ -83,8 +88,7 @@ def run_isolated(factory, payload, *, context, tick=None):
         or threading.active_count() != 1
     ):
         raise CapabilityUnsupported()
-    if _unreclaimed:
-        raise Unavailable()
+    ensure_isolation_available()
     if not callable(factory) or tick is not None and not callable(tick):
         raise InvalidInput()
     encoded = _encode(payload)

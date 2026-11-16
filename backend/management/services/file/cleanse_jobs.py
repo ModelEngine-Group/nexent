@@ -243,13 +243,7 @@ class CleanseJobs:
         ):
             raise InvalidInput()
         now = self.clock()
-        where = both(
-            Comparison("job_id", "eq", handle["job_id"]),
-            Comparison("status", "eq", "running"),
-            Comparison("owner_id", "eq", handle["owner_id"]),
-            Comparison("attempt_id", "eq", handle["attempt_id"]),
-            Comparison("lease_until", "gt", now.isoformat()),
-        )
+        where = self._attempt_where(handle, now=now)
         values = {
             "status": status,
             "artifact": artifact.model_dump(mode="json") if artifact else None,
@@ -261,6 +255,8 @@ class CleanseJobs:
             values["lease_until"] = (now + timedelta(seconds=lease_seconds)).isoformat()
         else:
             values["lease_until"] = None
+        if status == "completed":
+            values["reconcile_required"] = False
         with self.records.transaction(context=context) as tx:
             rows = tx.claim(
                 DATASET,
@@ -271,13 +267,32 @@ class CleanseJobs:
             )
         return bool(rows)
 
-    def mark_uncertain(self, handle, *, context):
-        where = both(
+    @staticmethod
+    def _attempt_where(handle, *, now=None):
+        terms = (
             Comparison("job_id", "eq", handle["job_id"]),
             Comparison("status", "eq", "running"),
             Comparison("owner_id", "eq", handle["owner_id"]),
             Comparison("attempt_id", "eq", handle["attempt_id"]),
         )
+        if now is not None:
+            terms += (Comparison("lease_until", "gt", now.isoformat()),)
+        return both(*terms)
+
+    def begin_execution(self, handle, *, context):
+        # Persist uncertainty before any parser side effect, including process death.
+        with self.records.transaction(context=context) as tx:
+            rows = tx.claim(
+                DATASET,
+                RecordQuery(where=self._attempt_where(handle, now=self.clock())),
+                FieldPatch(set_values={"reconcile_required": True}),
+                limit=1,
+                context=context,
+            )
+        return bool(rows)
+
+    def mark_uncertain(self, handle, *, context):
+        where = self._attempt_where(handle)
         with self.records.transaction(context=context) as tx:
             rows = tx.claim(
                 DATASET,

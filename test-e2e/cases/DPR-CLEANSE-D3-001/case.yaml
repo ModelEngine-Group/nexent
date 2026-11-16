@@ -62,6 +62,9 @@ case:
   - order: 14
     action: Dispatch an authorized recovered KB source through production worker composition using actual record, broker and object ports with controlled text parsing.
     expected: The worker renews its authorized lease, publishes a checksummed tenant-partitioned artifact, commits completion before acknowledgement, and duplicate delivery does not parse again; another tenant cannot read the output.
+  - order: 15
+    action: Run the production discovery loop and fixed tenant queue factory with controlled parsing, stop after a completed dispatch, then lose a root after execution admission and expire its lease.
+    expected: The loop closes discovery before execution and stops with durable completion; an execution-admitted job retains its persisted reconciliation obligation and a replacement root cannot enqueue or execute it after lease expiry.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -77,6 +80,7 @@ case:
   - Over-quota recovery retains its physical source charge and blocks successful publication pending cleanup.
   - Production ledger queries and release use scoped ports with snapshot consistency and audited idempotence.
   - Production KB worker composition preserves ownership, durable completion, deduplication and tenant-partitioned cleansing artifacts.
+  - Production root discovery and tenant queue composition stop cleanly and fence crashed execution until reconciliation.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
@@ -86,6 +90,11 @@ case:
   cleanup:
   - Delete only test-owned containers by their returned IDs including anonymous volumes.
   acceptance:
+  - id: AC-13
+    description: The production dispatch loop uses scoped queue factories, stops after durable completion and never blindly replays an execution-admitted job after root loss.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1]
   - id: AC-12
     description: Actual KB worker, broker and object composition publishes a tenant-partitioned artifact once while retaining durable authorization and completion.
     steps: [14]

@@ -2,6 +2,7 @@
 """Production worker composition preserves durable policy and live authorization."""
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -10,9 +11,10 @@ from management.services.file import knowledge_cleanse_worker as worker
 from management.services.file.cleanse_lease import CleanseLeaseGuard
 from management.services.file.cleanse_worker import HANDLER
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
-from nexent.storage.models import StorageScope, TaskEnvelope
+from nexent.storage.models import PageRequest, RecordQuery, StorageScope, TaskEnvelope
 from nexent.storage.queue import Delivery
 
+from infrastructure.rdb.cleanse_jobs import DATASET
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from test.backend.services.test_cleanse_authorization import (
     resources as resources,  # noqa: PLC0414
@@ -149,3 +151,34 @@ def test_default_parser_factory_defers_all_handles_until_child(mocker):
     assert child.parser_version == "v1"
     child.close()
     objects.return_value.close.assert_called_once()
+
+
+def test_worker_crash_after_dispatch_cannot_be_reclaimed_on_lease_expiry(
+    prepared, setup
+):
+    public, queue, lookup, _, _ = prepared
+    make, now = setup
+
+    def execute(*args, **kwargs):
+        admitted = public.records.query(
+            DATASET, RecordQuery(), PageRequest(), context=context()
+        ).items[0]
+        assert admitted["reconcile_required"] is True
+        raise SystemExit("controlled root crash")
+
+    with pytest.raises(SystemExit):
+        consume(queue, execute)
+    row = public.records.query(
+        DATASET, RecordQuery(), PageRequest(), context=context()
+    ).items[0]
+    now[0] = datetime.fromisoformat(row["lease_until"]) + timedelta(seconds=1)
+    assert row["reconcile_required"] is True
+    assert public.ready(context=context()) == ()
+    assert (
+        make("new-worker").claim(
+            "new-root", job_id=lookup.job_id, lease_seconds=60, context=context()
+        )
+        is None
+    )
+    queue.retry.assert_called_once()
+    queue.ack.assert_not_called()

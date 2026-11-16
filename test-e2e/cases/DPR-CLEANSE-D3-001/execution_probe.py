@@ -2,15 +2,28 @@
 """Actual broker, KB admission and tenant output objects with a controlled parser."""
 
 import hashlib
+from datetime import datetime, timedelta, timezone
+from threading import Event
 
 from contracts.agentos_knowledge import CleanseArtifact, ObjectReference
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_executor import CleanseExecutor
+from management.services.file.cleanse_jobs import DATASET
+from management.services.file.cleanse_root import dispatch_ready, serve
 from management.services.file.cleanse_worker import HANDLER
 from management.services.file.knowledge_cleanse_service import KnowledgeCleanseService
 from management.services.file.knowledge_cleanse_worker import consume_knowledge_once
 from nexent.storage.errors import NotFound
-from nexent.storage.models import ObjectRef, Revision, StorageScope, TaskEnvelope
+from nexent.storage.models import (
+    Comparison,
+    FieldPatch,
+    ObjectRef,
+    PageRequest,
+    RecordQuery,
+    Revision,
+    StorageScope,
+    TaskEnvelope,
+)
 
 from infrastructure.file_processing.objects import bind_cleanse_objects
 from infrastructure.knowledge_cleanse import knowledge_cleanse_ports
@@ -101,6 +114,99 @@ def check_execution(queue, row, context):
         context=context(),
     )
     assert len(calls) == 1
+    root_state = api.submit(
+        request.model_copy(update={"idempotency_key": "root-stop"}),
+        tenant_id="tenant-a",
+        user_id="user-a",
+        context=context(),
+    )
+    stop = Event()
+
+    def stop_after_execute(*args, **kwargs):
+        result = execute(*args, **kwargs)
+        stop.set()
+        return result
+
+    serve(
+        stop,
+        owner_id="root-proof",
+        parser_version="parser-v1",
+        execute=stop_after_execute,
+    )
+    root_lookup = lookup.model_copy(update={"job_id": root_state.job_id})
+    assert (
+        api.inspect(
+            root_lookup, tenant_id="tenant-a", user_id="user-a", context=context()
+        ).status
+        == "completed"
+    )
+    with knowledge_cleanse_ports("tenant-a", "proof", context=context()) as (jobs, _):
+        finished = jobs.query(
+            DATASET,
+            RecordQuery(where=Comparison("job_id", "eq", root_state.job_id)),
+            PageRequest(limit=1),
+            context=context(),
+        ).items[0]
+        assert finished["reconcile_required"] is False
+    crashed = api.submit(
+        request.model_copy(update={"idempotency_key": "root-crash"}),
+        tenant_id="tenant-a",
+        user_id="user-a",
+        context=context(),
+    )
+
+    def crash(*args, **kwargs):
+        with knowledge_cleanse_ports("tenant-a", "proof", context=context()) as (
+            jobs,
+            _,
+        ):
+            admitted = jobs.query(
+                DATASET,
+                RecordQuery(where=Comparison("job_id", "eq", crashed.job_id)),
+                PageRequest(limit=1),
+                context=context(),
+            ).items[0]
+            assert admitted["reconcile_required"] is True
+        raise SystemExit("controlled root loss")
+
+    try:
+        dispatch_ready(
+            owner_id="crash-proof",
+            parser_version="parser-v1",
+            stop=Event(),
+            execute=crash,
+        )
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("controlled crash did not reach dispatch")
+    with knowledge_cleanse_ports("tenant-a", "proof", context=context()) as (jobs, _):
+        pending = jobs.query(
+            DATASET,
+            RecordQuery(where=Comparison("job_id", "eq", crashed.job_id)),
+            PageRequest(limit=1),
+            context=context(),
+        ).items[0]
+        assert pending["reconcile_required"] is True
+        jobs.patch(
+            DATASET,
+            pending["id"],
+            FieldPatch(
+                set_values={
+                    "lease_until": (
+                        datetime.now(timezone.utc) - timedelta(seconds=1)
+                    ).isoformat()
+                }
+            ),
+            expected=Revision(str(pending["revision"])),
+            context=context(),
+        )
+    assert dispatch_ready(
+        owner_id="replacement-proof",
+        parser_version="parser-v1",
+        stop=Event(),
+        execute=crash,
+    ) == {"enqueued": 0, "consumed": 0}
     environment = _configured_environment()
     for tenant in ("tenant-a", "tenant-b"):
         objects = S3ObjectStore(

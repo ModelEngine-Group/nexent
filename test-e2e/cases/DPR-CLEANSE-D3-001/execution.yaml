@@ -18,6 +18,7 @@ acceptance_bindings:
   AC-10: [test_durable_cleanse_dispatch]
   AC-11: [test_durable_cleanse_dispatch]
   AC-12: [test_durable_cleanse_dispatch]
+  AC-13: [test_durable_cleanse_dispatch]
 preparation:
   families: []
   anchors: false

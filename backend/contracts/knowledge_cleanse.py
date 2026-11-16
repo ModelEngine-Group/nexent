@@ -10,6 +10,10 @@ from contracts.agentos_knowledge import (
 )
 from pydantic import Field
 
+CLEANSE_QUEUE_NAMESPACE = "management-file-cleanse"
+CLEANSE_DISPATCH_DATASET = "knowledge_cleanse_dispatch"
+CLEANSE_HANDLER = "file.cleanse"
+
 
 class KnowledgeCleanseRequest(KnowledgeFileReference):
     knowledge_id: int = Field(gt=0, le=2**31 - 1)

@@ -8,12 +8,17 @@ from time import monotonic
 from types import MappingProxyType
 
 from contracts.agentos_knowledge import ObjectReference
-from contracts.knowledge_cleanse import parse_cleanse_request
-from nexent.storage.errors import InvalidInput, OutcomeUnknown, StorageError
+from contracts.knowledge_cleanse import CLEANSE_HANDLER, parse_cleanse_request
+from nexent.storage.errors import (
+    InvalidInput,
+    OperationCancelled,
+    OutcomeUnknown,
+    StorageError,
+)
 from nexent.storage.models import TaskEnvelope
 
 logger = logging.getLogger(__name__)
-HANDLER = "file.cleanse"
+HANDLER = CLEANSE_HANDLER
 
 
 class HandlerRegistry:
@@ -124,6 +129,8 @@ class CleanseHandler:
                 context, deadline=min(context.deadline, monotonic() + max(0, remaining))
             )
             execution.remaining()
+            if not self.jobs.begin_execution(row, context=execution):
+                raise OperationCancelled(operation_id=execution.operation_id)
             artifact = self.execute(row, request, context=execution)
             if not isinstance(artifact, ObjectReference):
                 raise InvalidInput()
