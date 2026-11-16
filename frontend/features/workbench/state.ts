@@ -42,9 +42,8 @@ export const initialWorkbenchState: WorkbenchState = {
   resolving: false,
   skillNames: {},
   config: {
-    schema_version: 3,
+    schema_version: 4,
     mode: "generic_chat",
-    generation_config: { deep_thinking: false, thinking_effort: "low" },
     agent_mounts: [],
     skill_mounts: [],
   },
@@ -77,8 +76,6 @@ export function workbenchReducer(
         config: {
           ...state.config,
           mode: action.mode,
-          model_id:
-            action.mode === "generic_chat" ? state.config.model_id : undefined,
           agent_mounts: [],
           skill_mounts: [],
           knowledge_scope: undefined,

@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { I18nextProvider } from "react-i18next";
 
 import i18n, { loadLocaleMessages } from "@/app/i18n";
+import { getBrowserTabLogo, getBrowserTabTitle } from "@/lib/projectBranding";
 import {
   useGlobalConfigStore,
   useGlobalConfigStoreAllLanguage,
@@ -17,11 +18,18 @@ interface I18nProviderWrapperProps {
   locale?: string;
 }
 
+const TRANSPARENT_TAB_ICON =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+  );
+
 export default function I18nProviderWrapper({
   children,
   locale: initialLocale,
 }: I18nProviderWrapperProps) {
   const [loaded, setLoaded] = useState(false);
+  const [tabIcon, setTabIcon] = useState(TRANSPARENT_TAB_ICON);
   const pathname = usePathname();
   const { config, setConfig } = useGlobalConfigStore();
   const { setAllConfig } = useGlobalConfigStoreAllLanguage();
@@ -29,8 +37,14 @@ export default function I18nProviderWrapper({
     initialLocale || pathname.split("/").filter(Boolean)[0] || "zh";
 
   useEffect(() => {
-    document.title = config.productName?.trim() || "Nexent";
-  }, [config.productName, pathname]);
+    const icon = getBrowserTabLogo();
+    const image = new Image();
+    image.onload = () => setTabIcon(icon);
+    image.src = icon;
+    return () => {
+      image.onload = null;
+    };
+  }, []);
 
   useEffect(() => {
     let isCurrentEffect = true;
@@ -58,9 +72,13 @@ export default function I18nProviderWrapper({
     };
   }, [targetLocale, setAllConfig, setConfig]);
 
-  if (!loaded) {
-    return null;
-  }
-
-  return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
+  return (
+    <>
+      <title>{getBrowserTabTitle(config)}</title>
+      <link rel="icon" href={tabIcon} />
+      <link rel="shortcut icon" href={tabIcon} />
+      <link rel="apple-touch-icon" href={tabIcon} />
+      {loaded && <I18nextProvider i18n={i18n}>{children}</I18nextProvider>}
+    </>
+  );
 }

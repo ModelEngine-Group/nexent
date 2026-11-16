@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from starlette.responses import StreamingResponse
 
 from contracts.agent import NL2SkillRunRequest
+from contracts.agentos import AgentVersionReference
+from contracts.errors.exceptions import WorkbenchError
+from management.services.conversation.creator_execution import start_creation_turn
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.exceptions import RunModelControlsError
 from infrastructure.rdb.conversation_state import conversation_belongs_to
@@ -33,8 +36,8 @@ async def nl2skill_run_api(
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
-    """Run NL2Skill; Workbench turns opt into conversation persistence."""
-    if (request.persist_history or request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+    """Run the shared NL2Skill using the common creator history path."""
+    if request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
         user_id, tenant_id, user_language = get_current_user_info(authorization)
@@ -42,49 +45,31 @@ async def nl2skill_run_api(
         raise HTTPException(status_code=401, detail="Unauthorized") from exc
 
     try:
-        if request.persist_history and request.conversation_id is not None:
-            if not await run_blocking(
-                "nl2skill-conversation-scope", conversation_belongs_to, request.conversation_id,
-                user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
-            ):
-                raise ValueError("Conversation is not an accessible creation session")
-        payload = await run_blocking(
-            "nl2skill-snapshot", prepare_nl2skill_snapshot, request, user_id, tenant_id,
-            request.language or user_language or "zh", lane="control-io", owner="management",
-        )
-        stream = create_nl2skill_stream(payload, user_id, tenant_id)
+        async def prepare_stream(effective, ref=None):
+            payload = await run_blocking(
+                "nl2skill-snapshot", prepare_nl2skill_snapshot, effective, user_id, tenant_id,
+                request.language or user_language or "zh", lane="control-io", owner="management",
+            )
+            if ref is not None:
+                payload = payload.model_copy(update={"system_agent": AgentVersionReference(
+                    agent_id=ref.agent_id, version_no=ref.version_no,
+                )})
+            return create_nl2skill_stream(payload, user_id, tenant_id)
+
         if request.persist_history:
-            conversation_id, assistant_index = await run_blocking(
-                "nl2skill-history", prepare_creation_history, lane="control-io", owner="management",
-                conversation_id=request.conversation_id,
-                mode="skill_create",
-                query=request.query,
-                minio_files=request.minio_files,
-                workbench_config=request.workbench_config,
-                agent_id=None,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                retry_user_message_id=request.retry_user_message_id,
-                retry_message_index=request.retry_message_index,
+            stream, conversation_id = await start_creation_turn(
+                request, kind="skill", user_id=user_id, tenant_id=tenant_id, stream_factory=prepare_stream,
             )
-            stream = persist_creation_stream(
-                stream,
-                conversation_id=conversation_id,
-                assistant_index=assistant_index,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={"conversation_id": str(conversation_id)},
-            )
-        return StreamingResponse(stream, media_type="text/event-stream")
+            return StreamingResponse(stream, media_type="text/event-stream",
+                                     headers={"conversation_id": str(conversation_id)})
+        return StreamingResponse(await prepare_stream(request), media_type="text/event-stream")
+    except PermissionError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
     except RunModelControlsError as exc:
         status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
         raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail="Attachment access denied.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:

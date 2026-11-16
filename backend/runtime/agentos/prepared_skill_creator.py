@@ -17,7 +17,7 @@ from runtime.agentos.creator_context import apply_creator_budget
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_evaluation import _materialize_model
 
-NL2SKILL_NAME = "__skill_creator__"
+NL2SKILL_NAME = "nl2skill_main"
 
 
 def get_nl2skill_prompt_template(
@@ -113,6 +113,15 @@ def prepare_skill_creator_run(payload: PreparedSkillCreatorRun, actor: ServicePr
         user_request=query, target_files=payload.target_files,
     )
     agent = create_nl2skill_agent_config(template.get("system_prompt", ""), model.cite_name)
+    from runtime.agentos.creator_definition import load_creator_definition
+
+    definition = load_creator_definition(payload)
+    if definition is not None:
+        agent.agent_id = definition["agent_id"]
+        agent.version_no = definition["version_no"]
+        agent.runtime_ref = f"agent:{agent.agent_id}:v{agent.version_no}"
+        agent.origin = "SYSTEM"
+        agent.max_steps = int(definition["max_steps"])
     budget = apply_creator_budget(payload, agent)
     info = build_run_info(
         language=payload.language, observer=_SkillCreatorObserver(lang=payload.language),

@@ -1,12 +1,18 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, it } from "vitest";
 import { RemoteConversationHistoryAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import type { ApiConversationDetail } from "@/types/conversation";
 
-async function restoreSkillTurn(units: Array<{ type: string; content: string }>) {
+async function restoreSkillTurn(
+  units: Array<{ type: string; content: string }>,
+  standalone = false
+) {
   const detail = {
     conversation_id: "42",
     conversation_title: "创建合同审查技能",
-    workbench_config: { mode: "skill_create" },
+    agent_system_key: "nl2skill_main",
+    workbench_config: standalone ? null : { mode: "skill_create" },
     message: [{ role: "assistant", message_id: 5, message: units }],
   } as ApiConversationDetail;
   const adapter = new RemoteConversationHistoryAdapter(
@@ -58,7 +64,10 @@ it("keeps the Skill creation summary at the end of the restored answer", async (
     { type: "model_output_thinking", content: "检查生成内容。" },
     { type: "final_answer", content: "执行已完成。" },
   ]);
-  expect(content.at(-1)).toMatchObject({ type: "text", text: "技能创建完成。" });
+  expect(content.at(-1)).toMatchObject({
+    type: "text",
+    text: "技能创建完成。",
+  });
 });
 
 it("discards rolled-back Skill summary and file fragments during history replay", async () => {
@@ -99,7 +108,10 @@ it("discards rolled-back Skill summary and file fragments during history replay"
       expect.objectContaining({
         type: "data",
         name: "nl2skill-file",
-        data: expect.objectContaining({ path: "example.md", content: "正确文件" }),
+        data: expect.objectContaining({
+          path: "example.md",
+          content: "正确文件",
+        }),
       }),
     ])
   );
@@ -111,10 +123,18 @@ it("restores retried creation answers as sibling variants of one user turn", asy
     workbench_config: { mode: "skill_create" },
     message: [
       { role: "user", message_id: 100, message_index: 0, message: "创建技能" },
-      { role: "assistant", message_id: 101, message_index: 1,
-        message: [{ type: "summary", content: "第一版" }] },
-      { role: "assistant", message_id: 102, message_index: 1,
-        message: [{ type: "summary", content: "第二版" }] },
+      {
+        role: "assistant",
+        message_id: 101,
+        message_index: 1,
+        message: [{ type: "summary", content: "第一版" }],
+      },
+      {
+        role: "assistant",
+        message_id: 102,
+        message_index: 1,
+        message: [{ type: "summary", content: "第二版" }],
+      },
     ],
   } as ApiConversationDetail;
   const adapter = new RemoteConversationHistoryAdapter(
@@ -123,8 +143,36 @@ it("restores retried creation answers as sibling variants of one user turn", asy
     async () => detail
   );
   const history = await adapter.load();
-  expect(history.messages.map((item) => [item.message.id, item.parentId])).toEqual([
-    ["100", null], ["101", "100"], ["102", "100"],
+  expect(
+    history.messages.map((item) => [item.message.id, item.parentId])
+  ).toEqual([
+    ["100", null],
+    ["101", "100"],
+    ["102", "100"],
   ]);
   expect(history.headId).toBe("102");
+});
+
+it("restores standalone Skill summary and files without a Workbench declaration", async () => {
+  const content = await restoreSkillTurn(
+    [
+      { type: "summary", content: "Summary " },
+      { type: "summary", content: "ready" },
+      {
+        type: "file_content",
+        content: JSON.stringify({ path: "example.md", content: "file" }),
+      },
+    ],
+    true
+  );
+  expect(content.filter((part) => part.type === "text")).toEqual([
+    expect.objectContaining({ text: "Summary ready" }),
+  ]);
+  expect(content).toContainEqual(
+    expect.objectContaining({
+      type: "data",
+      name: "nl2skill-file",
+      data: expect.objectContaining({ path: "example.md", content: "file" }),
+    })
+  );
 });

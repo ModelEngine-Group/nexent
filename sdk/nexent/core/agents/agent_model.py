@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from ..model_service.profiles.resolved_profile import ResolvedModelProfile
 from ..models.capacity_budget import ContextBudgetSnapshot
 from ..models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from ..utils.observer import MessageObserver
@@ -53,6 +54,8 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    resolved_profile: Optional[ResolvedModelProfile] = Field(default=None, repr=False)
     diagnostic_chunks_enabled: bool = Field(
         default=False, description="Capture bounded content-free response chunk structure"
     )
@@ -595,7 +598,7 @@ class ExternalA2AAgentConfig(BaseModel):
     transport_type: str = Field(description="Transport type: http-streaming or http-polling", default="http-streaming")
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
     protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
-    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    timeout: float = Field(description="Request timeout in seconds", default=900.0)
     ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities", default=None

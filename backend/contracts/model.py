@@ -3,12 +3,92 @@
 """Model descriptors, generation settings and capacity suggestion contracts."""
 
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from enum import Enum
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelProfileSelection as ModelProfileSelection
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelProfileProviderInfo as ModelProfileProviderInfo
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelOutletContextPatch as ModelOutletContextPatch
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelOutletContextConfigurationPatch as ModelOutletContextConfigurationPatch
+
+
+ThinkingControlFormat = Literal["profile_default", "enable_thinking", "thinking_type", "chat_template"]
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelProfilePreviewRequest as ModelProfilePreviewRequest
+
+
+class ModelProfilePreviewProviderInfo(ModelProfileProviderInfo):
+    base_url: str = Field(default="", max_length=500)
+
+
+class ModelProfilePreviewInput(ModelProfilePreviewRequest):
+    """Allow catalog-only previews without weakening create or probe requirements."""
+    provider_info: ModelProfilePreviewProviderInfo
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    request_model_id: str = Field(default="", max_length=100)
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelOutletProfileSelection as ModelOutletProfileSelection
+
+
+class ModelOutletCreateRequest(ModelProfilePreviewRequest):
+    connect_status: Optional[Literal["available", "unavailable"]] = None
+    api_key: Optional[str] = Field(default=None, max_length=500, repr=False)
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelOutletConnectionPatch as ModelOutletConnectionPatch
+
+
+from nexent.core.model_service.profiles.configuration_inputs import ModelOutletPatchRequest as ModelOutletPatchRequest
+
+
+class ConversationModelPreferencePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+
+
+class ConversationModelSelectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected_model_id: int = Field(gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletMigrationReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    outlet_id: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    expected_revision: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    draft: Optional[ModelOutletCreateRequest] = None
+    patch: Optional[ModelOutletPatchRequest] = None
+
+    @model_validator(mode="after")
+    def require_single_source(self):
+        if (self.outlet_id is None) == (self.draft is None):
+            raise ValueError("Select exactly one draft or saved outlet")
+        if self.outlet_id is None and self.expected_revision is not None:
+            raise ValueError("A draft has no saved revision")
+        if self.patch is not None and self.outlet_id is None:
+            raise ValueError("A patch requires a saved outlet")
+        if self.patch is not None and self.expected_revision not in (None, self.patch.expected_revision):
+            raise ValueError("Conflicting saved revisions")
+        return self
 
 
 ProfileKey = tuple[str, str]
@@ -220,6 +300,9 @@ class ProviderModelRequest(BaseModel):
     # safe value; operators pointing at self-signed internal endpoints must
     # opt out explicitly instead of verification being silently disabled.
     ssl_verify: bool = True
+
+    timeout_seconds: int = Field(default=120, gt=0, lt=2**31)
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False)
 
 
 class BatchCreateModelsRequest(BaseModel):
@@ -503,12 +586,12 @@ class ManageProviderModelCreateRequest(BaseModel):
     )
     # v2.6.0: model_type is now optional. When omitted, returns all models and
     # infers type from model name. When provided, behavior is unchanged.
-    model_type: Optional[str] = Field(
-        None,
-        description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.",
-    )
-    api_key: Optional[str] = Field("", description="API key for the provider")
-    base_url: Optional[str] = Field("", description="Base URL for the provider API")
+    model_type: Optional[str] = Field(None, description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.")
+    api_key: Optional[str] = Field('', description="API key for the provider")
+    base_url: Optional[str] = Field('', description="Base URL for the provider API")
+    ssl_verify: bool = True
+    timeout_seconds: int = Field(default=120, gt=0, lt=2**31)
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False)
 
 
 # =============================================================================
@@ -1033,7 +1116,9 @@ def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
       because develop's classifier gives generation keywords priority.
     - Image understanding (vlm) — keywords aligned with develop's TokenPony
       provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
-      prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
+      prefix rules: qwen-vl-*, internvl-*, llava-*, gpt-4o-* and GLM
+      visual suffixes such as glm-4.6v. A version prefix (GLM-V5.2) alone
+      is not a visual capability marker.
       "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
     """
     if _name_contains_any(name, final_segment, "omni", "video"):
@@ -1055,16 +1140,8 @@ def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
     ):
         return "vlm2"
     if (
-        _name_matches(
-            name,
-            final_segment,
-            "qwen-vl-",
-            "glm-v",
-            "internvl-",
-            "llava-",
-            "gpt-4o-",
-            "gpt-4-vision-",
-        )
+        _name_matches(name, final_segment, "qwen-vl-", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or re.match(r"^glm[-_]\d+(?:[._-]\d+)?v(?:$|[-_])", final_segment)
         or "vl" in final_segment.split("-")
         or _name_contains_any(name, final_segment, "vision", "visual", "ocr")
     ):
@@ -1087,7 +1164,7 @@ def _infer_model_type_from_name(model_name: str) -> str:
     Mapping rules (see design doc Phase 2.6):
     - gpt-* / o1-* / o3-* / o4-* / claude-* / glm-* / qwen-* (non-vl) /
       deepseek-* / llama-* / mistral-* / yi-* / moonshot-* / gemini-* → llm
-    - qwen-vl-* / glm-v* / internvl-* / llava-* → vlm
+    - qwen-vl-* / glm-<version>v / internvl-* / llava-* → vlm
     - text-embedding-* / embedding-* / bge-* (non-reranker) → embedding
     - rerank-* / bge-reranker-* / jina-reranker-* → rerank
     - whisper-* / paraformer-* / sensevoice-* → stt

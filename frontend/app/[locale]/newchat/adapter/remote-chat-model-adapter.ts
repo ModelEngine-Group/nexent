@@ -3,13 +3,12 @@
 "use client";
 
 import i18next from "i18next";
-import type { ReasoningEffort } from "@/types/modelConfig";
-import { isReasoningEffort } from "@/lib/modelReasoning";
 import {
-  snapshotTurnModelControls,
-  type TurnModelControls,
-  type RuntimeGenerationOverrides,
-} from "@/features/model-controls/turnControls";
+  persistModelDrafts,
+  snapshotModelDrafts,
+  acknowledgeModelDrafts,
+} from "@/lib/conversationModelDrafts";
+import type { TurnModelControls } from "@/features/model-controls/turnControls";
 import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 
 import type {
@@ -46,6 +45,7 @@ import type {
   HumanInteractionEvent,
 } from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
+import { fromMessageAnnotationWireItems } from "../utils/message-annotations";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -304,12 +304,16 @@ export interface Nl2aMessage {
 }
 
 interface NexentRunConfig {
+  modelPreferenceScope?: string;
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
   onRunRejected?: (error: unknown, message?: ThreadMessage) => void;
+  // Structured reply annotations for the outgoing message; set when the
+  // composer keeps the library-managed send (in-flight attachment uploads).
+  messageAnnotations?: unknown;
   resume?: boolean;
   agentId?: number | string;
   agentVersionNo?: number;
@@ -320,10 +324,12 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
+  getDraftSnapshot?: () => Record<string, unknown>;
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
   persistCreationHistory?: boolean;
+  creationTarget?: import("@/types/conversation").ConversationTarget;
   retry_message_index?: number;
   retry_user_message_id?: number;
   creationWorkbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
@@ -1423,14 +1429,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
       : undefined;
-    const creatorTurn = custom?.turnModelControls
-      ? structuredClone(custom.turnModelControls)
-      : creationConfig?.model_id != null
-        ? snapshotTurnModelControls(
-            creationConfig.model_id,
-            creationConfig.generation_config
-          )
-        : undefined;
+    const creatorTurn = custom?.turnModelControls ?? undefined;
+    const preferenceScope = custom?.modelPreferenceScope ?? unstable_threadId;
+    const draftSnapshot = preferenceScope
+      ? snapshotModelDrafts(preferenceScope)
+      : {};
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1460,7 +1463,26 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
-    if (!isResume && !query) {
+    // Reply annotations: prefer the structured metadata on the outgoing user
+    // message (manual append path and retries); fall back to the runConfig
+    // channel used when in-flight uploads keep the library submission flow
+    // in charge of the append. Resolved before the empty-query guard because
+    // an annotation-only send (quoted reply, no typed text) carries an empty
+    // query; the backend merges the quotes into the model-facing text.
+    const messageAnnotations = fromMessageAnnotationWireItems(
+      lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              | { annotations?: unknown }
+              | undefined
+        )?.annotations
+        : undefined
+    );
+    const annotations = messageAnnotations.length
+      ? messageAnnotations
+      : fromMessageAnnotationWireItems(custom?.messageAnnotations);
+
+    if (!isResume && !query && !annotations.length) {
       log.warn("[ChatModelAdapter] No user query found in messages");
       return;
     }
@@ -1538,11 +1560,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     if (!isResume && !isNl2Agent && clarificationResponse) {
       requestBody.clarification_response = clarificationResponse;
     }
+    // Reply annotations travel as a structured request field; an
+    // annotation-only send keeps its empty query (see the guard above).
+    if (!isResume && !isNl2Agent && annotations.length) {
+      requestBody.annotations = annotations;
+    }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
     if (
-      (!isEphemeralRuntime || custom?.persistCreationHistory) &&
+      (!isEphemeralRuntime || isNl2Agent || isNl2Skill) &&
       hasServerConversationId
     ) {
       requestBody.conversation_id = numericServerThreadId;
@@ -1568,33 +1595,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
-    const reasoningEffort = context.config?.reasoningEffort;
-    const reasoningBudgetTokens = (
-      context.config as { reasoningBudgetTokens?: number } | undefined
-    )?.reasoningBudgetTokens;
-    const reasoningCapability = (
-      context.config as
-        | {
-            reasoningCapability?: {
-              status?: string;
-              controls?: Array<{ type?: string }>;
-              levels?: string[];
-              control?: string;
-            };
-          }
-        | undefined
-    )?.reasoningCapability;
-    const reasoningSupported =
-      reasoningCapability?.status === "supported" &&
-      Boolean(
-        reasoningCapability.controls?.length ||
-        reasoningCapability.levels?.length ||
-        reasoningCapability.control === "toggle"
-      );
-    const hasBudgetSelection =
-      typeof reasoningBudgetTokens === "number" &&
-      Number.isInteger(reasoningBudgetTokens) &&
-      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1604,91 +1604,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      !hasBudgetSelection &&
-      typeof reasoningEffort === "string" &&
-      reasoningEffort &&
-      reasoningEffort !== "auto"
-    ) {
-      requestBody.reasoning_effort = reasoningEffort;
-    }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      hasBudgetSelection &&
-      reasoningBudgetTokens > 0
-    ) {
-      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
-    }
-
-    log.log(
-      "[ChatModelAdapter] Sending agent request through conversation service"
-    );
-    log.log(
-      `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
-    );
-
-    // Workbench v3 owns model selection; legacy composer state is only a projection.
     const workbenchConfig = custom?.workbenchConfig;
-    if (workbenchConfig) {
-      requestBody.model_id = workbenchConfig.model_id ?? undefined;
-      // Workbench generation_config is authoritative for this run. Do not let
-      // the shared selector's ordinary-chat effort/budget override it.
-      delete requestBody.reasoning_effort;
-      delete requestBody.reasoning_budget_tokens;
-    }
-    if (!workbenchConfig) {
-      const modelContext = context.config as
-        | {
-            deepThinking?: boolean;
-            reasoningEffort?: string;
-            temperature?: number;
-            top_p?: number;
-          }
-        | undefined;
-      if (modelContext?.deepThinking !== undefined) {
-        requestBody.generation_config = {
-          deep_thinking: modelContext.deepThinking,
-          ...(hasBudgetSelection
-            ? { reasoning_budget_tokens: reasoningBudgetTokens }
-            : {}),
-          ...(modelContext.deepThinking &&
-          !hasBudgetSelection &&
-          isReasoningEffort(modelContext.reasoningEffort)
-            ? { thinking_effort: modelContext.reasoningEffort }
-            : {}),
-        };
-      }
-      if (
-        !isAgentDebug &&
-        !isResume &&
-        (modelContext?.temperature != null || modelContext?.top_p != null)
-      ) {
-        requestBody.generation_config = {
-          ...(requestBody.generation_config as
-            RuntimeGenerationOverrides | undefined),
-          ...snapshotTurnModelControls(
-            Number(requestBody.model_id),
-            modelContext
-          ).generation_config,
-        };
+    if (creatorTurn && (isNl2Agent || isNl2Skill))
+      requestBody.model_id = creatorTurn.model_id;
+    if (abortSignal?.aborted) return;
+    if (!isResume && preferenceScope) {
+      if (hasServerConversationId && !isAgentDebug) {
+        await persistModelDrafts(preferenceScope, numericServerThreadId);
+      } else {
+        requestBody.model_parameter_preferences = draftSnapshot;
       }
     }
-    if (isNl2Agent || isNl2Skill) {
-      const turn = creatorTurn;
-      if (turn) {
-        requestBody.model_id = turn.model_id;
-        requestBody.generation_config = { ...turn.generation_config };
-      }
-      // One authority per creator turn; compatibility top-level fields are not duplicated.
-      delete requestBody.reasoning_effort;
-      delete requestBody.reasoning_budget_tokens;
-    }
+    if (abortSignal?.aborted) return;
 
-    let backendConversationId = hasServerConversationId
-      ? numericServerThreadId
+    let backendConversationId = requestBody.conversation_id
+      ? Number(requestBody.conversation_id)
       : null;
     let backendRunId: string | null = null;
     let backendStopPromise: Promise<void> | null = null;
@@ -1751,13 +1681,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           query: String(requestBody.query || ""),
           clarification_response: requestBody.clarification_response as
             ClarificationResponse | undefined,
+          annotations: requestBody.annotations as
+            | import("@/types/conversation").ApiMessageAnnotation[]
+            | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;
           }>,
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
+          // Older runtimes require agent_id; both fields name the same draft.
           agent_id: requestBody.agent_id as number | undefined,
+          target:
+            isNl2Agent && nl2AgentId != null
+              ? { type: "agent", id: Number(nl2AgentId) }
+              : custom?.creationTarget,
           version_no: custom?.agentVersionNo,
           is_debug: isAgentDebug,
           is_resume: isResume,
@@ -1770,8 +1708,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : isNl2Skill
               ? "nl2skill"
               : undefined,
-          persist_history:
-            isEphemeralRuntime && custom?.persistCreationHistory === true,
+          persist_history: isNl2Agent || isNl2Skill,
           retry_message_index: isEphemeralRuntime
             ? custom?.retry_message_index
             : undefined,
@@ -1779,11 +1716,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             ? custom?.retry_user_message_id
             : undefined,
           workbench_config: isEphemeralRuntime ? creationConfig : undefined,
-          draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
+          draft_snapshot: isNl2Skill
+            ? (custom?.getDraftSnapshot?.() ?? custom?.draftSnapshot)
+            : undefined,
           language: isNl2Skill ? custom?.language : undefined,
           model_id: requestBody.model_id as number | undefined,
-          generation_config: requestBody.generation_config as
-            RuntimeGenerationOverrides | undefined,
+          model_parameter_preferences:
+            requestBody.model_parameter_preferences as
+              Record<string, Record<string, unknown>> | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1793,6 +1733,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
+          if (numericId > 0 && preferenceScope)
+            acknowledgeModelDrafts(preferenceScope, draftSnapshot);
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
             if (userAborted) {
@@ -2289,7 +2231,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     const upsertCreatedAgentPart = (completed: boolean) => {
-      if (!isNl2Agent || !custom?.persistCreationHistory) return;
+      if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
       const existing = contentParts.find(
@@ -2595,7 +2537,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
             continue;
@@ -3052,7 +2994,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             }
           } else if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "automation_proposal") {

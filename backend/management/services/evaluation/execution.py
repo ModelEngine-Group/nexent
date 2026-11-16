@@ -8,10 +8,7 @@ from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
 from contracts.errors.exceptions import AppException
 
-try:
-    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
-except ModuleNotFoundError:
-    JiuwenSDKAdapter = None
+import adapters.jiuwen_sdk_adapter as adapter
 import asyncio
 import json
 import uuid
@@ -19,7 +16,6 @@ from collections import defaultdict
 from datetime import datetime
 from statistics import mean
 
-from contracts.errors.capabilities import JiuwenSDKUnavailableError
 from contracts.constants.constants import MAX_TURNS_PER_SESSION
 from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
 from infrastructure.rdb.client import get_db_session
@@ -195,7 +191,6 @@ def _execute_single_case(
     case: dict[str, Any],
     run: dict[str, Any],
     judge_model_id: int,
-    adapter: Any,
     evaluators: dict[int, dict[str, Any]],
     judge_system_prompt: str,
     context_window: int = 4096,
@@ -253,7 +248,6 @@ def _execute_single_case(
                 agent_version_no=agent_version_no,
                 query=query,
                 judge_model_id=judge_model_id,
-                adapter=adapter,
                 evaluators=evaluators,
                 judge_system_prompt=judge_system_prompt,
                 language=run.get("language", "zh"),
@@ -509,12 +503,14 @@ def execute_agent_evaluation_run(
             raise AppException(ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED)
         judge_model_id = int(judge_model_id)
 
-        if JiuwenSDKAdapter is None:
-            raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable.")
-        adapter = JiuwenSDKAdapter(model_id=judge_model_id, tenant_id=tenant_id)
-
         # Preload evaluators and judge template (loaded once, reused for all cases)
         evaluators = _preload_evaluators_for_run(run, tenant_id)
+        if not evaluators:
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_EVALUATOR_REQUIRED,
+                "No usable evaluator is configured for this run. "
+                "Select at least one published evaluator and retry.",
+            )
         judge_system_prompt = compose_auxiliary_prompt(
             run.get("language", "zh"), "evaluation_judge"
         ).system
@@ -550,7 +546,6 @@ def execute_agent_evaluation_run(
                     case=c,
                     run=run,
                     judge_model_id=judge_model_id,
-                    adapter=adapter,
                     evaluators=evaluators,
                     judge_system_prompt=judge_system_prompt,
                     context_window=context_window,
@@ -623,7 +618,6 @@ async def _evaluate_query(
     agent_version_no: int,
     query: str,
     judge_model_id: int,
-    adapter: Any,
     evaluators: dict[int, dict[str, Any]],
     judge_system_prompt: str,
     runtime_events: list[dict] | None = None,
@@ -634,6 +628,11 @@ async def _evaluate_query(
     conversation_id: int | None = None,
 ) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
+    if not evaluators:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_EVALUATOR_REQUIRED,
+            "At least one published evaluator is required to score an evaluation.",
+        )
     answer_text, events = await _run_agent_to_final_answer(
         agent_id=agent_id,
         tenant_id=tenant_id,

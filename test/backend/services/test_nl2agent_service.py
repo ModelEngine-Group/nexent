@@ -45,6 +45,8 @@ from management.services.agent.nl2agent_tools import (
 )
 
 
+
+
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
     values = {
         "resolver_version": "2.0.0",

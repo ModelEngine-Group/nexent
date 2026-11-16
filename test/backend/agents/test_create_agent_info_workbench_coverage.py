@@ -164,44 +164,8 @@ def test_skill_script_tools_remove_mutating_tool_for_runtime_snapshot(monkeypatc
     assert len(tools) == 5
 
 
-def test_root_generation_overlay_skips_children_and_adds_root_alias():
-    class Model:
-        def __init__(self, cite_name, temperature=0.5, top_p=0.9, extra_body=None):
-            self.cite_name = cite_name
-            self.temperature = temperature
-            self.top_p = top_p
-            self.extra_body = extra_body
-            self.enable_thinking = True
-            self.reasoning_capability = None
-            self.reasoning_effort = None
-            self.reasoning_budget_tokens = None
-
-        def model_copy(self, *, deep):
-            assert deep is True
-            return Model(
-                self.cite_name,
-                self.temperature,
-                self.top_p,
-                dict(self.extra_body) if self.extra_body else None,
-            )
-
-    child = Model("child")
-    root = Model("root", extra_body={"reasoning_effort": "high"})
-    models = [child, root]
-    config = SimpleNamespace(model_name="root")
-
-    run_preparation.apply_root_generation_overlay(
-        models,
-        config,
-        {"deep_thinking": False, "temperature": 0.2, "top_p": 0.8},
-    )
-
-    assert len(models) == 3
-    assert models[-1].cite_name == "workbench_root_model"
-    assert models[-1].temperature == 0.2
-    assert models[-1].top_p == 0.8
-    assert "reasoning_effort" not in models[-1].extra_body
-    assert config.model_name == "workbench_root_model"
+def test_su_ac_07_no_parallel_generation_overlay_remains():
+    assert not hasattr(run_preparation, "apply_root_generation_overlay")
 
 
 @pytest.mark.asyncio

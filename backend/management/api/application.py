@@ -33,7 +33,6 @@ from management.api.file.file_management import file_management_config_router as
 from management.api.file.image import router as proxy_router
 from management.api.file.storage import router as file_storage_router
 from management.api.knowledge_base.knowledge_summary import router as summary_router
-from management.api.identity.mock_user_management import router as mock_user_management_router
 from management.api.model.model_managment import router as model_manager_router
 from management.api.identity.oauth import router as oauth_router
 from management.api.mcp.mcp_management import router as mcp_management_router
@@ -65,21 +64,28 @@ from management.api.memory.memory_dreaming import router as memory_dreaming_rout
 from management.api.memory.memory_provider import router as memory_provider_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
 from management.thread_management import config_thread_manager
+from management.recovery import (
+    recover_config_tasks,
+)
+from management.services.evaluation.maintenance import (
+    start as start_eval_maintenance,
+)
+from management.services.memory.dreaming.scheduler import dreaming_scheduler
+from management.services.model.outlet_migration import migrate_legacy_outlets
+from nexent.core.concurrency import (
+    run_blocking,
+)
+from ops.api.access import router as ops_access_router
 
 logger = logging.getLogger("base_app")
 
 
 async def recover_config_tasks_on_startup():
-    from management.services.evaluation.maintenance import start as start_eval_maintenance
-    from management.recovery import (
-        recover_config_tasks,
-        schedule_workbench_main_backfill,
-    )
 
     await config_thread_manager.run(
         "control-io",
@@ -90,8 +96,6 @@ async def recover_config_tasks_on_startup():
         recover_config_tasks,
     )
     start_eval_maintenance(config_thread_manager)
-    if ENABLE_AGENT_WORKBENCH:
-        schedule_workbench_main_backfill()
 
 
 async def validate_external_service_configuration():
@@ -100,15 +104,12 @@ async def validate_external_service_configuration():
         raise RuntimeError("AIDP_SERVER_URL and AIDP_API_KEY are required when ENABLE_AIDP_KNOWLEDGE=true")
 
 
-
 async def start_dreaming_scheduler():
-    from management.services.memory.dreaming.scheduler import dreaming_scheduler
 
     await dreaming_scheduler.start()
 
 
 async def stop_dreaming_scheduler():
-    from management.services.memory.dreaming.scheduler import dreaming_scheduler
 
     await dreaming_scheduler.stop()
 
@@ -138,6 +139,8 @@ async def config_lifespan(_app):
         maintenance_started = False
         dreaming_started = False
         try:
+            migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
+            logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
             await recover_config_tasks_on_startup()
             maintenance_started = True
             await validate_external_service_configuration()
@@ -160,6 +163,7 @@ app = create_app(
     title="Nexent Config API",
     description="Configuration APIs",
     lifespan=config_lifespan,
+    enable_monitoring=True,
     gateway_identity_audience="management",
 )
 if hasattr(app, "state"):
@@ -199,13 +203,7 @@ app.include_router(idata_router)
 app.include_router(ragflow_router)
 app.include_router(monitoring_router)
 
-# Choose user management router based on IS_SPEED_MODE
-if IS_SPEED_MODE:
-    logger.info("Speed mode enabled - using mock user management router")
-    app.include_router(mock_user_management_router)
-else:
-    logger.info("Normal mode - using real user management router")
-    app.include_router(user_management_router)
+app.include_router(user_management_router)
 
 app.include_router(oauth_router)
 app.include_router(cas_router)
@@ -249,3 +247,5 @@ app.include_router(tag_management_router)
 app.include_router(northbound_router)
 app.include_router(a2a_router)
 app.include_router(gateway_identity_router)
+
+app.include_router(ops_access_router)

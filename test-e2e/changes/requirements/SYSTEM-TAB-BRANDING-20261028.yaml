@@ -1,0 +1,168 @@
+schema_version: '1.0'
+change:
+  change_id: SYSTEM-TAB-BRANDING-20261028
+  change_type: requirement
+  requirement_id: SYSTEM-TAB-BRANDING-20261028
+  title: 首页品牌独立配置与系统标签页隔离
+  description: 'Rename optional tab branding to homepage branding: navigation uses
+    homepage logo/title, browser tabs use system name/logo, empty homepage logo falls
+    back to system logo, and empty homepage title remains blank with a proportionally
+    enlarged logo layout that keeps its size when collapsed.'
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-184
+    retired: []
+  affected_cases:
+    existing:
+    - API-AUTO-FB865AC656B0B645
+    added:
+    - SYSTEM-BRANDING-D4-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/browserTabBranding.test.tsx
+    - frontend/tests/component/sidebarHover.test.tsx
+    - frontend/tests/component/projectConfigBranding.test.tsx
+    - frontend/tests/projectBranding.test.mjs
+    behaviors:
+    - Browser title uses system name and favicon uses the system logo after loading,
+      regardless of homepage overrides; unavailable names remain blank and pending
+      or failed image loads remain transparent without competing metadata.
+    - Startup initializes an unconfigured homepage title to Nexent in both locales,
+      preserves legacy titles, and never replaces explicit empty or whitespace titles.
+      Navigation does not substitute the system name for a cleared title.
+    - Homepage logo uses its own persisted asset or falls back to system logo; legacy
+      tab fields/assets remain readable.
+    - Persist canonical homepage fields, accept legacy upload aliases, preserve system
+      files, and support reset/error boundaries.
+    - Blank-title logo retains its reduced dimensions across sidebar states; collapsed
+      navigation clips the right side rather than shrinking the image.
+    reason: Existing browserTabBranding and sidebarHover tests cover shared branding
+      and navigation behavior but not independent tab fields, reset, upload persistence
+      or blank-title logo sizing. Add targeted frontend and Node UT; Python product
+      code is unaffected. No duplicate D1 is needed.
+  notes: |
+    Requirement revised 2026-10-29 on bugfix_logo1028. Preserve the original Change/Case IDs.
+    The configured SPEC repository is still unavailable, as previously confirmed by the user.
+    Existing user-edited system and browser-tab logo images must be preserved.
+    Canonical fields are homeTitle/homeLogo; legacy tabTitle/tabLogo values are read as homepage
+    branding only. Explicit empty homepage title stays empty. Browser tab branding uses only
+    productName and modelengine-logo.png; unavailable system names leave the title blank.
+    Empty homeLogo explicitly masks a legacy logo and falls back to system logo. New uploads and
+    reset use homepage fields while legacy HTTP upload fields and asset URLs remain supported.
+    Current-change UT and D4 assertions are being revised. Previous 2026-10-28 passing test results
+    apply to the superseded tab-override contract and do not establish acceptance of this revision.
+    D2 regression API-AUTO-FB865AC656B0B645 remains selected; no new D1 duplicates isolated UT.
+    The existing full-validator blocker is the missing ConversationResumeBranch.test.tsx referenced
+    by CHAT-AGENT-DETAIL-20261026. Runtime acceptance requires an isolated test-home and an updated
+    application; the user's visible Docker deployment is not modified by this source change.
+
+    Verification for the 2026-10-29 revision:
+    - Component UT: 27 PASS across browserTabBranding, sidebarHover and projectConfigBranding.
+    - Node UT: 22 PASS across branding persistence/compatibility and API proxy regression;
+      the 11 branding tests reran after adding preservation of the legacy uploaded image.
+    - Source-only TypeScript check excluding generated .next caches PASS; targeted ESLint
+      has zero errors and only native-image warnings. Prettier and copyright checks PASS.
+    - Design validation with current-change/acceptance flags PASS. Implementation validation
+      remains BLOCKED by the pre-existing missing ConversationResumeBranch.test.tsx selector.
+    - Revised SYSTEM-BRANDING-D4-001 collects as one Playwright test. Its fixed steps assert
+      system-only browser branding and exact equality between the blank-title logo width and
+      the former combined brand content width, with proportional fit and compact collapse.
+    - Formal execution stopped before running because NEXENT_TEST_HOME is not configured.
+    - Existing user image bytes and their stored logo reference were preserved; current default
+      JSON keys were renamed to homeTitle/homeLogo while retaining the previously uploaded value.
+    - The obsolete tab-override behavior is superseded; its prior passes are not current evidence.
+    No Docker container or operational configuration was changed. Runtime acceptance is still
+    pending deployment to an isolated environment; UT/static success is recorded separately.
+
+    Follow-up 2026-10-29: keep the blank-title logo at the expanded brand dimensions
+    in both sidebar states; collapse clips the right side without resizing. The 184px
+    image frame derives from 240px rail minus 16px padding, 32px pin button and 8px gap.
+    Earlier compact-collapse assertions are superseded by this request.
+    - Strengthened sidebarHover regression fails on the prior implementation for all
+      three title boundaries (absent, empty and whitespace); the other 11 tests pass.
+    - After the fix, all 14 sidebarHover component UT pass, including unchanged sizing
+      across hover/collapse and preserved compact logo layout with an explicit title.
+    - Targeted ESLint has zero errors and one native-image warning; Prettier, copyright
+      headers and git diff --check pass for the affected files.
+    - Updated AC-02 and the fixed D4 step assert equal expanded/collapsed image widths,
+      a collapsed viewport no wider than 48px, overflow clipping and left-edge alignment.
+      The Playwright CLI collects one test; collection is not runtime acceptance.
+    - Design validation passed with current-change UT and acceptance flags. Formal
+      execution remains blocked before startup because NEXENT_TEST_HOME is absent.
+    - This follow-up changes only frontend layout and its regression assets; the prior
+      27-component/22-Node checks above apply to the preceding branding revision.
+    Latest follow-up SYSTEM-TAB-TITLE-RACE-20261029 supersedes the full-width logo
+    dimensions with 160x40 images (40x40 with titles), retaining fixed sizing and
+    collapsed clipping. It also removes the default browser metadata/title fallback;
+    missing names stay blank. Refer to its bug record and current task verification
+    for the strengthened title-race assertions and remaining runtime blockers.
+    Latest icon-loading follow-up SYSTEM-TAB-ICON-FLASH-20261029 supersedes direct
+    metadata icon URLs with transparent SSR links and system-image preloading.
+    Successful loading switches the React-owned links to the system image; failed
+    loading stays transparent. Existing title and logo-layout rules are preserved.
+    Cosmetic follow-up 2026-10-29: move only the homepage logo image 4px to the right
+    in both sidebar states. Image sizes, title positions and clipping remain unchanged.
+    This spacing-only change adds no business behavior, so no new UT or formal Case is
+    required. Reuse sidebarHover regression UT and adjust the existing D4 measured
+    left inset from zero to 4px; formal runtime re-execution is exempt for this purely
+    cosmetic delta, without claiming closure of earlier blocked acceptance checks.
+    Follow-up 2026-10-29: reduce the homepage image right offset from 4px to 2px.
+    Startup sets a missing homeTitle to the legacy tabTitle or Nexent, using nullish
+    fallback so saved empty/whitespace titles and independent localized values survive
+    subsequent starts. Existing local custom.json edits are preserved. Add startup UT
+    for absent, localized, legacy and explicitly cleared values, reusing configuration
+    save and sidebar UT for editing to empty and blank-title layout. No Python code is
+    affected. No additional D1 is needed for an isolated initialization default. Reuse
+    SYSTEM-BRANDING-D4-001 for saved-empty persistence; its cosmetic inset becomes 2px.
+    The new initialization rule is proved by startup UT, separate from D4 execution.
+    Verification for this follow-up: 33 component UT and 28 Node UT PASS. The six new
+    startup variants exercise real locale file reads/writes with isolated storage,
+    including clearing values before a second startup. Before implementation, the
+    unconfigured and legacy initialization variants fail as expected. Prettier,
+    JavaScript syntax and copyright checks PASS; ESLint has zero errors and the
+    existing native-image warning. Design validation with --generate and current
+    Change selection PASS; unrelated generated navigation changes were restored.
+    Implementation validation remains BLOCKED by the existing missing
+    ConversationResumeBranch.test.tsx; formal runtime execution remains BLOCKED
+    because NEXENT_TEST_HOME is absent. Browser DOM inspection confirms 2px image
+    translation and Nexent homepage text when the sidebar is expanded. No live
+    branding settings were saved and no container was changed during verification.
+    PR review 4411750924 wording follow-up, using user-selected option 3:
+    display application logo/name for browser branding and navigation logo/title for
+    top-left branding in Chinese/English. Retain the display-location annotations and
+    visible hints explaining the application name's wider use and navigation logo's
+    fallback. This delta changes only UI copy and its presentation; existing variable,
+    function and translation-key names, configuration, HTTP payloads and assets remain
+    unchanged. Reuse projectConfigBranding UT and adjust only accessible-name strings
+    in the existing D4 script. No new behavior, UT or formal acceptance obligation is
+    introduced; full D4 re-execution is exempt for this wording-only delta, without
+    closing the previously blocked formal runtime acceptance. Python is unaffected.
+    Verification after narrowing scope: 5 projectConfigBranding component UT PASS;
+    source-only TypeScript excluding generated .next files, bilingual copy/key checks,
+    Prettier, copyright and git diff --check PASS. ESLint has zero errors and two
+    existing native-image warnings. git diff confirms that branding helpers, upload
+    server logic, navigation rendering and browser-tab provider match the committed
+    baseline exactly. The previously observed formal validation/runtime blockers
+    remain recorded above; no full formal runtime PASS is claimed for this copy edit.
+    Tooltip follow-up: move the four labels' parenthesized display locations into
+    small circular-exclamation help buttons, following model configuration hint
+    styling. Both localized name inputs retain their own labels; hints appear on
+    hover or keyboard focus and clicking help never submits the form. Preserve
+    existing persistent usage/fallback text, internal identifiers and HTTP behavior.
+    Strengthen projectConfigBranding UT with Chinese/English hover and focus checks;
+    update only the existing D4 label selectors. Reuse its save/reset/empty-title
+    journey rather than adding a new formal Case for presentation. The current
+    isolated D4 runtime prerequisite remains unavailable; do not claim a formal PASS.
+    Verification: 8 projectConfigBranding UT PASS, including all six help controls in
+    Chinese/English, hover dismissal, focus accessibility and no-submit behavior.
+    Source-only TypeScript excluding generated .next files, localized JSON checks,
+    Prettier, copyright and git diff --check PASS; ESLint has zero errors and two
+    existing native-image warnings. Manual Chrome inspection confirms short labels,
+    visible circular-exclamation buttons and correct application/navigation hints;
+    real title and navigation-logo screenshots are stored outside Git. No branding
+    settings were saved. Formal runtime acceptance remains blocked as recorded above.

@@ -174,9 +174,9 @@ class LocalExecutionRegistry:
         with self._lock:
             return len(self.agent_runs)
 
-    def stop_agent_run(self, conversation_id: Union[int, str], user_id: str) -> bool:
+    def stop_agent_run(self, conversation_id: Union[int, str], user_id: str, expected_run_info=None) -> bool:
         """stop agent run for specified conversation_id and user_id"""
-        return self.stop_local_run(conversation_id, user_id)
+        return self.stop_local_run(conversation_id, user_id, expected_run=expected_run_info)
 
     def stop_local_run(self, conversation_id, user_id, expected_run=None) -> bool:
         """Cancel a local execution without broadcasting to another replica."""

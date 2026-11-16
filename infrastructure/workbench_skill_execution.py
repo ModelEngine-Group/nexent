@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.errors.exceptions import WorkbenchError
+from contracts.roles import has_any_role
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:
@@ -33,7 +34,7 @@ def can_view_skill(
     """Return whether a skill is available to the current user."""
     if skill.get("source") == "official":
         return True
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES):
         return True
     if str(skill.get("created_by")) == str(user_id):
         return True

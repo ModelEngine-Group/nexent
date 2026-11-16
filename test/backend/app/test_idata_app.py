@@ -71,7 +71,6 @@ backend_database_module.client = backend_database_client_module
 sys.modules["backend"] = backend_module
 sys.modules["backend.database"] = backend_database_module
 sys.modules["infrastructure.rdb.client"] = backend_database_client_module
-sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
@@ -103,7 +102,7 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
 
         # Now it's safe to import backend modules
         from management.api.knowledge_base.idata import router
-        from backend.http.server.app_factory import register_exception_handlers
+        from backend.http.server.exception_handlers import register_exception_handlers
         # Import ErrorCode and AppException the same way as the endpoint function does
         # The endpoint uses: from contracts.errors.codes import ErrorCode
         # The endpoint uses: from contracts.errors.exceptions import AppException

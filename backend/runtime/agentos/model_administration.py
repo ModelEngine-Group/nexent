@@ -14,6 +14,7 @@ from contracts.model_administration import (
     ModelBatchUpdate,
     ModelHealthcheck,
     ModelProbe,
+    ModelProfileProbe,
     ModelProviderDiscovery,
     ModelProviderImport,
     ModelProviderList,
@@ -70,7 +71,17 @@ async def _deactivate_tenant(_payload: ModelTenantDeactivation, actor):
     )
 
 
-def _endpoint(schema, call):
+async def _profile_probe(payload, actor, request):
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    from runtime.model.profile_probe import probe_until_disconnect
+
+    profile = ResolvedModelProfile.model_validate(payload.profile)
+    if profile.identity.tenant_id != actor.tenant_id:
+        raise ValueError("Model profile tenant does not match the authenticated actor")
+    return await probe_until_disconnect(profile, payload.api_key, payload.http_headers, request.is_disconnected)
+
+
+def _endpoint(schema, call, *, request_aware=False):
     async def endpoint(request: Request):
         actor = request.scope.get(PRINCIPAL_KEY)
         if actor is None:
@@ -80,7 +91,7 @@ def _endpoint(schema, call):
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         try:
-            result = await call(payload, actor)
+            result = await call(payload, actor, request) if request_aware else await call(payload, actor)
         except LookupError:
             return JSONResponse({"code": "MODEL_NOT_FOUND"}, status_code=404)
         except ValueError:
@@ -114,7 +125,7 @@ def create_model_administration_router() -> APIRouter:
         (ModelAdministrationOperation.LIST_PROVIDER, ModelProviderList,
          lambda p, a: registry.list_provider_models_for_tenant(a.tenant_id, p.provider, p.model_type)),
         (ModelAdministrationOperation.HEALTHCHECK, ModelHealthcheck,
-         lambda p, a: health.check_model_connectivity(p.display_name, a.tenant_id, p.model_type)),
+         lambda p, a: health.check_model_connectivity(p.display_name, a.tenant_id, p.model_type, persist_status=p.persist_status)),
         (ModelAdministrationOperation.PROBE, ModelProbe, _probe),
     )
     for operation, schema, call in operations:
@@ -122,4 +133,9 @@ def create_model_administration_router() -> APIRouter:
             operation.value, _endpoint(schema, call), methods=["POST"],
             include_in_schema=False, name=f"model_{operation.name.lower()}",
         )
+    router.add_api_route(
+        ModelAdministrationOperation.PROFILE_PROBE.value,
+        _endpoint(ModelProfileProbe, _profile_probe, request_aware=True),
+        methods=["POST"], include_in_schema=False, name="model_profile_probe",
+    )
     return router

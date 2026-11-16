@@ -3,6 +3,7 @@
 """Compile serializable Agent resources for AgentOS execution."""
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from contracts.agentos import PreparedConversationScope, TurnModelGeneration
@@ -38,7 +39,7 @@ def _ensure_agent_reasoning_snapshot(
             tenant_id=tenant_id,
             version_no=version_no,
         )
-        if not agent_info:
+        if not agent_info or agent_info.get("agent_origin") == "SYSTEM":
             return
         current_overrides = agent_info.get("model_params_override")
         updated_overrides = snapshot_agent_reasoning_config(
@@ -46,6 +47,7 @@ def _ensure_agent_reasoning_snapshot(
             requested_overrides=current_overrides,
             existing_overrides=current_overrides,
             tenant_id=agent_info.get("tenant_id") or tenant_id,
+            normalize_profiles=False,
         )
         if updated_overrides == current_overrides:
             return
@@ -101,6 +103,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     reasoning_effort: str | None = None,
     reasoning_budget_tokens: int | None = None,
+    runtime_generation_config: Optional[Dict[str, Any]] = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
@@ -110,13 +113,14 @@ async def create_agent_run_info(
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
-    runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     export_debug_planning: bool = False,
     prepared_conversation: PreparedConversationScope | None = None,
     prepared_workbench: "PreparedWorkbench | None" = None,
     turn_generation: TurnModelGeneration | None = None,
     authorized_knowledge_tools: dict | None = None,
+    model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -192,9 +196,21 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
-    agent_config = await create_agent_config(
-        **create_config_kwargs, tool_params=tool_params
-    )
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    captured_records = {}
+    outlet_profiles = {}
+    for configured in model_list:
+        if isinstance(getattr(configured, "resolved_profile", None), ResolvedModelProfile):
+            from nexent.core.model_service.registry import model_service_references
+
+            outlet_profiles[configured.resolved_profile.outlet_id] = configured.resolved_profile
+            captured = encode_resolved_model_profile(configured.resolved_profile, registered_references=model_service_references())
+            if captured.get("model_id") is not None:
+                captured_records[captured["model_id"]] = captured
+    if captured_records:
+        create_config_kwargs["runtime_model_records"] = captured_records
+    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # v2.6.0: Apply per-agent model params override to model_config_list.
     # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
@@ -202,11 +218,13 @@ async def create_agent_run_info(
     # by display_name (the cite_name used in model_config_list) and merge the
     # override values on top of the model-level defaults.
     _agent_info_for_override = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
-    )
-    model_params_override = (_agent_info_for_override or {}).get(
-        "model_params_override"
-    ) or {}
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    from management.services.agent.model_parameters import bind_agent_model_profiles
+
+    bind_agent_model_profiles(model_list, agent_config, _agent_info_for_override or {},
+        lambda selected_agent_id, selected_version: search_agent_info_by_agent_id(
+            agent_id=selected_agent_id, tenant_id=tenant_id, version_no=selected_version))
     if model_params_override:
         for model_id_str, override_entry in model_params_override.items():
             if not isinstance(override_entry, dict):
@@ -224,18 +242,13 @@ async def create_agent_run_info(
             if not display_name:
                 continue
             for mc in model_list:
+                if isinstance(getattr(mc, "resolved_profile", None), ResolvedModelProfile):
+                    continue  # Saved outlets were bound independently for each Agent above.
                 if mc.cite_name == display_name:
                     if override_entry.get("temperature") is not None:
                         mc.temperature = override_entry["temperature"]
                     if override_entry.get("top_p") is not None:
                         mc.top_p = override_entry["top_p"]
-                    # v2.6.0: capacity fields are overridable per-agent. The
-                    # authoritative consumer for request shaping is the W1/W2
-                    # resolution (agent-selected model), this keeps each
-                    # ModelConfig consistent with its override entry.
-                    for field in _OPERATOR_OVERRIDE_FIELDS:
-                        if override_entry.get(field) is not None:
-                            setattr(mc, field, override_entry[field])
                     override_extra = override_entry.get("extra_params")
                     if override_extra and isinstance(override_extra, dict):
                         for k, v in override_extra.items():
@@ -302,6 +315,9 @@ async def create_agent_run_info(
 
     from management.services.agent.preparation.evaluation_snapshot import compile_snapshot
 
+    apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
+        outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
+
     export_options = {}
     if turn_generation is not None:
         export_options.update(turn_generation=turn_generation, source_model_alias=source_model_alias)
@@ -312,7 +328,7 @@ async def create_agent_run_info(
 
         agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
         export_options.update(
-            root_generation=prepared_workbench.config.generation_config,
+            root_generation=None,
             source_model_alias=source_model_alias,
             workbench_skills=prepared_workbench.plan.root_skills,
             workbench_knowledge_tools=prepared_workbench.knowledge_tools,
@@ -326,5 +342,35 @@ async def create_agent_run_info(
         tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
         agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
         catalog_model_versions=model_versions,
+        model_parameter_preferences=model_parameter_preferences,
         **export_options,
     )
+
+
+def apply_root_model_preferences(model_list, agent_config, preferences, *, outlet_profiles=None, agent_overrides=None):
+    """Give the root a private alias; never change a child Agent's model defaults."""
+    if not preferences:
+        return
+    from management.services.conversation.model_preferences import merge_model_preferences
+
+    for configured in model_list:
+        profile = getattr(configured, "resolved_profile", None)
+        if configured.cite_name != agent_config.model_name or profile is None:
+            continue
+        values = preferences.get(str(profile.outlet_id))
+        if values is None:
+            return
+        original = (outlet_profiles or {}).get(profile.outlet_id)
+        if original is not None:
+            from management.services.agent.model_parameters import merge_runtime_model_parameters
+
+            resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
+        else:
+            resolved = merge_model_preferences(profile, values)
+        root = configured.model_copy(deep=True, update={"cite_name": "conversation_root_model_" + uuid.uuid4().hex,
+            "resolved_profile": resolved,
+            "default_output_reserve_tokens": resolved.parameter_values.get("max_output_tokens",
+                configured.default_output_reserve_tokens)})
+        model_list.append(root)
+        agent_config.model_name = root.cite_name
+        return

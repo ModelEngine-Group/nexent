@@ -1,0 +1,22 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-CATALOG
+  name: Local model profile source catalog
+  status: planned
+  description: Pinned source inventory and package resources for the upcoming local
+    resolver.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-CATALOG-RULE-01
+    description: Selected authored TOML retains exact upstream bytes and complete
+      base_model dependencies. Nexent-authored provider files carry separate origin, version and official documentation evidence.
+  - rule_id: SDK-MODEL-PROFILE-CATALOG-RULE-02
+    description: Inventory inclusion is not verified model support; runtime uses saved
+      resolved outlets.
+  required_test_stages: []
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-CATALOG-20261013
+    notes: Source and package integrity only; no runtime integration.

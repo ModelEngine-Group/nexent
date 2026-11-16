@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-DEADLINE-MODALITIES-20261102
+  change_type: bugfix
+  bug_id: MODEL-DEADLINE-MODALITIES-20261102
+  title: Bound synchronous model HTTP calls and tolerate unknown output modalities
+  description: Restore absolute deadlines and conservative gateway capability metadata for valid custom outlets.
+  observed_behavior: Unknown output modalities crash get_model_info; a peer sending bytes indefinitely bypasses per-operation HTTP timeouts and retains the caller and permit.
+  expected_behavior: Unknown modalities advertise no text capability without raising; synchronous active requests abort at the deadline with MODEL_RUN_DEADLINE and release resources without cancelling the parent run.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests only bound async blocked calls and check deadlines before sync dispatch; none exercise a real slow synchronous peer. Gateway tests use known text modalities only.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-REL-02, CMSR-005]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [MODEL-LEGACY-TOOLS-D3-001, MODEL-PROBE-D3-001]
+    added: [MODEL-DEADLINE-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Unknown, empty, image-only and text modalities work through both standard and long-context adapters.
+    - Active sync invoke and stream deadlines abort their attempt, log one warning, suppress retries and release permits and watchers.
+    - Normal completion cannot trigger late cancellation; caller cancellation remains RunTerminated; full watcher capacity prevents HTTP dispatch.
+    reason: Unit assertions isolate metadata and lifecycle outcomes; the new D3 separately proves actual socket shutdown under trickled and stalled HTTP.
+    test_selectors:
+    - test/sdk/core/model_service/test_gateway_resolved_model.py
+    - test/sdk/core/model_service/test_sync_deadline.py
+    - test/sdk/core/model_service/test_model_service.py
+    - test/sdk/core/model_service/test_http_sender.py
+  notes: Existing approved model-access SPEC and PR4083 runtime deadline contract are retained. Scope is limited to the gateway metadata guard and synchronous absolute-deadline enforcement. Reuse existing managed control-io lane with bounded workers/queue; no unmanaged timer threads or new deployment settings. New D3 owns and joins its loopback peer and managed workers; no persistent assets or factories. Unknown-modality branches need unit variants rather than duplicate formal D1 cases.

@@ -66,30 +66,6 @@ export default function AgentRunPolicy({
             onChange={(val) => updateAgent({ max_step: val ?? 10 })}
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <AgentSettingHint
-            label={t("agentConfig.layout.outputReserve")}
-            hint={t("agent.requestedOutputTokens.tooltip")}
-          >
-            <label htmlFor="agent-requested-output-tokens">
-              {t("agentConfig.layout.outputReserve")}
-            </label>
-          </AgentSettingHint>
-          <InputNumber
-            id="agent-requested-output-tokens"
-            min={128}
-            max={32768}
-            step={128}
-            disabled={isReadOnly}
-            controls={false}
-            suffix="tokens"
-            className="!h-8 !w-full !rounded-[4px] !border-[#c9c9c9] [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-suffix]:!ml-[10px]"
-            value={editedAgent.requested_output_tokens ?? 4096}
-            onChange={(val) =>
-              updateAgent({ requested_output_tokens: val ?? 4096 })
-            }
-          />
-        </div>
         <Checkbox
           checked={editedAgent.provide_run_summary}
           disabled={isReadOnly}
@@ -159,27 +135,6 @@ export default function AgentRunPolicy({
             <span className="ant-form-text pl-2">
               {t("agent.runPolicy.maxStepUnit")}
             </span>
-          </Form.Item>
-        </Col>
-
-        {/* Output Reserve */}
-        <Col xs={24} sm={12}>
-          <Form.Item
-            name="requested_output_tokens"
-            label={t("agent.requestedOutputTokens")}
-            className="mb-3"
-          >
-            <InputNumber
-              min={128}
-              max={32768}
-              step={128}
-              className="w-full"
-              value={editedAgent.requested_output_tokens ?? 4096}
-              onChange={(val) =>
-                updateAgent({ requested_output_tokens: val ?? 4096 })
-              }
-            />
-            <span className="ant-form-tex pl-2">tokens</span>
           </Form.Item>
         </Col>
       </Row>

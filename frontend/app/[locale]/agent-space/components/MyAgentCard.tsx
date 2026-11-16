@@ -9,7 +9,6 @@ import {
   ClipboardCheck,
   Clock,
   Eye,
-  LineChart,
   MoreHorizontal,
   Pencil,
   Share2,
@@ -34,23 +33,19 @@ interface MyAgentCardProps {
   agent: MyEditableAgentItem;
   onEdit: () => void;
   onView: () => void;
-  onApplyListing: () => void;
   onViewReview: (
     agent: MyEditableAgentItem,
     mode: "review" | "reviewUpdate"
   ) => void;
   onDelete: () => void;
-  onEvaluate: () => void;
   onUsageGuide: () => void;
   highlighted?: boolean;
   guideMenuOpen?: boolean;
   onGuideMenuOpenChange?: (open: boolean) => void;
-  isApplying?: boolean;
   isDeleting?: boolean;
 }
 
-const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
-  apply: "agentRepository.mine.menu.apply",
+const MENU_ACTION_I18N: Record<Exclude<MineCardMenuAction, "apply">, string> = {
   review: "agentRepository.mine.menu.review",
   reviewUpdate: "agentRepository.mine.menu.reviewUpdate",
 };
@@ -59,15 +54,12 @@ export function MyAgentCard({
   agent,
   onEdit,
   onView,
-  onApplyListing,
   onViewReview,
   onDelete,
-  onEvaluate,
   onUsageGuide,
   highlighted = false,
   guideMenuOpen,
   onGuideMenuOpenChange,
-  isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
@@ -89,30 +81,21 @@ export function MyAgentCard({
   const isMainAgent = agent.is_main_agent !== false;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
-  const canEvaluate = canView;
-  const menuActions = getMineCardMenuActions(agent);
+  const menuActions = getMineCardMenuActions(agent).filter(
+    (action) => action !== "apply"
+  );
   const repositoryBadge = getMineCardRepositoryStatusBadge(
     agent.repository_info
   );
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
-    const icon =
-      action === "apply" ? (
-        <Share2 className="size-3.5" aria-hidden />
-      ) : (
-        <ClipboardCheck className="size-3.5" aria-hidden />
-      );
+    const icon = <ClipboardCheck className="size-3.5" aria-hidden />;
 
     return {
       key: action,
       label: t(MENU_ACTION_I18N[action]),
       icon,
-      disabled: action === "apply" && isApplying,
       onClick: () => {
-        if (action === "apply") {
-          onApplyListing();
-          return;
-        }
         onViewReview(
           agent,
           action === "reviewUpdate" ? "reviewUpdate" : "review"
@@ -120,15 +103,6 @@ export function MyAgentCard({
       },
     };
   });
-
-  if (canEvaluate) {
-    menuItems.push({
-      key: "evaluate",
-      icon: <LineChart className="size-3.5" aria-hidden />,
-      label: t("agentRepository.mine.evaluate"),
-      onClick: onEvaluate,
-    });
-  }
 
   if (menuItems.length > 0 && canEdit) {
     menuItems.push({ type: "divider" });

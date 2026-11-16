@@ -211,14 +211,30 @@ class RunModelBinding(RunSpecModel):
     tenant_default_profile: Literal["standard", "logprobs"] | None = None
     root_generation: WorkbenchGenerationConfig | None = None
     turn_generation: TurnModelGeneration | None = None
+    agent_parameters: dict[str, JsonValue] | None = None
+    conversation_parameters: dict[str, JsonValue] | None = None
 
     @model_serializer(mode="wrap")
     def serialize_optional_model_fields(self, handler):
         data = handler(self)
-        for name in ("provider_body_revision", "tenant_default_profile", "root_generation", "turn_generation"):
+        for name in ("provider_body_revision", "tenant_default_profile", "root_generation", "turn_generation",
+                     "agent_parameters", "conversation_parameters"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data
+
+
+def model_binding_owner(resource, alias):
+    """Find the Agent resource that owns an execution-private model alias."""
+    if resource is None:
+        return None
+    if resource.model_alias == alias:
+        return resource
+    for child in resource.subagents:
+        owner = model_binding_owner(child, alias)
+        if owner is not None:
+            return owner
+    return None
 
 
 class ModelBindings(RunSpecModel):
@@ -632,6 +648,7 @@ class PreparedCreatorRun(RunSpecModel):
     context_window_tokens: PositiveInt
     capacity_snapshot: dict[str, JsonValue] | None = None
     context_budget_snapshot: dict[str, JsonValue] | None = None
+    system_agent: AgentVersionReference | None = None
 
 
 class PreparedSkillCreatorRun(PreparedCreatorRun):
@@ -678,6 +695,7 @@ class ModelAdministrationOperation(str, Enum):
     LIST_PROVIDER = NAMESPACE + "v1/model/provider-list"
     HEALTHCHECK = NAMESPACE + "v1/model/healthcheck"
     PROBE = NAMESPACE + "v1/model/probe"
+    PROFILE_PROBE = NAMESPACE + "v1/model/profile-probe"
 
 
 class MemoryOperation(str, Enum):

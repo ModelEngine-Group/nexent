@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from sqlalchemy import TIMESTAMP, Boolean, Column, Index, Integer, Sequence, String, select, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import column_property
 
 from infrastructure.rdb.base import SCHEMA, TableBase
@@ -61,7 +61,8 @@ class UserAccount(TableBase):
                         primary_key=True, comment="Technical account record identifier")
     user_id = Column(String(100), nullable=False, comment="Stable user identifier including legacy system IDs; service-serialized uniqueness")
     user_email = Column(String(255), comment="Normalized login email; null for passwordless identities")
-    user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
+    user_roles = Column(ARRAY(String(30)), nullable=False, default=list, server_default=text("'{}'::varchar[]"),
+                   comment="Authoritative built-in account roles; empty until assigned within registration")
     password_hash = Column(String(512), comment="Encoded local or imported password hash; never returned to API callers")
     password_hash_scheme = Column(String(30), comment="Password encoding scheme: scrypt or imported bcrypt")
     password_login_enabled = Column(Boolean, nullable=False, server_default=text("false"),
@@ -71,11 +72,16 @@ class UserAccount(TableBase):
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
     source_metadata = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
                              comment="Migration/provider provenance, API-only and system identity markers; never grants permissions")
+    user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
 
 # Read projections preserve established association query/response contracts.
-# These expressions create no role/email columns on the association table.
+# These expressions create no role or email columns on the association table.
+UserTenant.roles = column_property(
+    select(UserAccount.user_roles).where(UserAccount.user_id == UserTenant.user_id,
+                                  UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery()
+)
 UserTenant.user_role = column_property(
-    select(UserAccount.user_role).where(UserAccount.user_id == UserTenant.user_id,
+    select(UserAccount.user_roles[1]).where(UserAccount.user_id == UserTenant.user_id,
                                       UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery().label("user_role")
 )
 UserTenant.user_email = column_property(

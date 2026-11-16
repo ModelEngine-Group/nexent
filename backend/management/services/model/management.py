@@ -10,7 +10,8 @@ from contracts.model import ModelConnectStatusEnum
 from contracts.model_names import add_repo_to_name
 from infrastructure.rdb.model_records import get_created_model_ids as _ids_for_created_models
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
-from management.db.model.repository import get_model_by_model_id, get_model_records
+from management.db.model.repository import get_model_by_model_id, get_model_records, get_model_records_page
+from management.utils.managed_read import managed_read
 from management.services.model.reasoning import _enrich_model_reasoning_capability
 
 # Default-model slots that may be auto-configured after a create/import.
@@ -113,6 +114,8 @@ def _backfill_default_model_slots(
                 continue
 
             candidates = get_model_records({"model_type": model_type}, tenant_id)
+            candidates = [model for model in candidates
+                          if model.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value]
 
             if row is None and new_model_ids is not None:
                 # Empty slot: only consider what this create call added.
@@ -216,29 +219,27 @@ async def list_llm_models_for_tenant(tenant_id: str):
         result: List[Dict[str, Any]] = []
         for record in records:
             _enrich_model_reasoning_capability(record)
-            result.append(
-                {
-                    "model_id": record["model_id"],
-                    "model_name": add_repo_to_name(
-                        model_repo=record["model_repo"],
-                        model_name=record["model_name"],
-                    ),
-                    "model_type": record.get("model_type", "llm"),
-                    "connect_status": ModelConnectStatusEnum.get_value(
-                        record.get("connect_status")
-                    ),
-                    "display_name": record["display_name"],
-                    "api_key": record.get("api_key", ""),
-                    "base_url": record.get("base_url", ""),
-                    "max_tokens": record.get("max_tokens", 4096),
-                    "extra_params": record.get("extra_params"),
-                    **(
-                        {"reasoning_capability": record["reasoning_capability"]}
-                        if record.get("reasoning_capability") is not None
-                        else {}
-                    ),
-                }
-            )
+            result.append({
+                "model_id": record["model_id"],
+                "model_name": add_repo_to_name(
+                    model_repo=record["model_repo"],
+                    model_name=record["model_name"],
+                ),
+                "model_type": record.get("model_type", "llm"),
+                "connect_status": ModelConnectStatusEnum.get_value(record.get("connect_status")),
+                "display_name": record["display_name"],
+                "api_key": record.get("api_key", ""),
+                "base_url": record.get("base_url", ""),
+                "max_tokens": record.get("max_tokens", 4096),
+                "extra_params": record.get("extra_params"),
+                **{key: record[key] for key in ("profile_schema_version", "config_revision", "migration_status",
+                    "migration_review_required", "migration_details", "migration_diagnostic") if key in record},
+                **(
+                    {"reasoning_capability": record["reasoning_capability"]}
+                    if record.get("reasoning_capability") is not None
+                    else {}
+                ),
+            })
 
         logging.debug("Successfully retrieved model list")
         return result
@@ -247,7 +248,8 @@ async def list_llm_models_for_tenant(tenant_id: str):
         raise Exception(f"Failed to retrieve model list: {str(e)}")
 
 
-async def list_models_for_admin(
+@managed_read
+def list_models_for_admin(
     tenant_id: str, model_type: Optional[str] = None, page: int = 1, page_size: int = 20
 ) -> Dict[str, Any]:
     """Get models for a specified tenant (admin operation) with pagination.
@@ -268,7 +270,12 @@ async def list_models_for_admin(
             filters = {"model_type": model_type}
 
         # Get model records for the specified tenant
-        records = get_model_records(filters, tenant_id)
+        if page > 0 and page_size > 0:
+            records, total = get_model_records_page(filters, tenant_id, page, page_size)
+        else:
+            # Preserve direct callers' legacy slice behavior for non-HTTP inputs.
+            records = get_model_records(filters, tenant_id)
+            total = len(records)
 
         # Type mapping for backwards compatibility
         type_map = {
@@ -293,11 +300,11 @@ async def list_models_for_admin(
             normalized_models.append(record)
 
         # Calculate pagination
-        total = len(normalized_models)
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
-        paginated_models = normalized_models[start_index:end_index]
+        paginated_models = (normalized_models if page > 0 and page_size > 0
+                            else normalized_models[start_index:end_index])
 
         # Get tenant name
         from management.services.permission.identity.tenants import get_tenant_info

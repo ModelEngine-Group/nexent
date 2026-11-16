@@ -32,6 +32,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { usePermission } from "@/hooks/permission/usePermission";
+import {
+  updateModelOutlet,
+  validateModelOutlet,
+} from "@/services/modelProfileService";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
@@ -40,8 +44,11 @@ import {
   ModelConnectStatus,
 } from "@/types/modelConfig";
 import log from "@/lib/logger";
+import { ModelCheckSummary } from "@/components/model/ModelCheckSummary";
+import { modelCheckFailure, type ModelCheckIssue } from "@/lib/modelCheckIssues";
 
 import { ModelAddDialog } from "./model/ModelAddDialog";
+import { ModelOutletEditDialog } from "./model/ModelOutletEditDialog";
 import { ModelEditDialog } from "./model/ModelEditDialog";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { ModelLibraryList } from "./model/ModelLibraryList";
@@ -92,8 +99,14 @@ export const ModelConfigSection = forwardRef<
 
   /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const pendingModelChecks = useRef(new Set<string>());
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [checkIssues, setCheckIssues] = useState<Record<string, ModelCheckIssue>>(
+    {}
+  );
 
   // v2.6.1 redesign: add-model dialog (single/batch tab)
   const [addDialogTab, setAddDialogTab] = useState<"single" | "batch">(
@@ -122,10 +135,6 @@ export const ModelConfigSection = forwardRef<
   });
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  // Per-row debounce timers for single-model connectivity probes, keyed by
-  // `${displayName}::${modelType}`. One shared timer made clicks on different
-  // rows cancel each other; per-row keys keep every clicked row's probe.
-  const verifyTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const scheduleAutoSave = () => {
@@ -327,12 +336,14 @@ export const ModelConfigSection = forwardRef<
         try {
           // Partial update: only api_key + base_url are sent; the backend
           // leaves every other field untouched.
-          await modelService.updateSingleModel({
-            currentDisplayName: m.displayName,
-            url: patch.url,
-            apiKey: patch.apiKey,
-            source: m.source,
-          });
+          if (m.type === "llm" && m.profileSchemaVersion && m.configRevision) {
+            await updateModelOutlet(m.id, { expected_revision: m.configRevision,
+              connection: { base_url: patch.url }, ...(patch.apiKey ? { api_key: patch.apiKey } : {}) });
+          } else {
+            await modelService.updateSingleModel({
+              currentDisplayName: m.displayName, url: patch.url, apiKey: patch.apiKey, source: m.source,
+            });
+          }
         } catch (e: any) {
           failed += 1;
           log.error("batch update model failed", m.displayName, e);
@@ -455,7 +466,24 @@ export const ModelConfigSection = forwardRef<
       await invalidate();
 
       const allModels = await modelService.getAllModels();
+      const previousModels = modelsRef.current;
       setModels(allModels);
+      setCheckIssues((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).filter(([id]) => {
+            const model = allModels.find((item) => String(item.id) === id);
+            const previous = previousModels.find(
+              (item) => String(item.id) === id
+            );
+            return (
+              model && previous &&
+              previous.configRevision === model.configRevision &&
+              previous.connect_status === model.connect_status &&
+              model.connect_status !== MODEL_STATUS.AVAILABLE
+            );
+          })
+        )
+      );
 
       const exists = (
         disp: string,
@@ -589,6 +617,86 @@ export const ModelConfigSection = forwardRef<
     }
   };
 
+  const finishModelEdit = async () => {
+    if (editingCardModel) {
+      const id = String(editingCardModel.id);
+      setCheckIssues((previous) => {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
+    }
+    setEditingCardModel(null);
+    await loadModelLists(true);
+  };
+
+  // Keep the saved-outlet probe diagnostics intact for both page entry points.
+  const checkModel = async (
+    modelName: string,
+    modelType: ModelType,
+    allModels: ModelOption[],
+    signal?: AbortSignal
+  ) => {
+    const model = allModels.find(
+      (item) => item.displayName === modelName && item.type === modelType
+    );
+    const id = String(model?.id ?? `${modelType}:${modelName}`);
+    if (pendingModelChecks.current.has(id)) return;
+    pendingModelChecks.current.add(id);
+    let issue: ModelCheckIssue | null = null;
+    let connected = false;
+    let completed = false;
+    const previousStatus = model?.connect_status === MODEL_STATUS.CHECKING
+      ? MODEL_STATUS.UNCHECKED
+      : model?.connect_status ?? MODEL_STATUS.UNCHECKED;
+    updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
+    const isCurrent = () => modelsRef.current.some((current) =>
+      current.id === model?.id && current.type === modelType &&
+      current.configRevision === model?.configRevision && current.displayName === modelName
+    );
+    try {
+      if (model?.type === "llm" && model.profileSchemaVersion) {
+        const result = await validateModelOutlet(
+          { outlet_id: model.id, expected_revision: model.configRevision },
+          signal
+        );
+        connected = result.ok;
+        issue = result.error;
+      } else {
+        connected = await modelService.verifyCustomModel(
+          modelName, modelType, signal
+        );
+      }
+      completed = true;
+      if (!connected && !issue)
+        issue = { category: "MODEL_HTTP_ERROR", scope: "model" };
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+        updateModelStatus(modelName, modelType, previousStatus);
+        return;
+      }
+      issue = modelCheckFailure(error);
+    } finally {
+      pendingModelChecks.current.delete(id);
+    }
+    if (!isCurrent()) return;
+    if (signal?.aborted) {
+      updateModelStatus(modelName, modelType, previousStatus);
+      return;
+    }
+    setCheckIssues((prev) => {
+      const next = { ...prev };
+      if (issue) next[id] = issue;
+      else delete next[id];
+      return next;
+    });
+    updateModelStatus(
+      modelName, modelType,
+      completed ? (connected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE) : previousStatus
+    );
+  };
+
   /* ------------------ Verify models ------------------ */
   const verifyModelsInternal = async (
     allModels: ModelOption[],
@@ -693,7 +801,6 @@ export const ModelConfigSection = forwardRef<
             modelName,
             modelType,
           });
-          updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
         }
       }
       if (modelsToVerify.length === 0) {
@@ -709,22 +816,7 @@ export const ModelConfigSection = forwardRef<
       }
       await Promise.all(
         modelsToVerify.map(async ({ modelName, modelType }) => {
-          try {
-            const isConnected = await modelService.verifyCustomModel(
-              modelName,
-              modelType,
-              signal
-            );
-            updateModelStatus(
-              modelName,
-              modelType,
-              isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-            );
-          } catch (error: any) {
-            if (error.name === "AbortError") return;
-            log.error(`Failed to verify model ${modelName}:`, error);
-            updateModelStatus(modelName, modelType, MODEL_STATUS.UNAVAILABLE);
-          }
+          await checkModel(modelName, modelType, allModels, signal);
         })
       );
     } catch (error: any) {
@@ -749,52 +841,10 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Verify single ------------------ */
-  // Cancel any pending single-row probes when the page unmounts.
-  useEffect(
-    () => () => {
-      verifyTimersRef.current.forEach((timer) => clearTimeout(timer));
-      verifyTimersRef.current.clear();
-    },
-    []
-  );
-
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
-    // Flip the row to CHECKING immediately so the click is always visible,
-    // and debounce per row instead of on one shared timer: with a shared
-    // timer, clicks on different rows cancelled each other, leaving the
-    // earlier row without any feedback. A per-row timer can only be
-    // superseded by clicking that same row again — impossible through the
-    // UI while it is CHECKING (the row action disables itself), so every
-    // lit "detecting" status is guaranteed to reach a terminal one.
-    updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
-    const key = `${displayName}::${modelType}`;
-    const timers = verifyTimersRef.current;
-    const pending = timers.get(key);
-    if (pending) clearTimeout(pending);
-    timers.set(
-      key,
-      setTimeout(async () => {
-        timers.delete(key);
-        try {
-          const isConnected = await modelService.verifyCustomModel(
-            displayName,
-            modelType
-          );
-          updateModelStatus(
-            displayName,
-            modelType,
-            isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-          );
-        } catch (error: any) {
-          log.error(
-            t("modelConfig.error.verifyCustomModel", { model: displayName }),
-            error
-          );
-          updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
-        }
-      }, 1000)
-    );
+    // All entry points share the per-model in-flight guard in checkModel.
+    await checkModel(displayName, modelType, models);
   };
 
   /* ------------------ Apply change ------------------ */
@@ -897,9 +947,6 @@ export const ModelConfigSection = forwardRef<
       configUpdate[configKey].dimension = modelInfo?.maxTokens || undefined;
     }
     updateModelConfig(configUpdate);
-    if (displayName) {
-      await verifyOneModel(displayName, modelType);
-    }
     scheduleAutoSave();
   };
 
@@ -1013,19 +1060,31 @@ export const ModelConfigSection = forwardRef<
                 </Badge>
               </div>
               <Can permission="model:update">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={verifyModels}
-                  disabled={isVerifying}
-                >
-                  {isVerifying ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="size-4" />
-                  )}
-                  {t("modelConfig.button.checkConnectivity")}
-                </Button>
+                <div className="flex items-center gap-3">
+                  <ModelCheckSummary
+                    issues={checkIssues}
+                    modelNames={Object.fromEntries(
+                      models.map((model) => [String(model.id), model.displayName])
+                    )}
+                    onRetry={(id) => {
+                      const model = models.find((item) => String(item.id) === id);
+                      if (model) void verifyOneModel(model.displayName, model.type);
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={verifyModels}
+                    disabled={isVerifying}
+                  >
+                    {isVerifying ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="size-4" />
+                    )}
+                    {t("modelConfig.button.checkConnectivity")}
+                  </Button>
+                </div>
               </Can>
             </div>
 
@@ -1178,7 +1237,7 @@ export const ModelConfigSection = forwardRef<
             isOpen={isAddModalV2Open}
             onClose={() => setIsAddModalV2Open(false)}
             initialTab={addDialogTab}
-            onSuccess={async (newModel) => {
+            onSuccess={async () => {
               // Invalidate FIRST so the refetch completes before loadModelLists
               // reads the cache (a model create may have auto-configured
               // default-model slots that must be reflected immediately).
@@ -1186,11 +1245,7 @@ export const ModelConfigSection = forwardRef<
                 queryKey: CONFIG_QUERY_KEY,
               });
               await loadModelLists(true);
-              if (newModel && newModel.name && newModel.type) {
-                setTimeout(() => {
-                  verifyOneModel(newModel.name, newModel.type);
-                }, 100);
-              }
+
             }}
           />
 
@@ -1207,15 +1262,14 @@ export const ModelConfigSection = forwardRef<
           />
 
           {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
-          {editingCardModel && (
+          {editingCardModel && editingCardModel.type === "llm" && editingCardModel.profileSchemaVersion ? (
+            <ModelOutletEditDialog modelId={editingCardModel.id} onClose={() => setEditingCardModel(null)} onSuccess={finishModelEdit} />
+          ) : editingCardModel && (
             <ModelEditDialog
               key={editingCardModel.id}
               model={editingCardModel}
               onClose={() => setEditingCardModel(null)}
-              onSuccess={async () => {
-                setEditingCardModel(null);
-                await loadModelLists(true);
-              }}
+              onSuccess={finishModelEdit}
             />
           )}
         </div>

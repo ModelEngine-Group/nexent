@@ -3,7 +3,7 @@
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, JsonValue, AfterValidator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator
 
 from contracts.model import BatchCreateModelsRequest, ModelProbeRequest, ModelRequest, ProviderModelRequest
 
@@ -45,6 +45,7 @@ class ModelUpdate(ModelSelection):
 
 class ModelHealthcheck(ModelSelection):
     model_type: str | None = None
+    persist_status: bool = True
 
 
 class ModelBatchUpdate(BaseModel):
@@ -68,3 +69,12 @@ class ModelProviderList(BaseModel):
 
 class ModelProbe(ModelProbeRequest):
     model_config = ConfigDict(extra="forbid")
+
+
+class ModelProfileProbe(BaseModel):
+    """Server-composed policy and request-owned credentials for one signed probe."""
+
+    model_config = ConfigDict(extra="forbid")
+    profile: dict[str, JsonValue]
+    api_key: str | None = Field(default=None, max_length=500, repr=False)
+    http_headers: dict[str, str] = Field(default_factory=dict, repr=False)

@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: MODEL-DEADLINE-D3-001
+  feature_id: V5-REL-02
+  requirement_ids: [V5-REL-02]
+  business_rule_ids: [V5-REL-02-RULE-01]
+  title: Synchronous model deadlines abort active HTTP and reclaim permits
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove absolute request deadlines independently of per-read HTTP timeouts through a real socket.
+  preconditions: [Installed SDK, loopback TCP available]
+  test_data:
+    profile: mock
+    modes: [body_drip, headers_stall, sse_comments, sse_partial_frame]
+  steps:
+  - order: 1
+    action: Invoke the real ModelService and HttpRequestSender against a continuously trickling or stalled loopback peer with a 0.3 second deadline and 3 second configured timeout.
+    expected: The call ends before 1.2 seconds with MODEL_RUN_DEADLINE, one attempt and no retry; a streaming call emits one error event.
+  - order: 2
+    action: Inspect parent scope, actual peer disconnect, concurrency limiter and managed executions after completion.
+    expected: Socket is shut down, caller scope remains usable, model permit and deadline watcher are reclaimed.
+  expected_results:
+  - All four modes terminate within the total budget plus bounded cleanup tolerance, irrespective of fresh bytes.
+  - No retry or response completion can be committed after the deadline.
+  - No active model permit, scope closer or managed execution remains; the parent run is not cancelled.
+  forbidden_side_effects: ["No external inference, credentials, database writes or application configuration changes"]
+  integration_boundary: [Real ModelService and HttpRequestSender through HTTPX to a loopback TCP peer]
+  observations: [Elapsed duration, actual peer disconnect, request counts, normalized error and released resources]
+  cleanup: [Close and join loopback server and managed deadline workers]
+  failure_evidence: [Elapsed duration, normalized error, request count and resource assertions]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-DEADLINE
+    description: Active HTTP work respects the absolute synchronous call deadline and is reclaimed.
+    steps: [1, 2]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

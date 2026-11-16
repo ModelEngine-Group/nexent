@@ -11,8 +11,8 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AsyncExitStack
 from typing import Any, Callable
 
+from ...consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
 from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
-from ...consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 
 
 logger = logging.getLogger("managed_mcp")
@@ -131,9 +131,18 @@ class ManagedMCPToolCollection:
                         ),
                         timeout=self.connect_timeout_seconds,
                     )
+                except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                    raise
                 except asyncio.TimeoutError as exc:
                     raise MCPConnectionTimeoutError(
                         f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
+                    ) from exc
+                except Exception as exc:
+                    # Attribute the failure to this server so terminal messages
+                    # can name it; the original error stays on __cause__.
+                    raise MCPConnectionFailure(
+                        url=str(parameters.get("url", "unknown")),
+                        transport=str(parameters.get("transport", "unknown")),
                     ) from exc
                 connections.append((*connection, allowed_tools))
 

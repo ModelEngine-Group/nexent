@@ -10,7 +10,7 @@ from contracts.agent import AgentRequest, WorkbenchSessionConfig
 
 def _single_agent_payload() -> dict:
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "mode": "single_agent_chat",
         "agent_mounts": [{"agent_id": 7, "version_no": 2}],
         "skill_mounts": [{"skill_id": 11, "config_values": {"region": "cn"}}],
@@ -47,7 +47,7 @@ def test_ut_be_wb_008_skill_mounts_are_a_unique_full_selection():
 
 
 def test_ut_be_wb_020_unknown_canonical_fields_are_rejected():
-    """UT-BE-WB-020: v3 canonical config rejects silent schema drift."""
+    """UT-BE-WB-020: v4 canonical config rejects silent schema drift."""
     payload = _single_agent_payload()
     payload["resolved_agents"] = []
     with pytest.raises(ValidationError):
@@ -72,4 +72,4 @@ def test_ut_be_wb_025_agent_request_requires_explicit_workbench_entrypoint():
         entrypoint="workbench",
         workbench=_single_agent_payload(),
     )
-    assert request.workbench and request.workbench.schema_version == 3
+    assert request.workbench and request.workbench.schema_version == 4

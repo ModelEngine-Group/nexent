@@ -1,10 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { beforeEach, expect, it, vi } from "vitest";
 import { resolveRestoredWorkbench } from "@/features/workbench/conversationRestore";
 import { previewWorkbenchAgent } from "@/features/workbench/api";
-import { fetchSkillsList, type SkillListItem } from "@/services/skillService";
+import { fetchSkillById } from "@/services/agentConfigService";
 import { initialWorkbenchState } from "@/features/workbench/state";
 vi.mock("@/features/workbench/api", () => ({ previewWorkbenchAgent: vi.fn() }));
-vi.mock("@/services/skillService", () => ({ fetchSkillsList: vi.fn() }));
+vi.mock("@/services/agentConfigService", () => ({ fetchSkillById: vi.fn() }));
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(previewWorkbenchAgent).mockResolvedValue({
@@ -15,10 +17,11 @@ beforeEach(() => {
       { skill_id: 1, config_values: { region: "published" } },
     ],
   });
-  vi.mocked(fetchSkillsList).mockResolvedValue([
-    { skill_id: "1", name: "Default" },
-    { skill_id: "2", name: "Selected" },
-  ] as SkillListItem[]);
+  vi.mocked(fetchSkillById).mockResolvedValue({
+    success: true,
+    data: { skill_id: 2, name: "Selected" },
+    message: "",
+  });
 });
 it("UT-FE-WB-032 restores canonical declarations and display names without default reintroduction", async () => {
   const config = {
@@ -33,6 +36,7 @@ it("UT-FE-WB-032 restores canonical declarations and display names without defau
     agent_id: 99,
   });
   expect(previewWorkbenchAgent).toHaveBeenCalledExactlyOnceWith(8, 3);
+  expect(fetchSkillById).toHaveBeenCalledExactlyOnceWith(2);
   expect(result).toEqual({ config, version: 7, skillNames: { 2: "Selected" } });
   expect(result.config.skill_mounts).not.toContainEqual({
     skill_id: 1,
@@ -46,8 +50,8 @@ it("does not silently import an ordinary Agent conversation into Workbench", asy
   expect(previewWorkbenchAgent).not.toHaveBeenCalled();
 });
 it("restoration stays pending until display resources finish loading", async () => {
-  let finish!: (items: SkillListItem[]) => void;
-  vi.mocked(fetchSkillsList).mockImplementation(
+  let finish!: (result: Awaited<ReturnType<typeof fetchSkillById>>) => void;
+  vi.mocked(fetchSkillById).mockImplementation(
     () =>
       new Promise((resolve) => {
         finish = resolve;
@@ -60,9 +64,70 @@ it("restoration stays pending until display resources finish loading", async () 
       skill_mounts: [{ skill_id: 1, config_values: {} }],
     },
   }).then(ready);
-  await vi.waitFor(() => expect(fetchSkillsList).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(fetchSkillById).toHaveBeenCalledOnce());
   expect(ready).not.toHaveBeenCalled();
-  finish([{ skill_id: "1", name: "Default" }] as SkillListItem[]);
+  finish({
+    success: true,
+    data: { skill_id: 1, name: "Default" },
+    message: "",
+  });
   await pending;
   expect(ready).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ["nl2agent_main", "agent_create"],
+  ["nl2skill_main", "skill_create"],
+] as const)(
+  "restores %s without persisted Workbench configuration or guessing from target",
+  async (agent_system_key, mode) => {
+    const conversation = {
+      agent_id: 77,
+      agent_system_key,
+      workbench_config: null,
+      workbench_config_version: 0,
+    };
+    const result = await resolveRestoredWorkbench(conversation);
+    expect(result.config.mode).toBe(mode);
+    expect(result.version).toBe(0);
+    expect(conversation.workbench_config).toBeNull();
+    expect(previewWorkbenchAgent).not.toHaveBeenCalled();
+    expect(fetchSkillById).not.toHaveBeenCalled();
+    result.config.agent_mounts.push({ agent_id: 99, version_no: 1 });
+    expect(initialWorkbenchState.config.agent_mounts).toEqual([]);
+  }
+);
+
+it("retains a saved creation configuration without rewriting it", async () => {
+  const config = {
+    ...initialWorkbenchState.config,
+    mode: "agent_create" as const,
+    model_id: 11,
+  };
+  const before = structuredClone(config);
+  const result = await resolveRestoredWorkbench({
+    workbench_config: config,
+    workbench_config_version: 7,
+    agent_system_key: "nl2agent_main",
+  });
+  expect(result.config).toBe(config);
+  expect(config).toEqual(before);
+  expect(result.version).toBe(7);
+});
+
+it("rejects an unavailable saved skill without dropping or rewriting mounts", async () => {
+  vi.mocked(fetchSkillById).mockResolvedValue({
+    success: false,
+    data: null,
+    message: "offline",
+  });
+  const config = {
+    ...initialWorkbenchState.config,
+    skill_mounts: [{ skill_id: 2, config_values: { region: "custom" } }],
+  };
+  const before = structuredClone(config);
+  await expect(
+    resolveRestoredWorkbench({ workbench_config: config })
+  ).rejects.toThrow();
+  expect(config).toEqual(before);
 });

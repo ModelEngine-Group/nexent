@@ -1,0 +1,104 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CREATION-INTENT-D4-001
+  feature_id: WB-CONTROLS
+  requirement_ids:
+  - WB-CREATION-INTENT-20261103
+  business_rule_ids:
+  - WB-CONTROLS-RULE-002
+  title: Confirm explicit creation intent and retain the request in the matching isolated mode
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove model-generated structured clarification, persisted decisions and isolated mode navigation; input text
+    alone must never trigger frontend classification.
+  preconditions:
+  - Local frontend available with controlled authorized tenant APIs and a selectable model.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Submit a natural assistant request without creation keywords; the controlled main-model stream returns a creation
+      confirmation. Choose continue_chat.
+    expected: The request reaches ordinary agent/run before any card appears. A structured confirmation is rendered; continuing
+      sends the answer to ordinary chat, saves the selection and never selects a creation mode.
+  - order: 2
+    action: Submit a multi-turn follow-up. The model returns an Agent proposal with its complete context. Confirm entry, edit
+      the new draft and return.
+    expected: Exactly one acknowledgement completes before agent_create is selected. The draft includes the AI context and
+      original request. Return preserves the original ordinary draft and submitted card; no creation run occurs automatically.
+  - order: 3
+    action: Reload the source history after confirmation, then obtain and confirm a Skill proposal. Open two new conversations
+      while the Skill requirements remain unsent.
+    expected: Saved selection restores as submitted and cannot be replayed. Skill confirmation selects skill_create with its
+      AI context; resources are not created before the user sends the new draft. Each new conversation is blank and ordinary.
+  - order: 4
+    action: Attempt a proposal without its permission; attempt confirmation when saving fails, then retry.
+    expected: Unauthorized creation choices are disabled. Failed persistence leaves the original mode and draft, displays
+      an error, and permits retry without duplicate saved responses.
+  - order: 5
+    action: From the confirmed unsent Agent requirements, open two new conversations.
+    expected: Each opens a distinct blank ordinary thread without copying the creation request or selecting a creation mode.
+  - order: 6
+    action: Obtain another Agent confirmation, enter its creation mode and explicitly send the carried requirements to a runtime requiring agent_id. Open a blank conversation afterwards.
+    expected: No creator request occurs before the explicit send. The request includes the same positive draft ID in agent_id and target.id, retains its requirements and receives a visible creator response instead of HTTP 422. The following conversation is blank and ordinary.
+  expected_results:
+  - Authorized users can reach the correct creation mode from a chat request without retyping.
+  - New conversations never inherit creation handoff drafts or modes.
+  - Explicitly sending confirmed Agent requirements works with the existing agent_id runtime contract while retaining the structured target.
+  forbidden_side_effects:
+  - No frontend keyword classification, extra intent-classification request or automatic creation generation.
+  - No draft loss, lost confirmation state or duplicate acknowledged response.
+  - No navigation from unauthorized, stale, malformed or still-running confirmation cards.
+  - No reuse of an unsent creation thread or copying its requirements into new conversations.
+  actor: Authorized mock tenant user
+  journey:
+  - Open Workbench
+  - Submit request
+  - Cancel
+  - Confirm Agent entry
+  - Return
+  - Confirm Skill entry
+  - Return
+  - Check permissions
+  final_business_result:
+  - The user can continue the original creation request in the selected creation mode.
+  failure_evidence:
+  - Browser assertion and prompt screenshot
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: AI stream, continue-chat, context handoff, persisted confirmation and isolated creation navigation.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Permission and persistence failures prevent navigation and permit a safe retry.
+    steps:
+    - 4
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 3
+  - id: AC-03
+    description: New conversations remain blank and ordinary after unsent Agent and Skill handoffs.
+    steps: [3, 5]
+    expected_results: [2]
+    forbidden_side_effects: [4]
+  - id: AC-04
+    description: The confirmed Agent draft can be explicitly sent with matching legacy and structured target identity.
+    steps: [6]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]

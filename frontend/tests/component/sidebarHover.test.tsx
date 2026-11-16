@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { SideNavigation } from "@/components/navigation/SideNavigation";
+import { useGlobalConfigStore } from "@/stores/global";
 
 const state = vi.hoisted(() => ({ speed: true, push: vi.fn() }));
 vi.mock("react-i18next", () => ({
@@ -74,9 +75,97 @@ vi.mock("@/components/navigation/NotificationBell", () => ({
 beforeEach(() => {
   vi.useFakeTimers();
   state.speed = true;
+  useGlobalConfigStore.getState().setConfig({});
 });
+
+test.each([undefined, "", "   "])(
+  "keeps a blank-title logo large and clips it when collapsed (%j)",
+  (homeTitle) => {
+    useGlobalConfigStore.getState().setConfig({
+      productName: "System brand",
+      ...(homeTitle === undefined ? {} : { homeTitle }),
+    });
+    const { rail } = setup();
+    const home = screen.getByRole("link", { name: "sidebar.homePage" });
+    const logo = home.querySelector("img")!;
+    expect(home).not.toHaveTextContent("Nexent");
+    expect(home).not.toHaveTextContent("System brand");
+    const logoFrame = logo.parentElement!;
+    const imageClasses = logo.className;
+    const frameClasses = logoFrame.className;
+    expect(home).toHaveClass("overflow-hidden");
+    expect(logoFrame).toHaveClass("w-40", "shrink-0");
+    expect(logo).toHaveClass("w-full", "h-10", "object-contain", "object-left");
+    fireEvent.mouseEnter(rail);
+    expect(logo.className).toBe(imageClasses);
+    expect(logoFrame.className).toBe(frameClasses);
+    expect(home).toHaveTextContent("");
+    fireEvent.mouseLeave(rail);
+    act(() => vi.advanceTimersByTime(160));
+    expect(logo.className).toBe(imageClasses);
+    expect(logoFrame.className).toBe(frameClasses);
+    expect(home).toHaveClass("overflow-hidden");
+  }
+);
 afterEach(() => {
   vi.useRealTimers();
+});
+
+test("uses homepage title and logo instead of system branding", () => {
+  useGlobalConfigStore.getState().setConfig({
+    productName: "System brand",
+    homeTitle: "Homepage",
+    homeLogo: "home-logo.png?v=abc",
+  });
+  const { rail } = setup();
+  fireEvent.mouseEnter(rail);
+  const home = screen.getByRole("link", { name: "sidebar.homePage" });
+  expect(home).toHaveTextContent("Homepage");
+  expect(home).not.toHaveTextContent("System brand");
+  expect(home.querySelector("img")).toHaveAttribute(
+    "src",
+    "/home-logo.png?v=abc"
+  );
+  expect(home.querySelector("img")).toHaveClass("w-10", "h-10");
+});
+
+test("reads legacy homepage values but explicit empty settings clear them", () => {
+  const legacy = {
+    productName: "System brand",
+    tabTitle: "Legacy home",
+    tabLogo: "browser-tab-logo.png?v=abc",
+  };
+  useGlobalConfigStore.getState().setConfig(legacy);
+  const { rail } = setup();
+  fireEvent.mouseEnter(rail);
+  const home = screen.getByRole("link", { name: "sidebar.homePage" });
+  expect(home).toHaveTextContent("Legacy home");
+  expect(home.querySelector("img")).toHaveAttribute(
+    "src",
+    "/browser-tab-logo.png?v=abc"
+  );
+  act(() =>
+    useGlobalConfigStore
+      .getState()
+      .setConfig({ ...legacy, homeTitle: "", homeLogo: "" })
+  );
+  expect(home).toHaveTextContent("");
+  expect(home.querySelector("img")).toHaveAttribute(
+    "src",
+    "/modelengine-logo.png"
+  );
+});
+
+test("falls back to the system image when a homepage logo fails to load", () => {
+  useGlobalConfigStore
+    .getState()
+    .setConfig({ homeLogo: "home-logo.jpg?v=abc" });
+  setup();
+  const logo = screen
+    .getByRole("link", { name: "sidebar.homePage" })
+    .querySelector("img")!;
+  fireEvent.error(logo);
+  expect(logo).toHaveAttribute("src", "/modelengine-logo.png");
 });
 function setup(onPinnedChange?: (pinned: boolean) => void) {
   const result = render(<SideNavigation onPinnedChange={onPinnedChange} />);

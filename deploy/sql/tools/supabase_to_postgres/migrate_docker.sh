@@ -16,26 +16,38 @@ network_of() { platform inspect --format '{{range $name,$network := .NetworkSett
 address_of() { platform inspect --format "{{with index .NetworkSettings.Networks \"$2\"}}{{.IPAddress}}{{end}}" "$1"; }
 run_migration() {
   local host="${SUPABASE_POSTGRES_HOST:-}" source_network target_network names name output code
+  local auth_name="${SUPABASE_MIGRATION_AUTH_CONTAINER:-supabase-auth-mini}"
+  local kong_name="${SUPABASE_MIGRATION_KONG_CONTAINER:-supabase-kong-mini}"
   local candidates=()
   source_name="${source_name:-${SUPABASE_MIGRATION_DB_CONTAINER:-}}"
   case "$host" in ''|supabase_db|supabase-db-mini|nexent-supabase-db) host="" ;; esac
   if [ -z "$host" ] || [ -n "$source_name" ]; then
     names="$(platform ps -a --format '{{.Names}}')" || fail "Cannot inspect Docker source containers"
     while IFS= read -r name; do
+      [[ "$name" != "$auth_name" && "$name" != "$kong_name" ]] || continue
       case "${name,,}" in *supabase*db*) candidates+=("$name") ;; esac
     done <<< "$names"
     if [ -z "$source_name" ]; then
       [ "${#candidates[@]}" -le 1 ] || fail "Multiple Supabase databases exist; configure the original source container"
-      source_name="${candidates[0]:-}"
+      source_name="${candidates[0]:-supabase-db-mini}"
     fi
-    [ -n "$source_name" ] || fail "The original Supabase database is required; restore its original data before retrying"
-    local peers=("$source_name" "${SUPABASE_MIGRATION_AUTH_CONTAINER:-supabase-auth-mini}" "${SUPABASE_MIGRATION_KONG_CONTAINER:-supabase-kong-mini}")
+    local peers=("$source_name" "$auth_name" "$kong_name")
     for name in "${peers[@]}"; do
       [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ && "${name,,}" == *supabase* ]] || fail "Use Supabase names for source cleanup"
       [ "$name" != "$database" ] || fail "Source cleanup must not select the target database"
     done
     [ "${peers[0]}" != "${peers[1]}" ] && [ "${peers[0]}" != "${peers[2]}" ] && [ "${peers[1]}" != "${peers[2]}" ] || fail "Source cleanup names must be distinct"
-    platform inspect "$source_name" >/dev/null 2>&1 || fail "Configured source container is missing"
+    if ! grep -Fxq -- "$source_name" <<< "$names"; then
+      [ "${#candidates[@]}" -eq 0 ] || fail "Configured source container is missing; verify which existing Supabase database is original"
+      [ "$allow_start" = true ] || fail "Original Supabase source is missing and source startup is disabled"
+      log_stage source "Source container $source_name is missing; checking original PostgreSQL data before recovery."
+      (
+        export SUPABASE_MIGRATION_DB_CONTAINER="$source_name"
+        source "$SCRIPT_DIR/legacy.sh"
+        legacy_action=up with_auth=false production=false run_recovery
+      )
+    fi
+    platform inspect "$source_name" >/dev/null 2>&1 || fail "Cannot inspect the original Supabase source container"
     if [ "$(platform inspect --format '{{.State.Running}}' "$source_name")" != true ]; then
       [ "$allow_start" = true ] || fail "Original Supabase source is stopped"
       platform start "$source_name" >/dev/null || fail "Cannot start original Supabase"
@@ -82,7 +94,7 @@ run_migration() {
   fi
   if [ "$apply" = true ] && [ -n "$source_name" ]; then
     log_stage cleanup "Committed migration; stopping and removing selected source DB/Auth/Kong containers, retaining data volumes."
-    for name in "${SUPABASE_MIGRATION_KONG_CONTAINER:-supabase-kong-mini}" "${SUPABASE_MIGRATION_AUTH_CONTAINER:-supabase-auth-mini}" "$source_name"; do
+    for name in "$kong_name" "$auth_name" "$source_name"; do
       if platform inspect "$name" >/dev/null 2>&1; then
         log_stage cleanup "Removing source container $name."
         platform stop "$name" >/dev/null && platform rm "$name" >/dev/null || cleanup_warning

@@ -1,86 +1,96 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PropsWithChildren } from "react";
 import { renderToString } from "react-dom/server";
 import { useConversationActivitySync } from "@/hooks/chat/useConversationActivitySync";
 import { conversationService } from "@/services/conversationService";
 
 const state = vi.hoisted(() => ({
-  items: [] as Array<{
-    id: string;
-    remoteId: string;
-    title: string;
-    custom: { lastMessageAt: string };
-  }>,
   busy: false,
   reload: vi.fn<() => Promise<void>>(),
   runEnd: undefined as undefined | (() => void),
 }));
 vi.mock("@assistant-ui/react", () => ({
-  useAui: () => client,
+  useAui: () => runtime,
   useAuiEvent: (_event: unknown, callback: () => void) => {
     state.runEnd = callback;
   },
   useAuiState: (selector: (value: unknown) => unknown) =>
     selector({ threads: { isLoading: state.busy, isLoadingMore: false } }),
 }));
-const client = {
+const runtime = {
   threads: () => ({
     reload: state.reload,
     getState: () => ({
-      threadItems: state.items,
-      threadIds: state.items.map((item) => item.id),
+      isLoading: state.busy,
+      isLoadingMore: false,
+      threadItems: [],
+      threadIds: [],
     }),
   }),
 };
-const data = {
-  items: [
-    {
-      conversation_id: 1,
-      conversation_title: "History",
-      create_time: 1,
-      update_time: 1,
-      last_activity_time: 10,
-    },
-  ],
-  metadata: { total: 1, today: 1, last_7_days: 0, older: 0 },
-  next_cursor: null,
-};
 const clients: QueryClient[] = [];
-afterEach(() => {
-  clients.splice(0).forEach((value) => value.clear());
+let visible: DocumentVisibilityState;
+let online: boolean;
+beforeEach(() => {
+  visible = "visible";
+  online = true;
   state.busy = false;
+  state.reload.mockReset().mockResolvedValue();
+  vi.spyOn(document, "visibilityState", "get").mockImplementation(
+    () => visible
+  );
+  vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+  vi.spyOn(conversationService, "getList").mockResolvedValue({
+    items: [],
+    metadata: { total: 0, today: 0, last_7_days: 0, older: 0 },
+    next_cursor: null,
+  });
+  vi.useFakeTimers();
 });
-function setup() {
-  const query = new QueryClient({
+afterEach(() => {
+  cleanup();
+  clients.splice(0).forEach((c) => c.clear());
+  vi.useRealTimers();
+});
+interface Props {
+  scope: string | null;
+  type: "workbench" | "agent_chat";
+  serverConversationIds?: ReadonlyMap<string, string>;
+  generatedTitles?: ReadonlyMap<string, string>;
+}
+function setup(props: Partial<Props> = {}) {
+  const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
-  clients.push(query);
-  state.reload.mockReset().mockImplementation(async () => {
-    state.items = data.items.map((row) => ({
-      id: String(row.conversation_id),
-      remoteId: String(row.conversation_id),
-      title: row.conversation_title,
-      custom: { lastMessageAt: new Date(row.last_activity_time).toISOString() },
-    }));
-  });
+  clients.push(client);
   return renderHook(
-    ({ scope }: { scope: string | null }) =>
-      useConversationActivitySync(scope, "workbench"),
+    ({ scope, type, ...changes }: Props) =>
+      useConversationActivitySync(scope, type, changes),
     {
-      initialProps: { scope: "owner" as string | null },
+      initialProps: { scope: "owner", type: "workbench", ...props } as Props,
       wrapper: ({ children }: PropsWithChildren) => (
-        <QueryClientProvider client={query}>{children}</QueryClientProvider>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
       ),
     }
   );
 }
+async function advance(ms = 100) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+function foreground() {
+  window.dispatchEvent(new Event("focus"));
+  window.dispatchEvent(new Event("online"));
+  document.dispatchEvent(new Event("visibilitychange"));
+}
 
 it("can render without browser globals during server rendering", () => {
-  const query = new QueryClient();
+  const client = new QueryClient();
   function Probe() {
     useConversationActivitySync("owner", "workbench");
     return null;
@@ -89,107 +99,197 @@ it("can render without browser globals during server rendering", () => {
   try {
     expect(() =>
       renderToString(
-        <QueryClientProvider client={query}>
+        <QueryClientProvider client={client}>
           <Probe />
         </QueryClientProvider>
       )
     ).not.toThrow();
   } finally {
     vi.unstubAllGlobals();
-    query.clear();
+    client.clear();
   }
 });
 
-it("refreshes only changed metadata and refetches immediately after a local run", async () => {
-  state.items = [];
-  const get = vi.spyOn(conversationService, "getList").mockResolvedValue(data);
+it("adds no duplicate initial list read and makes no periodic request while idle for sixty seconds", async () => {
   setup();
-  await waitFor(() => expect(state.reload).toHaveBeenCalledTimes(1));
-  act(() => state.runEnd?.());
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  await advance(60_000);
+  expect(conversationService.getList).not.toHaveBeenCalled();
+  expect(state.reload).not.toHaveBeenCalled();
+});
+
+it("coalesces terminal run events and reloads the runtime without a duplicate first-page probe", async () => {
+  setup();
+  act(() => {
+    state.runEnd?.();
+    state.runEnd?.();
+  });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  expect(conversationService.getList).not.toHaveBeenCalled();
+  await advance(60_000);
   expect(state.reload).toHaveBeenCalledTimes(1);
 });
 
-it("does not reload an already-current list on mount or after remount", async () => {
-  state.items = [
-    {
-      id: "1",
-      remoteId: "1",
-      title: "History",
-      custom: { lastMessageAt: new Date(10).toISOString() },
-    },
-  ];
-  const get = vi.spyOn(conversationService, "getList").mockResolvedValue(data);
-  const first = setup();
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-  expect(state.reload).not.toHaveBeenCalled();
-  first.unmount();
+it("coalesces focus, visibility and reconnect and ignores ordinary pointer interactions", async () => {
   setup();
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  expect(state.reload).not.toHaveBeenCalled();
-});
-
-it("does not load the global conversation page for Agent-chat history", () => {
-  const get = vi.spyOn(conversationService, "getList");
-  const query = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-  });
-  clients.push(query);
-  renderHook(() => useConversationActivitySync("owner", "agent_chat"), {
-    wrapper: ({ children }: PropsWithChildren) => (
-      <QueryClientProvider client={query}>{children}</QueryClientProvider>
-    ),
-  });
-
-  act(() => state.runEnd?.());
-  expect(get).not.toHaveBeenCalled();
-  expect(state.reload).not.toHaveBeenCalled();
-});
-
-it("coalesces focus/reconnect while a request is pending and stops after unmount", async () => {
-  let resolve!: (value: typeof data) => void;
-  const get = vi.spyOn(conversationService, "getList").mockReturnValue(
-    new Promise((done) => {
-      resolve = done;
-    })
-  );
-  const view = setup();
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
   act(() => {
-    window.dispatchEvent(new Event("focus"));
-    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("focusin"));
   });
-  expect(get).toHaveBeenCalledTimes(1);
-  view.unmount();
-  await act(async () => resolve(data));
+  await advance(60_000);
+  expect(state.reload).toHaveBeenCalledTimes(1);
+});
+
+it("observes first persisted identity and a late saved title while ignoring identical map contents", async () => {
+  const props: Props = { scope: "owner", type: "workbench" };
+  const { rerender } = setup(props);
+  rerender({ ...props, serverConversationIds: new Map([["local", "42"]]) });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  rerender({ ...props, serverConversationIds: new Map([["local", "42"]]) });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  rerender({
+    ...props,
+    serverConversationIds: new Map([["local", "42"]]),
+    generatedTitles: new Map([["local", "Saved late title"]]),
+  });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(2);
+});
+
+it("does not treat an unpersisted draft mapping as a saved history", async () => {
+  const { rerender } = setup();
+  rerender({
+    scope: "owner",
+    type: "workbench",
+    serverConversationIds: new Map([["local", "workbench-draft:local"]]),
+  });
+  await advance();
   expect(state.reload).not.toHaveBeenCalled();
 });
 
-it("does not fetch for an anonymous scope or a hidden document", async () => {
-  let visibility: DocumentVisibilityState = "hidden";
-  vi.spyOn(document, "visibilityState", "get").mockImplementation(
-    () => visibility
+it("keeps one trailing operation refresh but ignores duplicate foreground events during a pending read", async () => {
+  let finish!: () => void;
+  state.reload.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
   );
-  const get = vi.spyOn(conversationService, "getList").mockResolvedValue(data);
-  const view = setup();
-  expect(get).not.toHaveBeenCalled();
-  view.rerender({ scope: null });
-  visibility = "visible";
-  act(() => document.dispatchEvent(new Event("visibilitychange")));
-  expect(get).not.toHaveBeenCalled();
-  view.rerender({ scope: "owner" });
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  setup();
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  act(() => {
+    state.runEnd?.();
+    state.runEnd?.();
+  });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  await act(async () => finish());
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(2);
 });
 
-it("retains the confirmed list on fetch failure and recovers on focus", async () => {
-  state.items = [];
-  const get = vi
-    .spyOn(conversationService, "getList")
-    .mockRejectedValueOnce(new Error("network"))
-    .mockResolvedValue(data);
-  setup();
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+it("waits for an existing pagination load instead of dropping the event", async () => {
+  state.busy = true;
+  const { rerender } = setup();
+  act(() => state.runEnd?.());
+  await advance();
   expect(state.reload).not.toHaveBeenCalled();
-  act(() => window.dispatchEvent(new Event("focus")));
-  await waitFor(() => expect(state.reload).toHaveBeenCalledTimes(1));
+  state.busy = false;
+  rerender({ scope: "owner", type: "workbench" });
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+});
+
+it("keeps hidden or offline changes pending until foreground and network recovery", async () => {
+  setup();
+  visible = "hidden";
+  act(() => {
+    state.runEnd?.();
+    foreground();
+  });
+  await advance();
+  expect(state.reload).not.toHaveBeenCalled();
+  visible = "visible";
+  online = false;
+  act(foreground);
+  await advance();
+  expect(state.reload).not.toHaveBeenCalled();
+  online = true;
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+});
+
+it("does not refresh anonymous or Agent-chat scopes", async () => {
+  const { rerender } = setup({ scope: null });
+  act(() => {
+    state.runEnd?.();
+    foreground();
+  });
+  await advance();
+  rerender({ scope: "owner", type: "agent_chat" });
+  act(() => {
+    state.runEnd?.();
+    foreground();
+  });
+  await advance();
+  expect(state.reload).not.toHaveBeenCalled();
+});
+
+it("discards queued work when the identity changes or the sidebar unmounts", async () => {
+  const { rerender, unmount } = setup();
+  act(() => state.runEnd?.());
+  rerender({ scope: "other-tenant", type: "workbench" });
+  await advance();
+  expect(state.reload).not.toHaveBeenCalled();
+  act(() => state.runEnd?.());
+  unmount();
+  await advance();
+  act(foreground);
+  await advance();
+  expect(state.reload).not.toHaveBeenCalled();
+});
+
+it("does not schedule another identity's pending changes when an old request settles", async () => {
+  let finish!: () => void;
+  state.reload.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const { rerender } = setup();
+  act(() => state.runEnd?.());
+  await advance();
+  act(() => state.runEnd?.());
+  rerender({ scope: "other-tenant", type: "workbench" });
+  await act(async () => finish());
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(2);
+});
+
+it("does not retry a failed reload until another event", async () => {
+  state.reload.mockRejectedValueOnce(new Error("History unavailable"));
+  setup();
+  act(() => state.runEnd?.());
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  await advance(60_000);
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  act(foreground);
+  await advance();
+  expect(state.reload).toHaveBeenCalledTimes(2);
 });

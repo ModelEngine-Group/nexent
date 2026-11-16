@@ -1,0 +1,117 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: SYSTEM-BRANDING-D4-001
+  feature_id: F-184
+  business_rule_ids:
+  - F-184-RULE-02
+  requirement_ids:
+  - SYSTEM-TAB-BRANDING-20261028
+  - SYSTEM-TAB-TITLE-RACE-20261029
+  - SYSTEM-TAB-ICON-FLASH-20261029
+  title: 首页品牌配置保存、空标题logo扩展与系统标签页隔离
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify homepage/navigation branding through the real super-admin configuration
+    journey while browser tabs retain system branding.
+  preconditions:
+  - An isolated Nexent runtime and writable persistent project-config storage are
+    available.
+  - A SUPER_ADMIN session is available; preserve the original locale configuration
+    and logo bytes before mutation.
+  - A tenant_a_admin test user can sign in and navigate between workbench and Agent
+    configuration; SUPER_ADMIN navigation is intentionally restricted.
+  test_data:
+    system_name: Branding system
+    home_title_zh: 独立首页标题
+    home_title_en: Independent homepage
+    logos: Distinct valid PNG images; preserve original images for restoration.
+  steps:
+  - order: 1
+    action: Open system configuration, leave homepage title/logo empty, save a system
+      name and system logo, then reload with branding and system-image requests
+      delayed; repeat with a failed system-image request and finally restore loading.
+    expected: The browser tab uses system name/logo; navigation has no title and uses
+      the system logo; while branding is unavailable the browser title is blank,
+      and pending or failed system-image loads keep all browser icons transparent.
+  - order: 2
+    action: Save independent Chinese/English homepage titles and a homepage logo;
+      reload, sign in with a fresh session, use sidebar navigation and switch locales.
+    expected: Navigation follows localized homepage branding; browser title/favicon
+      remain the system name/logo, including after navigation metadata completes.
+  - order: 3
+    action: Clear only the homepage title; save, expand and collapse navigation.
+    expected: No system-name placeholder appears in navigation; logo uses
+      a smaller 160x40 image without distortion in both states; collapsed navigation
+      clips the right side instead of shrinking the image, and browser tab branding
+      is unchanged.
+  - order: 4
+    action: Clear homepage titles and restore the system logo option; save/reload
+      and restore original configuration/images.
+    expected: Navigation title stays blank and its logo falls back to system logo;
+      browser uses system branding; original values are restored.
+  expected_results:
+  - Homepage branding persists, localizes and remains independent from browser system
+    branding.
+  - Empty homepage logo falls back to system logo; empty homepage title remains blank.
+  - Blank-title navigation logo keeps its smaller 160x40 dimensions proportionally in both
+    states; collapsed navigation clips the image to its leftmost visible portion.
+  - Browser title stays blank before a system name is available and never changes to
+    a default Nexent title during login, refresh or sidebar navigation.
+  - Initial and pending/failed system-image loads use transparent icons, without
+    competing default icon links; successful loading switches to the system logo.
+  forbidden_side_effects:
+  - Homepage overrides must not change browser tab title/favicon or overwrite the
+    system logo/name.
+  - Restore original configuration and original logo files after the test, including
+    on failure.
+  acceptance:
+  - id: AC-01
+    description: Optional homepage branding, localized persistence, independent logo
+      fallback and browser system-brand isolation.
+    steps:
+    - 1
+    - 2
+    - 4
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Blank-title navigation logo keeps its reduced dimensions; collapsed
+      navigation reveals only the left portion without rescaling.
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-03
+    description: Unavailable titles remain blank; loaded system titles survive login,
+      refresh and sidebar navigation without a competing default title.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 4
+  - id: AC-04
+    description: Browser icons remain transparent during initial SSR and slow/failed
+      image loads, then use the system logo only after a successful load.
+    steps:
+    - 1
+    expected_results:
+    - 5
+  actor: SUPER_ADMIN
+  journey:
+  - Open system configuration
+  - save homepage branding
+  - reload and navigate
+  - clear homepage overrides
+  - restore original settings
+  final_business_result:
+  - Homepage navigation and browser tab use their designated branding sources.
+  failure_evidence:
+  - Screenshot and trace under the machine-local result directory.

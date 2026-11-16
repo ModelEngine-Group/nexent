@@ -7,8 +7,8 @@ import bcrypt
 import psycopg2
 import pytest
 
-from local_auth import disposable_database
 from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationConflict, import_users
+from local_auth import disposable_database
 
 
 def assert_consolidated_schema(root):
@@ -55,12 +55,12 @@ def assert_consolidated_schema(root):
             with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
                 cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id='deleted-binding'")
                 import_users(connection, rows, dry_run=False)
-                cursor.execute("SELECT user_id,user_role,password_login_enabled,password_hash,delete_flag FROM nexent.user_account_t ORDER BY user_id")
+                cursor.execute("SELECT user_id,user_roles,password_login_enabled,password_hash,delete_flag FROM nexent.user_account_t ORDER BY user_id")
                 accounts = {r[0]: r[1:] for r in cursor.fetchall()}
                 assert accounts == {
-                    "cas-only": ("USER", False, None, "N"),
-                    "oauth-only": ("DEV", False, None, "N"),
-                    dual_id: ("ADMIN", True, encoded, "N"),
+                    "cas-only": (["USER"], False, None, "N"),
+                    "oauth-only": (["DEV"], False, None, "N"),
+                    dual_id: (["ADMIN"], True, encoded, "N"),
                 }
                 cursor.execute("SELECT count(*) FROM nexent.user_oauth_account_t")
                 assert cursor.fetchone()[0] == len(bindings)

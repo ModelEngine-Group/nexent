@@ -1,0 +1,60 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-DEBUG-MODE-SWITCH-20261029
+  change_type: bugfix
+  bug_id: AGENT-DEBUG-MODE-SWITCH-20261029
+  title: Restore planning and execution selection in ordinary Agent debug
+  description: Connect the ordinary debug composer to the same parent-owned mode state already used by comparison debug.
+  observed_behavior: The ordinary debug Thread receives a no-op onChatModeChange callback, so its planning/execution selector cannot change mode; comparison debug receives setChatMode and works.
+  expected_behavior: Ordinary debug switches both ways, updates enablePlan in the next runtime configuration, and shares the current mode with comparison debug without clearing drafts or starting a run.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: AgentDebugHeader mocked Thread without a mode control, and adapter UT did not check enable_plan. PW-PROMPT-02 covers returning from comparison to ordinary debug but does not exercise mode selection.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-PROMPT-02]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-PROMPT-02]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Ordinary debug switches execution to planning and back, with the corresponding enablePlan runtime flag while preserving Agent/model identity.
+    - Ordinary and comparison views retain one shared mode across switches; unsent text and thread state remain intact.
+    - Selecting a mode never starts or resets a conversation; existing clear and header controls retain their behavior.
+    - The debug adapter serializes explicit true, false and omitted planning flags through the existing enable_plan field.
+    test_selectors:
+    - frontend/tests/workbench/AgentDebugHeader.test.tsx
+    - frontend/tests/workbench/AgentDebugModelControls.test.ts
+    reason: Extend existing React state/callback UT and actual request-adapter assertions. Reuse the existing two-model D4 journey as broader regression; no new D1 or duplicate browser Case is necessary for this missing callback. Python and protocol contracts are unchanged.
+  notes: |
+    Initial branch bugfix_debug1028 at 122048900; the initially untracked home-logo.png
+    and nexent-web.tar were left untouched. The sibling nexent-doc and UI source were already confirmed
+    absent by the user; continue within that authorization without a replacement SPEC root.
+    Capability: AgentDebugPanel owns chatMode (initial execution), and both mounted
+    views receive it. AgentDebugChat converts it to composer runConfig.enablePlan;
+    remoteChatModelAdapter serializes that flag as enable_plan. Comparison already
+    forwards its setter. Only the ordinary DebugConversation callback is disconnected.
+    AC-01: ordinary mode controls update displayed selection and runtime flags both ways.
+    AC-02: mode survives entering/leaving comparison, without clearing unsent text,
+    resetting/cancelling the thread or submitting a request merely on selection.
+    Existing header/welcome/model controls remain regression owners. PW-PROMPT-02 is
+    unchanged broader D4 regression, not a claim that its legacy assertions detect this
+    defect. UT supplies the focused missing state/callback and payload proof; D2/D3/D5
+    add no necessary evidence for this unchanged protocol. Preserve historical Cases.
+    Implementation and targeted UT/static checks are complete. The added UI regression
+    reproduces the failure before the fix; detailed commands and results are kept in
+    machine-local verification notes outside Git. Source-only type checking excludes
+    generated .next caches and is not a full build claim. Design validation passed;
+    implementation validation is blocked by the existing missing ConversationResumeBranch
+    UT selector. Real-model D4 stopped before execution because the isolated test-home
+    is not configured. Follow-up browser delivery checks confirmed ordinary debug
+    switches planning/execution both ways in the real running application, without
+    sending a message. Screenshots stay outside Git. This limited UI evidence is not
+    a formal two-model D4 PASS or complete model-runtime acceptance.

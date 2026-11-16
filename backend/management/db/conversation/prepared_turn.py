@@ -368,6 +368,7 @@ def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
     *, initial_title: str | None = None, saved_user: SavedUserTurn | None = None, omitted_user: bool = False,
     background_run: bool = False,
+    selected_model_id: int | None = None, model_parameter_preferences: dict | None = None,
 ) -> PreparedTurn:
     if background_run and (not omitted_user or initial_title is not None or saved_user is not None):
         raise PreparedTurnConflict
@@ -433,6 +434,8 @@ def stage_turn(
                 knowledge_scope=(workbench["config"].get("knowledge_scope") if workbench is not None
                                  else knowledge["value"] if knowledge is not None else None),
                 reserved_conversation_id=reference.conversation_id, db_session=session,
+                **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
+                **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
             )
         row.status = "dispatching"
         row.conversation_id = reference.conversation_id
@@ -556,6 +559,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index - 1,
                 "role": "user", "content": user_turn["query"], "minio_files": user_turn["minio_files"],
             }
+            if user_turn.get("annotations") is not None:
+                user_message["annotations"] = user_turn["annotations"]
             clarification = user_turn.get("clarification_response")
             options = {}
             if clarification is not None and source_message_id is None:

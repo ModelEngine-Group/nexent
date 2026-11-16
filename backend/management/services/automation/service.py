@@ -778,30 +778,23 @@ class AgentAutomationFacade:
 
         from management.services.automation.runner import agent_automation_runner
 
-        prepared = run.get("projection_message_index") is not None
-        if not prepared:
-            await agent_automation_runner.cancel_runtime_run(
-                run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+        if run.get("projection_message_index") is not None:
+            canceled = agent_automation_db.cancel_run(
+                run_id, tenant_id, user_id, "Automation run was canceled by user.",
             )
-        canceled = agent_automation_db.cancel_run(
-            run_id,
-            tenant_id,
-            user_id,
-            "Automation run was canceled by user.",
-        )
-        if prepared:
             if canceled:
                 await agent_automation_runner.cancel_runtime_run(
                     run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
                 )
             return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
-        agent_automation_db.update_task(run["task_id"], tenant_id, user_id, {
-            "last_run_status": AutomationRunStatus.CANCELED.value,
-            "last_error": "Automation run was canceled by user.",
-            "lock_owner": None,
-            "lock_until": None,
-        })
-        return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
+        task = self.get_task(run["task_id"], tenant_id, user_id)
+        canceled, won = agent_automation_runner.cancel_run_by_user(run, task)
+        if won:
+            await agent_automation_runner.cancel_runtime_run(
+                run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+            )
+        return canceled
+
 
     def delete_run(self, run_id: int, tenant_id: str, user_id: str) -> bool:
         run = agent_automation_db.get_run(run_id, tenant_id, user_id)

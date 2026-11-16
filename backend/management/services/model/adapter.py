@@ -8,7 +8,7 @@ from nexent import MessageObserver
 from nexent.core.gateway import get_gateway
 
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from infrastructure.model_adapter import _config_to_context, build_adapter_fresh as build_adapter_fresh
+from infrastructure.model_adapter import restore_model_snapshot, _config_to_context, build_adapter_fresh as build_adapter_fresh
 from infrastructure.model_adapter import get_adapter_from_config as get_adapter_from_config
 from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager

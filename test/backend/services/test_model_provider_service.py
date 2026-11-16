@@ -14,6 +14,8 @@ This test module thoroughly tests:
 Coverage: 100% for model_provider_service.py and related provider modules.
 """
 import sys
+from pathlib import Path
+from types import ModuleType
 from unittest import mock
 import pytest
 
@@ -27,6 +29,12 @@ import pytest
 
 # First, mock the SDK modules that have side effects at import time
 # NOTE: Use 'nexent' instead of 'sdk.nexent' because backend imports from the installed 'nexent' package
+# Preserve SDK submodule imports while mocking only storage I/O boundaries.
+if "nexent" not in sys.modules:
+    sdk_package = ModuleType("nexent")
+    sdk_package.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent")]
+    sys.modules["nexent"] = sdk_package
+
 sdk_modules_to_mock = [
     "sdk",
     "nexent",

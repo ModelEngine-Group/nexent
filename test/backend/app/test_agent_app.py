@@ -371,6 +371,17 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
     assert exc_info.value.detail == {"code": "WORKBENCH_DISABLED"}
 
 
+@pytest.fixture(autouse=True)
+def creator_history_boundary(mocker):
+    mocker.patch("permissions.resource_access.get_current_user_context", return_value=("test_user", "test_tenant", ("DEV",)))
+    from contracts.agent import SystemAgentRef
+    from management.services.conversation import creator_execution
+    mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))
+    mocker.patch.object(creator_execution, "authorize_target", side_effect=lambda target, *_: target)
+    mocker.patch.object(creator_execution, "prepare_creation_history", return_value=(42, 1))
+    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=lambda stream, **_: stream)
+
+
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
@@ -454,7 +465,10 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         authorization=mock_auth_header["Authorization"],
     )
     assert response.headers["conversation_id"] == "42"
-    assert prepare.call_args.kwargs["agent_id"] == 17
+    assert prepare.call_args.kwargs["agent_id"] == 77
+    assert prepare.call_args.kwargs["target"] == {"type": "agent", "id": 17}
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert chunks
     assert persist.call_args.kwargs["assistant_index"] == 1
 
 
@@ -909,7 +923,8 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 
 
 @pytest.mark.asyncio
-async def test_nl2agent_run_api_requires_agent_id():
+async def test_nl2agent_run_api_requires_target_for_new_conversation(mocker):
+    mocker.patch("runtime.api.agent.execution.get_current_user_info", return_value=("user", "tenant", "en"))
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=config_creator_app),
         base_url="http://test",
@@ -919,8 +934,8 @@ async def test_nl2agent_run_api_requires_agent_id():
             json={"query": "Build an assistant"},
         )
 
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"][-1] == "agent_id"
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid Workbench creation session."
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
@@ -1413,6 +1428,16 @@ def test_update_agent_info_api_with_result(mocker, mock_auth_header):
 
     assert response.status_code == 200
     assert response.json()["updated"] is True
+
+
+def test_update_agent_info_api_rejects_invalid_model_parameters(mocker, mock_auth_header):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+
+    mocker.patch("management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock,
+                 side_effect=ParameterValidationError("PARAMETER_VALUE_INVALID", "/temperature"))
+    response = config_client.post("/agent/update", json={"agent_id": 1}, headers=mock_auth_header)
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "PARAMETER_VALUE_INVALID", "field": "/temperature"}
 
 
 def test_update_agent_info_api_exception(mocker, mock_auth_header):

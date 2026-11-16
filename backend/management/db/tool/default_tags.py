@@ -2,12 +2,17 @@
 
 """Initialize unified tags for newly registered built-in search tools."""
 
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.models import ResourceTagAssignment, TagDefinition, TagValue
 from management.db.tag.repository import TagManagementDB
 
 
 def initialize_search_tool_tags(session, tenant_id: str, tool_id: int, actor_id: str) -> None:
     """Assign Keywords=search once, within the tool registration transaction."""
+    # Shared system catalogs are not user tenants and have no tenant tag library.
+    if tenant_id == ASSET_OWNER_TENANT_ID:
+        return
+
     binding = TagManagementDB._get_active_resource_binding(
         session, tenant_id, "tool", "default_resource", for_update=True,
     )

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared loading, hashing, and validation for formal Nexent test assets."""
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ class ValidationIssue:
     path: Path
     location: str
     message: str
+    code: str = "UNCLASSIFIED"
+    case_id: str | None = None
 
     def render(self, root: Path) -> str:
         try:
@@ -70,14 +74,15 @@ def load_structured_file(path: Path) -> dict[str, Any]:
     return value
 
 
-def discover_documents(root: Path, kind: str) -> list[AssetDocument]:
+def discover_documents(root: Path, kind: str, *, case_ids=None) -> list[AssetDocument]:
     directory = root / ASSET_DIRECTORIES[kind]
     if not directory.exists():
         return []
     if kind == "features":
         paths = sorted(directory.glob("*/feature.yaml"))
     elif kind == "cases":
-        paths = sorted(directory.glob("*/case.yaml"))
+        paths = sorted(path for path in directory.glob("*/case.yaml")
+                       if case_ids is None or path.parent.name in case_ids)
     elif kind == "changes":
         paths = sorted(directory.glob("*/*.yaml"))
     else:

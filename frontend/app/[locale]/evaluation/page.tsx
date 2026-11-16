@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
+
 import {
   useState,
   useEffect,
@@ -71,7 +72,6 @@ const { Text, Title } = Typography;
 const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
   USER_ROLES.SU,
   USER_ROLES.ADMIN,
-  USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
 
@@ -163,7 +163,7 @@ function RunsTab() {
   const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
   const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
-  const [agents] = useList("/api/agent/published_list");
+  const [agents] = useList(API_ENDPOINTS.agent.publishedList);
 
   // ── Top-level list state ──────────────────────────────────────────────
   // An empty selection represents all agents. A detail-page link may provide
@@ -182,7 +182,7 @@ function RunsTab() {
   const { user } = useAuthorizationContext();
   const canDeleteRun = (r: any) =>
     (user?.id != null && r?.created_by === user.id) ||
-    EVALUATION_DELETE_ALL_ROLES.has(user?.role ?? "");
+    hasRole(user, ...EVALUATION_DELETE_ALL_ROLES);
 
   // ── Drawer (create-evaluation form) state ─────────────────────────────
   // Short variable names intentionally match the drawer inputs one-to-one:
@@ -235,7 +235,7 @@ function RunsTab() {
       .then((d) => setEvaluators(d.data || []));
   };
   const refreshEvalSets = () => {
-    fetch("/api/evaluation-sets", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationSets.list, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => setEvalSets(d.data || d.items || []));
   };
@@ -594,7 +594,7 @@ function RunsTab() {
                       setAVer(null);
                       setAgentVersions([]);
                       setErrors((e) => ({ ...e, a: false }));
-                      fetch(`/api/agent/${v}/versions`, {
+                      fetch(API_ENDPOINTS.agent.versions.list(Number(v)), {
                         headers: getAuthHeaders(),
                       })
                         .then((r) => r.json())
@@ -814,7 +814,7 @@ function RunsTab() {
                     let q = trialQuery;
                     if (!q && sS) {
                       const r = await fetch(
-                        `/api/evaluation-sets/${sS}/cases?limit=1`,
+                        `${API_ENDPOINTS.evaluationSets.cases(sS)}?limit=1`,
                         { headers: getAuthHeaders() }
                       );
                       const d = await r.json();
@@ -841,7 +841,7 @@ function RunsTab() {
                         b.field_mappings = mappings;
                       }
                       const r = await fetch(
-                        "/api/agent-evaluations/trial-run",
+                        API_ENDPOINTS.agentEvaluations.trialRun,
                         {
                           method: "POST",
                           headers: {
@@ -852,8 +852,17 @@ function RunsTab() {
                         }
                       );
                       const d = await r.json();
+                      if (!r.ok) {
+                        message.error(
+                          d?.message ||
+                            d?.detail ||
+                            t("agentEvaluation.trialFailed")
+                        );
+                        return;
+                      }
                       setTrialResult(d.data || d);
                     } catch {
+                      message.error(t("agentEvaluation.trialFailed"));
                     } finally {
                       setTrialRunning(false);
                     }
@@ -1064,7 +1073,7 @@ function EvaluatorsTab() {
   const fetchVersions = async (evaluatorId: number) => {
     setVersionBusy(true);
     try {
-      const r = await fetch(`/api/evaluators/${evaluatorId}/versions`, {
+      const r = await fetch(API_ENDPOINTS.evaluators.versions(evaluatorId), {
         headers: getAuthHeaders(),
       });
       const d = await r.json();
@@ -1077,7 +1086,10 @@ function EvaluatorsTab() {
     setVersionBusy(true);
     try {
       await fetch(
-        `/api/evaluators/${versionEval?.evaluator_id}/versions/${versionId}/restore`,
+        API_ENDPOINTS.evaluators.restoreVersion(
+          Number(versionEval?.evaluator_id),
+          versionId
+        ),
         { method: "POST", headers: getAuthHeaders() }
       );
       await fetchVersions(versionEval.evaluator_id);
@@ -1092,7 +1104,10 @@ function EvaluatorsTab() {
     setVersionBusy(true);
     try {
       await fetch(
-        `/api/evaluators/${versionEval?.evaluator_id}/versions/${versionId}`,
+        API_ENDPOINTS.evaluators.version(
+          Number(versionEval?.evaluator_id),
+          versionId
+        ),
         { method: "DELETE", headers: getAuthHeaders() }
       );
       await fetchVersions(versionEval.evaluator_id);
@@ -2190,7 +2205,7 @@ function SetsTab() {
   );
   const { availableLlmModels } = useModelList();
   const { enableAidpKnowledge } = useDeployment();
-  const [agentList] = useList("/api/agent/published_list");
+  const [agentList] = useList(API_ENDPOINTS.agent.publishedList);
   useEffect(() => {
     if (!genSetModel && availableLlmModels.length > 0)
       setGenSetModel(availableLlmModels[0].id);
@@ -2206,7 +2221,7 @@ function SetsTab() {
         let hasMore = true;
         while (hasMore && page <= 10) {
           const resp = await fetch(
-            `/api/aidp-mgmt/knowledge-bases?page=${page}&page_size=100`,
+            `${API_ENDPOINTS.aidpMgmt.knowledgeBases}?page=${page}&page_size=100`,
             { headers: getAuthHeaders() }
           );
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -2224,9 +2239,12 @@ function SetsTab() {
             }))
         );
       } else {
-        const resp = await fetch("/api/indices?include_stats=true", {
-          headers: getAuthHeaders(),
-        });
+        const resp = await fetch(
+          `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+          {
+            headers: getAuthHeaders(),
+          }
+        );
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         const info = data.indices_info || [];
@@ -2257,7 +2275,7 @@ function SetsTab() {
   const SET_CASE_PAGE_SIZE = 10;
 
   const refreshSets = () =>
-    fetch("/api/evaluation-sets", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationSets.list, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setSets(d.data || d.items || []);
@@ -2297,7 +2315,7 @@ function SetsTab() {
   const loadSetCasesPage = async (setId: number, page: number, q?: string) => {
     const sq = q ?? setCaseQuery;
     const offset = (page - 1) * SET_CASE_PAGE_SIZE;
-    let url = `/api/evaluation-sets/${setId}/cases?limit=${SET_CASE_PAGE_SIZE}&offset=${offset}`;
+    let url = `${API_ENDPOINTS.evaluationSets.cases(setId)}?limit=${SET_CASE_PAGE_SIZE}&offset=${offset}`;
     if (sq) url += `&query=${encodeURIComponent(sq)}`;
     const r = await fetch(url, { headers: getAuthHeaders() });
     const d = await r.json();
@@ -2461,7 +2479,7 @@ function SetsTab() {
     if (!newQ.trim() || !newA.trim()) return;
     try {
       const r = await fetch(
-        `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases`,
+        API_ENDPOINTS.evaluationSets.cases(detailSet.evaluation_set_id),
         {
           method: "POST",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
@@ -2496,7 +2514,10 @@ function SetsTab() {
     const c = editingCase;
     try {
       const r = await fetch(
-        `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/${c.evaluation_set_case_id}`,
+        API_ENDPOINTS.evaluationSets.case(
+          detailSet.evaluation_set_id,
+          c.evaluation_set_case_id
+        ),
         {
           method: "PUT",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
@@ -2794,7 +2815,10 @@ function SetsTab() {
               onConfirm={async () => {
                 try {
                   const resp = await fetch(
-                    `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/${r.evaluation_set_case_id}`,
+                    API_ENDPOINTS.evaluationSets.case(
+                      detailSet.evaluation_set_id,
+                      r.evaluation_set_case_id
+                    ),
                     { method: "DELETE", headers: getAuthHeaders() }
                   );
                   if (!resp.ok) {
@@ -3240,7 +3264,7 @@ function SetsTab() {
                       if (genSetDesc) body.set_description = genSetDesc;
                     }
                     const r = await fetch(
-                      "/api/evaluation-sets/generate-cases-async",
+                      API_ENDPOINTS.evaluationSets.generateCases,
                       {
                         method: "POST",
                         headers: {
@@ -3308,7 +3332,9 @@ function SetsTab() {
                   setBatchDeleting(true);
                   try {
                     const resp = await fetch(
-                      `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/batch-delete`,
+                      API_ENDPOINTS.evaluationSets.casesBatchDelete(
+                        detailSet.evaluation_set_id
+                      ),
                       {
                         method: "POST",
                         headers: {

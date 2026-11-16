@@ -1,0 +1,101 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AUTO-RUN-D3-001
+  feature_id: F-126
+  requirement_ids:
+  - AUTO-RUN-OUTCOME-20261027
+  business_rule_ids:
+  - F-126-RULE-03
+  title: Automation run messages and outcomes through real persistence and streaming
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Automation run messages and outcomes through real persistence and streaming
+  preconditions:
+  - Product Python dependencies and PostgreSQL are available; all database rows use
+    a disposable schema.
+  - A disposable Redis database/key namespace is available; real Redis cancellation
+    pollers are used by lifecycle variants.
+  test_data:
+    profile: mock
+    identities:
+    - owner
+    - other
+  steps:
+  - order: 1
+    action: Execute successful, model-failed and preparation-failed runs through the
+      real runner, background stream and PostgreSQL persistence with a controlled
+      SDK producer.
+    expected: Committed prompt and assistant messages are linked to their own run
+      with AUTOMATION source; failed execution is FAILED and cannot reuse a previous
+      assistant.
+  - order: 2
+    action: Interrupt a run after prompt creation or during assistant output; complete
+      a memory fallback and retryable error variant.
+    expected: TIMEOUT and cancellation retain committed IDs, output finalization settles,
+      and successful fallback remains successful; failure counters follow the actual
+      terminal outcome.
+  - order: 3
+    action: Exercise consecutive background turns with real Redis cancellation pollers;
+      cancel during preparation and await the original manual-run caller.
+    expected: A previous cancellation cannot stop the next run; current cancellation
+      survives preparation; business cancellation returns CANCELED while caller cancellation
+      propagates.
+  expected_results:
+  - Committed prompt and assistant messages are linked to their own run with AUTOMATION
+    source; failed execution is FAILED and cannot reuse a previous assistant.
+  - TIMEOUT and cancellation retain committed IDs, output finalization settles, and
+    successful fallback remains successful; failure counters follow the actual terminal
+    outcome.
+  - A previous cancellation cannot stop the next run; current cancellation survives
+    preparation; business cancellation returns CANCELED while caller cancellation
+    propagates.
+  forbidden_side_effects:
+  - No business-data mutation, schema migration, ordinary quota bypass, false success
+    or association with another run/conversation.
+  observations:
+  - Actual persisted message IDs, statuses, content and sources; run/task rows and
+    transaction completion.
+  cleanup:
+  - Remove the isolated fixture schema and close only test-owned execution resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Committed prompt and assistant messages are linked to their own run
+      with AUTOMATION source; failed execution is FAILED and cannot reuse a previous
+      assistant.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: TIMEOUT and cancellation retain committed IDs, output finalization
+      settles, and successful fallback remains successful; failure counters follow
+      the actual terminal outcome.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: A previous cancellation cannot stop the next run; current cancellation
+      survives preparation; business cancellation returns CANCELED while caller cancellation
+      propagates.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  integration_boundary:
+  - Real automation runner, adapter, background orchestration, stream finalizer and
+    PostgreSQL; SDK/model/settings boundaries are controlled.

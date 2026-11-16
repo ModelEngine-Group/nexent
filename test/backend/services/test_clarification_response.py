@@ -2,6 +2,7 @@
 """Clarification validation and atomic persistence regressions."""
 
 import json
+import sqlite3
 from contextlib import contextmanager
 from copy import deepcopy
 
@@ -74,7 +75,11 @@ def test_answer_length_boundary_and_other_only_selection():
 
 @pytest.fixture
 def storage(monkeypatch):
-    engine = create_engine('sqlite://')
+    dbapi = sqlite3
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        # Keep real transaction/RETURNING coverage on older Linux runner images.
+        import pysqlite3 as dbapi
+    engine = create_engine('sqlite://', module=dbapi)
     with engine.connect() as connection:
         connection.execute(text("ATTACH DATABASE ':memory:' AS nexent"))
         connection.execute(text('CREATE TABLE nexent.conversation_record_t '

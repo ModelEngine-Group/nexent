@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-ROW-STORAGE-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-ROW-STORAGE-20261013
+  title: Encode and restore complete resolved outlet rows
+  description: Compose existing codecs under a strict ResolvedModelProfile and same-row restoration with trusted version availability checks.
+  affected_features:
+    existing: [SDK-MODEL-OUTLET-STORAGE]
+    added: []
+    modified: [SDK-MODEL-OUTLET-STORAGE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Strict full profile and row round trips preserve identity, saved values, same-row domains and detached snapshots without defaults or source reads.
+    - Credentials are references to this outlet; raw API keys and copied protocol/identity/value fields are excluded from generated storage.
+    - Invalid or incomplete rows, wrong versions, unavailable implementations, conflicting extra parameters, oversized profiles and corrupted domains fail explicitly.
+    reason: Existing group codecs cannot prove complete object ownership and restoration. These SDK codec tests remain UT; database integration and deployment proof add the necessary higher boundary instead of duplicating inputs in a D1 wrapper.
+    test_selectors: [test/sdk/core/model_service/test_outlet_storage.py]
+  no_case_change_reason: No database transaction or runtime provider request is connected in this slice. Those boundaries still require separate formal implementation and execution; no existing Case is removed.
+  notes: This does not establish actual transport registration or provider qualification. The tests supply a controlled availability snapshot; production must use its real registry.

@@ -1,0 +1,104 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: AUTO-RUN-D5-001
+  feature_id: F-126
+  requirement_ids:
+  - AUTO-RUN-OUTCOME-20261027
+  business_rule_ids:
+  - F-126-RULE-03
+  title: Automation message transactions and cancellation races preserve identity
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Automation message transactions and cancellation races preserve identity
+  preconditions:
+  - Product Python dependencies and PostgreSQL are available; all database rows use
+    a disposable schema.
+  test_data:
+    profile: mock
+    identities:
+    - owner
+    - other
+  steps:
+  - order: 1
+    action: Inject failures into prompt-unit persistence and run association, then
+      retry user and assistant creation with real PostgreSQL transactions.
+    expected: Message creation, units and run links commit together or roll back;
+      retries reuse the existing message without overwriting a different binding.
+  - order: 2
+    action: Race duplicate creation and terminal cancellation against message binding/finalization;
+      try foreign and deleted histories.
+    expected: Transactions finish within the bound, preserve conversation-before-run/message
+      ordering and ownership, and late work cannot overwrite a terminal run or mutate
+      unrelated rows.
+  - order: 3
+    action: Race cancellation and completion through the common terminal transaction;
+      inject task-update failure, replay finalizers and stale scheduled claims, and
+      query mixed manual/scheduled history.
+    expected: Run and task finalization commit or roll back together; each scheduled
+      occurrence advances once, manual and paused schedules are preserved, stale claims
+      do not run, and history uses actual time with deterministic ties.
+  expected_results:
+  - Message creation, units and run links commit together or roll back; retries reuse
+    the existing message without overwriting a different binding.
+  - Transactions finish within the bound, preserve conversation-before-run/message
+    ordering and ownership, and late work cannot overwrite a terminal run or mutate
+    unrelated rows.
+  - Run and task finalization commit or roll back together; each scheduled occurrence
+    advances once, manual and paused schedules are preserved, stale claims do not
+    run, and history uses actual time with deterministic ties.
+  forbidden_side_effects:
+  - No business-data mutation, schema migration, ordinary quota bypass, false success
+    or association with another run/conversation.
+  observations:
+  - Actual persisted message IDs, statuses, content and sources; run/task rows and
+    transaction completion.
+  cleanup:
+  - Remove the isolated fixture schema and close only test-owned execution resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Message creation, units and run links commit together or roll back;
+      retries reuse the existing message without overwriting a different binding.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Transactions finish within the bound, preserve conversation-before-run/message
+      ordering and ownership, and late work cannot overwrite a terminal run or mutate
+      unrelated rows.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Run and task finalization commit or roll back together; each scheduled
+      occurrence advances once, manual and paused schedules are preserved, stale claims
+      do not run, and history uses actual time with deterministic ties.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  risk: Atomicity, ownership, idempotency and cancellation races
+  metrics:
+  - Transaction outcome and persisted message/run identity
+  thresholds:
+  - Zero orphaned committed messages, false successes, duplicated bindings or deadlocks
+  condition:
+  - Failure injection and concurrent transactions in isolated PostgreSQL
+  recovery_expectations:
+  - Preserve committed links and reject terminal/foreign/deleted writes
+  risk_type: RELIABILITY

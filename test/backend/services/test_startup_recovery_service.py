@@ -201,49 +201,6 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
     assert failure.kwargs["error_message"] == "storage down"
 
 
-@pytest.mark.asyncio
-async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
-    monkeypatch,
-):
-    fail_uploads = MagicMock(return_value=0)
-    monkeypatch.setattr(startup_recovery_service, "fail_interrupted_uploads", fail_uploads)
-    monkeypatch.setattr(startup_recovery_service, "UPLOAD_RECOVERY_GRACE_SECONDS", 0)
-    startup_recovery_service._upload_cleanup_tasks.clear()
-
-    await startup_recovery_service.schedule_interrupted_upload_cleanup(
-        "nexent-config"
-    )
-    pending = list(startup_recovery_service._upload_cleanup_tasks)
-    if pending:
-        await asyncio.gather(*pending)
-
-    assert fail_uploads.call_count == 2
-    assert (
-        fail_uploads.call_args_list[0].args[0]
-        <= fail_uploads.call_args_list[1].args[0]
-    )
-    assert [call_args.args[1] for call_args in fail_uploads.call_args_list] == [
-        "nexent-config",
-        "nexent-config",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_schedule_workbench_main_backfill_runs_in_background(monkeypatch):
-    """UT-BE-SAL-006: historical bootstrap must not block config startup."""
-    backfill = MagicMock(return_value={"total": 2, "succeeded": 2, "failed": 0})
-    tenant_service_module = types.ModuleType("management.services.permission.identity.tenants")
-    tenant_service_module.backfill_workbench_main_agents = backfill
-    monkeypatch.setitem(sys.modules, "management.services.permission.identity.tenants", tenant_service_module)
-    startup_recovery_service._system_agent_backfill_tasks.clear()
-
-    startup_recovery_service.schedule_workbench_main_backfill()
-    pending = list(startup_recovery_service._system_agent_backfill_tasks)
-    assert pending
-
-    await asyncio.gather(*pending)
-
-    backfill.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -293,3 +250,8 @@ def test_durable_recovery_retries_failed_redis_write_without_clearing_repair(mon
     clear.assert_called_once_with(identity)
     assert renew.call_count == reclaim.call_count == 2
     assert journal.return_value.repair_terminal.call_args_list == [call("stopped"), call("stopped")]
+
+
+def test_startup_has_no_system_agent_backfill():
+    assert not hasattr(startup_recovery_service, "schedule_workbench_main_backfill")
+    assert not hasattr(startup_recovery_service, "_system_agent_backfill_tasks")

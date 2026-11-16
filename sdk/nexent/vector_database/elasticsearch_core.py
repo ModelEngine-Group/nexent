@@ -1429,6 +1429,84 @@ class ElasticSearchCore(VectorDatabaseCore):
 
     def get_indices_detail(
         self, index_names: List[str], embedding_dim: Optional[int] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch transport calls while retaining the legacy per-index projection."""
+        if not index_names:
+            return {}
+        names = list(dict.fromkeys(index_names))
+        if len(names) == 1:
+            return self._get_indices_detail_serial(names, embedding_dim)
+        query = {
+            "size": 0,
+            "aggs": {
+                "unique_path_or_url_count": {"cardinality": {"field": "path_or_url"}},
+                "process_sources": {"terms": {"field": "process_source", "size": 10}},
+                "embedding_models": {"terms": {"field": "embedding_model_name", "size": 10}},
+            },
+        }
+        try:
+            stats = self.client.indices.stats(index=names)
+            settings = self.client.indices.get_settings(index=names)
+            searches = [part for name in names for part in ({"index": name}, query)]
+            responses = self.client.msearch(body=searches)["responses"]
+            if len(responses) != len(names):
+                raise ValueError("Incomplete Elasticsearch multi-search response")
+        except Exception:
+            return self._get_indices_detail_serial(names, embedding_dim)
+
+        result = {}
+        for name, aggregation in zip(names, responses):
+            try:
+                if "error" in aggregation:
+                    raise ValueError("Elasticsearch index aggregation failed")
+                result[name] = self._format_index_detail(name, stats, settings, aggregation, embedding_dim)
+            except Exception:
+                # Retry only the affected index through the original error boundary.
+                result.update(self._get_indices_detail_serial([name], embedding_dim))
+        return result
+
+    @staticmethod
+    def _format_index_detail(index_name, stats, settings, agg_result, embedding_dim):
+        """Keep primary bytes and source cardinality identical across read paths."""
+        unique_sources_count = agg_result["aggregations"]["unique_path_or_url_count"]["value"]
+        process_source = (
+            agg_result["aggregations"]["process_sources"]["buckets"][0]["key"]
+            if agg_result["aggregations"]["process_sources"]["buckets"]
+            else ""
+        )
+        embedding_model = (
+            agg_result["aggregations"]["embedding_models"]["buckets"][0]["key"]
+            if agg_result["aggregations"]["embedding_models"]["buckets"]
+            else ""
+        )
+
+        index_stats = stats["indices"][index_name]["primaries"]
+
+        # Get creation and update timestamps from settings
+        creation_date = int(
+            settings[index_name]["settings"]["index"]["creation_date"])
+        # Update time defaults to creation time if not modified
+        update_time = creation_date
+
+        return {
+            "base_info": {
+                "doc_count": unique_sources_count,
+                "chunk_count": index_stats["docs"]["count"],
+                "store_size": format_size(index_stats["store"]["size_in_bytes"]),
+                "process_source": process_source,
+                "embedding_model": embedding_model,
+                "embedding_dim": embedding_dim or 1024,
+                "creation_date": creation_date,
+                "update_date": update_time,
+            },
+            "search_performance": {
+                "total_search_count": index_stats["search"]["query_total"],
+                "hit_count": index_stats["request_cache"]["hit_count"],
+            },
+        }
+
+    def _get_indices_detail_serial(
+        self, index_names: List[str], embedding_dim: Optional[int] = None
     ) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """Get formatted statistics for multiple indices"""
         all_stats = {}
@@ -1451,42 +1529,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                 agg_result = self.client.search(
                     index=index_name, body=agg_query)
 
-                unique_sources_count = agg_result["aggregations"]["unique_path_or_url_count"]["value"]
-                process_source = (
-                    agg_result["aggregations"]["process_sources"]["buckets"][0]["key"]
-                    if agg_result["aggregations"]["process_sources"]["buckets"]
-                    else ""
-                )
-                embedding_model = (
-                    agg_result["aggregations"]["embedding_models"]["buckets"][0]["key"]
-                    if agg_result["aggregations"]["embedding_models"]["buckets"]
-                    else ""
-                )
-
-                index_stats = stats["indices"][index_name]["primaries"]
-
-                # Get creation and update timestamps from settings
-                creation_date = int(
-                    settings[index_name]["settings"]["index"]["creation_date"])
-                # Update time defaults to creation time if not modified
-                update_time = creation_date
-
-                all_stats[index_name] = {
-                    "base_info": {
-                        "doc_count": unique_sources_count,
-                        "chunk_count": index_stats["docs"]["count"],
-                        "store_size": format_size(index_stats["store"]["size_in_bytes"]),
-                        "process_source": process_source,
-                        "embedding_model": embedding_model,
-                        "embedding_dim": embedding_dim or 1024,
-                        "creation_date": creation_date,
-                        "update_date": update_time,
-                    },
-                    "search_performance": {
-                        "total_search_count": index_stats["search"]["query_total"],
-                        "hit_count": index_stats["request_cache"]["hit_count"],
-                    },
-                }
+                all_stats[index_name] = self._format_index_detail(
+                    index_name, stats, settings, agg_result, embedding_dim)
             except Exception as e:
                 logger.error(
                     f"Error getting stats for index {index_name}: {str(e)}")
