@@ -73,6 +73,7 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  SI-STORAGE: system
   GW-AUTH: system
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
