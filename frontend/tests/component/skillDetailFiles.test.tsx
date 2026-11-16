@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { buildSkillDetailTree } from "../../lib/skillDetailFiles.ts";
+import { test } from "vitest";
+import { buildSkillDetailTree } from "../../lib/skillDetailFiles";
 
 test("builds nested directories and keeps duplicate basenames distinct", () => {
   const tree = buildSkillDetailTree([
@@ -11,8 +11,8 @@ test("builds nested directories and keeps duplicate basenames distinct", () => {
     { path: "scripts/readme.md", content: "" },
   ]);
   assert.equal(tree[0].key, "SKILL.md");
-  assert.equal(tree[1].children[0].children[0].key, "docs/deep/readme.md");
-  assert.equal(tree[2].children[0].key, "scripts/readme.md");
+  assert.equal(tree[1].children![0].children![0].key, "docs/deep/readme.md");
+  assert.equal(tree[2].children![0].key, "scripts/readme.md");
   assert.equal(tree[1].isLeaf, false);
 });
 

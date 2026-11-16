@@ -79,6 +79,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "file",
         "identity",
         "roles",
+        "review",
         "knowledge",
         "memory",
         "model",

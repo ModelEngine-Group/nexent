@@ -4,6 +4,9 @@
 
 from typing import Annotated
 
+from fastapi import APIRouter, Header, HTTPException, Path, Request
+from pydantic import ValidationError
+
 from contracts.errors.exceptions import ReviewConflictError, UnauthorizedError
 from contracts.review import (
     ResourceType,
@@ -11,9 +14,6 @@ from contracts.review import (
     ReviewListQuery,
     ReviewSubmissionRequest,
 )
-from fastapi import APIRouter, Header, HTTPException, Path, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
 from gateway.authentication.auth import get_current_user_context
 from management.services.repository.reviews import (
     decide_repository_review,
@@ -21,26 +21,7 @@ from management.services.repository.reviews import (
     list_repository_reviews,
     submit_repository_review,
 )
-from pydantic import ValidationError
-
-
-class ReviewRoute(APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                return await original(request)
-            except RequestValidationError as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "code": "INVALID_REVIEW_REQUEST",
-                        "message": "Invalid review request",
-                    },
-                ) from exc
-
-        return handler
+from management.utils.review_routes import ReviewRoute
 
 
 router = APIRouter(prefix="/reviews", route_class=ReviewRoute)

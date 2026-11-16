@@ -17,3 +17,6 @@ acceptance_bindings:
   - test_global_authorized_review_list
 notes: Backend contract implemented. Complete change acceptance remains pending; no
   UI or migration proof is inferred from this execution.
+
+preparation:
+  families: []

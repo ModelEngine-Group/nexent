@@ -6,6 +6,7 @@ import { RESOURCE_REPOSITORY_PERMISSION_ROUTE } from "@/const/resourceRepository
 import {
   decideResourceReview,
   fetchResourceReview,
+  fetchLegacyResourceReview,
   fetchResourceReviews,
 } from "@/services/resourceReviewService";
 import type { ResourceType } from "@/types/resourceRepository";
@@ -18,7 +19,8 @@ export function useResourceReviews(
   query: ResourceReviewQuery,
   type?: ResourceType,
   id?: string,
-  detailOnly = false
+  detailOnly = false,
+  repositoryId?: string,
 ) {
   const { user, isAuthzReady, canAccessRoute } = useAuthorizationContext();
   const enabled =
@@ -33,9 +35,12 @@ export function useResourceReviews(
     enabled: enabled && !detailOnly,
   });
   const detail = useQuery({
-    queryKey: ["resourceReview", ...identity, type, id],
-    queryFn: () => fetchResourceReview(id!),
-    enabled: enabled && !!id,
+    queryKey: ["resourceReview", ...identity, type, id, repositoryId],
+    queryFn: () =>
+      id
+        ? fetchResourceReview(id)
+        : fetchLegacyResourceReview(type!, repositoryId!),
+    enabled: enabled && (!!id || (!!type && !!repositoryId)),
   });
   const decision = useMutation({
     mutationFn: (input: {
@@ -50,7 +55,7 @@ export function useResourceReviews(
         predicate: ({ queryKey }) => {
           const key = String(queryKey[0]);
           return /resourceReview|Repository|myEditable|mcp|skills|agents/i.test(
-            key
+            key,
           );
         },
       });

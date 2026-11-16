@@ -15,3 +15,6 @@ acceptance_bindings:
   - test_revision_races_rollback_and_notification_failure_windows
 notes: Script prepared; execution deferred until functional/UI completion per user
   development strategy.
+
+preparation:
+  families: []

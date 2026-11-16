@@ -30,7 +30,7 @@ function asPositiveInt(value: unknown): number | null {
 }
 
 export function extractReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { agentRepositoryId: number; agentId: number } | null {
   if (!details) {
     return null;
@@ -44,7 +44,7 @@ export function extractReviewDeepLinkIds(
 }
 
 export function extractSkillReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { skillRepositoryId: number; skillId: number } | null {
   if (!details) {
     return null;
@@ -58,7 +58,7 @@ export function extractSkillReviewDeepLinkIds(
 }
 
 export function extractMcpReviewDeepLinkIds(
-  details: NotificationDetails | Record<string, unknown> | null | undefined
+  details: NotificationDetails | Record<string, unknown> | null | undefined,
 ): { marketId: number; sourceMcpId: number } | null {
   if (!details) {
     return null;
@@ -79,7 +79,7 @@ function isReviewResultEvent(eventType: string): boolean {
 }
 
 export function isAgentRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.AGENT_REPOSITORY) {
     return false;
@@ -96,7 +96,7 @@ export function isAgentRepositoryReviewResultNotification(
 }
 
 export function isSkillRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.SKILL_REPOSITORY) {
     return false;
@@ -113,7 +113,7 @@ export function isSkillRepositoryReviewResultNotification(
 }
 
 export function isMcpRepositoryReviewResultNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   if (item.resource_type !== NOTIFICATION_RESOURCE_TYPES.MCP_REPOSITORY) {
     return false;
@@ -130,7 +130,7 @@ export function isMcpRepositoryReviewResultNotification(
 }
 
 export function isRepositoryReviewNotification(
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): boolean {
   return (
     isAgentRepositoryReviewResultNotification(item) ||
@@ -142,7 +142,7 @@ export function isRepositoryReviewNotification(
 export function buildAgentRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
     return `/${locale}/agent-space?tab=review`;
@@ -158,7 +158,7 @@ export function buildAgentRepositoryReviewDeepLink(
 export function buildSkillRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
     return `/${locale}/skill-space?tab=review`;
@@ -179,7 +179,7 @@ export function buildSkillRepositoryReviewDeepLink(
 export function buildMcpRepositoryReviewDeepLink(
   locale: string,
   details: NotificationDetails | Record<string, unknown> | null | undefined,
-  eventType?: string
+  eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
     return `/${locale}/mcp-space?tab=review`;
@@ -199,27 +199,27 @@ export function buildMcpRepositoryReviewDeepLink(
 
 export function buildRepositoryReviewDeepLink(
   locale: string,
-  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">
+  item: Pick<NotificationItem, "event_type" | "resource_type" | "details">,
 ): string | null {
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.SKILL_REPOSITORY) {
     return buildSkillRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.MCP_REPOSITORY) {
     return buildMcpRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.AGENT_REPOSITORY) {
     return buildAgentRepositoryReviewDeepLink(
       locale,
       item.details,
-      item.event_type
+      item.event_type,
     );
   }
   return null;
@@ -230,7 +230,7 @@ export function parseReviewDeepLinkParams(searchParams: URLSearchParams): {
   agentId: number;
 } | null {
   const agentRepositoryId = asPositiveInt(
-    searchParams.get("agent_repository_id")
+    searchParams.get("agent_repository_id"),
   );
   const agentId = asPositiveInt(searchParams.get("agent_id"));
   if (agentRepositoryId == null || agentId == null) {
@@ -244,7 +244,7 @@ export function parseSkillReviewDeepLinkParams(searchParams: URLSearchParams): {
   skillId: number;
 } | null {
   const skillRepositoryId = asPositiveInt(
-    searchParams.get("skill_repository_id")
+    searchParams.get("skill_repository_id"),
   );
   const skillId = asPositiveInt(searchParams.get("skill_id"));
   if (skillRepositoryId == null || skillId == null) {
@@ -267,7 +267,7 @@ export function parseMcpReviewDeepLinkParams(searchParams: URLSearchParams): {
 
 export function buildUnifiedRepositoryReviewDeepLink(
   locale: string,
-  item: NotificationItem
+  item: NotificationItem,
 ): string | null {
   if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.RESOURCE_REVIEW) {
     const reviewId =
@@ -290,8 +290,15 @@ export function buildUnifiedRepositoryReviewDeepLink(
       item.event_type !== NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING)
   )
     return null;
+  const repositoryId = normalizeRepositoryId(
+    item.repository_id ??
+      item.details?.[type === "mcp" ? "market_id" : `${type}_repository_id`],
+  );
+  const pending =
+    item.event_type === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING;
   return buildResourceRepositoryHref(locale, {
-    tab: "review",
+    tab: pending ? "review" : type,
     resourceType: type,
+    ...(repositoryId ? { repositoryId } : {}),
   });
 }

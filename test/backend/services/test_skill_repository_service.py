@@ -1129,10 +1129,19 @@ def isolate_repository_transaction_boundary(monkeypatch):
 
 
 @pytest.mark.parametrize("roles,allowed", [(["USER", "DEV", "OPS"], True), (["USER", "OPS"], False)])
-def test_skill_repository_access_uses_the_authoritative_role_union(roles, allowed):
+def test_skill_repository_access_uses_the_authoritative_role_union(roles, allowed, monkeypatch):
+    monkeypatch.setattr("management.db.identity.role_permission.check_role_permission", lambda *args, **kwargs: False)
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"roles": roles, "user_role": "USER"}
     if allowed:
         srs.ensure_skill_repository_access("user-1")
     else:
         with pytest.raises(ForbiddenError):
             srs.ensure_skill_repository_access("user-1")
+
+
+@pytest.mark.parametrize("roles,restricted", [(("ADMIN",), False), (("DEV", "ADMIN"), False), (("DEV",), True)])
+def test_review_listing_uses_admin_role_membership(roles, restricted):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"roles": roles}
+    with patch.object(srs, "list_skill_repository_summaries", return_value={"items": [], "pagination": {}}) as listing:
+        srs.list_skill_repository_listings_impl(tenant_id="tenant-1", user_id="user-1", status="pending_review")
+    assert (listing.call_args.kwargs.get("review_user_id") == "user-1") is restricted

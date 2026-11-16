@@ -11,3 +11,10 @@ acceptance_bindings:
   - test_per_type_scopes_and_direct_decision_authorization
   AC-03:
   - test_per_type_scopes_and_direct_decision_authorization
+
+preparation:
+  families: []
+notes: >-
+  Self-contained scenario. The backend script creates a unique rsc_verify_ schema,
+  seeds its own identities and resources, closes clients, restores the session factory,
+  and drops only that schema in finally. No shared asset families are required.

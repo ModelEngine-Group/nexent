@@ -262,7 +262,7 @@ async def batch_delete_mcp_services_api(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
     except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication required") from exc
 
     results = []
     for kind, target_id in dict.fromkeys((item.kind, item.id) for item in payload.items):
@@ -273,7 +273,12 @@ async def batch_delete_mcp_services_api(
             else:
                 await delete_community_mcp_service(tenant_id=tenant_id, user_id=user_id, market_id=target_id)
         except (McpNotFoundError, ForbiddenError, UnauthorizedError) as exc:
-            results.append({**result, "success": False, "message": str(exc)})
+            message = (
+                "MCP service not found"
+                if isinstance(exc, McpNotFoundError)
+                else "Not authorized to delete MCP service"
+            )
+            results.append({**result, "success": False, "message": message})
         except Exception:
             logger.exception("Failed to batch delete MCP %s %s", kind, target_id)
             results.append({**result, "success": False, "message": "Failed to delete MCP service"})

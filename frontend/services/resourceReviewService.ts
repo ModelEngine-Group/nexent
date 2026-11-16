@@ -10,6 +10,7 @@ import type {
   ReviewDecision,
   ResourceReviewSubmission,
 } from "@/types/resourceReview";
+import type { ResourceType } from "@/types/resourceRepository";
 
 export class ReviewRequestError extends Error {
   constructor(public readonly status: number) {
@@ -31,10 +32,14 @@ export const fetchResourceReviews = (query: ResourceReviewQuery) =>
   request<ResourceReviewList>(API_ENDPOINTS.resourceReviews.list(query));
 export const fetchResourceReview = (id: string) =>
   request<ResourceReviewDetail>(API_ENDPOINTS.resourceReviews.detail(id));
+export const fetchLegacyResourceReview = (type: ResourceType, id: string) =>
+  request<ResourceReviewDetail>(
+    API_ENDPOINTS.resourceReviews.legacyDetail(type, id),
+  );
 export const decideResourceReview = (
   id: string,
   decision: ReviewDecision,
-  reason: string
+  reason: string,
 ) =>
   request<ResourceReview>(API_ENDPOINTS.resourceReviews.decision(id), {
     decision,

@@ -7,6 +7,7 @@ from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
 from contracts.constants.constants import SYSTEM_TENANT_ID
 from contracts.errors.exceptions import UnauthorizedError
+from contracts.roles import has_any_role
 from contracts.agent import AgentRepositorySnapshot
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.skill import SkillResolution
@@ -203,7 +204,7 @@ def list_agent_repository_listings_impl(
         # Order the merged tenant+official set as one list; ordering only in
         # SQL would interleave the two query blocks incorrectly.
         records = _order_listings_by_publish_time(records)
-    if user_id is not None and _get_user_role(user_id) != "ADMIN":
+    if user_id is not None and not has_any_role(_get_user_role(user_id), {"ADMIN"}):
         records = [row for row in records if row.get("status") == STATUS_SHARED
                    or row.get("submitted_user_id") == user_id
                    or (row.get("status") == STATUS_NOT_SHARED and row.get("publisher_user_id") == user_id)]

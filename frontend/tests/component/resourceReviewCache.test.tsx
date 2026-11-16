@@ -5,7 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useResourceReviews } from "@/hooks/resourceReview/useResourceReviews";
-import { decideResourceReview } from "@/services/resourceReviewService";
+import {
+  decideResourceReview,
+  fetchLegacyResourceReview,
+  fetchResourceReview,
+} from "@/services/resourceReviewService";
 
 const auth = vi.hoisted(() => ({
   id: "actor-a",
@@ -25,6 +29,7 @@ vi.mock("@/services/resourceReviewService", () => ({
     items: [],
     pagination: { total: 0, total_pages: 0 },
   })),
+  fetchLegacyResourceReview: vi.fn(async () => ({ review_id: "987" })),
   fetchResourceReview: vi.fn(async () => ({ review_id: "41" })),
   decideResourceReview: vi.fn(),
 }));
@@ -53,14 +58,14 @@ function setup() {
       wrapper: ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={client}>{children}</QueryClientProvider>
       ),
-    }
+    },
   );
   return { client, ...hook };
 }
 describe("unified review cache boundaries", () => {
   it("invalidates review and warehouse data after a lost decision response without retrying", async () => {
     vi.mocked(decideResourceReview).mockRejectedValue(
-      new Error("Response lost")
+      new Error("Response lost"),
     );
     const { client, result } = setup();
     client.setQueryData(["skillRepository", "page"], {
@@ -75,12 +80,12 @@ describe("unified review cache boundaries", () => {
           id: "9007199254740993",
           decision: "approve",
           reason: "",
-        })
+        }),
       ).rejects.toThrow("Response lost");
     });
     expect(decideResourceReview).toHaveBeenCalledTimes(1);
     expect(
-      client.getQueryState(["skillRepository", "page"])?.isInvalidated
+      client.getQueryState(["skillRepository", "page"])?.isInvalidated,
     ).toBe(true);
     expect(client.getQueryState(["agents", "page"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["unrelated"])?.isInvalidated).toBe(false);
@@ -102,5 +107,36 @@ describe("unified review cache boundaries", () => {
     auth.granted = false;
     const { result } = setup();
     expect(result.current.list.fetchStatus).toBe("idle");
+  });
+  it("resolves a legacy repository ID through the legacy endpoint", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    clients.push(client);
+    const { result } = renderHook(
+      () =>
+        useResourceReviews(
+          {
+            type: "all",
+            status: "all",
+            search: "",
+            page: 1,
+            page_size: 10,
+          },
+          "mcp",
+          undefined,
+          true,
+          "41",
+        ),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await waitFor(() => expect(result.current.detail.isSuccess).toBe(true));
+    expect(fetchLegacyResourceReview).toHaveBeenCalledWith("mcp", "41");
+    expect(fetchResourceReview).not.toHaveBeenCalled();
+    expect(result.current.detail.data?.review_id).toBe("987");
   });
 });

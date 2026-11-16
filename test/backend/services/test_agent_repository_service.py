@@ -2806,3 +2806,18 @@ def isolate_repository_transaction_boundary(monkeypatch):
     monkeypatch.setattr(transactions, "repository_unit_of_work", lambda: nullcontext())
     import management.services.repository.agent.publishing as publishing
     monkeypatch.setattr(publishing, "repository_unit_of_work", lambda: nullcontext())
+
+
+@pytest.mark.parametrize("roles,expected", [(("ADMIN",), 2), (("DEV", "ADMIN"), 2), (("DEV",), 1)])
+def test_review_listing_uses_admin_role_membership(roles, expected):
+    rows = [
+        {**_repository_record(agent_repository_id=1, agent_id=10, status="pending_review"),
+         "submitted_user_id": "other"},
+        {**_repository_record(agent_repository_id=2, agent_id=20, status="pending_review"),
+         "submitted_user_id": "caller"},
+    ]
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=rows), \
+         patch_import_object_context(ars, "get_user_tenant_by_user_id", return_value={"roles": roles}), \
+         patch_import_object_context(ars, "sum_agent_repository_downloads_by_agent_ids", return_value={}):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="pending_review", user_id="caller")
+    assert len(result["items"]) == expected

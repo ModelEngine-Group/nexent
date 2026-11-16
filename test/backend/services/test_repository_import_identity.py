@@ -2,8 +2,6 @@
 
 """Repository imports preserve authenticated user and tenant identity."""
 
-import sys
-from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,29 +42,15 @@ async def test_repository_import_passes_identity_to_typed_importer(with_skills, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("authenticated_tenant", ["target-tenant", "other-tenant", None])
-async def test_repository_import_resolves_missing_user_and_rejects_invalid_identity(authenticated_tenant):
-    record = {
-        **_repository_record(),
-        "agent_info_json": {"agent_id": 10, "agent_info": {"10": {"name": "template"}}, "mcp_info": []},
-    }
-    auth = ModuleType("gateway.authentication.auth")
-    auth.get_current_user_id = MagicMock(return_value=("copier", authenticated_tenant))
-    if authenticated_tenant is None:
-        auth.get_current_user_id.side_effect = UnauthorizedError("Session expired")
-    with patch.dict(sys.modules, {"gateway.authentication.auth": auth}), \
-            patch.object(installation, "get_agent_repository_by_id", return_value=record), \
-            patch.object(installation, "import_agent_impl", new=AsyncMock(return_value={10: 101})) as importer, \
-            patch.object(installation, "increment_agent_repository_downloads", return_value=1) as increment:
-        if authenticated_tenant == "target-tenant":
-            result = await installation.import_agent_from_repository_impl(42, "target-tenant", "Bearer session")
-            assert result == {10: 101}
-            assert importer.await_args.args[1].user_id == "copier"
-            assert importer.await_args.args[1].tenant_id == "target-tenant"
-            increment.assert_called_once_with(42)
-        else:
-            with pytest.raises(UnauthorizedError):
-                await installation.import_agent_from_repository_impl(42, "target-tenant", "Bearer session")
-            importer.assert_not_awaited()
-            increment.assert_not_called()
-    auth.get_current_user_id.assert_called_once_with("Bearer session")
+@pytest.mark.parametrize("user_id", [None, ""])
+async def test_repository_import_rejects_missing_identity_before_io(user_id):
+    with patch.object(installation, "get_agent_repository_by_id") as lookup, \
+            patch.object(installation, "import_agent_impl", new=AsyncMock()) as importer, \
+            patch.object(installation, "increment_agent_repository_downloads") as increment:
+        with pytest.raises(UnauthorizedError, match="Authenticated user is required"):
+            await installation.import_agent_from_repository_impl(
+                42, "target-tenant", "Bearer session", user_id=user_id
+            )
+    lookup.assert_not_called()
+    importer.assert_not_awaited()
+    increment.assert_not_called()

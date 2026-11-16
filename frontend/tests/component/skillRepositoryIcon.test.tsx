@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { getSkillRepositoryIconKind } from "../../lib/skillRepositoryIcon.ts";
+import { test } from "vitest";
+import { getSkillRepositoryIconKind } from "../../lib/skillRepositoryIcon";
 
 test("recognizes document and presentation names with token boundaries", () => {
   for (const name of ["workspace-file-summarizer", "xlsx", "PDF-reader"]) {
@@ -16,11 +16,11 @@ test("recognizes document and presentation names with token boundaries", () => {
 test("uses tags before names, and explicit icon identifiers before tags", () => {
   assert.equal(
     getSkillRepositoryIconKind({ name: "custom", tags: ["演示文稿"] }),
-    "presentation"
+    "presentation",
   );
   assert.equal(
     getSkillRepositoryIconKind({ name: "ppt", tags: ["file-management"] }),
-    "document"
+    "document",
   );
   assert.equal(
     getSkillRepositoryIconKind({
@@ -28,11 +28,11 @@ test("uses tags before names, and explicit icon identifiers before tags", () => 
       tags: ["presentation"],
       icon: "file-text",
     }),
-    "document"
+    "document",
   );
   assert.equal(
     getSkillRepositoryIconKind({ name: "ppt", icon: "layers" }),
-    "general"
+    "general",
   );
 });
 
@@ -40,11 +40,11 @@ test("keeps unsupported or ambiguous values on the generic fallback", () => {
   for (const name of ["", "skill-creator", "slack-gif-creator", "profile"]) {
     assert.equal(
       getSkillRepositoryIconKind({ name, tags: [], icon: null }),
-      "general"
+      "general",
     );
   }
   assert.equal(
     getSkillRepositoryIconKind({ name: "ppt-generator", icon: "unknown" }),
-    "presentation"
+    "presentation",
   );
 });

@@ -1114,7 +1114,7 @@ def list_skill_repository_listings_impl(
         search=search,
         tag=tag,
         sort_by_update_time=sort_by_update_time,
-        **({"review_user_id": user_id} if user_role != "ADMIN" and status != STATUS_SHARED else {}),
+        **({"review_user_id": user_id} if not has_any_role(user_role, {"ADMIN"}) and status != STATUS_SHARED else {}),
         **({"sort_by_published_time": True} if sort_by_published_time else {}),
     )
     user_role = _get_user_role(user_id)

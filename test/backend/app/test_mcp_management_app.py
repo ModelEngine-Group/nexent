@@ -64,7 +64,7 @@ def test_batch_delete_dispatches_unique_targets_and_keeps_partial_results():
 
     assert response.status_code == HTTPStatus.OK
     assert response.json()["data"] == [
-        {"kind": "local", "id": 7, "success": False, "message": "MCP service is read-only"},
+        {"kind": "local", "id": 7, "success": False, "message": "Not authorized to delete MCP service"},
         {"kind": "community", "id": 7, "success": True},
     ]
     local.assert_awaited_once_with(tenant_id="tid", user_id="uid", mcp_id=7)
@@ -987,3 +987,15 @@ class TestMcpMarketAuditEntries:
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
+
+
+def test_batch_delete_does_not_expose_exception_details():
+    with patch.object(mgmt_app, "get_current_user_info", return_value=("uid", "tid", "en")), \
+         patch.object(mgmt_app, "delete_mcp_service", new_callable=AsyncMock) as remove:
+        for error in (McpNotFoundError("Traceback private-path"), ForbiddenError("private-token"),
+                      UnauthorizedError("private-dsn"), RuntimeError("private-stack")):
+            remove.side_effect = error
+            response = client.post("/mcp-tools/batch_delete", json={"items": [{"kind": "local", "id": 7}]}, headers=AUTH_HEADER)
+            item = response.json()["data"][0]
+            assert item["success"] is False
+            assert "private" not in item["message"] and "Traceback" not in item["message"]

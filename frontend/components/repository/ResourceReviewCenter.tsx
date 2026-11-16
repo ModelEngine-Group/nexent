@@ -70,7 +70,8 @@ export default function ResourceReviewCenter({
     query,
     target.resourceType,
     target.reviewId,
-    detailOnly
+    detailOnly,
+    target.repositoryId,
   );
   const [opinion, setOpinion] = useState("");
   const [action, setAction] = useState<{
@@ -81,11 +82,11 @@ export default function ResourceReviewCenter({
   const [reconciled, setReconciled] = useState(false);
   const updateUrl = (
     changes: Record<string, string | null>,
-    replace = false
+    replace = false,
   ) => {
     const next = new URLSearchParams(params.toString());
     Object.entries(changes).forEach(([key, value]) =>
-      value === null ? next.delete(key) : next.set(key, value)
+      value === null ? next.delete(key) : next.set(key, value),
     );
     router[replace ? "replace" : "push"](`${pathname}?${next.toString()}`);
   };
@@ -94,6 +95,7 @@ export default function ResourceReviewCenter({
       [key]: value,
       page: "1",
       review_id: null,
+      repository_id: null,
       resource_type: null,
     });
   const total = list.data?.pagination.total ?? 0;
@@ -120,6 +122,7 @@ export default function ResourceReviewCenter({
     updateUrl({
       resource_type: null,
       review_id: row.review_id,
+      repository_id: null,
     });
   const begin = (row: ResourceReview, value: ReviewDecision) => {
     open(row);
@@ -157,7 +160,7 @@ export default function ResourceReviewCenter({
     label: t(`resourceCenter.${value === "all" ? "allTypes" : `tab.${value}`}`),
   }));
   const statusOptions = ["all", "pending_review", "approved", "rejected"].map(
-    (value) => ({ value, label: t(`resourceCenter.status.${value}`) })
+    (value) => ({ value, label: t(`resourceCenter.status.${value}`) }),
   );
   const actions = (row: ResourceReview, inline = false) => (
     <Space size={inline ? 12 : 16}>
@@ -284,7 +287,7 @@ export default function ResourceReviewCenter({
                 render: (_, row) =>
                   displayName(
                     row.submitter.cas_username,
-                    row.submitter.display_name || "—"
+                    row.submitter.display_name || "—",
                   ),
               },
               {
@@ -327,11 +330,17 @@ export default function ResourceReviewCenter({
         </>
       )}
       <Modal
-        open={!!target.reviewId && !action}
+        open={!!(target.reviewId || target.repositoryId) && !action}
         title={latest?.name || t("resourceCenter.detail")}
         centered
         width={760}
-        onCancel={() => updateUrl({ review_id: null, resource_type: null })}
+        onCancel={() =>
+          updateUrl({
+            review_id: null,
+            repository_id: null,
+            resource_type: null,
+          })
+        }
         footer={latest ? actions(latest) : null}
         destroyOnHidden
       >
@@ -365,7 +374,7 @@ export default function ResourceReviewCenter({
                     label: t("resourceCenter.submitter"),
                     children: displayName(
                       latest.submitter.cas_username,
-                      latest.submitter.display_name || "—"
+                      latest.submitter.display_name || "—",
                     ),
                   },
                   {
@@ -439,14 +448,14 @@ export default function ResourceReviewCenter({
                     {latest.resource_detail.server_url}
                   </p>
                   {Object.entries(
-                    latest.resource_detail.shared_fields || {}
+                    latest.resource_detail.shared_fields || {},
                   ).map(([name, shared]) => (
                     <div key={name}>
                       {name}:{" "}
                       {t(
                         shared
                           ? "resourceCenter.sharedField"
-                          : "resourceCenter.privateField"
+                          : "resourceCenter.privateField",
                       )}
                     </div>
                   ))}
@@ -456,7 +465,7 @@ export default function ResourceReviewCenter({
                       {t(
                         field.configured
                           ? "resourceCenter.masked"
-                          : "resourceCenter.notConfigured"
+                          : "resourceCenter.notConfigured",
                       )}
                     </div>
                   ))}
@@ -471,7 +480,7 @@ export default function ResourceReviewCenter({
         title={
           <span className="block font-['HarmonyOS_Sans_SC',sans-serif] text-xl font-medium leading-7 tracking-normal text-[#191919]">
             {t(
-              `resourceCenter.review.${action?.decision === "reject" ? "confirmReject" : "confirmApprove"}`
+              `resourceCenter.review.${action?.decision === "reject" ? "confirmReject" : "confirmApprove"}`,
             )}
           </span>
         }
@@ -513,7 +522,7 @@ export default function ResourceReviewCenter({
             action?.decision === "reject"
               ? "repository.review.confirmRejectContent"
               : "repository.review.confirmApproveContent",
-            { name: action?.row.name }
+            { name: action?.row.name },
           )}
         </p>
         {failed && (
@@ -524,14 +533,14 @@ export default function ResourceReviewCenter({
             message={t(
               stale
                 ? "resourceCenter.review.changed"
-                : "resourceCenter.review.failed"
+                : "resourceCenter.review.failed",
             )}
             action={
               stale && latest?.status === "pending_review" ? (
                 <Button
                   onClick={() => {
                     setAction(
-                      (current) => current && { ...current, row: latest }
+                      (current) => current && { ...current, row: latest },
                     );
                     setFailed(false);
                   }}

@@ -38,6 +38,8 @@ export const API_ENDPOINTS = {
     },
     submit: `${API_BASE_URL}/reviews`,
     detail: (id: string) => `${API_BASE_URL}/reviews/${encodeURIComponent(id)}`,
+    legacyDetail: (type: string, id: string) =>
+      `${API_BASE_URL}/reviews/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     decision: (id: string) =>
       `${API_BASE_URL}/reviews/${encodeURIComponent(id)}/decision`,
   },
