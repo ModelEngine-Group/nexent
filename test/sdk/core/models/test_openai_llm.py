@@ -872,6 +872,7 @@ def test_call_normal_operation(openai_model_instance):
         # Verify token counts were set
         assert openai_model_instance.last_input_token_count == 10
         assert openai_model_instance.last_output_token_count == 5
+        assert openai_model_instance.last_context_observation.input_tokens == 10
 
 
 def test_call_with_no_think_token_addition(openai_model_instance):
@@ -1098,6 +1099,7 @@ def test_call_with_no_usage_info(openai_model_instance):
         # The implementation estimates tokens from input/output text
         assert openai_model_instance.last_input_token_count >= 0
         assert openai_model_instance.last_output_token_count >= 0
+        assert openai_model_instance.last_context_observation is None
 
 
 def test_call_with_null_tokens(openai_model_instance):

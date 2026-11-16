@@ -974,6 +974,7 @@ class TestAgentObservability:
                 compaction_trigger_threshold_tokens=100,
                 compaction_target_tokens=72,
                 raw_token_estimate=110, final_token_estimate=80,
+                token_estimate_basis="provider_calibrated_estimate", observed_provider_input_tokens=90,
                 messages_fingerprint="messages-fp", tools_fingerprint="tools-fp",
                 message_roles=("system", "user", "assistant"),
                 history_message_roles=("user", "assistant"), compression_attempted=True,
@@ -988,6 +989,9 @@ class TestAgentObservability:
             assert event_attrs["context.compaction_target_tokens"] == 72
             assert event_attrs["context.tokens.pre_compression"] == 110
             assert event_attrs["context.tokens.post_compression"] == 80
+            assert event_attrs["context.tokens.estimate_basis"] == "provider_calibrated_estimate"
+            assert event_attrs["context.tokens.provider_input_known"] is True
+            assert event_attrs["context.tokens.observed_provider_input"] == 90
             assert event_attrs["context.compression.attempted"] is True
 
 

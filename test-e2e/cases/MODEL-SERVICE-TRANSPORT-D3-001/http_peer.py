@@ -121,6 +121,10 @@ class Peer(BaseHTTPRequestHandler):
                 return self.json_response(400, {"error": {
                     "code": "context_length_exceeded", "message": "provider rejected dummy-loopback",
                 }})
+            if scenario == "shared_context_overflow" and self.server.counts[scenario] == 1:
+                return self.json_response(400, {"error": {
+                    "code": "context_length_exceeded", "message": "controlled input overflow",
+                }})
             if scenario == "disconnect" and self.server.counts[scenario] == 1:
                 self.connection.shutdown(socket.SHUT_RDWR)
                 return
@@ -165,6 +169,27 @@ class Peer(BaseHTTPRequestHandler):
             if scenario == "vllm_023_tail":
                 sample = Path(__file__).resolve().parents[3] / "test/fixtures/model_service/vllm_023_glm_tail.sse"
                 self.chunk(sample.read_bytes())
+            elif scenario == "compatible_no_usage":
+                self.chunk(frame({"content": "unknown usage response"}, finish="stop"))
+                self.chunk(b"data: [DONE]\n\n")
+            elif scenario == "shared_context_overflow":
+                if self.server.counts[scenario] == 2:
+                    content = "# Compact Result of History\n\n" + "\n\n".join(
+                        "## " + heading + "\n\n" + value for heading, value in [
+                            ("Task Overview", "Preserve the original fact."),
+                            ("Completed Work", "SOURCE-FACT-001 is ORCHID-7429."),
+                            ("Key Decisions", "Use the observed original."),
+                            ("Unresolved Issues", "None."),
+                            ("Pending Items", "Complete the current task."),
+                            ("Next Steps", "Return the answer."),
+                            ("Context To Preserve", "SOURCE-FACT-001 is ORCHID-7429."),
+                        ]
+                    )
+                else:
+                    content = "recovered"
+                self.chunk(frame({"content": content}, finish="stop",
+                                 usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}))
+                self.chunk(b"data: [DONE]\n\n")
             elif scenario == "late_content":
                 self.chunk(frame({"content": "ok"}, finish="stop"))
                 self.chunk(frame({"content": "late"}))

@@ -346,13 +346,13 @@ def test_ac003_legacy_observation_fallback_keeps_masking_and_empty_success(obser
     assert len(observer.execution_history._records) == 1
 
 
-def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs():
+@pytest.mark.parametrize("provider_input", [5000, 6000, 60000])
+def test_ac009_real_agent_read_is_not_blocked_by_token_counts_and_resets_owner_between_runs(provider_input):
     from smolagents.agents import EMPTY_PROMPT_TEMPLATES
     from smolagents.models import ChatMessage, MessageRole, TokenUsage
     from nexent.core.utils.observer import ProcessType
 
-    # Keep prompt cost controlled so the small budget tests reader clipping,
-    # independently of the SDK's full default instruction/tool template.
+    # A locally exhausted context estimate must not prevent authorized recall.
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
     templates['system_prompt'] = 'Execute the requested code and return the final answer.'
     agent, observer, runtime, _ = runtime_agent(prompt_templates=templates)
@@ -388,7 +388,7 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
         '<final_answer>done</final_answer>',
     ]
     agent.model.generate = Mock(side_effect=[ChatMessage(role=MessageRole.ASSISTANT, content=body,
-        token_usage=TokenUsage(input_tokens=5000, output_tokens=100)) for body in responses])
+        token_usage=TokenUsage(input_tokens=provider_input, output_tokens=100)) for body in responses])
     assert str(agent.run('Print a report once, read its original range, then finish.', max_steps=3)) == 'done'
     assert agent._execution_owner != old_owner
     assert agent.tools['read_execution_output'].owner == agent._execution_owner
@@ -396,12 +396,12 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
     original, loaded = [store.get(key) for key in references]
     assert len(read_payloads) == 1 and 'next_offset' in loaded.text
     payload = read_payloads[0]
-    assert 0 < payload['next_offset'] < 4000
+    assert payload['next_offset'] == 4000
     assert payload['text'] == original.text[:payload['next_offset']] and not payload['eof']
     assert loaded.owner == original.owner == agent._execution_owner
     bounded = [call.kwargs['max_rendered_chars'] for call in store.reset_read_budget.call_args_list
                if 'max_rendered_chars' in call.kwargs]
-    assert len(bounded) == 2 and all(0 < value < 4000 for value in bounded)
+    assert len(bounded) == 2 and all(value == 16000 for value in bounded)
     previous_owner = agent._execution_owner
     agent.model.generate = Mock(return_value=ChatMessage(role=MessageRole.ASSISTANT,
                                                         content='<final_answer>fresh run</final_answer>'))

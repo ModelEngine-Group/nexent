@@ -55,6 +55,9 @@ def test_summary_output_normalization_and_fallback(caplog):
         (RuntimeError("maximum context length exceeded"), True),
         (RuntimeError("input is too long"), True),
         (RuntimeError("temporary connection failure"), False),
+        (RuntimeError("completion token limit reached; finish_reason=length"), False),
+        (RuntimeError("output token limit reached"), False),
+        (RuntimeError("reduce the length of the generated answer"), False),
     ],
 )
 def test_context_length_error_detection(error, expected):
@@ -580,3 +583,10 @@ def test_context_manager_memory_rendering_and_change_reasons():
     assert manager._change_reasons("third", manager._previous_stable_items) == [
         "unexpected_nondeterminism"
     ]
+
+
+def test_typed_rate_limit_never_enters_context_recovery_from_message_text():
+    from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
+    error = ModelInvocationTerminalError(ModelErrorCode.RATE_LIMIT_EXHAUSTED, 3,
+                                         cause=RuntimeError('too many tokens per minute'))
+    assert _is_context_length_error(error) is False

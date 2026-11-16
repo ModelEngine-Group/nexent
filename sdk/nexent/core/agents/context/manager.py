@@ -17,6 +17,7 @@ from smolagents.memory import ActionStep, AgentMemory, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
+from ...context_runtime.usage import InputUsageObservation, context_model_key, normalized_chars_per_token, request_characters
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
@@ -60,6 +61,11 @@ class ContextManager:
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
         self._run_compaction_attempts = 0
+        self._usage_anchor: InputUsageObservation | None = None
+        self._estimate_basis = "local_estimate"
+        self._usage_scope_initialized = False
+        self._usage_model_key: str | None = None
+        self._usage_baseline: InputUsageObservation | None = None
 
     def _compaction_trigger_threshold_tokens(self) -> int:
         return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
@@ -84,6 +90,8 @@ class ContextManager:
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
         self._history_candidate = None
+        self._usage_anchor = None
+        self._usage_scope_initialized = False
         self._run_compaction_attempts = 0
         self._current_item_cache.clear()
         source = self._item_source(items)
@@ -129,7 +137,9 @@ class ContextManager:
     ) -> FinalContext:
         if purpose != "step" and (request_system_messages or request_tail_messages):
             raise ValueError("Request-only action messages require step purpose")
+        self._run_compaction_attempts = 0
         run_context = run_context or self.prepare_run_context(memory, "")
+        self._observe_model_usage(model)
         policy = resolve_policy(self.config.policy_layers)
         persisted_items = list(run_context.items)
         if self._history_candidate is not None:
@@ -206,9 +216,14 @@ class ContextManager:
                 # If it is within the useful history target, fixed request
                 # content is the remaining excess and cannot be reclaimed by
                 # repeatedly summarizing the same checkpoint.
-                should_compress_history = original_history_tokens > history_target
+                should_compress_history = bool(
+                    force_compaction or (turns and original_history_tokens > history_target)
+               )
                 if not should_compress_history:
-                    compaction_stop_reason = "history_target_reached"
+                    compaction_stop_reason = (
+                        "no_new_history" if not turns and original_history_tokens > history_target
+                        else "history_target_reached"
+                    )
                 else:
                     history_triggered = True
                     self._emit_history_summary_status("compacting")
@@ -219,15 +234,19 @@ class ContextManager:
                 for _ in range(remaining_attempts if should_compress_history else 0):
                     self._run_compaction_attempts += 1
                     attempt = self._run_compaction_attempts
-                    result = self._history_compressor.compress(current_summary, current_turns, model)
+                    try:
+                        result = self._history_compressor.compress(current_summary, current_turns, model)
+                    except Exception:
+                        # Auxiliary maintenance cannot reject a main model request.
+                        # Cooperative cancellation inherits BaseException and propagates.
+                        logger.exception("History maintenance failed; preserving accepted context")
+                        compaction_stop_reason = "maintenance_failed"
+                        break
                     attempts = attempt
                     self._record_compression(result.records)
                     candidate = result.candidate
                     if candidate is None:
                         compaction_stop_reason = "invalid_candidate"
-                        if last_valid is None and result.fallback_turns:
-                            fallback_by_id = {item.id: item for item in result.fallback_turns}
-                            final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
                     candidate_item = candidate.as_item()
                     previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
@@ -281,13 +300,13 @@ class ContextManager:
                 elif should_compress_history:
                     self._emit_history_summary_status("idle")
 
-            final_items = self._compact_to_compaction_target(
-                final_items,
-                purpose_stable,
-                purpose_dynamic,
-                canonical_tools,
-                model=model,
-            )
+            try:
+                final_items = self._compact_to_compaction_target(
+                    final_items, purpose_stable, purpose_dynamic, canonical_tools, model=model,
+                )
+            except Exception:
+                logger.exception("Item maintenance failed; preserving accepted context")
+                compaction_stop_reason = "maintenance_failed"
 
         final_items.sort(key=lambda item: item.layout_key)
         rendered = self.build_context_messages(final_items)
@@ -296,7 +315,7 @@ class ContextManager:
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
         memory_messages = [*stable, *dynamic]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
-        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        final_tokens = self._estimate_request(messages, canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
         effective_limit = self.config.effective_input_limit_tokens
@@ -346,6 +365,8 @@ class ContextManager:
                 non_history_tokens=non_history_tokens,
                 compaction_stop_reason=compaction_stop_reason,
                 raw_token_estimate=raw_tokens,
+                token_estimate_basis=self._estimate_basis,
+                observed_provider_input_tokens=(self._usage_anchor.input_tokens if self._usage_anchor else None),
                 final_token_estimate=final_tokens,
                 loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
                 loaded_summary_coverage=(loaded.content.get("covered_through_message_id") if loaded else None),
@@ -432,7 +453,9 @@ class ContextManager:
             for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
                 if compact is None:
                     compact = self._compact_execution(original, model)
-                if compact is None or self._estimate_items([compact], [], [], []) >= self._estimate_items([original], [], [], []):
+                if compact is None or request_characters(self.build_context_messages([compact]), []) >= request_characters(
+                    self.build_context_messages([original]), []
+                ):
                     continue
                 result[result.index(original)] = compact
                 if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
@@ -539,7 +562,7 @@ class ContextManager:
             replacements.append(item.__class__(
                 **data, content=content,
                 metadata={**deepcopy(item.metadata), "representation": "selected_blocks"},
-                token_estimate=max(1, math.ceil(len(content[key]) / self.config.chars_per_token)),
+                token_estimate=max(1, math.ceil(len(content[key]) / self._chars_per_token())),
             ))
         self._memory_compact_cache[cache_key] = replacements
         self._record_compression([CompressionCallRecord(
@@ -668,18 +691,44 @@ class ContextManager:
         )
 
     def _estimate_items(self, items, stable, dynamic, tools):
-        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(
-            tools
-        )
+        return self._estimate_request([*self.build_context_messages(items), *stable, *dynamic], tools)
+
+    def _observe_model_usage(self, model):
+        observation = getattr(model, "last_context_observation", None)
+        key = context_model_key(model)
+        if not self._usage_scope_initialized or self._usage_model_key != key:
+            # Ignore a model's pre-run or pre-replacement response (connectivity
+            # probes and other conversations may have used the same instance).
+            self._usage_anchor = None
+            self._usage_baseline = observation if isinstance(observation, InputUsageObservation) else None
+            self._usage_model_key = key
+            self._usage_scope_initialized = True
+            return
+        if (isinstance(observation, InputUsageObservation) and observation.model_key == key
+                and observation != self._usage_baseline):
+            self._usage_anchor = observation
+
+    def _estimate_request(self, messages, tools):
+        if self._usage_anchor is not None:
+            self._estimate_basis = "provider_calibrated_estimate"
+            return self._usage_anchor.estimate(
+                input_characters=request_characters(messages, tools),
+                chars_per_token=self._chars_per_token(),
+            )
+        self._estimate_basis = "local_estimate"
+        return self._message_tokens(messages) + self._tools_tokens(tools)
+
+    def _chars_per_token(self):
+        return normalized_chars_per_token(self.config.chars_per_token)
 
     def _message_tokens(self, messages):
         return max(
-            0, int(sum(len(extract_message_text(message)) for message in messages) / self.config.chars_per_token)
+            0, int(sum(len(extract_message_text(message)) for message in messages) / self._chars_per_token())
         )
 
     def _tools_tokens(self, tools):
         return (
-            int(len(json.dumps(tools, ensure_ascii=False, default=str)) / self.config.chars_per_token) if tools else 0
+            int(len(json.dumps(tools, ensure_ascii=False, default=str)) / self._chars_per_token()) if tools else 0
         )
 
     def _record_compression(self, records):

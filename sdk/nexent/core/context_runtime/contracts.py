@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Contracts for the single ContextManager-backed runtime path."""
 from __future__ import annotations
 
@@ -47,6 +48,8 @@ class ContextEvidence:
     compressible_history_tokens: int = 0
     non_history_tokens: int = 0
     compaction_stop_reason: str = "not_triggered"
+    token_estimate_basis: str = "local_estimate"
+    observed_provider_input_tokens: int | None = None
     raw_token_estimate: int = 0
     final_token_estimate: int = 0
     loaded_summary_unit_id: int | None = None

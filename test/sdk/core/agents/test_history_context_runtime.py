@@ -354,7 +354,9 @@ def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
     assert result.evidence.summary_persist_status == "not_attempted"
     assert result.evidence.new_summary_coverage is None
     rendered = str(result.messages)
-    assert "history limited" in rendered
+    assert "history limited" not in rendered
+    assert "new question " * 100 in _rendered_text(result.messages)
+    assert "new answer " * 100 in _rendered_text(result.messages)
     assert _summary_and_turns()[1].content["user_message"] == "new question " * 100
 
 

@@ -1424,6 +1424,8 @@ class MonitoringManager:
             "context.compaction_target_tokens": getattr(
                 evidence, "compaction_target_tokens", 0
             ),
+            "context.tokens.estimate_basis": getattr(evidence, "token_estimate_basis", "local_estimate"),
+            "context.tokens.provider_input_known": getattr(evidence, "observed_provider_input_tokens", None) is not None,
             "context.tokens.pre_compression": getattr(evidence, "raw_token_estimate", 0),
             "context.tokens.post_compression": getattr(evidence, "final_token_estimate", 0),
             "context.compaction.exceeds_effective_input_limit": bool(
@@ -1433,6 +1435,9 @@ class MonitoringManager:
             "context.compression.fallback_compaction": bool(getattr(evidence, "fallback_compaction_used", False)),
             "context.compression.records": json.dumps(compression_records, ensure_ascii=False, sort_keys=True),
         }
+        observed_input = getattr(evidence, "observed_provider_input_tokens", None)
+        if observed_input is not None:
+            attrs["context.tokens.observed_provider_input"] = observed_input
         self.add_span_event("agent.final_context", attrs)
 
     def set_agent_context_metrics(self, metrics: List[Dict[str, Any]]) -> None:

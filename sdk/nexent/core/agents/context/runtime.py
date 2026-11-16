@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Managed context path thin adapter.
 
 All context policy and final payload assembly belongs to ContextManager.  This
@@ -12,6 +13,7 @@ from smolagents.memory import AgentMemory
 from smolagents.models import ChatMessage, Model
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext, ModelTool
+from ...context_runtime.usage import normalized_chars_per_token
 from .evidence import ContextEvidenceCollector
 from .manager import ContextManager
 from .models import ContextItem, ContextItemInput
@@ -178,7 +180,7 @@ class ManagedContextRuntime:
 
     @property
     def chars_per_token(self) -> float:
-        return self.context_manager.config.chars_per_token
+        return normalized_chars_per_token(self.context_manager.config.chars_per_token)
 
     @property
     def token_threshold(self) -> int | None:

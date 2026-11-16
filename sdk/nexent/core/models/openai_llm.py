@@ -10,6 +10,8 @@ from ...monitor.monitoring import (
 )
 from ..utils.token_estimation import estimate_tokens_text
 from .response_diagnostics import ResponseDiagnostics
+from ..context_runtime.usage import InputUsageObservation, context_model_key
+from types import SimpleNamespace
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
@@ -283,6 +285,7 @@ class OpenAIModel(OpenAIServerModel):
         self.last_cached_input_token_count = 0
         self.diagnostic_chunks_enabled = diagnostic_chunks_enabled
         self.last_response_diagnostics = None
+        self.last_context_observation = None
         self.last_attempt_id = None
         self.last_attempt_number = None
         self.last_reasoning_preview = None
@@ -370,6 +373,7 @@ class OpenAIModel(OpenAIServerModel):
                  _retry_empty_response: bool = True,
                  _empty_response_retries_used: int = 0,
                  **kwargs, ) -> ChatMessage:
+        self.last_context_observation = None
         messages = merge_system_messages(messages or [])
         _monitoring_operation.set("chat_completion")
 
@@ -893,6 +897,11 @@ class OpenAIModel(OpenAIServerModel):
                         "attempt_id": attempt_id,
                         "attempt": attempt,
                     })
+                    self.last_context_observation = InputUsageObservation.capture(
+                        usage=SimpleNamespace(input_tokens=input_tokens, origin="provider" if usage is not None else "unknown"),
+                        messages=messages, tools=tools_to_call_from,
+                        model_key=context_model_key(self), request_id=attempt_id, attempt=attempt,
+                    )
                     return message
 
                 except Exception as e:

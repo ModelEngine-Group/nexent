@@ -186,7 +186,7 @@ class _MockContextManagerConfig:
 
 
 mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
-mock_sdk_context_runtime_module.__path__ = []
+mock_sdk_context_runtime_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "context_runtime")]
 mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
 mock_sdk_context_runtime_managed_module.__path__ = []
 mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(

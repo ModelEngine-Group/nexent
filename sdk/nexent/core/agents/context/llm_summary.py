@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """LLM call orchestration for summary generation with retry and error handling."""
 
 import logging
@@ -21,6 +22,7 @@ logger = logging.getLogger("agent_context.llm_summary")
 @contextmanager
 def _summary_model_call_context(model, *, has_output_override: bool):
     """Isolate summary streaming and its request-specific output budget."""
+    observation = getattr(model, "last_context_observation", None)
     observer = getattr(model, "observer", None)
     budget_snapshot = getattr(model, "context_budget_snapshot", None)
     extra_body = getattr(model, "extra_body", None)
@@ -40,6 +42,8 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     try:
         yield
     finally:
+        if hasattr(model, "last_context_observation"):
+            model.last_context_observation = observation
         if observer is not None:
             model.observer = observer
         if hasattr(model, "context_budget_snapshot"):
@@ -204,6 +208,11 @@ class LLMSummary:
             output_len=len(raw_output),
             response=response, call_type=call_type,
         )
+        finish_reason = getattr(getattr(response, "raw", None), "finish_reason", None)
+        if finish_reason is None:
+            finish_reason = getattr(model, "last_finish_reason", None)
+        if finish_reason in {"length", "content_filter"}:
+            return SummaryResult(records=[record])
         return SummaryResult(summary_text=summary, records=[record])
 
     def _record_failed_compression(self, call_type: str, error_msg: str) -> CompressionCallRecord:
