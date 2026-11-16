@@ -83,10 +83,6 @@ Preload it for offline deployment. The migration worker uses the main backend im
 `migrate_docker.py` runs inside the worker container or Job. Recovery defaults
 for images, ports and service names are provided by `legacy.sh`.
 
-`migrate.sh` is the host entry point for both Docker and Kubernetes.
-`migrate_docker.py` runs inside the worker container or Job. Recovery defaults
-for images, ports and service names are provided by `legacy.sh`.
-
 Existing deployment settings are reused. Exported values override the selected
 Shell-compatible `--env-file` (default `deploy/env/.env`). The source password
 prefers `SUPABASE_POSTGRES_PASSWORD`, then the original container/pod environment;
