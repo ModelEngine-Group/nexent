@@ -1,4 +1,23 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import re
 from datetime import datetime
+
+
+HIGHLIGHT_PRE_TAG = "__nexent_hit_start__"
+HIGHLIGHT_POST_TAG = "__nexent_hit_end__"
+
+
+def extract_highlight_terms(highlights):
+    """Turn trusted provider markers into unique plain matched terms."""
+    pattern = re.compile(re.escape(HIGHLIGHT_PRE_TAG) + r"(.*?)" + re.escape(HIGHLIGHT_POST_TAG), re.DOTALL)
+    terms = []
+    for fragments in highlights.values():
+        for fragment in fragments:
+            for match in pattern.findall(fragment):
+                term = match.strip()
+                if term and term not in terms:
+                    terms.append(term)
+    return terms
 
 def format_size(size_in_bytes):
     """Convert size in bytes to human readable format"""

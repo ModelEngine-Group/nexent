@@ -44,11 +44,16 @@ def rank_candidates(lexical, semantic, mode, query):
     weight = 0.7 if any(char.isdigit() for char in query) else 0.3
     maxima = [max((hit.score for hit in branch), default=1) for branch in (lexical, semantic)]
     merged = {}
-    for branch, maximum, factor in zip((lexical, semantic), maxima, (weight, 1 - weight), strict=True):
+    for branch, maximum, factor, name in zip((lexical, semantic), maxima, (weight, 1 - weight), ("accurate", "semantic"), strict=True):
         for hit in branch:
             key = _identity(hit)
-            score = factor * hit.score / maximum if maximum > 0 else 0
-            merged[key] = replace(hit, score=score + (merged[key].score if key in merged else 0), score_kind="runtime.hybrid")
+            normalized = hit.score / maximum if maximum > 0 else 0
+            previous = merged.get(key)
+            scores = {"accurate": 0.0, "semantic": 0.0} if previous is None else dict(previous.scores)
+            scores[name] = normalized
+            highlights = tuple(dict.fromkeys((previous.highlights if previous else ()) + hit.highlights))
+            merged[key] = replace(hit, score=factor * normalized + (previous.score if previous else 0),
+                                  score_kind="runtime.hybrid", scores=scores, highlights=highlights)
     return sorted(merged.values(), key=lambda h: (-h.score, _identity(h)))
 
 
@@ -84,10 +89,14 @@ class KnowledgeSearchService:
 
     @staticmethod
     def _dto(hit):
+        details = dict(hit.scores)
+        if hit.highlights:
+            details["retrieval_highlight_terms"] = list(hit.highlights)
         return KnowledgeSearchHit(
             **{name: hit.payload[name] for name in ("knowledge_id", "file_id", "file_version", "content")},
             filename=hit.payload.get("filename", ""), location=hit.payload.get("location", {}),
             chunk_id=hit.key.key, score=hit.score, score_kind=hit.score_kind,
+            score_details=details,
         )
 
     def _visible(self, records, grant, request, hits, *, context):
@@ -123,7 +132,7 @@ class KnowledgeSearchService:
                 terms.append(Comparison("file_id", "in", request.file_ids))
             where = Junction("and", tuple(terms))
             if request.search_mode in {"accurate", "hybrid"}:
-                lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="text", where=where, limit=limit), context=context))
+                lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="weighted_text", where=where, limit=limit), context=context))
             if request.search_mode in {"semantic", "hybrid"}:
                 semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=where, limit=limit), context=context))
         return lexical, semantic

@@ -68,6 +68,12 @@ vector_pkg.base = vector_base_mod
 vector_utils_mod = types.ModuleType("sdk.nexent.vector_database.utils")
 vector_utils_mod.build_weighted_query = lambda query_text, weights: {"query": {"match": {"content": query_text}}}
 vector_utils_mod.format_size = lambda size: f"{size}B"
+_utils_spec = importlib.util.spec_from_file_location("_lexical_test_utils", REPO_ROOT / "sdk/nexent/vector_database/utils.py")
+_lexical_utils = importlib.util.module_from_spec(_utils_spec)
+_utils_spec.loader.exec_module(_lexical_utils)
+vector_utils_mod.HIGHLIGHT_PRE_TAG = _lexical_utils.HIGHLIGHT_PRE_TAG
+vector_utils_mod.HIGHLIGHT_POST_TAG = _lexical_utils.HIGHLIGHT_POST_TAG
+vector_utils_mod.extract_highlight_terms = _lexical_utils.extract_highlight_terms
 sys.modules["sdk.nexent.vector_database.utils"] = vector_utils_mod
 vector_pkg.utils = vector_utils_mod
 

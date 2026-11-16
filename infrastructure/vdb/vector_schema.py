@@ -21,9 +21,13 @@ class VectorBinding:
     text_field: str = "content"
     metric: str = "cosine"
     writable: bool = False
+    additional_text_fields: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "fields", tuple(self.fields))
+        if not isinstance(self.additional_text_fields, (tuple, list)):
+            raise InvalidInput()
+        object.__setattr__(self, "additional_text_fields", tuple(self.additional_text_fields))
         names = [field.name for field in self.fields]
         if (
             type(self.writable) is not bool
@@ -40,6 +44,10 @@ class VectorBinding:
         if self.metric != "cosine":
             raise CapabilityUnsupported()
         if self.schema[self.text_field].kind != "string":
+            raise InvalidInput()
+        if (len(set(self.additional_text_fields)) != len(self.additional_text_fields)
+            or self.text_field in self.additional_text_fields
+            or any(name not in self.schema or self.schema[name].kind != "string" for name in self.additional_text_fields)):
             raise InvalidInput()
 
     @property
@@ -62,7 +70,7 @@ class VectorBinding:
             else:
                 payload[field.name] = {
                     "type": "text"
-                    if field.name == self.text_field
+                    if field.name in (self.text_field, *self.additional_text_fields)
                     else kinds[field.kind]
                 }
         return {

@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-LEXICAL-20261117
+  change_type: requirement
+  requirement_id: DPR-002
+  title: Preserve weighted lexical retrieval and citation score evidence in Runtime
+  description: >-
+    Reuse the existing pure weighted-query and matched-term algorithms through a scoped
+    VectorStore weighted_text capability. Preserve lexical highlights and normalized
+    branch scores through Runtime fusion and rerank into AgentOS score_details.
+    Explicit extra fulltext fields require trusted schema declarations and leave default mappings unchanged.
+  affected_features:
+    existing: [DPR-KNOWLEDGE, SI-STORAGE]
+    added: []
+    modified: [DPR-KNOWLEDGE, SI-STORAGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-HTTP-D3-001, DPR-KB-D3-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, SI-VECTOR-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Compile the original lexical query only over trusted fulltext fields and mandatory scope filters.
+    - Share marker parsing without changing stored content or keeping an unused private parser.
+    - Preserve highlights and normalized branch scores through fusion and rerank without cross-generation mixing.
+    - Retain original SDK ES behavior while moving new retrieval requests through StorageInterface.
+    reason: >-
+      Add focused protocol, Runtime and pure SDK UT; retain the original SDK ES regression
+      in an isolated process to avoid its module-level stubs affecting real storage tests.
+      Strengthen existing actual ES and AgentOS HTTP cases; no duplicate formal D1.
+    test_selectors:
+    - test/backend/infrastructure/test_vector_lexical.py
+    - test/backend/services/test_knowledge_lexical.py
+    - test/sdk/vector_database/test_lexical_utils.py
+    - test/sdk/vector_database/test_elasticsearch_core.py
+  notes: >-
+    No retry or text-mode fallback is introduced. Ordinary file ingestion has no title field;
+    explicit-title and historical data schemas require explicit migration. Image, source citation
+    adaptation, SDK consumer cutover and final data-process retirement remain pending.

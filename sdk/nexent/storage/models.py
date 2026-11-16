@@ -283,6 +283,8 @@ class SearchHit:
     score_kind: str
     payload: Record
     generation: Revision | None = None
+    highlights: tuple[str, ...] = ()
+    scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

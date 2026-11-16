@@ -32,6 +32,7 @@ from nexent.storage.models import (
     WriteOutcome,
     WriteReceipt,
 )
+from nexent.vector_database.utils import extract_highlight_terms
 
 from infrastructure.vdb.vector_schema import (
     VectorBinding,
@@ -52,6 +53,7 @@ class ElasticsearchVectorStore:
                 "vector.get",
                 "vector.search.dense",
                 "vector.search.text",
+                "vector.search.weighted_text",
                 "vector.delete",
                 "vector.count",
             }
@@ -324,18 +326,24 @@ class ElasticsearchVectorStore:
             }
             score_kind = "elasticsearch.cosine"
         elif (
-            query.mode == "text"
+            query.mode in {"text", "weighted_text"}
             and query.vector is None
             and isinstance(query.text, str)
             and query.text
         ):
+            clause = {"match": {"payload." + binding.text_field: query.text}}
+            score_kind = "elasticsearch.bm25"
+            if query.mode == "weighted_text":
+                from infrastructure.vdb.lexical import weighted_query
+
+                clause, options["highlight"] = weighted_query(binding, query.text)
+                score_kind = "elasticsearch.weighted_text"
             options["query"] = {
                 "bool": {
                     "filter": [filters],
-                    "must": [{"match": {"payload." + binding.text_field: query.text}}],
+                    "must": [clause],
                 }
             }
-            score_kind = "elasticsearch.bm25"
         else:
             raise CapabilityUnsupported()
         fields = query.fields or tuple(binding.schema)
@@ -361,7 +369,8 @@ class ElasticsearchVectorStore:
                 or not math.isfinite(score)
             ):
                 raise Unavailable()
-            hits.append(SearchHit(key, float(score), score_kind, data, generation))
+            terms = tuple(extract_highlight_terms(hit.get("highlight", {}))) if query.mode == "weighted_text" else ()
+            hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
 
     def count(self, collection, where, *, context):

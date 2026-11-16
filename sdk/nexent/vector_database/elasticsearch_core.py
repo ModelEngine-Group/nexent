@@ -2,8 +2,6 @@
 
 import json
 import logging
-import os
-import re
 import threading
 import time
 from contextlib import contextmanager
@@ -16,7 +14,7 @@ from elasticsearch import Elasticsearch, exceptions
 from ..core.gateway.modality import EmbeddingAdapter
 from ..core.nlp.tokenizer import calculate_term_weights
 from .base import VectorDatabaseCore
-from .utils import build_weighted_query, format_size
+from .utils import HIGHLIGHT_POST_TAG, HIGHLIGHT_PRE_TAG, build_weighted_query, extract_highlight_terms, format_size
 
 
 logger = logging.getLogger("elasticsearch_core")
@@ -34,8 +32,6 @@ class BulkOperation:
 
 SCROLL_TTL = "2m"
 DEFAULT_SCROLL_SIZE = 1000
-_HIGHLIGHT_PRE_TAG = "__nexent_hit_start__"
-_HIGHLIGHT_POST_TAG = "__nexent_hit_end__"
 
 
 class ElasticSearchCore(VectorDatabaseCore):
@@ -620,7 +616,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                             embeddings = embedding_model.get_embeddings(inputs)
                             for doc, embedding in zip(embedding_sub_batch, embeddings):
                                 doc_embedding_pairs.append((doc, embedding))
-                        
+
                         total_vectorized += len(embedding_sub_batch)
                         if progress_callback:
                             try:
@@ -1093,8 +1089,8 @@ class ElasticSearchCore(VectorDatabaseCore):
             # lexical branch. This is part of the existing request, not a
             # second search, and is later used only to explain result cards.
             "highlight": {
-                "pre_tags": [_HIGHLIGHT_PRE_TAG],
-                "post_tags": [_HIGHLIGHT_POST_TAG],
+                "pre_tags": [HIGHLIGHT_PRE_TAG],
+                "post_tags": [HIGHLIGHT_POST_TAG],
                 "fields": {
                     "title": {"number_of_fragments": 0},
                     "content": {
@@ -1126,7 +1122,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         # Process and return results
         results = []
         for hit in response["hits"]["hits"]:
-            highlight_terms = self._extract_highlight_terms(hit.get("highlight", {}))
+            highlight_terms = extract_highlight_terms(hit.get("highlight", {}))
             results.append(
                 {
                     "score": hit["_score"],
@@ -1136,24 +1132,6 @@ class ElasticSearchCore(VectorDatabaseCore):
                 }
             )
         return results
-
-    @staticmethod
-    def _extract_highlight_terms(highlights: Dict[str, List[str]]) -> List[str]:
-        """Extract plain matched terms from Elasticsearch's trusted markers."""
-        terms: List[str] = []
-        pattern = re.compile(
-            re.escape(_HIGHLIGHT_PRE_TAG)
-            + r"(.*?)"
-            + re.escape(_HIGHLIGHT_POST_TAG),
-            re.DOTALL,
-        )
-        for fragments in highlights.values():
-            for fragment in fragments:
-                for match in pattern.findall(fragment):
-                    term = match.strip()
-                    if term and term not in terms:
-                        terms.append(term)
-        return terms
 
     def semantic_search(
         self,

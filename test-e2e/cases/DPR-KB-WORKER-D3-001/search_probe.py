@@ -26,6 +26,11 @@ async def prove_search(rpc, actor, request, content, observed):
             assert hit.score_kind == "model.rerank" and hit.score == 0.98
         elif mode == "hybrid":
             assert hit.score_kind == "runtime.hybrid"
+            assert hit.score_details["accurate"] > 0 and hit.score_details["semantic"] > 0
+            assert "worker" in [term.lower() for term in hit.score_details["retrieval_highlight_terms"]]
+        else:
+            assert hit.score_kind == "elasticsearch.weighted_text"
+            assert "worker" in [term.lower() for term in hit.score_details["retrieval_highlight_terms"]]
     assert observed == ["embedding", "rerank", "embedding"]
     for user, tenant in (("user-a", "tenant-b"), ("other", "tenant-a")):
         try:

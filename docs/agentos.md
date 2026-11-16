@@ -132,7 +132,7 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 
 KB 文件生命周期及授权客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
 
-文本 search 的客户端与 Runtime 各有 180 秒总截止，包含授权、embedding、存储、rerank 和最终可见性检查。`search_mode` 支持 accurate、semantic、hybrid，默认 semantic；指定 `rerank_model` 才执行重排，使用既有十倍候选常量。所有模型调用进入 `ModelService.invoke`，非法重排结果直接报错。Runtime 在重排前及返回前核对权威 generation，不能返回已删除或未发布的向量。
+文本 search 的客户端与 Runtime 各有 180 秒总截止，包含授权、embedding、存储、rerank 和最终可见性检查。`search_mode` 支持 accurate、semantic、hybrid，默认 semantic；指定 `rerank_model` 才执行重排，使用既有十倍候选常量。accurate/hybrid 的文本分支沿用原分词加权、短语/模糊匹配及同次查询高亮，失败不回退普通 text。所有模型调用进入 `ModelService.invoke`，非法重排结果直接报错。Runtime 在重排前及返回前核对权威 generation，不能返回已删除或未发布的向量。结果 `score_details` 包含适用的 accurate/semantic 归一化分量和 retrieval_highlight_terms，重排后仍保留这些检索信息。
 
 ```python
 result = await runtime.search_knowledge(
@@ -146,7 +146,7 @@ result = await runtime.search_knowledge(
 )
 ```
 
-同一请求的 KB 必须绑定同一 embedding ID；不同模型由 Management 分组调用。新接口当前面向原租户的本地 Elasticsearch KB，accurate 采用内容 BM25。旧标题加权、高亮、图片及引用卡片仍需随消费者和历史数据迁移完成对照，不能把文本接口验证视为旧 SDK 已切换。
+同一请求的 KB 必须绑定同一 embedding ID；不同模型由 Management 分组调用。新接口当前面向原租户的本地 Elasticsearch KB，普通文件使用内容全文字段；历史数据若有 title，需在维护迁移中显式声明对应全文 schema。默认映射不会隐式更改。图片与源文件引用卡片仍需随消费者和历史数据迁移完成对照，不能把文本接口验证视为旧 SDK 已切换。
 
 `KnowledgeUploadWorker.process(lookup, actor, owner_id=...)` 执行已接纳的任务。装配方显式提供源与产物大小上限，并安装 Runtime 的 `ThreadManager`。worker 经 Management 实时授权后领取 attempt，读取固定版本对象，再通过 `ModelService.invoke` 写入显式向量；每批写前复查授权和 owner。只有全部写入确认并仍持有有效 attempt 时才发布可见 generation，已完成任务再次投递不会调用模型。在途或 unknown 写入保留清理义务，不自动重跑。
 

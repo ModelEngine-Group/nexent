@@ -43,4 +43,6 @@ Runtime 上传 worker 已接通真实 ObjectStore/VectorStore 与版本发布，
 
 AgentOS 文本 search/rerank 也已接通，Management 批量查询当前 KB 读权限，Runtime 通过只读 VectorStore 和 Model.invoke 执行三种搜索模式，并在重排前及返回前检查可见版本。已验证实际签名 HTTP、PG/ES 查询和受控模型路径；真实 provider/Langfuse 配置缺失，旧标题/图片/引用及消费者未切换，完整退役继续待验收。
 
+词法分支已接入原加权查询与命中高亮算法，实际 ES 对照确认排序、分数和术语一致。Runtime 保留归一化混合得分并通过 AgentOS score_details 返回，重排不丢失检索信息。普通文件入库原本没有 title，默认映射保持；带 title 的历史数据需显式迁移。图片、源文件引用与消费者切换仍待完成。
+
 父 PR 的旧私有入口测试迁移、异步接纳与旧过载 D2 语义，以及既有前端测试绑定缺失继续单独跟踪，不能以本批交付声明已解决。

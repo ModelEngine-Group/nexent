@@ -31,6 +31,9 @@ case:
     action: Execute the Runtime ingestor twice through real ModelService and a managed lane, with controlled model adapter and artifact bytes, then inspect actual Elasticsearch records.
     expected: Both executions use Model.invoke with the pinned revision and the same chunk key; one physical vector remains retrievable with the original content and attempt generation.
   - order: 5
+    action: Compare the old weighted text algorithm with weighted_text on the same explicit title/content corpus, including matching rows from another tenant and collection, and inspect plain matched terms.
+    expected: IDs, ranking, scores and highlight terms match within the intended scope; matching out-of-scope rows never appear, and a title-only term retrieves its record without changing the existing primary mapping.
+  - order: 6
     action: Close ports and remove the owned container and anonymous volumes.
     expected: The closed port refuses access and the owned container no longer exists.
   expected_results:
@@ -39,6 +42,7 @@ case:
   - Snapshot pagination and per-document CAS preserve deletion results and concurrent replacement.
   - Owned ports, containers and volumes are closed or removed.
   - Runtime ingestion validates the artifact and writes deterministic physical vectors without publishing job visibility.
+  - Weighted lexical retrieval matches the original algorithm and returns plain matched terms within the declared fulltext schema.
   forbidden_side_effects:
   - No application storage, credentials, model endpoints or data-process service is used.
   integration_boundary:
@@ -66,11 +70,16 @@ case:
     forbidden_side_effects: [1]
   - id: AC-04
     description: Owned resources are closed and reclaimed.
-    steps: [5]
+    steps: [6]
     expected_results: [4]
     forbidden_side_effects: [1]
   - id: AC-05
     description: Runtime ingestion uses Model.invoke and stable physical chunk keys through the real VectorStore.
     steps: [4]
     expected_results: [5]
+    forbidden_side_effects: [1]
+  - id: AC-06
+    description: Weighted lexical retrieval preserves ranking, scores, explicit title fields and plain matched terms without extra model or data-process calls.
+    steps: [5]
+    expected_results: [6]
     forbidden_side_effects: [1]

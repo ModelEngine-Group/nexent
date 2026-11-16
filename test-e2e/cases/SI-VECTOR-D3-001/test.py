@@ -24,6 +24,7 @@ def test_scoped_vectors(record_property):
     ]
     from elasticsearch import Elasticsearch
     from ingestion_probe import probe_ingestion
+    from lexical_probe import probe_lexical
     from nexent.storage.errors import Conflict, PartialFailure, ScopeDenied
     from nexent.storage.models import (
         Comparison,
@@ -208,6 +209,7 @@ def test_scoped_vectors(record_property):
             "kb", Comparison("file_id", "eq", "race"), context=context()
         )[0].deleted
         ingestion = probe_ingestion(client_factory, ports, context)
+        lexical = probe_lexical(client_factory, ports, context)
         primary.close()
         with pytest.raises(ScopeDenied):
             primary.count("kb", None, context=context())
@@ -221,12 +223,15 @@ def test_scoped_vectors(record_property):
                     "dense_and_text": True,
                     "snapshot_pages_and_cas": True,
                     "runtime_ingestion": ingestion,
+                    "weighted_lexical": lexical,
                     "source_hashes": {
                         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
                         for path in (
                             "infrastructure/vdb/vector_store.py",
                             "infrastructure/vdb/vector_delete.py",
                             "infrastructure/vdb/vector_schema.py",
+                            "infrastructure/vdb/lexical.py",
+                            "sdk/nexent/vector_database/utils.py",
                             "backend/runtime/knowledge_base/ingestion.py",
                         )
                     },
