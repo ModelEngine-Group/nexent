@@ -59,6 +59,9 @@ case:
   - order: 13
     action: Read actual charges through production ledger facades, exercise a repeatable-read snapshot against a concurrent record update, then delete the fixture source after its sole writer has ended and release its charge.
     expected: Tenant/grouped totals and exact ownership queries are scoped, the snapshot keeps its original revision and maps concurrent update to Conflict, and charge release is audited and idempotent only after confirmed source absence.
+  - order: 14
+    action: Dispatch an authorized recovered KB source through production worker composition using actual record, broker and object ports with controlled text parsing.
+    expected: The worker renews its authorized lease, publishes a checksummed tenant-partitioned artifact, commits completion before acknowledgement, and duplicate delivery does not parse again; another tenant cannot read the output.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -73,6 +76,7 @@ case:
   - Source lifecycle and storage ledger share atomic commit/rollback and tenant isolation.
   - Over-quota recovery retains its physical source charge and blocks successful publication pending cleanup.
   - Production ledger queries and release use scoped ports with snapshot consistency and audited idempotence.
+  - Production KB worker composition preserves ownership, durable completion, deduplication and tenant-partitioned cleansing artifacts.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
@@ -82,6 +86,11 @@ case:
   cleanup:
   - Delete only test-owned containers by their returned IDs including anonymous volumes.
   acceptance:
+  - id: AC-12
+    description: Actual KB worker, broker and object composition publishes a tenant-partitioned artifact once while retaining durable authorization and completion.
+    steps: [14]
+    expected_results: [14]
+    forbidden_side_effects: [1]
   - id: AC-01
     description: Admission and inspection enforce durable identity and ownership.
     steps: [1]

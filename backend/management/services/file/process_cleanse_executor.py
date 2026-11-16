@@ -20,14 +20,21 @@ class ProcessCleanseExecutor:
             raise InvalidInput()
 
         def initialize(*, context):
-            executor = self.factory()
-            executor.warmup(context=context)
+            executor = self.factory(context=context)
+            try:
+                executor.warmup(context=context)
+            except BaseException:
+                executor.close()
+                raise
 
             def execute(snapshot, *, context):
-                typed = parse_cleanse_request(snapshot)
-                return executor(snapshot, typed, context=context).model_dump(
-                    mode="json"
-                )
+                try:
+                    typed = parse_cleanse_request(snapshot)
+                    return executor(snapshot, typed, context=context).model_dump(
+                        mode="json"
+                    )
+                finally:
+                    executor.close()
 
             return execute
 

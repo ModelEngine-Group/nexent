@@ -43,6 +43,9 @@ class Objects:
         self.content = {filename: content}
         self.filename = filename
 
+    def close(self):
+        pass  # This fixture stores bytes in memory and owns no external handles.
+
     def stat(self, ref, *, context):
         content = self.content[ref.key]
         return ObjectMetadata(
@@ -195,7 +198,7 @@ def check_isolation():
         ),
     )
 
-    def parser_factory():
+    def parser_factory(*, context):
         assert os.getpid() != actual_parent
         return CleanseExecutor(
             runtime=DocumentParserRuntime(1, [], {}),

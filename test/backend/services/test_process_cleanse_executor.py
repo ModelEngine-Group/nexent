@@ -35,6 +35,7 @@ def test_factory_initializes_only_in_child_boundary(mocker):
     result = ProcessCleanseExecutor(factory)(row(), request(), context=context())
     assert result == artifact()
     factory.return_value.warmup.assert_called_once()
+    factory.return_value.close.assert_called_once()
 
 
 def test_mismatched_request_never_starts_process(mocker):
@@ -57,3 +58,25 @@ def test_invalid_published_reference_is_unknown_not_replayed(mocker):
     )
     with pytest.raises(OutcomeUnknown):
         ProcessCleanseExecutor(Mock())(row(), request(), context=context())
+
+
+@pytest.mark.parametrize("phase", ["warmup", "execute"])
+def test_owned_executor_closes_on_child_failure(mocker, phase):
+    factory = Mock()
+    if phase == "warmup":
+        factory.return_value.warmup.side_effect = ValueError(
+            "controlled warmup failure"
+        )
+    else:
+        factory.return_value.side_effect = ValueError("controlled execution failure")
+
+    def isolate(initialize, snapshot, *, context, tick):
+        return initialize(context=context)(snapshot, context=context)
+
+    mocker.patch(
+        "management.services.file.process_cleanse_executor.run_isolated",
+        side_effect=isolate,
+    )
+    with pytest.raises(ValueError):
+        ProcessCleanseExecutor(factory)(row(), request(), context=context())
+    factory.return_value.close.assert_called_once()

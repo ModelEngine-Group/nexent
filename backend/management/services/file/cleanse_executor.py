@@ -17,6 +17,9 @@ class CleanseExecutor:
         self.runtime.ensure_initialized()
         context.remaining()
 
+    def close(self):
+        self.objects.close()
+
     def __call__(self, row, request, *, context):
         context.remaining()
         if row["parser_version"] != self.parser_version:

@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-EXECUTION-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Compose authorized KB worker and separate immutable source from tenant outputs
+  description: >-
+    Bind durable KB jobs, live resource authorization and parent lease checks for one queue delivery.
+    Default parsing initializes SDK and scoped object handles only inside the isolated child.
+    Infrastructure grants one pinned readonly source and tenant-partitioned content-addressed outputs.
+    The child closes its owned executor on completion, warmup failure and execution failure.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001, DPR-PARSER-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001, DPR-PARSER-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Consume durable KB snapshots with current user authorization and commit completion before acknowledgement.
+    - Reject wrong queue roles, quarantine unknown output and fence cancellation through the parent tick.
+    - Defer heavy initialization until the child and close owned executor handles on normal and failed execution.
+    - Restrict reads to the pinned source revision and puts to that source content-addressed output keys.
+    - Close both object grants even after one cleanup fails and deny use after close.
+    reason: >-
+      Existing worker, policy and isolation UT cover the individual components. Add production
+      composition and object-grant assertions without duplicating formal D1. D3 extends actual
+      PG/Redis/MinIO collaboration with controlled parsing; retain actual Linux SDK isolation regression.
+    test_selectors:
+    - test/backend/services/test_knowledge_cleanse_worker.py
+    - test/backend/infrastructure/test_cleanse_objects.py
+    - test/backend/services/test_process_cleanse_executor.py
+  notes: >-
+    Existing responsibility and self-contained preparation remain. The actual storage Case owns all
+    temporary containers/volumes, and its controlled parser does not prove full parser-provider integration.
+    The Linux parser Case separately proves real SDK/fork behavior with controlled ObjectStore bytes.
+    No long-lived production consumer or new HTTP route is enabled. Publication-intent reconciliation,
+    run authorization callbacks, Runtime KB and final retirement remain pending.

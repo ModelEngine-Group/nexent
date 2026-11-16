@@ -13,6 +13,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from contracts.constants import environment
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
 from ledger_probe import check_ledger_access
+from execution_probe import check_execution
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.source_publish import SourcePublisher
 from management.services.file.source_recovery import reconcile_sources
@@ -30,7 +31,7 @@ from infrastructure.rdb.tenant_config_record import TenantConfig
 from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
 
 
-def check_source_publication(engine, port, context):
+def check_source_publication(engine, port, context, queue):
     def client_factory(remaining):
         return boto3.client(
             "s3",
@@ -283,6 +284,7 @@ def check_source_publication(engine, port, context):
                 and row["source_sha256"] == source.sha256
             )
             assert lost.writes == 2
+            check_execution(queue, row, context)
             with engine.begin() as conn:
                 conn.execute(
                     TenantConfig.__table__.insert().values(
