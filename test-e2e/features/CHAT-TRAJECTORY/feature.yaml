@@ -16,6 +16,7 @@ feature:
       智能体input.value只记录本次用户query，子智能体记录本次任务；配置与上下文快照独立保存，模型请求正文保持完整，预览与分块正文一致。
       模型展示输入采用实际HTTP请求JSON，输出采用服务端响应正文；流式按原字段合并，内部DTO/采集状态不混入，指标独立展示，预览与完整正文来源一致。
       记忆准备按每个智能体合并为一个phase节点，正文保留内部步骤与错误，名称区分归属，总耗时按实际起止范围；沙箱初始化合并展示，python_interpreter下代码执行单独计时且排除延迟初始化，准备事实归入同次执行，阶段不计为模型/工具调用。
+      智能体及记忆归属优先采用采集时展示名称，缺失沿用内部名；Python解释器由前端统一本地化，搜索与详情一致。
   - rule_id: TRJ-RULE-002
     description: PG新增执行摘要及统计快照两张表，复用现有授权目录，列表和候选只读PG；节点详情按需读取文件。本地按tenant/user/agent/conversation组织；meta保存固定归属/执行清单，每执行一份OTLP，全部正文内嵌属性/Events并按字段分块读取。256KiB为刷盘阈值，单行可更大，增量编码/解码须实际验证。
   - rule_id: TRJ-RULE-003
@@ -24,6 +25,7 @@ feature:
       正文首块自动读取，触底后按服务端UTF-8偏移追加，失败位置重试并取消旧节点请求。 会话视图每会话一行，先确定最新执行四态再匹配历史执行，累计指标独立于匹配指标；详情按根执行顺序连续追加全部保留轮次。
   - rule_id: TRJ-RULE-004
     description: 显式查询静态历史快照，真实指标可为空；切换选择清理旧请求，无实时订阅或自动刷新。 模型TTFT记录首个非空回答/思考/工具参数增量，空块和usage排除，未知可空且零值有效；模型Span、事件、Histogram和本地OTLP使用同一实测值。
+      页头刷新按钮保留筛选排序并回到第一页，更新查询快照及汇总；加载时禁止重复点击，列表移除保留天数说明。
   - rule_id: TRJ-RULE-005
     description: 仅ADMIN/SU可读可信租户当前用户，PG归属、目录各层及固定meta同时核验；迁租旧归属检查只用于拒绝冲突，文件保持原租户，迁租事务撤销旧摘要并登记未采集占位。
       引用状态在服务端有界缓存保存，随机ID逐次核验类型及身份/资源绑定，部署无需轨迹密钥，失效后重新查询。
@@ -59,6 +61,7 @@ feature:
     - CHAT-TRAJECTORY-PHASES-20261116
     - CHAT-TRAJECTORY-MEMORY-GROUP-20261116
     - CHAT-TRAJECTORY-SANDBOX-TIMING-20261116
+    - CHAT-TRAJECTORY-REFRESH-20261116
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
       historical provenance for retired Cases. Unit contracts stay in UT; preserve

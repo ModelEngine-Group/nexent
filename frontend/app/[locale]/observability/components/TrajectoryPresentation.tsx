@@ -16,11 +16,19 @@ import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 
 export function trajectoryNodeName(node: TrajectoryNode, t: TFunction): string {
+  if (node.kind === "tool" && node.name === "python_interpreter")
+    return t("trajectory.tools.python_interpreter", {
+      defaultValue: node.name,
+    });
   if (node.kind !== "phase") return node.name;
   const label = t(`trajectory.phases.${node.name}`, {
     defaultValue: node.name,
   });
-  const agent = node.attributes["agent.name"];
+  const display = node.attributes["agent.display_name"];
+  const agent =
+    typeof display === "string" && display.trim()
+      ? display.trim()
+      : node.attributes["agent.name"];
   return node.name === "memory.prepare" && typeof agent === "string" && agent
     ? `${label} · ${agent}`
     : label;

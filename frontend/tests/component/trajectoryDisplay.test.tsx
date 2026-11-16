@@ -3,6 +3,7 @@
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -11,6 +12,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import type { StandardPaginatorProps } from "@/components/common/StandardPaginator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DirectoryFilter } from "@/app/observability/components/DirectoryFilter";
 import { TrajectoryBody } from "@/app/observability/components/TrajectoryBody";
@@ -29,6 +31,21 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/services/tenantService", () => ({ getTenant: vi.fn() }));
+// Exercise center-owned page transitions independently of AntD layout effects.
+vi.mock("@/components/common/StandardPaginator", () => ({
+  StandardPaginator: ({
+    current = 1,
+    pageSize = 10,
+    onChange,
+  }: StandardPaginatorProps) => (
+    <button
+      aria-label="test.nextPage"
+      onClick={() => onChange?.(current + 1, pageSize)}
+    >
+      {current}
+    </button>
+  ),
+}));
 vi.mock("@/services/trajectoryService", () => ({
   trajectoryService: {
     records: vi.fn(),
@@ -47,6 +64,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  api.records.mockReset();
   api.records.mockResolvedValue(recordsPage());
   api.facets.mockResolvedValue({ items: [], next_cursor: null });
   tenant.mockResolvedValue({ tenant_id: "tenant", tenant_name: "示例租户" });
@@ -293,6 +311,9 @@ describe("admin list display", () => {
       ).toBeNull();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(screen.queryByText("trajectory.partial")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("trajectory.retention")
+      ).not.toBeInTheDocument();
     }
   );
 
@@ -312,6 +333,106 @@ describe("admin list display", () => {
     expect(api.records.mock.calls.at(-1)?.[0].tenant_id).toBe("tenant");
     expect(screen.queryByText("Tenant")).not.toBeInTheDocument();
     expect(tenant).not.toHaveBeenCalled();
+  });
+});
+
+describe("trajectory page refresh", () => {
+  it("refreshes records and summary while retaining filters and sorting and returning to page one", async () => {
+    const view = render(
+      <ObservabilityCenter
+        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
+      />,
+      { wrapper }
+    );
+    await screen.findByRole("button", { name: "Root Agent" });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "trajectory.idSearch" }),
+      " 42 {enter}"
+    );
+    await waitFor(() =>
+      expect(api.records.mock.calls.at(-1)?.[0].id_query).toBe("42")
+    );
+    fireEvent.click(screen.getAllByText("trajectory.cumulativeDuration")[0]);
+    await waitFor(() =>
+      expect(api.records.mock.calls.at(-1)?.[0].sort_by).toBe("duration_ms")
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "common.refresh" })
+      ).not.toBeDisabled()
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "test.nextPage" })
+    );
+    await waitFor(() =>
+      expect(api.records.mock.calls.at(-1)?.[0]).toMatchObject({
+        page: 2,
+        query_id: "signed-query",
+      })
+    );
+    const next = recordsPage("refreshed-query");
+    next.items = [{ ...record, root_agent_name: "Refreshed Agent" }];
+    next.summary.conversation_count = 31;
+    api.records.mockResolvedValueOnce(next);
+    await userEvent.click(
+      screen.getByRole("button", { name: "common.refresh" })
+    );
+    expect(
+      await screen.findByRole("button", { name: "Refreshed Agent" })
+    ).toBeVisible();
+    expect(api.records.mock.calls.at(-1)?.[0]).toMatchObject({
+      tenant_id: "tenant",
+      id_query: "42",
+      sort_by: "duration_ms",
+      sort_order: "asc",
+      page: 1,
+      query_id: undefined,
+    });
+    expect(
+      screen.getByRole("textbox", { name: "trajectory.idSearch" })
+    ).toHaveValue(" 42 ");
+    expect(
+      view.container.querySelector(".trajectory-summary")
+    ).toHaveTextContent("31");
+    expect(
+      screen.getByRole("button", { name: "test.nextPage" })
+    ).toHaveTextContent("1");
+  });
+
+  it("prevents duplicate refresh requests and allows retry after a failed refresh", async () => {
+    render(
+      <ObservabilityCenter
+        user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
+      />,
+      { wrapper }
+    );
+    await screen.findByRole("button", { name: "Root Agent" });
+    let fail!: (error: Error) => void;
+    api.records.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        })
+    );
+    const refresh = screen.getByRole("button", { name: "common.refresh" });
+    await userEvent.click(refresh);
+    await waitFor(() => expect(api.records).toHaveBeenCalledTimes(2));
+    expect(refresh).toBeDisabled();
+    fireEvent.click(refresh);
+    expect(api.records).toHaveBeenCalledTimes(2);
+    await act(async () => fail(new Error("unavailable")));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(refresh).not.toBeDisabled();
+    await userEvent.click(refresh);
+    expect(
+      await screen.findByRole("button", { name: "Root Agent" })
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(api.records).toHaveBeenCalledTimes(3);
+    expect(api.records.mock.calls.at(-1)?.[0]).toMatchObject({
+      tenant_id: "tenant",
+      query_id: undefined,
+    });
   });
 });
 

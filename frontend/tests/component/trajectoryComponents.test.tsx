@@ -405,6 +405,94 @@ describe("node details and bounded body reads", () => {
     expect(screen.getByText("— Token/s")).toBeVisible();
     expect(screen.queryByText("trajectory.modelCalls")).not.toBeInTheDocument();
   });
+  it.each(['{"content":{}}', "{}", ""])(
+    "waits for the first body chunk instead of flashing preview %j",
+    async (preview) => {
+      let resolve!: (value: Awaited<ReturnType<typeof api.content>>) => void;
+      api.content.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          })
+      );
+      const view = render(
+        <TrajectoryBody
+          reference={{ ...body(preview, false), text: null, preview }}
+          slot="input"
+          conversationId="1"
+          nodeId="model"
+          cache={new BodyCache()}
+          onLoaded={vi.fn()}
+        />,
+        { wrapper }
+      );
+      expect(view.container.querySelector("pre code")).toBeNull();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "trajectory.loadingContent"
+      );
+      expect(
+        screen.getByRole("button", { name: "trajectory.copy" })
+      ).toBeDisabled();
+      const text = JSON.stringify({
+        max_tokens: 1024,
+        messages: [{ role: "user", content: "你好" }],
+      });
+      await act(async () =>
+        resolve({
+          text,
+          offset: 0,
+          next_offset: new TextEncoder().encode(text).length,
+          byte_count: new TextEncoder().encode(text).length,
+          char_count: Array.from(text).length,
+          complete: true,
+          offset_unit: "utf8_bytes",
+        })
+      );
+      expect(view.container.querySelector("pre code")?.textContent).toBe(
+        JSON.stringify(JSON.parse(text), null, 2)
+      );
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "trajectory.copy" })
+      ).toBeEnabled();
+      expect(api.content).toHaveBeenCalledTimes(1);
+    }
+  );
+  it("keeps failed initial previews hidden and displays the body after retry", async () => {
+    api.content.mockRejectedValueOnce({ code: "storage_busy" });
+    const view = render(
+      <TrajectoryBody
+        reference={body('{"content":{}}', false)}
+        slot="input"
+        conversationId="1"
+        nodeId="model"
+        cache={new BodyCache()}
+        onLoaded={vi.fn()}
+      />,
+      { wrapper }
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "trajectory.errors.storage_busy"
+    );
+    expect(view.container.querySelector("pre code")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    api.content.mockResolvedValueOnce({
+      text: '{"max_tokens":2048}',
+      offset: 0,
+      next_offset: 18,
+      byte_count: 18,
+      char_count: 18,
+      complete: true,
+      offset_unit: "utf8_bytes",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "trajectory.retry" }));
+    await waitFor(() =>
+      expect(view.container.querySelector("pre code")?.textContent).toBe(
+        JSON.stringify({ max_tokens: 2048 }, null, 2)
+      )
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
   it("automatically loads the first UTF-8 chunk, appends on scroll, and aborts on unmount", async () => {
     api.content.mockResolvedValueOnce({
       text: "中文",
@@ -446,6 +534,9 @@ describe("node details and bounded body reads", () => {
     const content = view.container.querySelector("pre")!;
     fireEvent.scroll(content, { target: { scrollTop: 20 } });
     expect(api.content.mock.calls[1][2]).toBe(6);
+    expect(view.container.querySelector("pre code")?.textContent).toBe(
+      JSON.stringify({ content: "中文" }, null, 2)
+    );
     const signal = api.content.mock.calls[1][3]!;
     view.unmount();
     expect(signal.aborted).toBe(true);

@@ -17,7 +17,9 @@ vi.mock("react-i18next", () => ({
           ? "记忆准备"
           : key === "trajectory.phases.code.execute"
             ? "代码执行"
-            : (options?.defaultValue ?? key),
+            : key === "trajectory.tools.python_interpreter"
+              ? "Python 解释器"
+              : (options?.defaultValue ?? key),
   }),
 }));
 
@@ -34,6 +36,46 @@ const phase = traceNode({
 });
 
 describe("trajectory preparation phases", () => {
+  it("localizes the Python tool for the tree, search and detail while selecting the original DTO", () => {
+    const tool = traceNode({
+      id: "python",
+      parent_id: "root",
+      kind: "tool",
+      name: "python_interpreter",
+    });
+    const select = vi.fn();
+    const view = render(
+      <App>
+        <TrajectoryTimeline
+          nodes={[traceNode(), tool]}
+          complete
+          cache={new BodyCache()}
+          onSelect={select}
+        />
+      </App>
+    );
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "解释器" },
+    });
+    const item = screen.getByRole("treeitem", { name: /Python 解释器/ });
+    fireEvent.click(item);
+    expect(select).toHaveBeenCalledWith(tool);
+    expect(screen.getByRole("treeitem", { name: /Root Agent/ })).toBeTruthy();
+    view.unmount();
+    render(
+      <App>
+        <TrajectoryNodeDetail
+          node={select.mock.calls[0][0]}
+          conversationId="123"
+          cache={new BodyCache()}
+          onParent={vi.fn()}
+          onLoaded={vi.fn()}
+        />
+      </App>
+    );
+    expect(screen.getByRole("heading", { name: "Python 解释器" })).toBeTruthy();
+  });
+
   it("shows code execution duration separately from sandbox initialization", () => {
     render(
       <App>
@@ -56,7 +98,10 @@ describe("trajectory preparation phases", () => {
       ...phase,
       id,
       name: "memory.prepare",
-      attributes: { "agent.name": name },
+      attributes: {
+        "agent.name": `internal_${id}`,
+        "agent.display_name": name,
+      },
     });
     const selected = grouped("memory-root", "主智能体");
     const onSelect = vi.fn();

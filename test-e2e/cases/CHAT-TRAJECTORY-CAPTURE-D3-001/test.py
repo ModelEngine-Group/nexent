@@ -206,9 +206,9 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
             return 'leaf-result-' + value
 
     monkeypatch.setattr(module, 'CaptureLeafTool', CaptureLeafTool, raising=False)
-    child = AgentConfig(name='child', agent_id=9, version_no=2, description='Controlled child', model_name='child', max_steps=2,
+    child = AgentConfig(name='child', display_name='通用子智能体', agent_id=9, version_no=2, description='Controlled child', model_name='child', max_steps=2,
                         tools=[ToolConfig(class_name='CaptureLeafTool', name='capture_leaf', source='local', params={})])
-    root = AgentConfig(name='root', agent_id=7, version_no=3, description='Controlled root', model_name='model', max_steps=2,
+    root = AgentConfig(name='root', display_name='通用助手', agent_id=7, version_no=3, description='Controlled root', model_name='model', max_steps=2,
                        tools=[ToolConfig(class_name='ParallelExecutorTool', name='parallel_executor',
                                          source='local', params={})],
                        worker_agents=[child])
@@ -231,7 +231,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         assert len(requests) == 6
     assert len(calls) == 2
     saved = runtime.spans()
-    children = [span for span in saved if span['name'] == 'agent.subagent.child']
+    children = [span for span in saved if attrs(span).get('subagent.invocation_id')]
     assert len(children) == 2
     assert {attrs(span)['input.value'] for span in children} == {'left', 'right'}
     assert len({attrs(span)['subagent.invocation_id'] for span in children}) == 2
@@ -249,6 +249,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     agents = [n for n in nodes.values() if n['kind'] == 'agent' and n['parent_id'] is not None]
     assert len(agents) == 2
     for agent in agents:
+        assert agent['name'] == '通用子智能体'
         assert agent['agent_version_no'] == 2
         assert agent['attributes']['nexent.invocation_id'] == child_invocations[agent['id']]
         assert agent['attributes']['nexent.parent_invocation_id'] == root_invocation
@@ -260,6 +261,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         leaves = [n for n in nodes.values() if n['parent_id'] == executions[0]['id']]
         assert len(leaves) == 1 and leaves[0]['name'] == 'capture_leaf'
     root = next(n for n in nodes.values() if n['parent_id'] is None)
+    assert root['name'] == '通用助手'
     assert root['agent_version_no'] == 3
     assert all(n['agent_version_no'] is None for n in nodes.values() if n['kind'] != 'agent')
     assert root['model_call_count'] == 6 and root['tool_call_count'] == 6
@@ -588,7 +590,7 @@ def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runt
     @capture_preparation
     async def prepare():
         for agent_id, agent_name in [(2, "子智能体"), (1, "主智能体")]:
-            attributes = {"agent.id": str(agent_id), "agent.name": agent_name}
+            attributes = {"agent.id": str(agent_id), "agent.name": f"agent_{agent_id}", "agent.display_name": agent_name}
             for name, inputs in [
                 ("memory.initialize", {"service": "memory"}),
                 ("memory.initialize", {"service": "context"}),
@@ -650,11 +652,12 @@ def test_capture_preparation_phases_survive_authorized_worker_and_cold_read(runt
         grouped = [n for n in phases if n["name"] == "memory.prepare"]
         root = next(n for n in result["nodes"] if n["parent_id"] is None)
         assert len(grouped) == 2 and prepare_node["parent_id"] == root["id"]
-        assert {n["attributes"]["agent.name"] for n in grouped} == {"子智能体", "主智能体"}
+        assert {n["attributes"]["agent.display_name"] for n in grouped} == {"子智能体", "主智能体"}
+        assert {n["attributes"]["agent.name"] for n in grouped} == {"agent_1", "agent_2"}
         for node in grouped:
             assert node["parent_id"] == prepare_node["id"]
             assert root["started_at"] <= node["started_at"]
-            assert node["status"] == (outcome if node["attributes"]["agent.name"] == "子智能体" else "success")
+            assert node["status"] == (outcome if node["attributes"]["agent.display_name"] == "子智能体" else "success")
             body, offset, chunks = node["output"], 0, []
             for _ in range(100):
                 chunk = data(client.get('/trajectory/conversations/123/contents/' + body['content_id'],

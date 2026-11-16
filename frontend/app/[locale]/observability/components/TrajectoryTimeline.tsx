@@ -52,20 +52,20 @@ export function TrajectoryTimeline({
   unavailable?: TrajectoryExecution[];
 }) {
   const { t } = useTranslation();
-  const nodes = useMemo(
-    () =>
-      sourceNodes.some((node) => node.kind === "phase")
-        ? sourceNodes.map((node) =>
-            node.kind === "phase"
-              ? {
-                  ...node,
-                  name: trajectoryNodeName(node, t),
-                }
-              : node
-          )
-        : sourceNodes,
-    [sourceNodes, t]
+  const sourceById = useMemo(
+    () => new Map(sourceNodes.map((node) => [node.id, node])),
+    [sourceNodes]
   );
+  const nodes = useMemo(() => {
+    let changed = false;
+    const localized = sourceNodes.map((node) => {
+      const name = trajectoryNodeName(node, t);
+      if (name === node.name) return node;
+      changed = true;
+      return { ...node, name };
+    });
+    return changed ? localized : sourceNodes;
+  }, [sourceNodes, t]);
   const container = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 800 });
@@ -432,7 +432,7 @@ export function TrajectoryTimeline({
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  onClick={() => onSelect(node)}
+                  onClick={() => onSelect(sourceById.get(node.id) ?? node)}
                 >
                   <NodeIcon kind={node.kind} />
                   <span className="truncate">{node.name}</span>
@@ -453,7 +453,7 @@ export function TrajectoryTimeline({
                 data-round={node.round_no}
                 className="trajectory-time-cell"
                 aria-label={`${node.name}: ${formatMetric(node.duration_ms)} ms`}
-                onClick={() => onSelect(node)}
+                onClick={() => onSelect(sourceById.get(node.id) ?? node)}
               >
                 {bar && (
                   <>

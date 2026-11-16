@@ -71,6 +71,12 @@ function TrajectoryBodyContent({
   useEffect(() => {
     callbacks.current = { onLoaded, onInvalidated };
   }, [onLoaded, onInvalidated]);
+  const awaitingFirstChunk =
+    reference.availability === "available" &&
+    !reference.complete &&
+    !!reference.content_id &&
+    chunk === null;
+  const showLoading = loading || (awaitingFirstChunk && error === null);
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
@@ -174,7 +180,7 @@ function TrajectoryBodyContent({
       void load(current.next);
   };
   return (
-    <section className="trajectory-body" aria-busy={loading}>
+    <section className="trajectory-body" aria-busy={showLoading}>
       <header>
         <button
           aria-expanded={!collapsed}
@@ -196,7 +202,10 @@ function TrajectoryBodyContent({
           <button
             className="trajectory-icon-button"
             aria-label={t("trajectory.copy")}
-            disabled={!text && reference.availability !== "available"}
+            disabled={
+              awaitingFirstChunk ||
+              (!text && reference.availability !== "available")
+            }
             onClick={() => {
               void navigator.clipboard.writeText(formatted).then(
                 () => message.success(t("trajectory.copied")),
@@ -218,64 +227,67 @@ function TrajectoryBodyContent({
             </p>
           ) : (
             <>
-              <div className="trajectory-code-card">
-                <div className="trajectory-code-toolbar">
-                  <span>{mode === "json" ? "JSON" : "TEXT"}</span>
-                  <span
-                    className="trajectory-code-meta"
-                    title={t(
-                      offset === 0 && complete
-                        ? "trajectory.fullContent"
-                        : "trajectory.contentRange",
-                      {
-                        start: offset,
-                        end:
-                          chunk?.next ?? new TextEncoder().encode(text).length,
-                        total: reference.byte_count ?? "—",
-                      }
-                    )}
-                  >
-                    {t("trajectory.characters", {
-                      count: reference.char_count ?? Array.from(text).length,
-                    })}
-                    <button
-                      className="trajectory-icon-button"
-                      aria-label={t(
-                        expanded
-                          ? "trajectory.collapseContent"
-                          : "trajectory.expandContent"
+              {!awaitingFirstChunk && (
+                <div className="trajectory-code-card">
+                  <div className="trajectory-code-toolbar">
+                    <span>{mode === "json" ? "JSON" : "TEXT"}</span>
+                    <span
+                      className="trajectory-code-meta"
+                      title={t(
+                        offset === 0 && complete
+                          ? "trajectory.fullContent"
+                          : "trajectory.contentRange",
+                        {
+                          start: offset,
+                          end:
+                            chunk?.next ??
+                            new TextEncoder().encode(text).length,
+                          total: reference.byte_count ?? "—",
+                        }
                       )}
-                      onClick={() => setExpanded((value) => !value)}
                     >
-                      {expanded ? (
-                        <Minimize2 size={13} />
-                      ) : (
-                        <Maximize2 size={13} />
-                      )}
-                    </button>
-                  </span>
-                </div>
-                <div className="trajectory-code-scroll">
-                  <pre
-                    tabIndex={0}
-                    onScroll={(event) => loadAtBottom(event.currentTarget)}
-                    onWheel={(event) => {
-                      if (event.deltaY > 0) loadAtBottom(event.currentTarget);
-                    }}
-                    className={
-                      expanded
-                        ? "trajectory-body-full"
-                        : "trajectory-body-preview"
-                    }
-                  >
-                    <span className="trajectory-line-numbers" aria-hidden>
-                      {lineNumbers}
+                      {t("trajectory.characters", {
+                        count: reference.char_count ?? Array.from(text).length,
+                      })}
+                      <button
+                        className="trajectory-icon-button"
+                        aria-label={t(
+                          expanded
+                            ? "trajectory.collapseContent"
+                            : "trajectory.expandContent"
+                        )}
+                        onClick={() => setExpanded((value) => !value)}
+                      >
+                        {expanded ? (
+                          <Minimize2 size={13} />
+                        ) : (
+                          <Maximize2 size={13} />
+                        )}
+                      </button>
                     </span>
-                    <code>{formatted || t("trajectory.emptyBody")}</code>
-                  </pre>
+                  </div>
+                  <div className="trajectory-code-scroll">
+                    <pre
+                      tabIndex={0}
+                      onScroll={(event) => loadAtBottom(event.currentTarget)}
+                      onWheel={(event) => {
+                        if (event.deltaY > 0) loadAtBottom(event.currentTarget);
+                      }}
+                      className={
+                        expanded
+                          ? "trajectory-body-full"
+                          : "trajectory-body-preview"
+                      }
+                    >
+                      <span className="trajectory-line-numbers" aria-hidden>
+                        {lineNumbers}
+                      </span>
+                      <code>{formatted || t("trajectory.emptyBody")}</code>
+                    </pre>
+                  </div>
                 </div>
-              </div>
-              {loading && (
+              )}
+              {showLoading && (
                 <div
                   role="status"
                   className="flex items-center gap-2 p-2 text-xs text-gray-500"

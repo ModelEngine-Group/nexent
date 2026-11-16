@@ -76,6 +76,60 @@ def test_grouped_memory_phase_exposes_agent_name_without_changing_node_kind():
     assert memory["parent_id"] == "root" and memory["usage"] is None
 
 
+@pytest.mark.parametrize("display,expected", [
+    (" 通用助手 ", "通用助手"), (None, "general_assistant"),
+    ("   ", "general_assistant"), (7, "general_assistant"),
+])
+def test_agent_node_prefers_captured_display_name(display, expected):
+    nodes, _, _ = build_nodes(request(
+        span("root", **{"agent.name": "general_assistant", "agent.display_name": display}),
+        span("tool", "root", "TOOL", **{"tool.name": "python_interpreter", "agent.display_name": "工具所属智能体"}),
+    ), conversation_id="123")
+    assert nodes[0]["name"] == expected
+    assert nodes[1]["name"] == "python_interpreter"
+
+
+@pytest.mark.parametrize("display,expected", [(None, "通用助手"), ("  ", "通用助手"), ("记忆助手", "记忆助手")])
+def test_memory_name_uses_own_display_or_unique_captured_agent(display, expected):
+    memory = span("memory", "root", "CHAIN", **{
+        "nexent.node.kind": "phase", "agent.id": "7", "agent.name": "general_assistant",
+        "agent.display_name": display,
+    })
+    memory["name"] = "memory.prepare"
+    nodes, _, _ = build_nodes(request(memory, span("root", **{
+        "agent.id": "7", "agent.name": "general_assistant", "agent.display_name": "通用助手",
+    })), conversation_id="123")
+    phase = next(node for node in nodes if node["id"] == "memory")
+    assert phase["attributes"]["agent.display_name"] == expected
+    assert phase["attributes"]["agent.name"] == "general_assistant"
+
+
+def test_legacy_memory_does_not_choose_between_conflicting_captured_names():
+    memory = span("memory", "root", "CHAIN", **{
+        "nexent.node.kind": "phase", "agent.id": "7", "agent.name": "general_assistant",
+    })
+    memory["name"] = "memory.prepare"
+    nodes, _, _ = build_nodes(request(span("root"), memory,
+        span("one", "root", **{"agent.id": "7", "agent.display_name": "名称一"}),
+        span("two", "root", **{"agent.id": "7", "agent.display_name": "名称二"}),
+    ), conversation_id="123")
+    phase = next(node for node in nodes if node["id"] == "memory")
+    assert "agent.display_name" not in phase["attributes"]
+    assert phase["attributes"]["agent.name"] == "general_assistant"
+
+
+def test_legacy_memory_can_use_the_captured_subagent_node_name():
+    memory = span("memory", "root", "CHAIN", **{
+        "nexent.node.kind": "phase", "agent.id": "7", "agent.name": "general_agent",
+    })
+    memory["name"] = "memory.prepare"
+    nodes, _, _ = build_nodes(request(span("root"), memory,
+        span("child", "root", **{"agent.id": "7", "agent.name": "通用子智能体"}),
+    ), conversation_id="123")
+    phase = next(node for node in nodes if node["id"] == "memory")
+    assert phase["attributes"]["agent.display_name"] == "通用子智能体"
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_sandbox_initialization_collapses_internal_phases_and_keeps_code(native):
     def phase(identity, parent, name):

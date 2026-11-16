@@ -272,6 +272,12 @@ async def create_agent_config(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_id, skip_query=not allow_memory_search
     )
+    memory_phase_attributes = {
+        "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
+    }
+    display_name = agent_info.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        memory_phase_attributes["agent.display_name"] = display_name.strip()
 
     # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
@@ -311,7 +317,7 @@ async def create_agent_config(
 
                 with trace_phase(
                     "memory.initialize", input_value={"service": "memory"},
-                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                    attributes=memory_phase_attributes,
                 ) as phase:
                     memory_service = build_memory_service_for_agent(
                         tenant_id=memory_context.tenant_id,
@@ -340,7 +346,7 @@ async def create_agent_config(
 
                 with trace_phase(
                     "memory.initialize", input_value={"service": "context"},
-                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                    attributes=memory_phase_attributes,
                 ) as phase:
                     memory_context_service = get_memory_context_service()
                     if memory_context_service is None:
@@ -389,7 +395,7 @@ async def create_agent_config(
 
                             with trace_phase(
                                 "memory.external_search", input_value={"query": last_user_query or "", "top_k": top_k},
-                                attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                                attributes=memory_phase_attributes,
                             ) as phase:
                                 ext_search_results = (
                                     await provider_service.search_all_enabled(
@@ -431,7 +437,7 @@ async def create_agent_config(
 
                     with trace_phase(
                         "memory.load_context", input_value={"layers": ["tenant", "user"]},
-                        attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                        attributes=memory_phase_attributes,
                     ) as phase:
                         long_term_search_context = (
                             await memory_context_service.build_context(
@@ -512,7 +518,7 @@ async def create_agent_config(
                 fixed_search_tool.external_results = external_results
                 with trace_phase(
                     "memory.presearch", input_value={"query": last_user_query or "", "top_k": 5},
-                    attributes={"agent.id": str(agent_id), "agent.name": agent_info.get("name", "")},
+                    attributes=memory_phase_attributes,
                 ) as phase:
                     fixed_search_result = await run_blocking(
                         "memory-presearch",

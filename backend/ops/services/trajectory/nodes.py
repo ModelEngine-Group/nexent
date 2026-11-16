@@ -106,6 +106,11 @@ def times(span):
     return iso(start), iso(end), duration
 
 
+def _agent_display_name(attrs):
+    value = attrs.get("agent.display_name")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: None):
     spans, fragments, aliases = {}, {}, {}
     capture_gap = False
@@ -160,6 +165,16 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 attrs,
             )
             complete = False
+    captured_names = {}
+    for span, attrs in spans.values():
+        if str(attrs.get("openinference.span.kind", "")).upper() != "AGENT" and not attrs.get("nexent.trajectory.root"):
+            continue
+        agent_id, display_name = attrs.get("agent.id"), _agent_display_name(attrs)
+        legacy_name = attrs.get("agent.name")
+        if not display_name and isinstance(legacy_name, str):
+            display_name = legacy_name.strip()
+        if agent_id is not None and display_name:
+            captured_names.setdefault(str(agent_id), set()).add(display_name)
     nodes = {}
     for key, (span, attrs) in spans.items():
         identity = str(attrs.get("nexent.record_id") or key)
@@ -257,7 +272,8 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
             "display_trace_id": identity,
             "kind": kind,
             "name": str(
-                attrs.get(
+                (_agent_display_name(attrs) if kind == "agent" else "")
+                or attrs.get(
                     {
                         "agent": "agent.name",
                         "model": "llm.model_name",
@@ -316,8 +332,15 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 if f"nexent.availability.{slot}" in attrs
             },
         }
-        if kind == "phase" and span.get("name") == "memory.prepare" and attrs.get("agent.name"):
-            node["attributes"]["agent.name"] = str(attrs["agent.name"])
+        if kind == "phase" and span.get("name") == "memory.prepare":
+            if attrs.get("agent.name"):
+                node["attributes"]["agent.name"] = str(attrs["agent.name"])
+            display_name = _agent_display_name(attrs)
+            candidates = captured_names.get(str(attrs.get("agent.id")), set())
+            if not display_name and len(candidates) == 1:
+                display_name = next(iter(candidates))
+            if display_name:
+                node["attributes"]["agent.display_name"] = display_name
         node["attributes"].update(version_availability)
         nodes[identity] = node
     # Fold sandbox implementation phases only when an initialization ancestor exists.

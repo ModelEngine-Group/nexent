@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { DatePicker, Popover, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { ChevronRight, Clock3, Filter, Search, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Clock3,
+  Filter,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -351,6 +358,15 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
+          <StandardButton
+            aria-label={t("common.refresh")}
+            icon={<RefreshCw size={14} />}
+            loading={records.isFetching}
+            disabled={records.isFetching}
+            onClick={refresh}
+          >
+            {t("common.refresh")}
+          </StandardButton>
           <Tooltip title={tenant ? "" : t("trajectory.scheduleSelectTenant")}>
             <span>
               <StandardButton
@@ -502,15 +518,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
         <div className="trajectory-list-caption">
           <span>
             {t("trajectory.total", { count: records.data?.total ?? 0 })}
-          </span>
-          <span
-            title={
-              records.data
-                ? `${t("trajectory.asOf")}: ${formatTraceTime(records.data.as_of)}`
-                : undefined
-            }
-          >
-            {t("trajectory.retention")}
           </span>
         </div>
         <StandardTable<TrajectoryRecord>

@@ -6933,6 +6933,7 @@
   "trajectory.phases.agent.prepare": "Execution preparation",
   "trajectory.phases.memory.prepare": "Memory preparation",
   "trajectory.phases.code.execute": "Code execution",
+  "trajectory.tools.python_interpreter": "Python interpreter",
   "trajectory.phases.memory.initialize": "Memory initialization",
   "trajectory.phases.memory.external_search": "External memory search",
   "trajectory.phases.memory.load_context": "Long-term memory loading",

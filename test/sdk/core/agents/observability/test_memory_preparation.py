@@ -18,6 +18,7 @@ from .test_phase_capture import local_spans as local_spans
 
 def memory_steps(agent_id, name, *, error=None):
     attributes = {"agent.id": str(agent_id), "agent.name": name}
+    attributes["agent.display_name"] = f"展示{name}"
     for service in ("memory", "context"):
         with trace_phase(
             "memory.initialize", input_value={"service": service}, attributes=attributes
@@ -90,6 +91,7 @@ async def test_memory_preparation_exports_one_node_per_agent(
         assert node.start_time == min(r["started_at_ns"] for r in source)
         assert node.end_time == max(r["finished_at_ns"] for r in source)
         assert node.attributes["nexent.node.kind"] == "phase"
+        assert node.attributes["agent.display_name"] == f"展示{node.attributes['agent.name']}"
         output = json.loads(node.attributes["output.value"])
         assert len(output["steps"]) == 6
         assert [step["name"] for step in output["steps"]].count(

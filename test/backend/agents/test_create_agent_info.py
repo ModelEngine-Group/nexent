@@ -2404,7 +2404,7 @@ class TestCreateAgentConfig:
 
         @contextmanager
         def phase(name, **kwargs):
-            event = {"name": name, "input": kwargs.get("input_value"), "output": None, "error": None}
+            event = {"name": name, "attributes": kwargs.get("attributes"), "input": kwargs.get("input_value"), "output": None, "error": None}
             events.append(event)
             try:
                 yield types.SimpleNamespace(set_output=lambda value: event.update(output=value))
@@ -2425,6 +2425,8 @@ class TestCreateAgentConfig:
             mocks["search_tool"].assert_not_called()
             return
         search = mocks["search_tool"].return_value.forward
+        assert all(event["attributes"]["agent.name"] == "test_agent" for event in events)
+        assert all(event["attributes"]["agent.display_name"] == "知识助手" for event in events)
         search.assert_called_once_with("test query", 5)
         assert [event["name"] for event in events] == [
             "memory.initialize", "memory.initialize", "memory.load_context", "memory.presearch",

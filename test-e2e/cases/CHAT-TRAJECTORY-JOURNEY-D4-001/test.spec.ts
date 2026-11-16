@@ -42,6 +42,9 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   }
   const steps = contract.expectedIds("steps");
   await contract.step(steps[0], async () => {
+    await expect(
+      page.getByText("完整轨迹保留 30 天", { exact: true }),
+    ).toHaveCount(0);
     await expect(page.getByText("当前租户统计", { exact: true })).toBeVisible();
     const statisticsTime = page.getByText(/^统计时间：/);
     const originalStatisticsTime = await statisticsTime.innerText();
@@ -68,7 +71,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       )
       .toBe("query-snapshot");
     await expect(statisticsTime).toHaveText(originalStatisticsTime);
-    await page.getByRole("button", { name: "查询", exact: true }).click();
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
     await expect
       .poll(() =>
         state.records
@@ -77,6 +80,10 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
           ?.searchParams.get("query_id"),
       )
       .toBeNull();
+    expect(
+      state.records.filter((url) => !url.searchParams.has("facet"))
+        .at(-1)?.searchParams.get("page"),
+    ).toBe("1");
   });
   await contract.step(steps[1], async () => {
     await expect(table.getByText("V3", { exact: true })).toBeVisible();
