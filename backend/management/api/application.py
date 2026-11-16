@@ -39,6 +39,7 @@ from management.api.evaluation.evaluation_annotation import (
 )
 from management.api.evaluation.evaluation_set import router as evaluation_set_router
 from management.api.evaluation.evaluator import router as evaluator_router
+from management.api.file.agentos_cleanse import create_file_cleanse_router
 from management.api.file.file_management import (
     file_management_config_router as file_manager_router,
 )
@@ -215,6 +216,7 @@ app.include_router(nl2agent_callback_router)
 app.include_router(workbench_callback_router)
 app.include_router(memory_callback_router)
 app.include_router(create_knowledge_authorization_router())
+app.include_router(create_file_cleanse_router())
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
 app.include_router(conversation_share_router)

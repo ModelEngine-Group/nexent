@@ -7,12 +7,12 @@ from threading import Event
 
 from contracts.agentos_knowledge import CleanseArtifact, ObjectReference
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
+from management.services.file.cleanse_execution import consume_cleanse_once
 from management.services.file.cleanse_executor import CleanseExecutor
 from management.services.file.cleanse_jobs import DATASET
 from management.services.file.cleanse_root import dispatch_ready, serve
 from management.services.file.cleanse_worker import HANDLER
 from management.services.file.knowledge_cleanse_service import KnowledgeCleanseService
-from management.services.file.knowledge_cleanse_worker import consume_knowledge_once
 from nexent.storage.errors import NotFound
 from nexent.storage.models import (
     Comparison,
@@ -85,7 +85,7 @@ def check_execution(queue, row, context):
         finally:
             executor.close()
 
-    assert consume_knowledge_once(
+    assert consume_cleanse_once(
         queue,
         owner_id="worker-proof",
         parser_version="parser-v1",
@@ -104,7 +104,7 @@ def check_execution(queue, row, context):
     )
     assert completed.status == "completed" and completed.artifact == calls[0]
     queue.enqueue(task, context=context())
-    assert consume_knowledge_once(
+    assert consume_cleanse_once(
         queue,
         owner_id="worker-proof",
         parser_version="parser-v1",

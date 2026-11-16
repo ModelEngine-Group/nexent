@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-FILE-CLEANSE-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Admit reverse FileCleanse requests through scoped Management storage
+  description: >-
+    Mount signed submit/inspect/cancel operations with a ten-second total budget.
+    Share existing durable admission with KB cleansing and grant only actor-owned
+    attachment/skill sources or the current run workspace. No parser executes in the API.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001]
+    added: [DPR-FILE-CLEANSE-D3-001]
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Enforce current user/tenant membership and pinned owner/run source scope before reservation.
+    - Preserve stable idempotency, run/job isolation and cancellation without parser execution.
+    - Use reverse body-bound signatures, fixed status/error codes and one bounded HTTP attempt.
+    - Execute both known run/knowledge scopes with existing lease, cancellation and unknown-result rules.
+    - Preserve existing KB authorization, admission and transport behavior after sharing common operations.
+    reason: >-
+      Existing run-job UT uses controlled authorization and existing KB service tests
+      reject run requests. Add actual scoped RecordStore/DAC tests and HTTP transport UT;
+      the new D3 adds actual PostgreSQL transactions and signed TCP HTTP. Preserve all D1.
+    test_selectors:
+    - test/backend/services/test_run_cleanse_service.py
+    - test/backend/services/test_knowledge_cleanse_service.py
+    - test/backend/app/test_agentos_file_cleanse.py
+    - test/backend/infrastructure/test_agentos_knowledge_client.py
+    - test/backend/services/test_knowledge_cleanse_worker.py
+    - test/backend/services/test_cleanse_root.py
+    - test/backend/infrastructure/test_cleanse_dispatch.py
+  notes: >-
+    The Case owns a temporary PostgreSQL container and loopback server, with no external
+    credentials or parser dependency. Run dispatch, all source types, Runtime tool cutover
+    and complete data-process retirement remain required. Queued admission is not execution.

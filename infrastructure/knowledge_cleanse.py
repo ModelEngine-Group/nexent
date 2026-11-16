@@ -15,9 +15,12 @@ from infrastructure.storage.work_queue import KombuWorkQueue, QueueBinding
 
 
 @contextmanager
-def knowledge_cleanse_ports(tenant_id, user_id, *, context):
+def knowledge_cleanse_ports(tenant_id, user_id, *, context, resource_namespaces=None):
     job_scope = StorageScope("management", tenant_id, user_id, {DATASET})
-    resource_scope = StorageScope("management", tenant_id, user_id, set(TABLES))
+    resource_scope = StorageScope(
+        "management", tenant_id, user_id,
+        set(TABLES) if resource_namespaces is None else frozenset(resource_namespaces),
+    )
     engine = record_engine(context)
     jobs = resources = None
     try:

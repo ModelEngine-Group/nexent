@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""System discovery exposes KB scheduling metadata without job payload or writes."""
+"""System discovery exposes known cleansing scopes without payload or writes."""
 
 from contracts.knowledge_cleanse import CLEANSE_DISPATCH_DATASET as DATASET
 from nexent.storage.models import StorageScope
@@ -21,6 +21,7 @@ def bind_cleanse_dispatch(engine):
         "job_id",
         "tenant_id",
         "user_id",
+        "scope_kind",
         "status",
         "lease_until",
         "create_time",
@@ -32,7 +33,7 @@ def bind_cleanse_dispatch(engine):
     projection = (
         select(*(cleanse_jobs.c[name] for name in names))
         .where(
-            cleanse_jobs.c.scope_kind == "knowledge",
+            cleanse_jobs.c.scope_kind.in_(("knowledge", "run")),
             cleanse_jobs.c.reconcile_required.is_(False),
             cleanse_jobs.c.status.in_(("queued", "running")),
         )

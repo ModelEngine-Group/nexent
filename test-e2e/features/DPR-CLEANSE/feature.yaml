@@ -18,4 +18,6 @@ feature:
     description: Structural cleansing uses a process-owned parser and scoped object ports without old task or model repositories.
   - rule_id: DPR-CLEANSE-RULE-05
     description: Management preserves structure and Runtime performs final text/table chunking with the established format algorithms.
+  - rule_id: DPR-CLEANSE-RULE-06
+    description: Reverse FileCleanse admission verifies the signed actor, current membership and source ownership, and preserves run/job isolation.
   required_test_stages: [D3]

@@ -35,6 +35,7 @@ from contracts.agentos import (
     PreparedSkillCreatorRun,
 )
 from contracts.agentos_knowledge import (
+    FileCleanseState,
     KnowledgeFileGrant,
     KnowledgeJobState,
     KnowledgeOperation,
@@ -80,11 +81,20 @@ class AgentOSClient:
         self.runtime_url = runtime_url.rstrip("/")
         self.create_client = create_client
 
+    async def submit_file_cleanse(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.FILE_CLEANSE, payload, user_id, tenant_id, FileCleanseState)
+
+    async def inspect_file_cleanse(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.FILE_CLEANSE_STATUS, payload, user_id, tenant_id, FileCleanseState)
+
+    async def cancel_file_cleanse(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.FILE_CLEANSE_CANCEL, payload, user_id, tenant_id, FileCleanseState)
+
     async def authorize_knowledge(self, payload, user_id, tenant_id):
-        return await self._knowledge_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
+        return await self._record_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
 
     async def authorize_knowledge_search(self, payload, user_id, tenant_id):
-        return await self._knowledge_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
+        return await self._record_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
 
     async def search_knowledge(self, payload, user_id, tenant_id):
         try:
@@ -97,25 +107,29 @@ class AgentOSClient:
             raise RuntimeServiceTimeoutError("AgentOS knowledge search timed out") from error
 
     async def upload_knowledge_file(self, payload, user_id, tenant_id):
-        return await self._knowledge_json(KnowledgeOperation.UPLOAD, payload, user_id, tenant_id, KnowledgeJobState)
+        return await self._record_json(KnowledgeOperation.UPLOAD, payload, user_id, tenant_id, KnowledgeJobState)
 
     async def inspect_knowledge_file(self, payload, user_id, tenant_id):
-        return await self._knowledge_json(KnowledgeOperation.INSPECT, payload, user_id, tenant_id, KnowledgeJobState)
+        return await self._record_json(KnowledgeOperation.INSPECT, payload, user_id, tenant_id, KnowledgeJobState)
 
     async def delete_knowledge_file(self, payload, user_id, tenant_id):
-        return await self._knowledge_json(KnowledgeOperation.DELETE, payload, user_id, tenant_id, KnowledgeJobState)
+        return await self._record_json(KnowledgeOperation.DELETE, payload, user_id, tenant_id, KnowledgeJobState)
 
-    async def _knowledge_json(self, operation, payload, user_id, tenant_id, schema):
+    async def _record_json(self, operation, payload, user_id, tenant_id, schema):
         try:
             async with asyncio.timeout(_KNOWLEDGE_DEADLINE_SECONDS):
                 result = await self._post_json(operation, payload, user_id, tenant_id, timeout=_KNOWLEDGE_TIMEOUT)
                 return self._validate_result(schema, result)
         except (TimeoutError, RuntimeServiceTimeoutError) as exc:
+            event = "agentos_file_cleanse_timeout" if operation in {
+                ManagementOperation.FILE_CLEANSE, ManagementOperation.FILE_CLEANSE_STATUS,
+                ManagementOperation.FILE_CLEANSE_CANCEL,
+            } else "agentos_knowledge_timeout"
             logger.warning(
-                "agentos_knowledge_timeout operation=%s phase=request threshold_seconds=%s exception_type=%s",
-                operation.name, _KNOWLEDGE_DEADLINE_SECONDS, type(exc).__name__,
+                "%s operation=%s phase=request threshold_seconds=%s exception_type=%s",
+                event, operation.name, _KNOWLEDGE_DEADLINE_SECONDS, type(exc).__name__,
             )
-            raise RuntimeServiceTimeoutError("AgentOS knowledge request timed out") from exc
+            raise RuntimeServiceTimeoutError("AgentOS record request timed out") from exc
 
     def _request(self, operation, payload, user_id, tenant_id):
         body = payload.model_dump_json().encode("utf-8")

@@ -405,7 +405,7 @@ try:
                 "backend/management/services/file/cleanse_worker.py",
                 "infrastructure/rdb/cleanse_dispatch.py",
                 "infrastructure/knowledge_cleanse.py",
-                "backend/management/services/file/knowledge_cleanse_worker.py",
+                "backend/management/services/file/cleanse_execution.py",
                 "infrastructure/file_processing/objects.py",
                 "backend/management/services/file/knowledge_cleanse_service.py",
                 "infrastructure/knowledge_cleanse.py",

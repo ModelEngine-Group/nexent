@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
+from contracts.agentos_knowledge import FileCleanseLookup
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup
-from management.services.file import knowledge_cleanse_worker as worker
+from management.services.file import cleanse_execution as worker
 from management.services.file.cleanse_lease import CleanseLeaseGuard
 from management.services.file.cleanse_worker import HANDLER
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
@@ -22,13 +23,15 @@ from test.backend.services.test_cleanse_authorization import (
 from test.backend.services.test_cleanse_jobs import artifact, context
 from test.backend.services.test_cleanse_jobs import setup as setup  # noqa: PLC0414
 from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
+from test.backend.services.test_run_cleanse_service import request as run_request
 
 
-@pytest.fixture
-def prepared(setup, resources, monkeypatch):
+@pytest.fixture(params=["knowledge", "run"])
+def prepared(setup, resources, monkeypatch, request):
     make, _ = setup
     public = make()
-    state = public.submit(knowledge_request(), context=context())
+    reference = knowledge_request() if request.param == "knowledge" else run_request()
+    state = public.submit(reference, context=context())
     _, update, engine, _ = resources
     closed = Mock()
 
@@ -54,12 +57,12 @@ def prepared(setup, resources, monkeypatch):
     )
     lookup = KnowledgeCleanseLookup(
         knowledge_id=1, file_id=state.file_id, file_version=0, job_id=state.job_id
-    )
+    ) if request.param == "knowledge" else FileCleanseLookup(run_id=state.run_id, job_id=state.job_id)
     return public, queue, lookup, update, closed
 
 
 def consume(queue, execute):
-    return worker.consume_knowledge_once(
+    return worker.consume_cleanse_once(
         queue,
         owner_id="worker-pod",
         parser_version="parser-v1",
@@ -141,7 +144,7 @@ def test_default_parser_factory_defers_all_handles_until_child(mocker):
     request = knowledge_request()
     ctx = context()
     tick = Mock()
-    worker.execute_knowledge_cleanse(snapshot, request, tick=tick, context=ctx)
+    worker.execute_cleanse(snapshot, request, tick=tick, context=ctx)
     isolate.call_args.kwargs["tick"](snapshot, context=ctx)
     tick.assert_called_once_with(context=ctx)
     objects.assert_not_called()

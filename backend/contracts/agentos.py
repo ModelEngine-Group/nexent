@@ -777,6 +777,7 @@ class ManagementOperation(str, Enum):
     KNOWLEDGE_SEARCH_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize-search"
     FILE_CLEANSE = NAMESPACE + "v1/file/cleanse"
     FILE_CLEANSE_STATUS = NAMESPACE + "v1/file/cleanse-status"
+    FILE_CLEANSE_CANCEL = NAMESPACE + "v1/file/cleanse-cancel"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"

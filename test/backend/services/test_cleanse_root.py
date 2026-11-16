@@ -38,7 +38,7 @@ def cycle(mocker):
 
     mocker.patch.object(root, "cleanse_dispatch_ports", discovery)
     mocker.patch.object(root, "knowledge_cleanse_queue", queue)
-    consume = mocker.patch.object(root, "consume_knowledge_once", return_value=True)
+    consume = mocker.patch.object(root, "consume_cleanse_once", return_value=True)
     return records, queues, consume, events
 
 

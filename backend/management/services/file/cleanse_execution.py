@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""One scoped KB dispatch, composed without importing the retired task service."""
+"""Scoped run/KB dispatch without importing the retired task service."""
 
+from contracts.agentos_knowledge import FileCleanseLookup, FileCleanseRequest
+from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.cleanse_executor import CleanseExecutor
 from management.services.file.cleanse_jobs import CleanseJobs
@@ -12,6 +14,7 @@ from management.services.file.cleanse_worker import (
     consume_once,
 )
 from management.services.file.process_cleanse_executor import ProcessCleanseExecutor
+from management.services.file.run_cleanse_authorization import RunCleanseAuthorization
 from nexent.storage.errors import InvalidInput, ScopeDenied
 
 from infrastructure.file_processing.objects import bind_cleanse_objects
@@ -19,7 +22,15 @@ from infrastructure.file_processing.parser import DocumentParserRuntime
 from infrastructure.knowledge_cleanse import knowledge_cleanse_ports
 
 
-def execute_knowledge_cleanse(row, request, *, tick, context):
+def _authorization(resources, user_id, reference):
+    if isinstance(reference, (FileCleanseRequest, FileCleanseLookup)):
+        return RunCleanseAuthorization(resources, user_id=user_id)
+    if isinstance(reference, (KnowledgeCleanseRequest, KnowledgeCleanseLookup)):
+        return KnowledgeCleanseAuthorization(resources, user_id=user_id)
+    raise ScopeDenied()
+
+
+def execute_cleanse(row, request, *, tick, context):
     def factory(*, context):
         from contracts.constants import environment
 
@@ -49,12 +60,12 @@ def execute_knowledge_cleanse(row, request, *, tick, context):
     return ProcessCleanseExecutor(factory, tick=renew)(row, request, context=context)
 
 
-def consume_knowledge_once(
+def consume_cleanse_once(
     queue,
     *,
     owner_id,
     parser_version,
-    execute=execute_knowledge_cleanse,
+    execute=execute_cleanse,
     lease_seconds=300,
     max_wait=1,
     context,
@@ -70,17 +81,15 @@ def consume_knowledge_once(
         records,
         resources,
     ):
-        policy = KnowledgeCleanseAuthorization(resources, user_id=owner_id)
+        def authorize_request(reference, *, context):
+            return _authorization(resources, owner_id, reference).authorize(reference, context=context)
+
         jobs = CleanseJobs(
-            records, authorize=policy.authorize, parser_version=parser_version
+            records, authorize=authorize_request, parser_version=parser_version
         )
 
         def authorize(row, request, *, context):
-            if row["scope_kind"] != "knowledge":
-                raise ScopeDenied()
-            return KnowledgeCleanseAuthorization(
-                resources, user_id=row["user_id"]
-            ).authorize_execution(row, request, context=context)
+            return _authorization(resources, row["user_id"], request).authorize_execution(row, request, context=context)
 
         guard = CleanseLeaseGuard(
             jobs, authorize_execution=authorize, lease_seconds=lease_seconds

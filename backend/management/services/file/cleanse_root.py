@@ -10,9 +10,9 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.knowledge_cleanse import CLEANSE_DISPATCH_DATASET, CLEANSE_HANDLER
-from management.services.file.knowledge_cleanse_worker import (
-    consume_knowledge_once,
-    execute_knowledge_cleanse,
+from management.services.file.cleanse_execution import (
+    consume_cleanse_once,
+    execute_cleanse,
 )
 from nexent.storage.errors import InvalidInput, OperationCancelled
 from nexent.storage.models import (
@@ -57,7 +57,7 @@ def dispatch_ready(
     parser_version,
     stop,
     operation_seconds=300,
-    execute=execute_knowledge_cleanse,
+    execute=execute_cleanse,
 ):
     _parameters(owner_id, parser_version, operation_seconds)
     if not callable(execute):
@@ -107,7 +107,7 @@ def dispatch_ready(
                 context=context,
             )
             result["enqueued"] += 1
-            consumed = consume_knowledge_once(
+            consumed = consume_cleanse_once(
                 queue,
                 owner_id=owner_id,
                 parser_version=parser_version,
@@ -127,7 +127,7 @@ def serve(
     parser_version,
     operation_seconds=300,
     poll_seconds=1,
-    execute=execute_knowledge_cleanse,
+    execute=execute_cleanse,
 ):
     _parameters(owner_id, parser_version, operation_seconds)
     _seconds(poll_seconds, 0.01, 30)

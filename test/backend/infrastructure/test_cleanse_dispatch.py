@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Dispatch discovery reveals only pending KB scheduling metadata and cannot write."""
+"""Discovery reveals known cleansing scopes without exposing payload or writes."""
 
 import pytest
 from nexent.storage.errors import InvalidInput, ScopeDenied
@@ -11,11 +11,11 @@ from test.backend.services.test_cleanse_jobs import setup as setup  # noqa: PLC0
 from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
 
 
-def test_discovery_excludes_runs_and_unknown_work_and_hides_payload(setup):
+def test_discovery_includes_known_scopes_but_excludes_unknown_work_and_hides_payload(setup):
     make, _ = setup
     jobs = make()
     ready = jobs.submit(knowledge_request(), context=context())
-    jobs.submit(request(), context=context())
+    run = jobs.submit(request(), context=context())
     uncertain = jobs.submit(
         knowledge_request().model_copy(update={"idempotency_key": "unknown"}),
         context=context(),
@@ -30,7 +30,8 @@ def test_discovery_excludes_runs_and_unknown_work_and_hides_payload(setup):
         rows = records.query(
             DATASET, RecordQuery(), PageRequest(), context=context()
         ).items
-        assert [row["job_id"] for row in rows] == [ready.job_id]
+        assert {row["job_id"] for row in rows} == {ready.job_id, run.job_id}
+        assert {row["scope_kind"] for row in rows} == {"knowledge", "run"}
         assert rows[0]["tenant_id"] == "tenant-a"
         assert "request_payload" not in rows[0] and "artifact" not in rows[0]
         with pytest.raises(InvalidInput):

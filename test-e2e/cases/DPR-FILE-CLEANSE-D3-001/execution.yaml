@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: DPR-FILE-CLEANSE-D3-001
+timeout_seconds: 110
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_reverse_file_cleanse
+acceptance_bindings:
+  AC-01: [test_reverse_file_cleanse]
+  AC-02: [test_reverse_file_cleanse]
+  AC-03: [test_reverse_file_cleanse]
+  AC-04: [test_reverse_file_cleanse]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+# The script owns its database, schema, listener, thread manager and cleanup.

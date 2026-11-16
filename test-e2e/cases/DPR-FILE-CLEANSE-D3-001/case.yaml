@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-FILE-CLEANSE-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-004]
+  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-06]
+  title: Signed reverse FileCleanse admission preserves actor and run scope in PostgreSQL
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual Management HTTP and PostgreSQL admission without using the retired task service.
+  preconditions:
+  - Docker has a cached postgres:15-alpine image and a loopback port is available.
+  - The script owns its database, schema, HTTP server, manager and temporary signing configuration.
+  test_data:
+    resources: One synthetic user/tenant and a pinned actor-owned attachment reference.
+    execution: The source reference is synthetic; this admission Case does not claim object existence or parser execution.
+  steps:
+  - order: 1
+    action: Submit the same signed FileCleanse request twice through AgentOSClient and inspect the persisted task.
+    expected: Both calls return the same queued job; one PostgreSQL row pins the actor, run and source identity.
+  - order: 2
+    action: Reuse the idempotency key with changed content, use another run/user/tenant or source owner, and tamper with the signed body.
+    expected: Conflict and unauthorized scopes are rejected with no extra task reservation or state change.
+  - order: 3
+    action: Cancel twice, then revoke current membership and inspect/cancel again.
+    expected: Cancellation is idempotent and revocation is immediately enforced.
+  - order: 4
+    action: Stop the HTTP server and manager and remove only the uniquely labelled test container and anonymous volume.
+    expected: No owned server, managed execution or container remains.
+  expected_results:
+  - Actual HTTP returns 202 for admission and 200 for lookup/cancel; one stable row retains queued/cancelled state.
+  - Wrong source, actor, run or body never modifies the admitted job or reserves another job.
+  - Duplicate cancellation is stable and revoked actors receive 403.
+  - Owned listeners, tasks, threads, database handles and containers are reclaimed.
+  forbidden_side_effects:
+  - No parser, model, old data-process API, automatic retry or unrelated application database is used.
+  integration_boundary:
+  - Actual Uvicorn HTTP, AgentOS signatures/client, Management service and StorageInterface RecordStore over PostgreSQL.
+  observations:
+  - HTTP statuses, stable job ID, scoped database fields and cleanup receipts.
+  cleanup:
+  - Close the owned server and manager and remove only the exact unique-label container and anonymous volume.
+  acceptance:
+  - id: AC-01
+    description: Actual signed admission and lookup persist one scoped idempotent task.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Scope, source, identity and request-integrity rejection has no additional reservation.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Idempotent cancellation and current membership revocation are enforced.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: All resources created by this proof are reclaimed.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
