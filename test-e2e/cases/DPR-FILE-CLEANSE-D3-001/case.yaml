@@ -5,7 +5,7 @@ case:
   case_id: DPR-FILE-CLEANSE-D3-001
   feature_id: DPR-CLEANSE
   requirement_ids: [DPR-004]
-  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-06]
+  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-06, DPR-CLEANSE-RULE-08]
   title: Signed reverse FileCleanse admission preserves actor and run scope in PostgreSQL
   type: INTEGRATION
   priority: P1
@@ -31,11 +31,15 @@ case:
   - order: 4
     action: Stop the HTTP server and manager and remove only the uniquely labelled test container and anonymous volume.
     expected: No owned server, managed execution or container remains.
+  - order: 5
+    action: Attempt signed release of the queued job, then seed an already-released fixture row and repeat signed release/inspect; repeat release under a wrong run or revoked membership.
+    expected: Queued release is rejected, already-released responses are stable and inspectable, and wrong run/revoked actors are rejected without object access.
   expected_results:
   - Actual HTTP returns 202 for admission and 200 for lookup/cancel; one stable row retains queued/cancelled state.
   - Wrong source, actor, run or body never modifies the admitted job or reserves another job.
   - Duplicate cancellation is stable and revoked actors receive 403.
   - Owned listeners, tasks, threads, database handles and containers are reclaimed.
+  - Release rejects queued work and foreign/revoked scope; an already-released fixture returns the typed confirmation and released lookup state.
   forbidden_side_effects:
   - No parser, model, old data-process API, automatic retry or unrelated application database is used.
   integration_boundary:
@@ -45,6 +49,11 @@ case:
   cleanup:
   - Close the owned server and manager and remove only the exact unique-label container and anonymous volume.
   acceptance:
+  - id: AC-05
+    description: Signed release enforces current authorization and stable released identity without pretending to prove object cleanup in this network-only Case.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
   - id: AC-01
     description: Actual signed admission and lookup persist one scoped idempotent task.
     steps: [1]

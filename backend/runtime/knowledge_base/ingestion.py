@@ -2,7 +2,6 @@
 """Execute an authorized text ingestion attempt without publishing file visibility."""
 
 import asyncio
-import hashlib
 import logging
 import math
 from dataclasses import dataclass
@@ -28,6 +27,7 @@ from nexent.storage.models import (
     VectorRecord,
     WriteOutcome,
 )
+from nexent.storage.objects import read_verified_object
 from pydantic import ValidationError
 from runtime.knowledge_base.chunking import chunk_text
 
@@ -54,35 +54,6 @@ def _scope(port, actor, namespace):
         or namespace not in scope.namespaces
     ):
         raise ScopeDenied()
-
-
-def _read(objects, reference, limit, context):
-    context.remaining()
-    ref = ObjectRef(reference.space, reference.key, Revision(reference.version))
-    metadata = objects.stat(ref, context=context)
-    if (
-        metadata.ref != ref
-        or type(metadata.size) is not int
-        or not 0 <= metadata.size <= limit
-        or metadata.sha256 not in {None, reference.sha256}
-    ):
-        raise InvalidInput()
-    parts, size = [], 0
-    with objects.open_read(ref, context=context) as stream:
-        while True:
-            context.remaining()
-            part = stream.read(min(1024 * 1024, limit - size + 1))
-            if not part:
-                break
-            size += len(part)
-            if size > limit:
-                raise InvalidInput()
-            parts.append(part)
-    context.remaining()
-    content = b"".join(parts)
-    if size != metadata.size or hashlib.sha256(content).hexdigest() != reference.sha256:
-        raise InvalidInput()
-    return content
 
 
 def embedding_vectors(output, count, dimensions):
@@ -270,10 +241,11 @@ class KnowledgeIngestor:
         json_source = None
         if filename.lower().endswith(".json"):
             json_source = await self._blocking(
-                _read,
+                read_verified_object,
                 self.objects,
-                source,
-                self.max_source_bytes,
+                ObjectRef(source.space, source.key, Revision(source.version)),
+                sha256=source.sha256,
+                limit=self.max_source_bytes,
                 context=context,
             )
 
@@ -346,8 +318,10 @@ class KnowledgeIngestor:
         return IngestedChunks(tuple(keys), expected.revision)
 
     def _artifact(self, request, source, *, context):
-        content = _read(
-            self.objects, request.artifact, self.max_artifact_bytes, context
+        reference = request.artifact
+        content = read_verified_object(
+            self.objects, ObjectRef(reference.space, reference.key, Revision(reference.version)),
+            sha256=reference.sha256, limit=self.max_artifact_bytes, context=context,
         )
         try:
             artifact = CleanseArtifact.model_validate_json(content)

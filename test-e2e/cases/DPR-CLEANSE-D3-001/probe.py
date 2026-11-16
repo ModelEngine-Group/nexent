@@ -398,6 +398,7 @@ try:
         "knowledge_worker_and_partitioned_artifact": True,
         "dispatch_root_stop_and_crash_fence": True,
         "run_artifacts_isolated": True,
+        "run_artifacts_released": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
@@ -409,6 +410,10 @@ try:
                 "backend/management/services/file/cleanse_execution.py",
                 "backend/management/services/file/cleanse_executor.py",
                 "backend/management/services/file/cleanse.py",
+                "backend/management/services/file/cleanse_release.py",
+                "backend/management/services/file/run_cleanse_service.py",
+                "infrastructure/file_processing/artifacts.py",
+                "sdk/nexent/storage/objects.py",
                 "backend/contracts/agentos_knowledge.py",
                 "infrastructure/file_processing/objects.py",
                 "backend/management/services/file/knowledge_cleanse_service.py",

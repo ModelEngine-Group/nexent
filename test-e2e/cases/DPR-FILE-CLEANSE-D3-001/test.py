@@ -27,7 +27,7 @@ def test_reverse_file_cleanse(record_property):
     assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads(result.stdout.splitlines()[-1])
     for key in ("scoped_admission", "identity_denial", "idempotent_cancel", "live_revocation",
-                "source_pinned", "owned_cleanup"):
+                "source_pinned", "owned_cleanup", "signed_release"):
         assert evidence[key] is True
     assert evidence["pg_rows"] == 1
     record_property("file_cleanse_probe", json.dumps(evidence, sort_keys=True))

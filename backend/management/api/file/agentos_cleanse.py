@@ -58,4 +58,8 @@ def create_file_cleanse_router(service=None):
     async def cancel(request: Request):
         return await dispatch(request, ManagementOperation.FILE_CLEANSE_CANCEL, FileCleanseLookup, service.cancel, 200)
 
+    @router.post(ManagementOperation.FILE_CLEANSE_RELEASE.value, include_in_schema=False)
+    async def release(request: Request):
+        return await dispatch(request, ManagementOperation.FILE_CLEANSE_RELEASE, FileCleanseLookup, service.release, 200)
+
     return router

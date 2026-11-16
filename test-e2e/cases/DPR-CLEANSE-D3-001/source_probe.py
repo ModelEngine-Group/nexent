@@ -287,8 +287,8 @@ def check_source_publication(engine, port, context, queue, redis_url):
                 and row["source_sha256"] == source.sha256
             )
             assert lost.writes == 2
-            check_execution(queue, row, context)
-            check_run_outputs(queue, context)
+            kb_artifact = check_execution(queue, row, context)
+            check_run_outputs(queue, context, kb_artifact)
             with engine.begin() as conn:
                 conn.execute(
                     TenantConfig.__table__.insert().values(

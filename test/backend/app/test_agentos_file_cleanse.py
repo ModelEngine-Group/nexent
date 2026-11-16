@@ -9,6 +9,7 @@ import pytest
 from contracts.agentos import ManagementOperation
 from contracts.agentos_knowledge import (
     FileCleanseLookup,
+    FileCleanseReleased,
     FileCleanseState,
     KnowledgeOperation,
 )
@@ -62,11 +63,24 @@ async def test_client_uses_signed_submit_inspect_cancel(endpoint):
         assert 0 < action.call_args.kwargs["context"].remaining() <= 10
 
 
-@pytest.mark.parametrize("changed,expected", [("body", 401), ("audience", 401), ("operation", 401), ("query", 400), ("large", 413)])
-async def test_invalid_signed_request_has_no_job_side_effect(endpoint, changed, expected):
+async def test_signed_release_returns_a_typed_confirmation(endpoint):
     client, service, _ = endpoint
-    operation = ManagementOperation.FILE_CLEANSE
-    body = request().model_dump_json().encode()
+    lookup = FileCleanseLookup(run_id="a" * 32, job_id="c" * 32)
+    service.release.return_value = FileCleanseReleased(**lookup.model_dump())
+    receipt = await client.release_file_cleanse(lookup, "user-a", "tenant-a")
+    assert receipt == FileCleanseReleased(**lookup.model_dump())
+    service.release.assert_called_once()
+    assert service.statuses == [200]
+    assert service.release.call_args.kwargs["user_id"] == "user-a"
+    assert service.release.call_args.kwargs["tenant_id"] == "tenant-a"
+
+
+@pytest.mark.parametrize("changed,expected", [("body", 401), ("audience", 401), ("operation", 401), ("query", 400), ("large", 413)])
+@pytest.mark.parametrize("operation", [ManagementOperation.FILE_CLEANSE, ManagementOperation.FILE_CLEANSE_RELEASE])
+async def test_invalid_signed_request_has_no_job_side_effect(endpoint, changed, expected, operation):
+    client, service, _ = endpoint
+    payload = request() if operation == ManagementOperation.FILE_CLEANSE else FileCleanseLookup(run_id="a" * 32, job_id="c" * 32)
+    body = payload.model_dump_json().encode()
     signed_operation = KnowledgeOperation.UPLOAD if changed == "audience" else (
         ManagementOperation.FILE_CLEANSE_STATUS if changed == "operation" else operation
     )
@@ -78,6 +92,7 @@ async def test_invalid_signed_request_has_no_job_side_effect(endpoint, changed, 
                                    content=body, headers={"Authorization": "Bearer " + token})
     assert response.status_code == expected
     service.submit.assert_not_called()
+    service.release.assert_not_called()
 
 
 async def test_denied_scope_maps_to_file_error_without_private_details(endpoint):
@@ -91,7 +106,8 @@ async def test_denied_scope_maps_to_file_error_without_private_details(endpoint)
     assert response.status_code == 403 and response.json() == {"code": "FILE_CLEANSE_FORBIDDEN"}
 
 
-async def test_total_client_deadline_cancels_one_request_and_closes_once(mocker, caplog):
+@pytest.mark.parametrize("action", ["submit_file_cleanse", "release_file_cleanse"])
+async def test_total_client_deadline_cancels_one_request_and_closes_once(mocker, caplog, action):
     mocker.patch.object(environment, "JWT_SECRET", "synthetic-cleanse-signature")
     mocker.patch("infrastructure.agentos_client._KNOWLEDGE_DEADLINE_SECONDS", 0.01)
     cancelled = []
@@ -115,7 +131,8 @@ async def test_total_client_deadline_cancels_one_request_and_closes_once(mocker,
     factory = MagicMock(return_value=http)
     client = AgentOSClient("http://private.invalid", factory)
     with pytest.raises(RuntimeServiceTimeoutError):
-        await client.submit_file_cleanse(request(), "user-a", "tenant-a")
+        payload = request() if action == "submit_file_cleanse" else FileCleanseLookup(run_id="a" * 32, job_id="c" * 32)
+        await getattr(client, action)(payload, "user-a", "tenant-a")
     assert cancelled == [True]
     http.post.assert_awaited_once()
     http.aclose.assert_awaited_once()
@@ -125,7 +142,8 @@ async def test_total_client_deadline_cancels_one_request_and_closes_once(mocker,
     assert not any(row.levelname == "ERROR" for row in caplog.records)
 
 
-async def test_receiver_deadline_cancels_record_action_once(endpoint, mocker, caplog):
+@pytest.mark.parametrize("action", ["submit_file_cleanse", "release_file_cleanse"])
+async def test_receiver_deadline_cancels_record_action_once(endpoint, mocker, caplog, action):
     client, service, _ = endpoint
     mocker.patch.object(agentos_cleanse, "_DEADLINE_SECONDS", 0.01)
     cancelled = []
@@ -138,7 +156,8 @@ async def test_receiver_deadline_cancels_record_action_once(endpoint, mocker, ca
 
     work = mocker.patch.object(agentos_cleanse, "run_blocking", side_effect=stalled)
     with pytest.raises(RuntimeUpstreamError) as captured:
-        await client.submit_file_cleanse(request(), "user-a", "tenant-a")
+        payload = request() if action == "submit_file_cleanse" else FileCleanseLookup(run_id="a" * 32, job_id="c" * 32)
+        await getattr(client, action)(payload, "user-a", "tenant-a")
     assert captured.value.status_code == 504
     assert captured.value.content == b'{"code":"FILE_CLEANSE_TIMEOUT"}'
     assert cancelled == [True]

@@ -778,6 +778,7 @@ class ManagementOperation(str, Enum):
     FILE_CLEANSE = NAMESPACE + "v1/file/cleanse"
     FILE_CLEANSE_STATUS = NAMESPACE + "v1/file/cleanse-status"
     FILE_CLEANSE_CANCEL = NAMESPACE + "v1/file/cleanse-cancel"
+    FILE_CLEANSE_RELEASE = NAMESPACE + "v1/file/cleanse-release"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"

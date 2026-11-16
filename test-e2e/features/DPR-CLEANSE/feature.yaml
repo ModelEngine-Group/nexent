@@ -22,4 +22,6 @@ feature:
     description: Reverse FileCleanse admission verifies the signed actor, current membership and source ownership, and preserves run/job isolation.
   - rule_id: DPR-CLEANSE-RULE-07
     description: Temporary run artifacts and images belong to the admitted run/job; KB object keys remain unchanged.
+  - rule_id: DPR-CLEANSE-RULE-08
+    description: Release verifies and exclusively removes only confirmed completed run outputs, retaining source objects and unknown-outcome fencing.
   required_test_stages: [D3]

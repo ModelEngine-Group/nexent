@@ -73,7 +73,7 @@ def test_filename_must_be_a_basename(api, filename):
         service.submit(request(filename=filename), tenant_id="tenant-a", user_id="user-a", context=context())
 
 
-@pytest.mark.parametrize("operation", ["submit", "inspect", "cancel"])
+@pytest.mark.parametrize("operation", ["submit", "inspect", "cancel", "release"])
 @pytest.mark.parametrize("revoked", ["cleanse_memberships", "cleanse_accounts"])
 def test_revoked_identity_is_checked_for_each_operation(api, operation, revoked):
     service, update, _ = api
@@ -88,7 +88,7 @@ def test_revoked_identity_is_checked_for_each_operation(api, operation, revoked)
 def test_other_actor_cannot_inspect_or_cancel(api, user, tenant):
     service, _, _ = api
     state = service.submit(request(), tenant_id="tenant-a", user_id="user-a", context=context())
-    for operation in ("inspect", "cancel"):
+    for operation in ("inspect", "cancel", "release"):
         with pytest.raises((ScopeDenied, NotFound)):
             getattr(service, operation)(lookup(state), tenant_id=tenant, user_id=user, context=context())
 
@@ -97,7 +97,7 @@ def test_same_actor_cannot_cross_run_or_change_an_idempotent_request(api):
     service, _, _ = api
     args = {"tenant_id": "tenant-a", "user_id": "user-a", "context": context()}
     state = service.submit(request(), **args)
-    for operation in ("inspect", "cancel"):
+    for operation in ("inspect", "cancel", "release"):
         with pytest.raises(NotFound):
             getattr(service, operation)(lookup(state, run_id="c" * 32), **args)
     with pytest.raises(Conflict):

@@ -62,6 +62,7 @@ def test_durable_cleanse_dispatch(record_property):
         "knowledge_worker_and_partitioned_artifact",
         "dispatch_root_stop_and_crash_fence",
         "run_artifacts_isolated",
+        "run_artifacts_released",
     ):
         assert evidence[key] is True, key
     record_property("cleanse_job_probe", json.dumps(evidence, sort_keys=True))

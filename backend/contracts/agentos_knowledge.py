@@ -234,7 +234,11 @@ class CleanseResult(Contract):
 
 
 class FileCleanseState(FileCleanseLookup, CleanseResult):
-    pass
+    status: Literal["queued", "running", "completed", "failed", "cancelled", "released"]
+
+
+class FileCleanseReleased(FileCleanseLookup):
+    released: Literal[True] = True
 
 
 class KnowledgeOperation(str, Enum):

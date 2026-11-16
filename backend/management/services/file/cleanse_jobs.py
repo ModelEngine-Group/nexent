@@ -64,6 +64,8 @@ class CleanseJobs:
 
     @staticmethod
     def state(row):
+        if row["status"] == "completed" and row["reconcile_required"]:
+            raise Conflict()
         return cleanse_state(row)
 
     def _find(self, where, context):
@@ -154,8 +156,59 @@ class CleanseJobs:
         return self.state(existing)
 
     def inspect(self, lookup, *, context):
+        return self.state(self.record(lookup, context=context))
+
+    def record(self, lookup, *, context):
         self.authorize(lookup, context=context)
-        return self.state(self._find(self._owned(lookup), context))
+        return self._find(self._owned(lookup), context)
+
+    def begin_release(self, lookup, *, revision, context):
+        if not isinstance(lookup, FileCleanseLookup):
+            raise InvalidInput()
+        self.authorize(lookup, context=context)
+        with self.records.transaction(context=context) as tx:
+            rows = tx.claim(
+                DATASET,
+                RecordQuery(where=both(
+                    self._owned(lookup),
+                    Comparison("revision", "eq", revision),
+                    Comparison("status", "eq", "completed"),
+                    Comparison("reconcile_required", "eq", False),
+                )),
+                FieldPatch(set_values={
+                    "reconcile_required": True,
+                    "error_code": "FILE_CLEANSE_RELEASING",
+                }),
+                limit=1,
+                context=context,
+            )
+            if not rows:
+                raise Conflict()
+            return tx.get(DATASET, rows[0]["id"], context=context)
+
+    def finish_release(self, handle, *, context):
+        lookup = FileCleanseLookup(run_id=handle["run_id"], job_id=handle["job_id"])
+        with self.records.transaction(context=context) as tx:
+            rows = tx.claim(
+                DATASET,
+                RecordQuery(where=both(
+                    self._owned(lookup),
+                    Comparison("revision", "eq", handle["revision"]),
+                    Comparison("status", "eq", "completed"),
+                    Comparison("reconcile_required", "eq", True),
+                    Comparison("error_code", "eq", "FILE_CLEANSE_RELEASING"),
+                )),
+                FieldPatch(set_values={
+                    "status": "released",
+                    "artifact": None,
+                    "reconcile_required": False,
+                    "error_code": None,
+                }),
+                limit=1,
+                context=context,
+            )
+            if not rows:
+                raise Conflict()
 
     def cancel(self, lookup, *, context):
         self.authorize(lookup, context=context)

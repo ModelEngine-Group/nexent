@@ -14,7 +14,7 @@ from management.services.file.cleanse_execution import consume_cleanse_once
 from management.services.file.cleanse_executor import CleanseExecutor
 from management.services.file.cleanse_worker import HANDLER
 from management.services.file.run_cleanse_service import FileCleanseService
-from nexent.storage.errors import ScopeDenied
+from nexent.storage.errors import NotFound, ScopeDenied
 from nexent.storage.models import ObjectRef, Revision, StorageScope, TaskEnvelope
 
 from infrastructure.file_processing.objects import bind_cleanse_objects
@@ -37,7 +37,7 @@ class Parser:
         )
 
 
-def check_run_outputs(queue, context):
+def check_run_outputs(queue, context, kb_artifact):
     environment = _configured_environment()
     content = b"identical run source"
     inputs = bind_source_objects(
@@ -66,7 +66,7 @@ def check_run_outputs(queue, context):
             sha256=original.sha256,
         )
         api = FileCleanseService(parser_version="parser-v1")
-        calls, manifests, image_keys = [], [], []
+        calls, manifests, image_keys, lookups = [], [], [], []
 
         def execute(row, request, *, tick, context):
             tick(context=context)
@@ -158,9 +158,24 @@ def check_run_outputs(queue, context):
             assert hashlib.sha256(image_data).hexdigest() == image.sha256
             manifests.append(ref.key)
             image_keys.append(image.key)
+            lookups.append(lookup)
         assert len(set(calls)) == len(set(manifests)) == len(set(image_keys)) == 3
+        for lookup in lookups:
+            assert api.release(lookup, tenant_id="tenant-a", user_id="user-a", context=context()).released
+            assert api.release(lookup, tenant_id="tenant-a", user_id="user-a", context=context()).released
+            assert api.inspect(lookup, tenant_id="tenant-a", user_id="user-a", context=context()).status == "released"
+        for key in manifests + image_keys:
+            try:
+                reader.stat(ObjectRef("files", key), context=context())
+            except NotFound:
+                pass
+            else:
+                raise AssertionError("released run output remains readable")
         with inputs.open_read(original.ref, context=context()) as stream:
             assert stream.read() == content
+        with reader.open_read(ObjectRef(kb_artifact.space, kb_artifact.key,
+            Revision(kb_artifact.version)), context=context()) as stream:
+            assert hashlib.sha256(stream.read()).hexdigest() == kb_artifact.sha256
     finally:
         reader.close()
         inputs.close()

@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-FILE-RELEASE-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Release confirmed run cleansing outputs through signed AgentOS
+  description: >-
+    Verify and release only an exclusively reserved completed run job's private
+    artifacts, retain its released terminal identity and never delete its source.
+    Unknown outcomes keep the existing reconciliation marker without automatic retries.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [DPR-CLEANSE-D3-001, DPR-FILE-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Bounded verified reads reject wrong revision, size and digest and always close streams.
+    - Release reserves only the current actor's completed run job by revision before touching objects.
+    - Verify the whole private manifest and images before deleting images then manifest; retain sources.
+    - Partial or unknown outcomes remain quarantined; repeated release cannot repeat writes.
+    - Released jobs remain inspectable and idempotent; KB states and output keys stay unchanged.
+    - Release uses signed HTTP and a single attempt within the existing total ten-second deadline.
+    reason: >-
+      Existing UT proves admission and object publication but not release. Add scoped
+      service/port tests and reuse actual storage and signed-network D3 boundaries.
+      Preserve all existing D1; no separate unit-like D1 is added.
+    test_selectors:
+    - test/backend/services/test_file_cleanse_release.py
+    - test/backend/app/test_agentos_file_cleanse.py
+    - test/backend/infrastructure/test_cleanse_artifacts.py
+    - test/sdk/storage/test_object_reads.py
+    - test/backend/services/test_knowledge_ingestion.py
+  notes: >-
+    DPR-CLEANSE-D3-001 proves actual PG/MinIO deletion after production worker completion.
+    DPR-FILE-CLEANSE-D3-001 proves queued-release denial and signed idempotent release
+    of a controlled already-released PG row, not parser or object deletion.
+    Both Cases own exact-label temporary resources and cleanup. Runtime tool migration remains open.

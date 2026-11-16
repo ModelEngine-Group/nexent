@@ -35,6 +35,7 @@ from contracts.agentos import (
     PreparedSkillCreatorRun,
 )
 from contracts.agentos_knowledge import (
+    FileCleanseReleased,
     FileCleanseState,
     KnowledgeFileGrant,
     KnowledgeJobState,
@@ -90,6 +91,9 @@ class AgentOSClient:
     async def cancel_file_cleanse(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.FILE_CLEANSE_CANCEL, payload, user_id, tenant_id, FileCleanseState)
 
+    async def release_file_cleanse(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.FILE_CLEANSE_RELEASE, payload, user_id, tenant_id, FileCleanseReleased)
+
     async def authorize_knowledge(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
 
@@ -123,7 +127,7 @@ class AgentOSClient:
         except (TimeoutError, RuntimeServiceTimeoutError) as exc:
             event = "agentos_file_cleanse_timeout" if operation in {
                 ManagementOperation.FILE_CLEANSE, ManagementOperation.FILE_CLEANSE_STATUS,
-                ManagementOperation.FILE_CLEANSE_CANCEL,
+                ManagementOperation.FILE_CLEANSE_CANCEL, ManagementOperation.FILE_CLEANSE_RELEASE,
             } else "agentos_knowledge_timeout"
             logger.warning(
                 "%s operation=%s phase=request threshold_seconds=%s exception_type=%s",

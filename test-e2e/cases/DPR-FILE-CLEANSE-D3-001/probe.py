@@ -136,11 +136,12 @@ def main(run_id):
 
                 await rejected(client.submit_file_cleanse, request.model_copy(update={"filename": "changed.txt"}),
                                "user-a", "tenant-a", 409)
+                await rejected(client.release_file_cleanse, lookup, "user-a", "tenant-a", 409)
                 await rejected(client.submit_file_cleanse, request.model_copy(update={
                     "source": request.source.model_copy(update={"key": "attachments/user-b/source.txt"}),
                 }), "user-a", "tenant-a", 403)
                 for user, tenant in (("user-b", "tenant-a"), ("user-a", "tenant-b")):
-                    for operation in (client.inspect_file_cleanse, client.cancel_file_cleanse):
+                    for operation in (client.inspect_file_cleanse, client.cancel_file_cleanse, client.release_file_cleanse):
                         await rejected(operation, lookup, user, tenant, 403)
                 await rejected(client.inspect_file_cleanse, lookup.model_copy(update={"run_id": "c" * 32}),
                                "user-a", "tenant-a", 404)
@@ -162,11 +163,20 @@ def main(run_id):
                     )
                     assert row["request_payload"] == request.model_dump(mode="json")
                     assert row["status"] == "cancelled" and row["artifact"] is None
+                    # Controlled released fixture proves protocol replay, not physical deletion.
+                    connection.execute(cleanse_jobs.update().where(cleanse_jobs.c.id == row["id"]).values(status="released"))
+                receipt = await client.release_file_cleanse(lookup, "user-a", "tenant-a")
+                assert receipt.released and receipt.job_id == lookup.job_id and receipt.run_id == lookup.run_id
+                assert await client.release_file_cleanse(lookup, "user-a", "tenant-a") == receipt
+                assert (await client.inspect_file_cleanse(lookup, "user-a", "tenant-a")).status == "released"
+                await rejected(client.release_file_cleanse, lookup.model_copy(update={"run_id": "c" * 32}), "user-a", "tenant-a", 404)
+                with engine.begin() as connection:
                     connection.execute(UserTenant.__table__.update().values(delete_flag="Y"))
-                for operation in (client.inspect_file_cleanse, client.cancel_file_cleanse):
+                for operation in (client.inspect_file_cleanse, client.cancel_file_cleanse, client.release_file_cleanse):
                     await rejected(operation, lookup, "user-a", "tenant-a", 403)
                 evidence.update(scoped_admission=True, identity_denial=True, idempotent_cancel=True,
-                                live_revocation=True, pg_rows=1, source_pinned=True, http_statuses=statuses)
+                                live_revocation=True, pg_rows=1, source_pinned=True, http_statuses=statuses,
+                                signed_release=True)
             finally:
                 server.should_exit = True
                 await asyncio.wait_for(serving, timeout=5)

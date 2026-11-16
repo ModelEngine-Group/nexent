@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_reverse_file_cleanse]
   AC-03: [test_reverse_file_cleanse]
   AC-04: [test_reverse_file_cleanse]
+  AC-05: [test_reverse_file_cleanse]
 preparation:
   families: []
   anchors: false

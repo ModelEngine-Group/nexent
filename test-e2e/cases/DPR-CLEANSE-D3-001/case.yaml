@@ -5,7 +5,7 @@ case:
   case_id: DPR-CLEANSE-D3-001
   feature_id: DPR-CLEANSE
   requirement_ids: [DPR-001]
-  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-02, DPR-CLEANSE-RULE-03, DPR-CLEANSE-RULE-07]
+  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-02, DPR-CLEANSE-RULE-03, DPR-CLEANSE-RULE-07, DPR-CLEANSE-RULE-08]
   title: Durable cleansing admission and fenced dispatch over PostgreSQL and Redis
   type: INTEGRATION
   priority: P1
@@ -68,6 +68,9 @@ case:
   - order: 16
     action: Execute three run jobs over identical pinned source bytes, including two jobs in one run, using production worker/object composition and controlled text/image parsing.
     expected: Each completed manifest and image has its own admitted run/job prefix and confirmed hash/revision; another job cannot write that prefix and the source remains unchanged.
+  - order: 17
+    action: Release each completed run through production service/object composition, repeat the release and inspect all private output keys and the original source.
+    expected: Images and manifests are absent, all run jobs retain released state, duplicate release performs no new cleanup, and the source and KB output remain readable.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -85,6 +88,7 @@ case:
   - Production KB worker composition preserves ownership, durable completion, deduplication and tenant-partitioned cleansing artifacts.
   - Production root discovery and tenant queue composition stop cleanly and fence crashed execution until reconciliation.
   - Identical sources produce disjoint run/job artifact and image keys without changing KB output paths.
+  - Confirmed private output deletion retains durable released identities, source bytes and KB objects.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
@@ -94,6 +98,11 @@ case:
   cleanup:
   - Delete only test-owned containers by their returned IDs including anonymous volumes.
   acceptance:
+  - id: AC-15
+    description: Actual release removes only completed run outputs and preserves source/KB objects and an idempotent released identity.
+    steps: [17]
+    expected_results: [17]
+    forbidden_side_effects: [1]
   - id: AC-14
     description: Actual run cleansing retains immutable sources and isolates temporary artifact/image writes by admitted run and job.
     steps: [16]

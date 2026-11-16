@@ -236,3 +236,4 @@ def check_execution(queue, row, context):
                     raise AssertionError("output object escaped its tenant partition")
         finally:
             objects.close()
+    return completed.artifact
