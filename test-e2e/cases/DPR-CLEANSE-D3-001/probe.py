@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
@@ -39,6 +40,31 @@ from nexent.storage.models import (
 from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
 from infrastructure.redis.kv import RedisKeyValueConfig, RedisKeyValueStore
 from infrastructure.storage.work_queue import KombuWorkQueue, QueueBinding
+
+
+def diagnostic_exception(kind, error, trace):
+    """Retain safe cause types/locations even when storage intentionally hides details."""
+    cause, seen = error, set()
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        locations = [
+            (frame.name, frame.lineno)
+            for frame in traceback.extract_tb(cause.__traceback__)
+        ]
+        print(
+            "probe_failure_cause",
+            type(cause).__module__,
+            type(cause).__name__,
+            getattr(cause, "errno", None),
+            getattr(cause, "winerror", None),
+            locations[-4:],
+            file=sys.stderr,
+        )
+        cause = cause.__context__
+    sys.__excepthook__(kind, error, trace)
+
+
+sys.excepthook = diagnostic_exception
 
 
 def docker(*args):
