@@ -1123,7 +1123,9 @@ def list_skill_repository_listings_impl(
     if include_installations:
         from management.services.repository.skill_installations import get_installation_states
         installation_info = get_installation_states(
-            [record["skill_repository_id"] for record in result.get("items", [])], tenant_id, user_id, user_role)
+            [record["skill_repository_id"] for record in result.get("items", [])], tenant_id, user_id, user_role,
+            source_skill_ids={record["skill_repository_id"]: record["skill_id"]
+                              for record in result.get("items", []) if record.get("skill_id") is not None})
 
     return {
         "items": [

@@ -655,6 +655,10 @@ def branch_conversation(
             "chat_mode": conversation.chat_mode,
             "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
             "runtime_metadata_version": 1,
+            "selected_model_id": getattr(conversation, "selected_model_id", None),
+            "model_parameter_preferences": deepcopy(
+                getattr(conversation, "model_parameter_preferences", None) or {}
+            ),
         }
         # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
         # value null (not SQL NULL), and agent-chat history filters on

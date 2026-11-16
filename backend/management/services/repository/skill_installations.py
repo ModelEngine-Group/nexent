@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Batch installation projections based only on user-visible Skill copies."""
+"""Batch installation projections for visible Skill copies and published sources."""
 
 from sqlalchemy import and_, or_, select
 
@@ -13,8 +13,13 @@ from management.services.skill.permission import can_view_skill, resolve_skill_p
 from management.utils.serialization import convert_string_to_list
 
 
-def installation_states(repository_ids: list[int], visible: list[dict]) -> dict:
+def installation_states(
+    repository_ids: list[int], visible: list[dict], source_skill_ids: dict[int, int] | None = None
+) -> dict:
     copies = {str(repository_id): [] for repository_id in repository_ids}
+    visible_ids = {str(skill["skill_id"]) for skill in visible}
+    owned = {str(repository_id) for repository_id, skill_id in (source_skill_ids or {}).items()
+             if str(skill_id) in visible_ids}
     unknown = False
     for skill in visible:
         source_id = skill.get("source_repository_id")
@@ -24,11 +29,14 @@ def installation_states(repository_ids: list[int], visible: list[dict]) -> dict:
             copies[str(source_id)].append({"skill_id": skill["skill_id"], "name": skill["name"],
                                           "can_uninstall": skill.get("permission") == "EDIT"})
     return {key: {"installed_copies": value,
-                  "installation_state": "installed" if value else "unknown" if unknown else "not_installed"}
+                  "installation_state": "installed" if value or key in owned else "unknown" if unknown else "not_installed"}
             for key, value in copies.items()}
 
 
-def get_installation_states(repository_ids: list[int], tenant_id: str, user_id: str, role: str) -> dict:
+def get_installation_states(
+    repository_ids: list[int], tenant_id: str, user_id: str, role: str,
+    *, source_skill_ids: dict[int, int] | None = None,
+) -> dict:
     if not repository_ids:
         return {}
     groups = set(query_group_ids_by_user(user_id) or [])
@@ -38,6 +46,7 @@ def get_installation_states(repository_ids: list[int], tenant_id: str, user_id: 
             SkillInfo.ingroup_permission).where(
                 SkillInfo.tenant_id == tenant_id, SkillInfo.delete_flag != "Y",
                 or_(SkillInfo.source_repository_id.in_(repository_ids),
+                    SkillInfo.skill_id.in_(list((source_skill_ids or {}).values())),
                     and_(SkillInfo.source == "repository", SkillInfo.source_repository_id.is_(None))))).mappings().all()
     visible = []
     for row in rows:
@@ -45,7 +54,7 @@ def get_installation_states(repository_ids: list[int], tenant_id: str, user_id: 
         if can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
             skill["permission"] = resolve_skill_permission(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups)
             visible.append(skill)
-    return installation_states(repository_ids, visible)
+    return installation_states(repository_ids, visible, source_skill_ids)
 
 
 def uninstall_repository_copy(repository_id: int | None, skill_id: int, tenant_id: str, user_id: str) -> None:

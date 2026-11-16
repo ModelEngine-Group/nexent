@@ -257,6 +257,9 @@ export function SkillSpace({
     }
   };
   const confirmTakeDown = (listing: SkillRepositoryListingItem) => {
+    if (!(listing.can_take_down ?? isAdmin) || listing.status !== "shared") {
+      return;
+    }
     modal.confirm({
       title: t("skillRepository.action.confirmTakeDown"),
       content: listing.name,

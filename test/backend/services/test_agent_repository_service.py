@@ -1651,6 +1651,7 @@ async def test_import_agent_from_repository_rejects_missing_listing():
                 agent_repository_id=42,
                 tenant_id="tenant_a",
                 authorization="Bearer token",
+            user_id="user_a",
             )
 
 
@@ -1664,6 +1665,7 @@ async def test_import_agent_from_repository_rejects_snapshotless_listing():
                 agent_repository_id=42,
                 tenant_id="tenant_a",
                 authorization="Bearer token",
+            user_id="user_a",
             )
 
 
@@ -2566,6 +2568,7 @@ async def test_import_agent_from_repository_rejects_failed_official_install(
                         agent_repository_id=42,
                         tenant_id="tenant_a",
                         authorization="Bearer token",
+                    user_id="user_a",
                     )
 
     increment.assert_not_called()
@@ -2593,6 +2596,7 @@ async def test_import_agent_from_repository_rejects_empty_official_install_resul
                     agent_repository_id=42,
                     tenant_id="tenant_a",
                     authorization="Bearer token",
+                user_id="user_a",
                 )
 
 
@@ -2620,6 +2624,7 @@ async def test_import_agent_from_repository_warns_when_official_download_increme
                     agent_repository_id=42,
                     tenant_id="tenant_a",
                     authorization="Bearer token",
+                user_id="user_a",
                 )
 
     assert result == {10: 100}
@@ -2654,6 +2659,7 @@ async def test_import_agent_from_repository_increments_downloads():
             agent_repository_id=42,
             tenant_id="tenant_a",
             authorization="Bearer token",
+        user_id="user_a",
         )
 
     mock_increment.assert_called_once_with(42)
@@ -2670,7 +2676,7 @@ async def test_workbench_import_response_identifies_root_not_first_child():
     with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=record), \
             patch_import_object_context(ars, "import_agent_impl", new_callable=AsyncMock, return_value={2: 102, 10: 110}), \
             patch_import_object_context(ars, "increment_agent_repository_downloads", return_value=1):
-        result = await ars.import_agent_from_repository_impl(42, "tenant_a", "Bearer token", return_root_id=True)
+        result = await ars.import_agent_from_repository_impl(42, "tenant_a", "Bearer token", return_root_id=True, user_id="user_a")
     assert result == {"agent_id": 110}
 
 
@@ -2703,6 +2709,7 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
                 agent_repository_id=42,
                 tenant_id="tenant_a",
                 authorization="Bearer token",
+            user_id="user_a",
             )
 
     mock_increment.assert_not_called()
@@ -2743,6 +2750,7 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
             tenant_id="tenant_a",
             authorization="Bearer token",
             skill_resolutions=skill_resolutions,
+        user_id="user_a",
         )
 
     mock_import.assert_called_once()
@@ -2781,6 +2789,7 @@ async def test_import_agent_from_repository_defaults_skill_resolutions_to_none()
             agent_repository_id=42,
             tenant_id="tenant_a",
             authorization="Bearer token",
+        user_id="user_a",
         )
 
     mock_import.assert_called_once()

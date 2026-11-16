@@ -6,8 +6,14 @@ import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
-import { Button, Dropdown, Tag } from "antd";
-import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
+import { Button, Dropdown, Space, Tag } from "antd";
+import {
+  Bot,
+  ChevronDown,
+  Download,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
@@ -58,21 +64,26 @@ export function SkillRepositoryCard({
     ? displayName(listing.author_cas_username, listing.author.trim())
     : displayName(
         listing.submitted_by_cas_username,
-        listing.submitted_by?.trim() || ""
+        listing.submitted_by?.trim() || "",
       );
   const menuItems: MenuProps["items"] =
-    showAdminMenu && onTakeDown != null
+    (listing.can_take_down ?? showAdminMenu) &&
+    listing.status === "shared" &&
+    onTakeDown != null
       ? [
           {
             key: "takeDown",
             label: t("skillRepository.action.status.notShared"),
-            icon: <PackageX className="size-3.5" aria-hidden />,
+            icon: <Trash2 className="size-3.5" aria-hidden />,
             danger: true,
             disabled: isTakingDown,
             onClick: onTakeDown,
           },
         ]
       : [];
+  const splitAction = Boolean(
+    presentation && action != null && menuItems.length > 0,
+  );
 
   return (
     <ResourceCard
@@ -129,7 +140,7 @@ export function SkillRepositoryCard({
         )
       }
       actions={
-        menuItems.length > 0 ? (
+        !splitAction && menuItems.length > 0 ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
@@ -164,7 +175,31 @@ export function SkillRepositoryCard({
           )}
         </>
       }
-      footer={action}
+      footer={
+        splitAction ? (
+          <Space.Compact>
+            <span className="inline-flex [&_.ant-btn]:!rounded-r-none">
+              {action}
+            </span>
+            <Dropdown
+              menu={{ items: menuItems }}
+              trigger={["click"]}
+              placement="bottomRight"
+              disabled={isTakingDown}
+            >
+              <Button
+                className="!w-8 !rounded-l-none !px-0"
+                icon={<ChevronDown size={14} aria-hidden />}
+                aria-label={t("skillRepository.common.moreActions")}
+                disabled={isTakingDown}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </Dropdown>
+          </Space.Compact>
+        ) : (
+          action
+        )
+      }
       onClick={onDetailClick}
     />
   );

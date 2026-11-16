@@ -261,6 +261,23 @@ def setup_function():
     }
 
 
+def test_repository_listing_passes_published_source_ids_to_installation_lookup():
+    _skill_repo_db_mock.list_skill_repository_summaries.return_value = {
+        "items": [_repository_record(status="shared")], "pagination": {"total": 1}
+    }
+    installation_service = types.ModuleType("management.services.repository.skill_installations")
+    installation_service.get_installation_states = MagicMock(return_value={
+        "1": {"installation_state": "installed", "installed_copies": []}
+    })
+    with patch.dict(sys.modules, {"management.services.repository.skill_installations": installation_service}):
+        result = srs.list_skill_repository_listings_impl(
+            "tenant-1", user_id="user-1", status="shared", include_installations=True
+        )
+    assert result["items"][0]["installation_state"] == "installed"
+    assert result["items"][0]["installed_copies"] == []
+    assert installation_service.get_installation_states.call_args.kwargs == {"source_skill_ids": {1: 10}}
+
+
 def _repository_record(
     status="not_shared",
     publisher_user_id="user-1",

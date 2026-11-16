@@ -124,6 +124,9 @@ def _resolve_author_display_name(user_id: str | None) -> str | None:
 
 
 def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
+    published_at = row.get("published_at") or None
+    if isinstance(published_at, datetime):
+        published_at = published_at.isoformat()
     raw_status = row.get("review_status") or "not_shared"
     status_map: Dict[str, str] = {
         STATUS_NOT_SHARED: "offline",
@@ -151,7 +154,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
             shared_fields = None
     return {
         "communityId": row.get("market_id"),
-        "publishedAt": row["published_at"].isoformat() if row.get("published_at") else None,
+        "publishedAt": published_at,
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
         "sourceMcpId": source_mcp_id,
