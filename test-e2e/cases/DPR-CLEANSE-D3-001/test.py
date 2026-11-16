@@ -53,6 +53,7 @@ def test_durable_cleanse_dispatch(record_property):
         "knowledge_dispatch",
         "consumer_stopped_closed",
         "lease_guard_renewal_and_cancel",
+        "live_resource_authorization",
     ):
         assert evidence[key] is True, key
     record_property("cleanse_job_probe", json.dumps(evidence, sort_keys=True))

@@ -49,7 +49,7 @@ class CleanseLeaseGuard:
         now = self.clock()
         if attempt == self._attempt and now < self._next:
             return
-        self.authorize(row, parse_cleanse_request(row))
+        self.authorize(row, parse_cleanse_request(row), context=context)
         context.remaining()
         if not self.jobs.transition(
             row, status="running", lease_seconds=self.lease_seconds, context=context

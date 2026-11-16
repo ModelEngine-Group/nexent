@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-AUTH-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Live KB cleansing authorization and independent content generations
+  description: >-
+    Read credential-free resources through tenant-scoped record catalogs and reuse
+    the existing DAC. Keep pinned source generations independent of lifecycle CAS
+    versions; legacy unpinned files and run callbacks fail closed on the new path.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Permit revision-free read-only datasets while refusing revision-free writes.
+    - Reuse current identity, tenant and DAC policy for pinned KB source references.
+    - Reject revoked, cross-tenant, deleted, stale and unpinned resources.
+    - Preserve read-only inspection without granting cleansing submission.
+    reason: Existing tests inject authorization callbacks and do not prove live resource policy.
+    test_selectors:
+    - test/backend/services/test_cleanse_authorization.py
+    - test/backend/infrastructure/test_record_read_only.py
+    - test/backend/database/test_knowledge_file_lifecycle_db.py

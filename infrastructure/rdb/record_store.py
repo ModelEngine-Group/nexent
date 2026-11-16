@@ -108,15 +108,25 @@ class SQLRecordStore:
             raise CapabilityUnsupported()
         for name, table in self._tables.items():
             definition = catalog.authorize(name, scope)
-            if [column.name for column in table.primary_key.columns] != [
-                definition.primary_key
-            ]:
+            keys = (
+                table.primary_key.columns
+                if hasattr(table.primary_key, "columns")
+                else table.primary_key
+            )
+            if [column.name for column in keys] != [definition.primary_key]:
+                raise CapabilityUnsupported()
+            if definition.write_roles and not isinstance(table, sa.Table):
                 raise CapabilityUnsupported()
             fields = {field.name for field in definition.fields}
             revision = self._revisions.get(name)
-            if not fields <= set(table.c.keys()) or revision not in fields:
+            if not fields <= set(table.c.keys()):
                 raise InvalidInput()
-            if not isinstance(table.c[revision].type, sa.Integer):
+            if revision is None:
+                if definition.write_roles:
+                    raise InvalidInput()
+            elif revision not in fields:
+                raise InvalidInput()
+            elif not isinstance(table.c[revision].type, sa.Integer):
                 raise CapabilityUnsupported()
             supported = {
                 "string": sa.String,
@@ -124,7 +134,7 @@ class SQLRecordStore:
                 "number": (sa.Float, sa.Integer),
                 "boolean": sa.Boolean,
                 "object": sa.JSON,
-                "array": sa.JSON,
+                "array": (sa.JSON, sa.ARRAY),
             }
             audit = self._audits.get(name)
             if audit is not None and (

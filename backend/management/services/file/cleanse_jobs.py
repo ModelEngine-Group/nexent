@@ -77,7 +77,7 @@ class CleanseJobs:
     def submit(self, request: FileCleanseRequest | KnowledgeCleanseRequest, *, context):
         if not isinstance(request, (FileCleanseRequest, KnowledgeCleanseRequest)):
             raise InvalidInput()
-        self.authorize(request)
+        self.authorize(request, context=context)
         payload = request.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -154,11 +154,11 @@ class CleanseJobs:
         return self.state(existing)
 
     def inspect(self, lookup, *, context):
-        self.authorize(lookup)
+        self.authorize(lookup, context=context)
         return self.state(self._find(self._owned(lookup), context))
 
     def cancel(self, lookup, *, context):
-        self.authorize(lookup)
+        self.authorize(lookup, context=context)
         with self.records.transaction(context=context) as tx:
             tx.claim(
                 DATASET,

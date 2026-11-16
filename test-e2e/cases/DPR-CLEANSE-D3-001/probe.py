@@ -37,6 +37,7 @@ from nexent.storage.models import (
     RecordQuery,
     StorageScope,
 )
+from resource_probe import check_resources
 
 from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
 from infrastructure.redis.kv import RedisKeyValueConfig, RedisKeyValueStore
@@ -146,7 +147,9 @@ try:
             StorageScope("management", tenant, user, {DATASET}), engine
         )
         return CleanseJobs(
-            records, authorize=lambda request: None, parser_version="parser-v1"
+            records,
+            authorize=lambda request, **kwargs: None,
+            parser_version="parser-v1",
         )
 
     public = service()
@@ -188,7 +191,7 @@ try:
         worker,
         owner_id="worker-1",
         lease_seconds=60,
-        authorize_execution=lambda row, request: None,
+        authorize_execution=lambda row, request, **kwargs: None,
         execute=execute,
     )
     registry = HandlerRegistry({HANDLER: handler})
@@ -258,7 +261,7 @@ try:
         worker,
         lease_seconds=60,
         clock=lambda: tick_clock[0],
-        authorize_execution=lambda row, request: authorization_checks.append(
+        authorize_execution=lambda row, request, **kwargs: authorization_checks.append(
             row["user_id"]
         ),
     )
@@ -292,6 +295,7 @@ try:
     assert worker.mark_uncertain(handle, context=context())
     clock[0] += timedelta(seconds=120)
     assert worker.ready(context=context()) == ()
+    check_resources(engine, request.source, public.records, context)
     last = public.submit(
         request.model_copy(update={"idempotency_key": "consumer-stop"}),
         context=context(),
@@ -364,6 +368,7 @@ try:
         "knowledge_dispatch": True,
         "consumer_stopped_closed": True,
         "lease_guard_renewal_and_cancel": True,
+        "live_resource_authorization": True,
     }
     print(json.dumps(result))
 finally:

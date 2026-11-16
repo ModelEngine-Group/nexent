@@ -108,7 +108,7 @@ class CleanseHandler:
             return  # A terminal/owned duplicate must not execute the parser again.
         try:
             request = parse_cleanse_request(row)
-            self.authorize(row, request)
+            self.authorize(row, request, context=context)
             if row["parser_version"] != self.jobs.parser_version:
                 self.jobs.transition(
                     row,

@@ -4,30 +4,12 @@
 
 import contextlib
 import importlib
-import sys
 import types
 from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-
-def _install_storage_import_stubs() -> None:
-    """Keep database tests independent from the SDK's optional model stack."""
-    nexent_pkg = sys.modules.setdefault("nexent", types.ModuleType("nexent"))
-    storage_pkg = sys.modules.setdefault("nexent.storage", types.ModuleType("nexent.storage"))
-    storage_pkg.__path__ = []
-    factory = sys.modules.setdefault(
-        "nexent.storage.storage_client_factory",
-        types.ModuleType("nexent.storage.storage_client_factory"),
-    )
-    factory.create_storage_client_from_config = lambda *_args, **_kwargs: MagicMock()
-    factory.MinIOStorageConfig = type("MinIOStorageConfig", (), {})
-    setattr(nexent_pkg, "storage", storage_pkg)
-    setattr(storage_pkg, "storage_client_factory", factory)
-
-
-_install_storage_import_stubs()
 lifecycle_db = importlib.import_module("management.db.knowledge_base.file_lifecycle")
 
 
