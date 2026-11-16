@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D3
+module: INFRA-STORAGE
+case:
+  case_id: SI-VECTOR-D3-001
+  feature_id: SI-STORAGE
+  requirement_ids: [SI-REQ-003, DPR-001]
+  business_rule_ids: [SI-STORAGE-RULE-02, SI-STORAGE-RULE-05]
+  title: Scoped explicit-vector storage through real Elasticsearch
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify collection compatibility, tenant isolation, search and bounded snapshot deletion without inference or service code.
+  preconditions:
+  - Docker and the pinned Elasticsearch 8.17.2 image are available locally.
+  test_data:
+    vectors: Fixed two-dimensional nonzero vectors and synthetic keyword/text payloads.
+    resources: One disposable container with a host-loopback HTTP port and an owned index.
+  steps:
+  - order: 1
+    action: Ensure and describe a collection, then request incompatible dimensions.
+    expected: Matching metadata is returned and incompatible binding fails without replacing the existing index.
+  - order: 2
+    action: Upsert explicit records for two tenants and two logical collections sharing the index; get, count and search through each scoped port.
+    expected: Dense and text search return their own payloads and score kinds; no tenant or collection leaks.
+  - order: 3
+    action: Delete more than one snapshot page, then update one candidate after snapshot selection and before its CAS delete.
+    expected: Every stable candidate is removed with an ordered receipt; the concurrent replacement survives and its conflict is reported as partial failure.
+  - order: 4
+    action: Close ports and remove the owned container and anonymous volumes.
+    expected: The closed port refuses access and the owned container no longer exists.
+  expected_results:
+  - Collection schema mismatches are explicit and never recreate data.
+  - Explicit-vector CRUD and dense/text search enforce both tenant and collection scope.
+  - Snapshot pagination and per-document CAS preserve deletion results and concurrent replacement.
+  - Owned ports, containers and volumes are closed or removed.
+  forbidden_side_effects:
+  - No application storage, credentials, model endpoints or data-process service is used.
+  integration_boundary:
+  - Actual Elasticsearch protocol and Infrastructure VectorStore; fixed supplied vectors, controlled concurrent write and disposable infrastructure.
+  observations:
+  - Collection dimensions, neutral records, scoped counts, scores, per-item receipts and preserved replacement generation.
+  cleanup:
+  - Remove only the returned test-owned container ID including anonymous volumes.
+  acceptance:
+  - id: AC-01
+    description: Collection compatibility checks preserve existing data.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Real explicit-vector storage and search are tenant and collection scoped.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Snapshot deletion preserves page boundaries and concurrent replacement.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Owned resources are closed and reclaimed.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]

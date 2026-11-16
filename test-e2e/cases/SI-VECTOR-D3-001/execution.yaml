@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: SI-VECTOR-D3-001
+timeout_seconds: 180
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_scoped_vectors
+acceptance_bindings:
+  AC-01: [test_scoped_vectors]
+  AC-02: [test_scoped_vectors]
+  AC-03: [test_scoped_vectors]
+  AC-04: [test_scoped_vectors]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

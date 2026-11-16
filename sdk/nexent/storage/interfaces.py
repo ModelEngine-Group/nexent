@@ -28,6 +28,7 @@ from .models import (
     SearchHit,
     SearchQuery,
     StorageScope,
+    VectorCollectionInfo,
     VectorKey,
     VectorRecord,
     WriteReceipt,
@@ -161,6 +162,10 @@ class ObjectStore(StoragePort, Protocol):
 
 
 class VectorStore(StoragePort, Protocol):
+    def ensure_collection(self, collection: str, *, context: OperationContext) -> VectorCollectionInfo: ...
+
+    def describe_collection(self, collection: str, *, context: OperationContext) -> VectorCollectionInfo: ...
+
     def upsert(self, records: tuple[VectorRecord, ...], *, context: OperationContext) -> tuple[WriteReceipt, ...]: ...
 
     def get(self, key: VectorKey, *, context: OperationContext) -> VectorRecord | None: ...

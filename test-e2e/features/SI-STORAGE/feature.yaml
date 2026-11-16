@@ -4,12 +4,12 @@ module:
   name: Infrastructure
 feature:
   feature_id: SI-STORAGE
-  name: StorageInterface foundation and scoped KV and object access
+  name: StorageInterface scoped storage adapters
   status: active
   description: >-
     Lightweight storage ports, explicit scope and capability checks, a logical
-    record catalog, and the first Redis KV adapter. Application migration and
-    the other default adapters remain separate implementation batches.
+    record catalog, Redis KV and explicit-vector Elasticsearch adapters.
+    Application migration and remaining default adapters are separate implementation batches.
   business_rules:
   - rule_id: SI-STORAGE-RULE-01
     description: Contract imports load no vendor drivers or application configuration.
@@ -19,6 +19,8 @@ feature:
     description: KV revision and TTL updates are atomic and uncertain writes are not automatically replayed.
   - rule_id: SI-STORAGE-RULE-04
     description: Managed object reads retain revision and range semantics; conversion uses ObjectStore and reclaims each attempt.
+  - rule_id: SI-STORAGE-RULE-05
+    description: Vector storage accepts explicit vectors only, enforces tenant and collection scope, and preserves per-item write outcomes without inference or automatic replay.
   required_test_stages: [D3]
   source:
     notes: >-

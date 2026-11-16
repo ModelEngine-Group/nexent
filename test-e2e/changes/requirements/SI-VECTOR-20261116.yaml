@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: SI-VECTOR-20261116
+  change_type: requirement
+  requirement_id: SI-REQ-003
+  title: Supply default scoped explicit-vector storage for Runtime KB migration
+  description: >-
+    Add an Infrastructure Elasticsearch adapter for collection compatibility, explicit-vector
+    writes, dense/text search, count and snapshot CAS deletion. No model discovery or inference
+    belongs in storage. Enforce service, tenant, collection and readonly grants, and preserve
+    per-item partial or unknown results without automatic retries or ranking fallback.
+  affected_features:
+    existing: [SI-STORAGE, DPR-CLEANSE]
+    added: []
+    modified: [SI-STORAGE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [SI-VECTOR-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Reject malformed vectors and ungranted collections before opening a provider.
+    - Keep tenant and collection filters and readonly bindings on every operation.
+    - Preserve partial bulk writes, unknown transport results and deletion CAS conflicts without retries.
+    - Close connections and snapshot handles after success or failure.
+    - Reject collection mismatches, partial shard searches and unsupported hybrid ranking explicitly.
+    reason: >-
+      Existing tests cover neutral contracts and other adapters but contain no vector implementation.
+      Add isolated traditional UT and an actual provider D3; no duplicate formal D1 is needed.
+    test_selectors:
+    - test/backend/infrastructure/test_vector_store.py
+  notes: >-
+    SI-STORAGE inherits the existing system responsibility domain. The D3 owns its disposable
+    Elasticsearch container, loopback port and anonymous volumes; families are explicitly empty.
+    Vectors are supplied fixtures and do not replace Runtime embedding or model-trace acceptance.

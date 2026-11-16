@@ -153,6 +153,7 @@ class WriteReceipt:
 class DeleteReceipt:
     operation_id: str
     deleted: bool
+    outcome: WriteOutcome = WriteOutcome.CONFIRMED
 
 
 @dataclass(frozen=True)
@@ -248,6 +249,13 @@ class ByteRange:
 class VectorKey:
     collection: str
     key: str
+
+
+@dataclass(frozen=True)
+class VectorCollectionInfo:
+    collection: str
+    dimensions: int
+    metric: str
 
 
 @dataclass(frozen=True)
