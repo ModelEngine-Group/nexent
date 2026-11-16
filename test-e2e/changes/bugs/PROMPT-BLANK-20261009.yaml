@@ -18,8 +18,9 @@ change:
     added: []
     retired: []
   affected_cases:
-    existing: [AGT-006]
-    modified: [AGT-007]
+    existing: []
+    modified: []
     added: []
     retired: []
-  notes: Lightweight design is maintained in nexent-doc/docs/Developing/dev-prompt-blank-input-validation/design.md. No new configuration keys.
+  no_case_change_reason: Historical standalone-generation coverage AGT-006 and AGT-007 was retired with its endpoint and subsequently deleted by REMOVE-RETIRED-PROMPT-20261026; no surviving Case is changed by this historical record.
+  notes: Lightweight design is maintained in nexent-doc/docs/Developing/dev-prompt-blank-input-validation/design.md. No new configuration keys. Historical assertions and execution evidence remain in Git and original reports.

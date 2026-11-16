@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-OUTLET-STORAGE
+  name: Resolved outlet value storage
+  status: planned
+  description: Preserve saved parameter presence and capability ownership across dedicated columns and remaining JSON.
+  business_rules:
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-01
+    description: Loading never applies defaults or fixed values and never removes conflicting saved values; invalid snapshots fail.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-02
+    description: Common parameters have one dedicated column; only other values enter the parameter bag. False, zero and explicit null remain distinct from omission.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-03
+    description: Dedicated SQL null means omission unless its allowed key is explicitly marked. Duplicate, unknown or conflicting markers and duplicate storage fail.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-04
+    description: Capability status, context, controls and modalities live only in their dedicated columns; remaining details are strict and complete, with no inference or duplicate storage.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-05
+    description: Exact duplicated control domains and active fixed values use strict same-row references; restoration preserves additional restrictions and never applies defaults or repairs missing values.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-06
+    description: Complete outlet identity, connection, instruction and implementation versions restore from the same row; raw credentials, source loading and fallback are excluded. Incomplete rows and unavailable versions fail.
+  required_test_stages: []
+  source:
+    requirement_ids: [MODEL-OUTLET-PARAMETER-STORAGE-20261013, MODEL-OUTLET-CAPABILITY-STORAGE-20261013, MODEL-OUTLET-RULE-STORAGE-20261013, MODEL-OUTLET-ROW-STORAGE-20261013]
+    notes: SDK row codec of SPEC AC-01/03. Database writer, legacy data conversion and runtime consumption are not connected yet. Those boundaries require additional integration and deployment evidence.

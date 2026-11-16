@@ -3,7 +3,7 @@
 import types
 import importlib.machinery
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, call, patch
 import sys
 import os
 import logging
@@ -17,34 +17,6 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
-sys.modules['nexent'] = MagicMock()
-sys.modules['nexent.core'] = types.ModuleType('nexent.core')
-# Keep the real, dependency-free name validator importable beneath the SDK stub.
-sys.modules['nexent.core'].__path__ = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/core'))
-]
-sys.modules['nexent.core.agents'] = MagicMock()
-# Create a mock ToolConfig class
-from pydantic import BaseModel
-
-
-class MockToolConfig(BaseModel):
-    name: str = ""
-    description: str = ""
-    parameters: dict = {}
-
-
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
-sys.modules['nexent.storage'] = MagicMock()
-sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
-sys.modules['nexent.storage.minio_config'] = MagicMock()
-
-# Mock for memory_service import used in delete_user_and_cleanup
-nexent_memory_service = MagicMock()
-sys.modules['nexent.memory'] = MagicMock()
-sys.modules['nexent.memory.memory_service'] = nexent_memory_service
-
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -52,17 +24,12 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    ValidationError,
-    UnauthorizedError,
-)
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -70,7 +37,7 @@ from http import HTTPStatus
 from fastapi import FastAPI
 
 # Create a test client with a fresh FastAPI app
-from apps.user_app import router
+from management.api.identity.user import router
 
 app = FastAPI()
 app.include_router(router)
@@ -81,7 +48,7 @@ client = TestClient(app)
 def mock_requester_context():
     """Provide a stable authenticated requester for user-list endpoint tests."""
     with patch(
-        "apps.user_app.get_current_user_context",
+        "management.api.identity.user.get_current_user_context",
         return_value=("admin-1", "tenant1", "ADMIN"),
     ):
         yield
@@ -92,7 +59,7 @@ class TestGetUsersEndpoint:
 
     def test_get_users_success_with_pagination(self):
         """Test successful user list retrieval with pagination"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"},
@@ -128,8 +95,8 @@ class TestUserResourceLimit:
     """Test structured quota errors at the user management HTTP boundary."""
 
     def test_role_update_limit_returns_standard_429_payload(self):
-        with patch("apps.user_app.get_current_user_context", return_value=("admin-1", "tenant1", "ADMIN")), \
-             patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as mock_update:
+        with patch("management.api.identity.user.get_current_user_context", return_value=("admin-1", "tenant1", "ADMIN")), \
+             patch("management.api.identity.user.update_user_for_requester", new_callable=AsyncMock) as mock_update:
             mock_update.side_effect = TenantResourceLimitError(
                 "Tenant administrator limit reached: maximum 1000 administrators per tenant",
                 resource="administrators",
@@ -150,7 +117,7 @@ class TestUserResourceLimit:
 
     def test_get_users_success_without_pagination(self):
         """Test successful user list retrieval without pagination (returns all data)"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"},
@@ -178,7 +145,7 @@ class TestUserResourceLimit:
 
     def test_get_users_success_with_only_page(self):
         """Test user list retrieval with only page parameter (no pagination info in response)"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -198,7 +165,7 @@ class TestUserResourceLimit:
 
     def test_get_users_success_with_only_page_size(self):
         """Test user list retrieval with only page_size parameter (no pagination info in response)"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -218,7 +185,7 @@ class TestUserResourceLimit:
 
     def test_get_users_success_with_asc_sort(self):
         """Test successful user list retrieval with ascending sort order"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -244,7 +211,7 @@ class TestUserResourceLimit:
 
     def test_get_users_empty_list(self):
         """Test user list retrieval with no users"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [],
                 "total": 0,
@@ -266,7 +233,7 @@ class TestUserResourceLimit:
 
     def test_get_users_with_custom_pagination(self):
         """Test user list retrieval with custom pagination (multiple pages)"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -295,7 +262,7 @@ class TestUserResourceLimit:
 
     def test_get_users_with_missing_total_pages(self):
         """Test user list retrieval when total_pages is missing (should calculate it)"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -317,7 +284,7 @@ class TestUserResourceLimit:
 
     def test_get_users_unexpected_error(self):
         """Test user list retrieval with unexpected error"""
-        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
+        with patch('management.api.identity.user.get_users_for_requester') as mock_get_users:
             mock_get_users.side_effect = Exception("Database connection failed")
 
             response = client.post(
@@ -332,7 +299,7 @@ class TestUserResourceLimit:
 
     def test_get_users_requires_authentication(self):
         with patch(
-            "apps.user_app.get_current_user_context",
+            "management.api.identity.user.get_current_user_context",
             side_effect=UnauthorizedError("Authentication required"),
         ):
             response = client.post("/users/list", json={"tenant_id": "tenant1"})
@@ -341,7 +308,7 @@ class TestUserResourceLimit:
 
     def test_get_users_forbidden_scope_returns_403(self):
         with patch(
-            "apps.user_app.get_users_for_requester",
+            "management.api.identity.user.get_users_for_requester",
             side_effect=ForbiddenError("Not authorized to list users for this tenant"),
         ):
             response = client.post("/users/list", json={"tenant_id": "tenant2"})
@@ -354,8 +321,8 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_success(self):
         """Test successful user update"""
-        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
-             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+        with patch('management.api.identity.user.get_current_user_context') as mock_get_user_id, \
+             patch('management.api.identity.user.update_user_for_requester') as mock_update_user:
 
             mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.return_value = {
@@ -376,10 +343,9 @@ class TestUpdateUserEndpoint:
             assert data["data"]["id"] == "user1"
             assert data["data"]["role"] == "ADMIN"
             mock_get_user_id.assert_called_once_with("Bearer token123")
-            # Pydantic model includes all fields with None defaults
             mock_update_user.assert_called_once_with(
                 "user1",
-                {"username": None, "email": None, "role": "ADMIN"},
+                {"role": "ADMIN"},
                 updated_by="updater123",
                 requester_tenant_id="tenant1",
                 requester_role="ADMIN",
@@ -387,8 +353,8 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_validation_error(self):
         """Test user update with validation error"""
-        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
-             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+        with patch('management.api.identity.user.get_current_user_context') as mock_get_user_id, \
+             patch('management.api.identity.user.update_user_for_requester') as mock_update_user:
 
             mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.side_effect = ValueError("Invalid role. Must be one of: ADMIN, DEV, USER")
@@ -407,8 +373,8 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_unexpected_error(self):
         """Test user update with unexpected error"""
-        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
-             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+        with patch('management.api.identity.user.get_current_user_context') as mock_get_user_id, \
+             patch('management.api.identity.user.update_user_for_requester') as mock_update_user:
 
             mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.side_effect = Exception("Database connection failed")
@@ -426,10 +392,10 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_forbidden_scope_returns_403(self):
         with patch(
-            "apps.user_app.get_current_user_context",
+            "management.api.identity.user.get_current_user_context",
             return_value=("admin-1", "tenant1", "ADMIN"),
         ), patch(
-            "apps.user_app.update_user_for_requester",
+            "management.api.identity.user.update_user_for_requester",
             side_effect=ForbiddenError("Not authorized to update this user"),
         ):
             response = client.put(
@@ -443,8 +409,8 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_success_records_audit_entry(self, caplog):
         """Test successful user update records a security audit entry with the changed fields"""
-        with patch('apps.user_app.get_current_user_context') as mock_get_user, \
-             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+        with patch('management.api.identity.user.get_current_user_context') as mock_get_user, \
+             patch('management.api.identity.user.update_user_for_requester') as mock_update_user:
 
             mock_get_user.return_value = ("admin-1", "tenant-1", "ADMIN")
             mock_update_user.return_value = {"user_id": "user-9", "role": "ADMIN"}
@@ -471,12 +437,15 @@ class TestDeleteUserEndpoint:
 
     def test_delete_user_success(self):
         """Test successful user deletion with complete cleanup"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant, \
-             patch('apps.user_app.delete_user_and_cleanup') as mock_cleanup:
+        with patch('management.api.identity.user.get_current_user_id') as mock_get_user_id, \
+             patch('management.api.identity.user.get_user_tenant_by_user_id') as mock_get_tenant, \
+             patch('management.api.identity.user.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_get_tenant.side_effect = [
+                {"tenant_id": "tenant1", "user_id": "user1", "user_roles": ["USER"]},
+                {"tenant_id": "tenant1", "user_id": "deleter123", "user_roles": ["ADMIN", "OPS"]},
+            ]
             mock_cleanup.return_value = None
 
             response = client.delete(
@@ -488,13 +457,13 @@ class TestDeleteUserEndpoint:
             data = response.json()
             assert data["message"] == "User deleted successfully"
             mock_get_user_id.assert_called_once_with("Bearer token123")
-            mock_get_tenant.assert_called_once_with("user1")
-            mock_cleanup.assert_called_once_with("user1", "tenant1")
+            assert mock_get_tenant.call_args_list == [call("user1"), call("deleter123")]
+            mock_cleanup.assert_awaited_once_with("user1", "tenant1", actor_id="deleter123")
 
     def test_delete_user_validation_error(self):
         """Test user deletion with user not found"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant:
+        with patch('management.api.identity.user.get_current_user_id') as mock_get_user_id, \
+             patch('management.api.identity.user.get_user_tenant_by_user_id') as mock_get_tenant:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
             mock_get_tenant.return_value = None  # User not found
@@ -510,12 +479,15 @@ class TestDeleteUserEndpoint:
 
     def test_delete_user_unexpected_error(self):
         """Test user deletion with unexpected error"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant, \
-             patch('apps.user_app.delete_user_and_cleanup') as mock_cleanup:
+        with patch('management.api.identity.user.get_current_user_id') as mock_get_user_id, \
+             patch('management.api.identity.user.get_user_tenant_by_user_id') as mock_get_tenant, \
+             patch('management.api.identity.user.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_get_tenant.side_effect = [
+                {"tenant_id": "tenant1", "user_id": "user1", "user_roles": ["USER"]},
+                {"tenant_id": "tenant1", "user_id": "deleter123", "user_roles": ["ADMIN", "OPS"]},
+            ]
             mock_cleanup.side_effect = Exception("Database connection failed")
 
             response = client.delete(
@@ -531,12 +503,15 @@ class TestDeleteUserEndpoint:
 
     def test_delete_user_success_records_audit_entry(self, caplog):
         """Test successful user deletion records a security audit entry with the target user/tenant"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user, \
-             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_user_tenant, \
-             patch('apps.user_app.delete_user_and_cleanup') as mock_delete:
+        with patch('management.api.identity.user.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.user.get_user_tenant_by_user_id') as mock_get_user_tenant, \
+             patch('management.api.identity.user.delete_user_and_cleanup') as mock_delete:
 
             mock_get_user.return_value = ("admin-1", "operator-tenant")
-            mock_get_user_tenant.return_value = {"user_id": "user-9", "tenant_id": "tenant-9"}
+            mock_get_user_tenant.side_effect = [
+                {"user_id": "user-9", "tenant_id": "tenant-9", "user_roles": ["USER"]},
+                {"user_id": "admin-1", "tenant_id": "operator-tenant", "user_roles": ["SU"]},
+            ]
             mock_delete.return_value = None
 
             with caplog.at_level(logging.INFO, logger="audit.security"):
@@ -587,7 +562,7 @@ class TestDataValidation:
 
     def test_update_user_invalid_role(self):
         """Test update user with invalid role pattern"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id:
+        with patch('management.api.identity.user.get_current_user_id') as mock_get_user_id:
             mock_get_user_id.return_value = ("updater123", "tenant1")
 
             response = client.put(
@@ -601,8 +576,8 @@ class TestDataValidation:
 
     def test_update_user_empty_update_data(self):
         """Test update user with empty update data"""
-        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
-             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+        with patch('management.api.identity.user.get_current_user_context') as mock_get_user_id, \
+             patch('management.api.identity.user.update_user_for_requester') as mock_update_user:
 
             mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.return_value = {
@@ -618,10 +593,9 @@ class TestDataValidation:
             )
 
             assert response.status_code == HTTPStatus.OK
-            # Pydantic model converts empty dict to dict with None values for all optional fields
             mock_update_user.assert_called_once_with(
                 "user1",
-                {"username": None, "email": None, "role": None},
+                {},
                 updated_by="updater123",
                 requester_tenant_id="tenant1",
                 requester_role="ADMIN",
@@ -630,15 +604,15 @@ class TestDataValidation:
 
 class TestUserAppCoverageGaps:
     def test_update_user_unauthorized(self):
-        with patch("apps.user_app.get_current_user_context", side_effect=UnauthorizedError("login required")):
+        with patch("management.api.identity.user.get_current_user_context", side_effect=UnauthorizedError("login required")):
             response = client.put("/users/user1", json={"role": "USER"})
 
         assert response.status_code == HTTPStatus.UNAUTHORIZED
         assert response.json()["detail"] == "login required"
 
     def test_update_user_not_found(self):
-        with (patch("apps.user_app.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
-              patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as update_user):
+        with (patch("management.api.identity.user.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
+              patch("management.api.identity.user.update_user_for_requester", new_callable=AsyncMock) as update_user):
             update_user.side_effect = NotFoundException("User user1 not found")
             response = client.put("/users/user1", json={"role": "USER"})
 
@@ -646,20 +620,20 @@ class TestUserAppCoverageGaps:
         assert response.json()["detail"] == "User user1 not found"
 
     def test_update_user_value_error(self):
-        with (patch("apps.user_app.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
-              patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as update_user):
+        with (patch("management.api.identity.user.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
+              patch("management.api.identity.user.update_user_for_requester", new_callable=AsyncMock) as update_user):
             update_user.side_effect = ValueError("role cannot be changed")
             response = client.put("/users/user1", json={"role": "USER"})
 
         assert response.status_code == HTTPStatus.BAD_REQUEST
         assert response.json()["detail"] == "role cannot be changed"
 
-    def test_delete_user_authentication_error_is_internal_error(self):
-        with patch("apps.user_app.get_current_user_id", side_effect=UnauthorizedError("invalid token")):
+    def test_delete_user_rejects_invalid_token(self):
+        with patch("management.api.identity.user.get_current_user_id", side_effect=UnauthorizedError("invalid token")):
             response = client.delete("/users/user1")
 
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        assert "Failed to delete user" in response.json()["detail"]
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert response.json()["detail"] == "invalid token"
 
 
 if __name__ == "__main__":

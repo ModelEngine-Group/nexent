@@ -19,7 +19,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [NB-CHAT-FINAL-ANSWER-001]
+    added: [NB-CHAT-FINAL-ANSWER-D2-001]
     modified: []
     retired: []
   traditional_ut:

@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -47,7 +48,7 @@ journey("PW-MARKET-AGENT-01", async (context) => {
         const labels = JSON.parse(readFileSync(join(need("NEXENT_REPO"), "frontend/public/locales/zh/common.json"),"utf8"));
         const categoryLabel = labels["tagManagement.systemDefinition.agentCategory"] || definition.definition_name;
         const valueLabel = labels[`agentRepository.tag.${value.normalized_value}`] || value.display_value;
-        await tagsDialog.getByPlaceholder("搜索标签名称或标识").fill(categoryLabel);
+        await tagsDialog.getByRole("searchbox", { name: "搜索标签名称、标识或显示值", exact: true }).fill(categoryLabel);
         await tagsDialog.getByRole("button",{name:categoryLabel,exact:true}).click();
         const selector = tagsDialog.getByRole("combobox"); await selector.click();
         const popup = page.locator(".ant-select-dropdown:visible");
@@ -89,7 +90,8 @@ journey("PW-MARKET-AGENT-01", async (context) => {
         // not a guessed identical name, identifies the independently editable copy.
         expect(created[0].display_name||created[0].name).toMatch(new RegExp(`^${esc(name)}(?:_\\d+)?$`));
         await p.goto(appPath(`/agents/${consumerAgentId}`),{waitUntil:"domcontentloaded"});
-        await expect(p.getByPlaceholder("请输入智能体描述")).toHaveValue(`market ${token}`,{timeout:120_000});
+        await new AgentPage(p).openSection("基础信息");
+        await expect(p.getByRole("textbox", { name: "智能体描述", exact: true })).toHaveValue(`market ${token}`,{timeout:120_000});
         return `consumer received and opened editable tenant-local copy id=${consumerAgentId}`;
       },
       async () => {

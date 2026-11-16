@@ -19,7 +19,7 @@ async def test_nacos_timeout_and_recovery(tenant_a_admin):
                 failed = await discover()
                 elapsed = time.monotonic() - start
                 assert_status(failed, 504)
-                assert "timed out after 10 seconds" in failed.json()["detail"]
+                assert "timed out after 10 seconds" in failed.json()["message"]
                 assert 9 <= elapsed < 15, 'the product must reach its Nacos timeout, not the test client timeout'
             after = await api.get('/a2a/client/agents')
             assert_status(after, 200)

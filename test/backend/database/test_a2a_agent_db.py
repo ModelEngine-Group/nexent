@@ -1,11 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for backend/database/a2a_agent_db.py
+Unit tests for backend/management/db/a2a/repository.py
 Tests all public functions including external agent operations,
 server agent operations, task operations, message operations,
 nacos config operations, and artifact operations.
 """
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -14,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
-from consts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -22,15 +23,22 @@ from consts.exceptions import AgentNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 # ---------------------------------------------------------------------------
-# Mock database.client
+# Mock management.db.client
 # ---------------------------------------------------------------------------
 db_client_mock = MagicMock()
-sys.modules['database.client'] = db_client_mock
-sys.modules['backend.database.client'] = db_client_mock
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +205,8 @@ db_models_mock.A2AArtifact = _make_artifact_cls()
 db_models_mock.PROTOCOL_HTTP_JSON = "HTTP+JSON"
 db_models_mock.PROTOCOL_JSONRPC = "JSONRPC"
 db_models_mock.PROTOCOL_GRPC = "GRPC"
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +447,8 @@ class MockSession:
 # ---------------------------------------------------------------------------
 # Import module under test (must be after mocks are set up)
 # ---------------------------------------------------------------------------
-from backend.database import a2a_agent_db as a2a_db
+from management.db.a2a import repository as a2a_db
+from management.utils import a2a as a2a_db_a2a
 
 
 # ---------------------------------------------------------------------------
@@ -490,36 +499,36 @@ def artifact():
 
 class TestGenerateTaskId:
     def test_prefix(self):
-        assert a2a_db._generate_task_id().startswith('task_')
+        assert a2a_db_a2a._generate_task_id().startswith('task_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_task_id() for _ in range(20)]
+        ids = [a2a_db_a2a._generate_task_id() for _ in range(20)]
         assert len(set(ids)) == 20
 
 
 class TestGenerateMessageId:
     def test_prefix(self):
-        assert a2a_db._generate_message_id().startswith('msg_')
+        assert a2a_db_a2a._generate_message_id().startswith('msg_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_message_id() for _ in range(20)]
+        ids = [a2a_db_a2a._generate_message_id() for _ in range(20)]
         assert len(set(ids)) == 20
 
 
 class TestGenerateEndpointId:
     def test_includes_agent_id(self):
-        ep = a2a_db._generate_endpoint_id(42)
+        ep = a2a_db_a2a._generate_endpoint_id(42)
         assert '42' in ep
         assert ep.startswith('a2a_42_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_endpoint_id(1) for _ in range(10)]
+        ids = [a2a_db_a2a._generate_endpoint_id(1) for _ in range(10)]
         assert len(set(ids)) == 10
 
 
 class TestExtractPrimaryInterface:
     def test_empty_returns_defaults(self):
-        url, ver = a2a_db._extract_primary_interface([])
+        url, ver = a2a_db_a2a._extract_primary_interface([])
         assert url == ""
         assert ver == "1.0"
 
@@ -528,13 +537,13 @@ class TestExtractPrimaryInterface:
             {"protocolBinding": "http+json", "url": "http://rest.example.com", "protocolVersion": "1.0"},
             {"protocolBinding": "grpc", "url": "http://g.example.com", "protocolVersion": "2.0"},
         ]
-        url, ver = a2a_db._extract_primary_interface(ifaces)
+        url, ver = a2a_db_a2a._extract_primary_interface(ifaces)
         assert url == "http://rest.example.com"
         assert ver == "1.0"
 
     def test_falls_back_to_first(self):
         ifaces = [{"protocolBinding": "custom", "url": "http://c.example.com", "protocolVersion": "3.0"}]
-        url, ver = a2a_db._extract_primary_interface(ifaces)
+        url, ver = a2a_db_a2a._extract_primary_interface(ifaces)
         assert url == "http://c.example.com"
 
 
@@ -544,39 +553,39 @@ class TestGetInterfaceByProtocol:
             {"protocolBinding": "rest", "url": "http://rest.example.com"},
             {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com"},
         ]
-        assert a2a_db._get_interface_by_protocol(ifaces, "rest")["url"] == "http://rest.example.com"
+        assert a2a_db_a2a._get_interface_by_protocol(ifaces, "rest")["url"] == "http://rest.example.com"
 
     def test_not_found_returns_none(self):
-        assert a2a_db._get_interface_by_protocol([], "rest") is None
+        assert a2a_db_a2a._get_interface_by_protocol([], "rest") is None
 
     def test_none_interfaces_returns_none(self):
-        assert a2a_db._get_interface_by_protocol(None, "rest") is None
+        assert a2a_db_a2a._get_interface_by_protocol(None, "rest") is None
 
 
 class TestExtractProtocolType:
     def test_jsonrpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "http-json-rpc"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "http-json-rpc"}]) == "JSONRPC"
 
     def test_httpjsonrpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "httpjsonrpc"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "httpjsonrpc"}]) == "JSONRPC"
 
     def test_httprest_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "httprest"}]) == "HTTP+JSON"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "httprest"}]) == "HTTP+JSON"
 
     def test_grpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "grpc"}]) == "GRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "grpc"}]) == "GRPC"
 
     def test_none_interfaces_returns_jsonrpc(self):
-        assert a2a_db._extract_protocol_type(None) == "JSONRPC"
-        assert a2a_db._extract_protocol_type([]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type(None) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([]) == "JSONRPC"
 
     def test_unknown_returns_jsonrpc(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "unknown"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "unknown"}]) == "JSONRPC"
 
 
 class TestGetProtocolBindingMapping:
     def test_has_all_protocols(self):
-        m = a2a_db._get_protocol_binding_mapping()
+        m = a2a_db_a2a._get_protocol_binding_mapping()
         assert "JSONRPC" in m
         assert "HTTP+JSON" in m
         assert "GRPC" in m
@@ -589,13 +598,13 @@ class TestFindInterfaceByProtocolType:
             {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com"},
             {"protocolBinding": "rest", "url": "http://rest.example.com"},
         ]
-        assert a2a_db._find_interface_by_protocol_type(ifaces, "JSONRPC")["url"] == "http://rpc.example.com"
+        assert a2a_db_a2a._find_interface_by_protocol_type(ifaces, "JSONRPC")["url"] == "http://rpc.example.com"
 
     def test_not_found(self):
-        assert a2a_db._find_interface_by_protocol_type([], "JSONRPC") is None
+        assert a2a_db_a2a._find_interface_by_protocol_type([], "JSONRPC") is None
 
     def test_none_interfaces(self):
-        assert a2a_db._find_interface_by_protocol_type(None, "JSONRPC") is None
+        assert a2a_db_a2a._find_interface_by_protocol_type(None, "JSONRPC") is None
 
 
 # ===========================================================================
@@ -1303,7 +1312,7 @@ class TestListExternalRelationsByLocalAgent:
 
 class TestMakeDefaultInterfaces:
     def test_includes_both_protocols(self):
-        ifaces = a2a_db._make_default_interfaces('a2a_10_abc12345')
+        ifaces = a2a_db_a2a._make_default_interfaces('a2a_10_abc12345')
         assert len(ifaces) == 2
         protocols = [i['protocolBinding'] for i in ifaces]
         assert 'JSONRPC' in protocols

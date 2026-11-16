@@ -8,7 +8,9 @@ from typing import Any, Dict, Optional
 
 from nexent.core.concurrency import run_blocking
 
-from consts.const import LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
 logger = logging.getLogger("agent_automation.prompt_generator")

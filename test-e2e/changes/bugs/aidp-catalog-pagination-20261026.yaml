@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-CATALOG-PAGINATION-20261026
+  change_type: bugfix
+  bug_id: BUG-AIDP-CATALOG-INCOMPLETE-ROWS
+  title: Align AIDP catalog pagination with card columns
+  description: Default to 12 and offer 12/24/48 while preserving card/table pagination state.
+  observed_behavior: A full 10-item page renders two complete four-card rows and a partial third row.
+  expected_behavior: Full 12-item pages fill the four-column grid; view switching retains the current records and does not refetch.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing list component coverage did not assert page-size policy or same-record/no-request view switching.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-111]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AIDP-FE-LIST-01]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+      - Preserve existing table-header interactions when switching catalog views.
+    test_selectors:
+      - frontend/tests/component/aidpResizableTitle.test.tsx
+    reason: Reuse the adjacent existing table unit checks; the existing catalog D1 proves pagination collaboration. User explicitly disallows new frontend UT.
+  notes: >-
+    Keep F-111 and its original rule IDs unchanged. Extend the existing pagination/search assertion
+    rather than add a new test or Case. The catalog defaults to 12 with 12/24/48 in both views;
+    other AIDP lists retain their defaults. Unrelated deletion-fixture changes are compared against
+    the base and excluded when not caused by this change. No Python/provider behavior changes.

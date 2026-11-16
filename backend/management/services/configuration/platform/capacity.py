@@ -167,7 +167,7 @@ class PlatformCapacityPolicy:
     @staticmethod
     def _get_allocation_state(asset_owner_tenant_id: str) -> Dict[str, Any]:
         """Return finite tenant allocations and unmanaged tenant count."""
-        from database.tenant_config_db import get_all_tenant_ids, get_single_config_info
+        from management.db.configuration.tenant import get_all_tenant_ids, get_single_config_info
 
         tenant_ids = [
             tenant_id
@@ -266,7 +266,7 @@ class PlatformCapacityPolicy:
         asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
     ) -> Dict[str, Any]:
         """Get platform-level declared storage capacity."""
-        from database.tenant_config_db import get_single_config_info
+        from management.db.configuration.tenant import get_single_config_info
 
         record = get_single_config_info(
             asset_owner_tenant_id, KEY_PLATFORM_CAPACITY_BYTES
@@ -375,8 +375,8 @@ class PlatformCapacityPolicy:
                 usage_pct = round(actual_bytes / hard_limit_bytes * 100, 2)
 
             # Try to get tenant name from config
-            from consts.const import TENANT_NAME
-            from database.tenant_config_db import get_single_config_info as gsci
+            from contracts.constants.constants import TENANT_NAME
+            from management.db.configuration.tenant import get_single_config_info as gsci
 
             name_record = gsci(tid, TENANT_NAME)
             tenant_name = name_record.get("config_value") if name_record else tid

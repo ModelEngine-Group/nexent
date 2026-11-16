@@ -1,0 +1,34 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import logging
+from http import HTTPStatus
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+
+from contracts.constants.environment import APP_VERSION, DEPLOYMENT_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE
+
+logger = logging.getLogger("tenant_config_app")
+router = APIRouter(prefix="/tenant_config")
+
+
+@router.get("/deployment_version")
+def get_deployment_version():
+    """
+    Get current deployment version (speed or full)
+    """
+    try:
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "deployment_version": DEPLOYMENT_VERSION,
+                "app_version": APP_VERSION,
+                "enable_aidp_knowledge": ENABLE_AIDP_KNOWLEDGE,
+                "enable_agent_workbench": ENABLE_AGENT_WORKBENCH,
+                "hide_home_page": HIDE_HOME_PAGE,
+                "status": "success",
+            },
+        )
+    except Exception as e:
+        logger.error(f"Failed to get deployment version, error: {e}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to get deployment version")

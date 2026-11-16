@@ -3,7 +3,7 @@
 
 import logging
 
-from database.user_tenant_db import get_user_tenant_in_tenant
+from management.db.identity.user_tenant import get_user_tenant_in_tenant
 
 logger = logging.getLogger(__name__)
 

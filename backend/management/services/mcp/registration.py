@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from consts.exceptions import MCPConnectionError, MCPNameIllegal
-from database.remote_mcp_db import check_mcp_name_exists, create_mcp_record
+from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal
+from management.db.mcp.remote import check_mcp_name_exists, create_mcp_record
 from management.services.mcp.common import logger
 from management.services.mcp.health import _mcp_protocol_health_check
 

@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
 
-from agents.nl2agent_agent import (
+from management.services.agent.creation import (
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )

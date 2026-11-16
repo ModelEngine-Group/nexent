@@ -4,7 +4,7 @@
 
 import pytest
 
-from database import attachment_db
+from management.db.file import attachment as attachment_db
 
 
 @pytest.mark.parametrize("outcome", [(True, None), (False, "storage unavailable")])

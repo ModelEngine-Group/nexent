@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: MAIN-IMAGE-SDK-20261102
+  change_type: bugfix
+  bug_id: MAIN-IMAGE-SDK-20261102
+  title: Include installed SDK code and catalog in the main application image
+  description: Copy complete SDK before non-editable installation and smoke-load its bundled catalog during the build.
+  observed_behavior: Exact image builds successfully but SDK imports fail because only sdk pyproject was copied into the package build.
+  expected_behavior: Actual application image includes importable SDK code and catalog resources matching its source revision.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Source-overlay tests and successful image build did not verify the actual installed SDK or catalog.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-174]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Existing model service and Workbench tests execute against image SDK and backend code without source overlays.
+    reason: Installed-package completeness is additionally checked by actual image imports, catalog loading and source hashes; a Dockerfile string test cannot establish packaging correctness.
+    test_selectors:
+    - test/sdk/core/model_service/test_model_service_boundaries.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+  notes: Inherited from develop a792f54c and discovered during user-authorized PR4083 acceptance. F-174 documents packaging automation removed by prior user request; no such suite is recreated. Runtime image and API evidence is retained separately.

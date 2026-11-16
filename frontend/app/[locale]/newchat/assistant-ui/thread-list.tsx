@@ -33,6 +33,7 @@ import {
   CircleAlertIcon,
   LoaderCircle,
   ListChecks,
+  Share2Icon,
 } from "lucide-react";
 import {
   Fragment,
@@ -51,6 +52,7 @@ import { removeDeletedWorkbenchPins } from "@/lib/workbenchPins";
 import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
+import { useConversationShareRequest } from "@/stores/conversationShare";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import {
   fetchAgentConversationIds,
@@ -101,6 +103,7 @@ const ConversationStatusIndicator: FC<{
 };
 
 interface BatchSelectionValue {
+  resolveRemoteId: (id: string) => string | undefined;
   batchMode: boolean;
   selectedIds: Set<string>;
   allVisibleSelected: boolean;
@@ -464,6 +467,7 @@ export const BatchSelectionProvider: FC<{
 
   const value = useMemo<BatchSelectionValue>(
     () => ({
+      resolveRemoteId,
       batchMode,
       selectedIds,
       allVisibleSelected:
@@ -484,6 +488,7 @@ export const BatchSelectionProvider: FC<{
       deleteSelected,
     }),
     [
+      resolveRemoteId,
       batchMode,
       selectedIds,
       visibleConversationIds,
@@ -651,6 +656,10 @@ export const ThreadList: FC<ThreadListProps> = ({
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const [settledHasMore, setSettledHasMore] = useState(hasMore);
+  if (!isLoading && settledHasMore !== hasMore) setSettledHasMore(hasMore);
+  // A same-adapter reload retains rows but temporarily clears its page cursor.
+  const showLoadMore = isLoading ? settledHasMore : hasMore;
   const threadIds = useAuiState((state) => state.threads.threadIds);
   const threadItems = useAuiState((state) => state.threads.threadItems);
   const visibleThreadIds = getVisibleThreadIds(
@@ -671,7 +680,13 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, []);
 
   return (
-    <div className={cn("flex flex-col p-2", newChatDesign && "min-h-0 flex-1")}>
+    <div
+      className={cn(
+        "flex flex-col p-2",
+        !newChatDesign && "[overflow-anchor:none]",
+        newChatDesign && "min-h-0 flex-1"
+      )}
+    >
       <div
         className={cn(
           "mb-1 flex h-8 items-center justify-between py-1",
@@ -707,7 +722,11 @@ export const ThreadList: FC<ThreadListProps> = ({
         </AgentHistoryViewport>
       ) : (
         <>
-          <AuiIf condition={(s) => s.threads.isLoading}>
+          <AuiIf
+            condition={(s) =>
+              s.threads.isLoading && visibleThreadIds.length === 0
+            }
+          >
             <ThreadListSkeleton />
           </AuiIf>
           <AuiIf
@@ -717,11 +736,7 @@ export const ThreadList: FC<ThreadListProps> = ({
           >
             <ThreadListEmpty />
           </AuiIf>
-          <AuiIf
-            condition={(s) =>
-              !s.threads.isLoading && visibleThreadIds.length > 0
-            }
-          >
+          <AuiIf condition={() => visibleThreadIds.length > 0}>
             <ThreadListItems
               activeThreadId={activeThreadId}
               visibleThreadIds={visibleThreadIds}
@@ -736,9 +751,9 @@ export const ThreadList: FC<ThreadListProps> = ({
               onToggleAgentExpanded={toggleAgentExpanded}
             />
           </AuiIf>
-          {hasMore && !isLoading && (
+          {showLoadMore && visibleThreadIds.length > 0 && (
             <ThreadListPrimitive.LoadMore
-              disabled={isLoadingMore}
+              disabled={isLoading || isLoadingMore}
               className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
@@ -1596,7 +1611,42 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     });
   };
 
+  const shareAgentOverrides = useThreadAgentOverrides();
   const togglePinned = () => pinned?.togglePin(thread);
+  const shareConversationId = Number(
+    batch?.resolveRemoteId(thread.id) || thread.remoteId
+  );
+
+  const handleShare = async () => {
+    const conversationId = shareConversationId;
+    if (
+      !Number.isSafeInteger(conversationId) ||
+      conversationId <= 0 ||
+      isRunning
+    )
+      return;
+    const agentId = resolveThreadAgentId(
+      thread.custom?.agentId,
+      shareAgentOverrides[thread.id]
+    );
+    if (agentId !== null) onHistoryAgentSelected?.(agentId);
+    try {
+      await aui.threads.switchToThread(thread.id);
+      if (aui.threads.getState().mainThreadId === thread.id) {
+        useConversationShareRequest
+          .getState()
+          .setRequest({ threadId: thread.id, conversationId });
+      }
+    } catch (error) {
+      if (
+        useConversationShareRequest.getState().request?.threadId === thread.id
+      ) {
+        useConversationShareRequest.getState().setRequest(null);
+      }
+      log.error("[ThreadList] Failed to open conversation for sharing:", error);
+      message.error(t("chatInterface.shareCreateFailed"));
+    }
+  };
 
   const renderMainContent = () => {
     if (isEditing) {
@@ -1724,6 +1774,18 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             <MoreHorizontalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
+            <ThreadListItemMorePrimitive.Item
+              onSelect={() => void handleShare()}
+              disabled={
+                isRunning ||
+                !Number.isSafeInteger(shareConversationId) ||
+                shareConversationId <= 0
+              }
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent data-[disabled]:opacity-50"
+            >
+              <Share2Icon className="size-4" />
+              {t("chatInterface.shareConversation")}
+            </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
               onSelect={togglePinned}
               disabled={!pinned?.canPin(thread)}

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from database import tool_db
+from management.db.tool import repository as tool_db
 
 
 def test_query_tenant_tools_by_ids_empty_list_skips_database(monkeypatch):

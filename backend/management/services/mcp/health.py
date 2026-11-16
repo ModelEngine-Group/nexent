@@ -3,15 +3,9 @@
 import asyncio
 from contextlib import AsyncExitStack
 
-from consts.const import MCP_REQUEST_TIMEOUT_SECONDS
-from consts.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_record_by_id_and_tenant,
-    update_mcp_record_status_by_id,
-    update_mcp_status_by_name_and_url,
-)
+from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from infrastructure.http.client import create_httpx_client
@@ -253,6 +247,7 @@ async def check_mcp_service_health(
     tenant_id: str,
     user_id: str,
     mcp_id: int,
+    persist_status: bool = True,
 ) -> str:
     """Check MCP service health by ID.
 
@@ -282,12 +277,13 @@ async def check_mcp_service_health(
     # as healthy (consistent with the enable/disable path).
     config_json = record.get("config_json")
     if isinstance(config_json, dict) and "openapi" in config_json:
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=True,
-        )
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=True,
+            )
         return "healthy"
 
     authorization_token = record.get("authorization_token")
@@ -300,29 +296,32 @@ async def check_mcp_service_health(
             custom_headers=custom_headers,
         )
     except MCPConnectionError:
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=False,
-        )
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=False,
+            )
         raise
     except Exception as exc:
         logger.error(f"MCP health check failed: {exc}")
+        if persist_status:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=False,
+            )
+        raise MCPConnectionError(str(exc) or "MCP connection failed")
+
+    if persist_status:
         update_mcp_record_status_by_id(
             mcp_id=mcp_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            status=False,
+            status=status,
         )
-        raise MCPConnectionError(str(exc) or "MCP connection failed")
-
-    update_mcp_record_status_by_id(
-        mcp_id=mcp_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        status=status,
-    )
 
     if not status:
         raise MCPConnectionError("MCP connection failed")

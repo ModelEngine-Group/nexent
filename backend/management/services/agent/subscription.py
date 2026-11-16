@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
 from copy import (
@@ -17,45 +18,21 @@ from typing import (
     Dict,
 )
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     agent_run_manager,
 )
-from consts.const import (
-    DEFAULT_EN_TITLE,
-    DEFAULT_ZH_TITLE,
-    ENABLE_AGENT_WORKBENCH,
-    LANGUAGE,
-    MESSAGE_ROLE,
-    RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-    STREAM_STATUS_EVENT,
-)
-from consts.error_code import (
-    ErrorCode,
-    RuntimeMetadataValidationCode,
-)
-from consts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ForbiddenError,
-    RuntimeCapacityExceededError,
-    RuntimeMetadataValidationError,
-    RuntimeMetadataVersionConflict,
-    RuntimeQueueTimeoutError,
-    ValidationError,
-    WorkbenchError,
-)
-from consts.model import (
-    AgentRequest,
-    ConversationKnowledgeScopeRequest,
-)
-from database.agent_db import (
-    search_agent_info_by_agent_id,
-)
-from database.conversation_db import (
-    resolve_conversation_runtime_metadata,
-)
+from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import STREAM_STATUS_EVENT
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, ValidationError, WorkbenchError
+from contracts.agent import AgentRequest
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.conversation.repository import resolve_conversation_runtime_metadata
 from fastapi import (
     Request,
 )
@@ -72,6 +49,9 @@ from management.services.agent.execution import (
     _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
+from management.services.agent.preparation.run import (
+    preflight_mcp_header_passthrough,
+)
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -80,7 +60,7 @@ from management.services.agent.run import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from nexent.core.agents.run_agent import (
+from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
 )
 from nexent.core.concurrency import (
@@ -106,6 +86,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
+    prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -117,11 +98,9 @@ from infrastructure.streaming.channels import (
 from infrastructure.concurrency import (
     runtime_thread_manager,
 )
-from management.services.permission.identity.authentication_helpers import (
-    get_current_user_info,
-    get_user_language,
-)
+from management.utils.request_context import get_user_language
 from infrastructure.serialization.runtime_metadata import (
+    strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
 
@@ -129,19 +108,14 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_user_tenant_language(
-    authorization: str,
     http_request: Request | None = None,
     user_id: str | None = None,
     tenant_id: str | None = None,
 ):
-    """Resolve user_id, tenant_id, language with optional overrides.
-
-    If user_id and tenant_id are provided, do not parse from authorization again.
-    """
-    if user_id is None or tenant_id is None:
-        return get_current_user_info(authorization, http_request)
-    else:
-        return user_id, tenant_id, get_user_language(http_request)
+    """Require established identity and read the request language preference."""
+    if not user_id or not tenant_id:
+        raise UnauthorizedError("Authenticated user and tenant are required")
+    return user_id, tenant_id, get_user_language(http_request)
 
 
 def _detect_resume_position(
@@ -221,7 +195,6 @@ def _detect_resume_position(
 async def run_agent_stream(
     agent_request: AgentRequest,
     http_request: Request,
-    authorization: str,
     user_id: str = None,
     tenant_id: str = None,
     skip_user_save: bool = False,
@@ -230,7 +203,7 @@ async def run_agent_stream(
 ):
     """
     Start an agent run and stream responses.
-    If user_id or tenant_id is provided, authorization will be overridden. (Useful in northbound apis)
+    The gateway must supply the authenticated user and tenant for every entrypoint.
 
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
@@ -239,17 +212,10 @@ async def run_agent_stream(
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
 
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
-        authorization=authorization,
         http_request=http_request,
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if not resume:
-        from management.services.model import run_controls
-
-        run_controls.validate_agent_model_selection(
-            agent_request, resolved_tenant_id, search_agent_info_by_agent_id
-        )
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -287,6 +253,16 @@ async def run_agent_stream(
                     "Conversation belongs to a different chat entrypoint"
                 )
 
+    if not resume:
+        from management.services.model import run_controls
+        if conversation is not None:
+            from management.services.conversation.model_preferences import read_model_preferences
+            saved = await run_blocking("conversation-model-settings", read_model_preferences, agent_request.conversation_id, resolved_user_id)
+            if agent_request.model_id is None:
+                agent_request.model_id = saved.get("selected_model_id")
+            agent_request.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+        run_controls.validate_agent_model_selection(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
+
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
         from management.services.agent.workbench import (
@@ -302,7 +278,7 @@ async def run_agent_stream(
             if requested_workbench is None and isinstance(
                 conversation.get("workbench_config"), dict
             ):
-                from consts.model import WorkbenchSessionConfig
+                from contracts.agent import WorkbenchSessionConfig
 
                 requested_workbench = WorkbenchSessionConfig.model_validate(
                     conversation["workbench_config"]
@@ -327,14 +303,36 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        apply_workbench_runtime_plan(
-            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
-        )
         if conversation is not None:
             assert_workbench_version(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
+    else:
+        request_scope = None
+    if not resume:
+        if canonical_workbench is not None:
+            apply_workbench_runtime_plan(
+                agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
+            )
+            request_scope = canonical_workbench.knowledge_scope
+        prepare_tool_retrieval_overrides(
+            resolved_tenant_id, tool_params=agent_request.tool_params,
+            agent_id=agent_request.agent_id, version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+        )
+    if not resume and conversation is not None and agent_request.model_parameter_preferences:
+        raise ValidationError("Save existing conversation parameters through the preference endpoint")
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -356,6 +354,16 @@ async def run_agent_stream(
                 error_code,
                 details={"reason": exc.code.value},
             ) from exc
+    # Validation passed — now compute a clean copy without transport-only
+    # reserved fields (``_mcp_headers``, ``_mcp_headers_by_server``, and any
+    # future ``_``-prefixed key) for every persistence path below.  We never
+    # mutate ``agent_request.metadata`` in place because ``apply_mcp_header_
+    # passthrough`` later still needs to read the reserved fields from it.
+    clean_metadata = (
+        strip_reserved_runtime_metadata_fields(agent_request.metadata)
+        if metadata_update_requested
+        else {}
+    )
     metadata_entrypoint = getattr(
         agent_request, "_runtime_metadata_entrypoint", "native"
     )
@@ -368,17 +376,6 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
-    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
-        request_scope = raw_request_scope
-    elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(
-            raw_request_scope
-        )
-    else:
-        request_scope = None
     stored_scope = (
         conversation.get("knowledge_scope")
         if conversation and canonical_workbench is None
@@ -464,6 +461,10 @@ async def run_agent_stream(
             "agent_id": agent_request.agent_id,
             "chat_mode": "planning" if agent_request.enable_plan else "execution",
         }
+        if agent_request.model_id is not None:
+            conversation_kwargs["selected_model_id"] = agent_request.model_id
+        if agent_request.model_parameter_preferences:
+            conversation_kwargs["model_parameter_preferences"] = agent_request.model_parameter_preferences
         if canonical_workbench is not None:
             conversation_kwargs["workbench_config"] = canonical_workbench.model_dump(
                 mode="json"
@@ -471,10 +472,11 @@ async def run_agent_stream(
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
-            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
+            conversation_kwargs["runtime_metadata"] = clean_metadata
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
+        agent_request.__dict__["_runtime_model_parameter_preferences"] = agent_request.model_parameter_preferences
         logger.info(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
@@ -495,7 +497,7 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=agent_request.metadata or {},
+                    metadata=clean_metadata,
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
             except RuntimeMetadataVersionConflict as exc:
@@ -527,15 +529,13 @@ async def run_agent_stream(
             )
 
         if agent_request.is_debug:
-            metadata_snapshot = (
-                dict(agent_request.metadata or {}) if metadata_update_requested else {}
-            )
+            metadata_snapshot = clean_metadata
             metadata_version = None
         elif is_new_conversation:
             metadata_snapshot = dict(
                 conversation_data.get(
                     "runtime_metadata",
-                    agent_request.metadata if metadata_update_requested else {},
+                    clean_metadata if metadata_update_requested else {},
                 )
                 or {}
             )
@@ -559,7 +559,7 @@ async def run_agent_stream(
                 resolved_metadata = resolve_conversation_runtime_metadata(
                     conversation_id=agent_request.conversation_id,
                     user_id=resolved_user_id,
-                    request_metadata=agent_request.metadata,
+                    request_metadata=clean_metadata if metadata_update_requested else None,
                     update_requested=metadata_update_requested,
                     expected_version=agent_request.expected_metadata_version,
                 )
@@ -805,9 +805,15 @@ async def run_agent_stream(
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
     agent_capacity_token = None
+    # Workbench shares its definition across tenants, but not its admission budget.
+    capacity_key = (
+        f"{resolved_tenant_id}:workbench_main"
+        if agent_request.entrypoint == "workbench"
+        else agent_request.agent_id
+    )
     try:
         agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            agent_request.agent_id,
+            capacity_key,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
         execution = runtime_thread_manager.submit(
@@ -953,6 +959,41 @@ async def run_agent_stream(
         stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
+
+    # -------------------------------------------------------------------
+    # Phase-1 MCP header passthrough preflight — MUST run BEFORE the
+    # StreamingResponse is committed so AppException 010111 surfaces
+    # as HTTP 400 instead of getting swallowed into an SSE error event later.
+    # -------------------------------------------------------------------
+    if agent_request.metadata is not None and agent_request.agent_id is not None:
+        try:
+            _pf = preflight_mcp_header_passthrough(
+                agent_id=int(agent_request.agent_id),
+                tenant_id=resolved_tenant_id,
+                user_id=str(user_id or ""),
+                version_no=int(agent_request.version_no or 0),
+                metadata=agent_request.metadata,
+            )
+            if _pf is not None:
+                # Real function returns a coroutine; AsyncMock returns an
+                # awaitable; a plain MagicMock returns a MagicMock that is
+                # NOT awaitable — guard against that so existing tests that
+                # only patch generate_stream don't crash on this new step.
+                import inspect as _inspect
+
+                if _inspect.isawaitable(_pf):
+                    await _pf
+        except Exception as exc:
+            # AppException propagates as HTTP 400 — this is the desired
+            # northbound contract.  Anything else here is a code bug; reraise
+            # so FastAPI surfaces 500.
+            if isinstance(exc, AppException):
+                raise
+            logger.error(
+                "preflight_mcp_header_passthrough raised unexpected exception",
+                exc_info=True,
+            )
+            raise
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
@@ -986,7 +1027,7 @@ async def run_agent_stream(
                                 "config_version": getattr(
                                     agent_request, "_workbench_config_version", 0
                                 ),
-                                "schema_version": 3,
+                                "schema_version": canonical_workbench.schema_version,
                                 "mode": canonical_workbench.mode,
                                 "agent_mounts": [
                                     mount.model_dump(mode="json")

@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.memory_record_db`` (Phase 2)."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.memory.record`` (Phase 2)."""
 
 import sys
 import types
@@ -14,12 +16,18 @@ sys.path.insert(
 )
 
 
-# Stub database.client
-client_mod = types.ModuleType("database.client")
+# Stub management.db.client
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = lambda data, _model: dict(data)
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # Stub SQLAlchemy ``and_``
@@ -32,7 +40,7 @@ sys.modules["sqlalchemy"] = sqlalchemy_mod
 
 # Stub db_models with column-level mocks so SQLAlchemy expressions can be
 # compared without instantiating the real ORM.
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class _Column:
@@ -124,11 +132,11 @@ class ConversationRecord:
 db_models_mod.MemoryRecord = MemoryRecord
 db_models_mod.AgentInfo = AgentInfo
 db_models_mod.ConversationRecord = ConversationRecord
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-from backend.database import memory_record_db
+from management.db.memory import record as memory_record_db
 
 
 @pytest.fixture
@@ -162,7 +170,7 @@ def test_generate_memory_id_is_noop():
 def test_insert_memory_record_success(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     class _StubRow:
@@ -193,7 +201,7 @@ def test_insert_memory_record_failure(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.add.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     mid = memory_record_db.insert_memory_record(
@@ -213,7 +221,7 @@ def test_insert_memory_record_failure(monkeypatch, mock_session_ctx):
 def test_upsert_memory_record_insert_path(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     # No existing record: ensure INSERT path runs.
@@ -254,7 +262,7 @@ def test_upsert_memory_record_update_path(monkeypatch, mock_session_ctx):
 
     session.query.return_value.filter.return_value.first.return_value = existing
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     mid = memory_record_db.upsert_memory_record_by_idempotency(
@@ -279,7 +287,7 @@ def test_soft_delete_memory_record(monkeypatch, mock_session_ctx):
     query_chain.update.return_value = 1
     session.query.return_value.filter.return_value = query_chain
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.soft_delete_memory_record(1, "t1", updated_by="u1")
@@ -302,7 +310,7 @@ def test_list_memory_records_filters(monkeypatch, mock_session_ctx):
     query.all.return_value = []
 
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memory_records(
@@ -353,7 +361,7 @@ def test_list_memory_records_enriches_agent_and_conversation(monkeypatch, mock_s
     query.offset.return_value = query
     query.all.return_value = [(record, "Agent Seven", "agent-seven", "Source chat")]
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memory_records(
@@ -377,7 +385,7 @@ def test_increment_recall_stats(monkeypatch, mock_session_ctx):
 
     session.query.return_value.filter.return_value.first.return_value = record
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.increment_recall_stats(
@@ -398,7 +406,7 @@ def test_apply_dreaming_phase_light(monkeypatch, mock_session_ctx):
     record.light_hits = 0
     session.query.return_value.filter.return_value.first.return_value = record
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.apply_dreaming_phase(1, "t1", phase="light")
@@ -411,7 +419,7 @@ def test_apply_dreaming_phase_light(monkeypatch, mock_session_ctx):
 def test_apply_dreaming_phase_invalid(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     # ``apply_dreaming_phase`` catches ``Exception`` internally and returns
@@ -424,7 +432,7 @@ def test_apply_dreaming_phase_invalid(monkeypatch, mock_session_ctx):
 def test_upsert_memory_record_requires_tenant_id(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     with pytest.raises(ValueError):
@@ -449,7 +457,7 @@ def test_upsert_memory_record_failure(monkeypatch, mock_session_ctx):
         "boom"
     )
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     mid = memory_record_db.upsert_memory_record_by_idempotency(
@@ -465,7 +473,7 @@ def test_update_memory_record_success(monkeypatch, mock_session_ctx):
     query_chain.update.return_value = 1
     session.query.return_value.filter.return_value = query_chain
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.update_memory_record(
@@ -482,7 +490,7 @@ def test_update_memory_record_not_found(monkeypatch, mock_session_ctx):
     query_chain.update.return_value = 0
     session.query.return_value.filter.return_value = query_chain
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.update_memory_record(999, "t1", {"content": "x"})
@@ -495,7 +503,7 @@ def test_update_memory_record_failure(monkeypatch, mock_session_ctx):
         "boom"
     )
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.update_memory_record(1, "t1", {"content": "x"})
@@ -509,7 +517,7 @@ def test_soft_delete_memory_record_not_found(monkeypatch, mock_session_ctx):
     query_chain.update.return_value = 0
     session.query.return_value.filter.return_value = query_chain
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.soft_delete_memory_record(999, "t1")
@@ -522,7 +530,7 @@ def test_soft_delete_memory_record_failure(monkeypatch, mock_session_ctx):
         "boom"
     )
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.soft_delete_memory_record(1, "t1")
@@ -566,7 +574,7 @@ def test_get_memory_record_success(monkeypatch, mock_session_ctx):
     query.first.return_value = record
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.get_memory_record(1, "t1")
@@ -582,7 +590,7 @@ def test_get_memory_record_not_found(monkeypatch, mock_session_ctx):
     query.first.return_value = None
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.get_memory_record(999, "t1")
@@ -625,7 +633,7 @@ def test_get_memory_record_include_deleted(monkeypatch, mock_session_ctx):
     query.first.return_value = record
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.get_memory_record(2, "t1", include_deleted=True)
@@ -637,7 +645,7 @@ def test_get_memory_record_exception(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.get_memory_record(1, "t1")
@@ -656,7 +664,7 @@ def test_list_memory_records_normalizes_empty_filters(monkeypatch, mock_session_
     query.offset.return_value = query
     query.all.return_value = []
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     # Pass empty-string filters so the normalization branches run.
@@ -685,7 +693,7 @@ def test_list_memory_records_with_status_filter(monkeypatch, mock_session_ctx):
     query.offset.return_value = query
     query.all.return_value = []
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memory_records(
@@ -705,7 +713,7 @@ def test_list_memory_records_exception(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.outerjoin.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memory_records("t1")
@@ -720,7 +728,7 @@ def test_list_active_memory_ids_by_layer(monkeypatch, mock_session_ctx):
     query.all.return_value = [(1,), (2,), (3,)]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ids = memory_record_db.list_active_memory_ids_by_layer(
@@ -734,7 +742,7 @@ def test_list_active_memory_ids_by_layer_exception(monkeypatch, mock_session_ctx
     session, ctx = mock_session_ctx
     session.query.return_value.filter.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ids = memory_record_db.list_active_memory_ids_by_layer("t1", "agent")
@@ -783,7 +791,7 @@ def test_get_memory_records_by_ids_success(monkeypatch, mock_session_ctx):
     query.all.return_value = [record]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.get_memory_records_by_ids([1, 2], "t1")
@@ -795,7 +803,7 @@ def test_get_memory_records_by_ids_exception(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.get_memory_records_by_ids([1], "t1")
@@ -839,7 +847,7 @@ def test_find_by_idempotency_success(monkeypatch, mock_session_ctx):
     query.first.return_value = record
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.find_by_idempotency("t1", "k")
@@ -854,7 +862,7 @@ def test_find_by_idempotency_not_found(monkeypatch, mock_session_ctx):
     query.first.return_value = None
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.find_by_idempotency("t1", "missing")
@@ -865,7 +873,7 @@ def test_find_by_idempotency_exception(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     row = memory_record_db.find_by_idempotency("t1", "k")
@@ -877,7 +885,7 @@ def test_increment_recall_stats_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.return_value.first.return_value = None
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.increment_recall_stats(999, "t1")
@@ -898,7 +906,7 @@ def test_increment_recall_stats_dedup(monkeypatch, mock_session_ctx):
 
     session.query.return_value.filter.return_value.first.return_value = record
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.increment_recall_stats(
@@ -920,7 +928,7 @@ def test_increment_recall_stats_exception(monkeypatch, mock_session_ctx):
         "boom"
     )
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.increment_recall_stats(1, "t1")
@@ -935,7 +943,7 @@ def test_apply_dreaming_phase_rem(monkeypatch, mock_session_ctx):
     record.rem_hits = 0
     session.query.return_value.filter.return_value.first.return_value = record
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.apply_dreaming_phase(1, "t1", phase="rem")
@@ -948,7 +956,7 @@ def test_apply_dreaming_phase_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.return_value.first.return_value = None
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.apply_dreaming_phase(999, "t1", phase="light")
@@ -961,7 +969,7 @@ def test_apply_dreaming_phase_exception(monkeypatch, mock_session_ctx):
         "boom"
     )
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     ok = memory_record_db.apply_dreaming_phase(1, "t1", phase="light")
@@ -1014,7 +1022,7 @@ def test_list_memories_for_dreaming(monkeypatch, mock_session_ctx):
     query.all.return_value = [recent, stale, none_recall]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memories_for_dreaming(
@@ -1028,7 +1036,7 @@ def test_list_memories_for_dreaming_exception(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.return_value.filter.side_effect = Exception("boom")
     monkeypatch.setattr(
-        "backend.database.memory_record_db.get_db_session", lambda: ctx
+        "management.db.memory.record.get_db_session", lambda: ctx
     )
 
     rows = memory_record_db.list_memories_for_dreaming("t1", user_id="u1")

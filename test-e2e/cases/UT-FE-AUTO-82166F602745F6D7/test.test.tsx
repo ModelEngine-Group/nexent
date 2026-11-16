@@ -289,10 +289,10 @@ describe('SourcesPanel selection and passthrough', () => {
   it('keeps citation, tooltip and panel numbers aligned across source and image tabs', async () => {
     h.aui.message.content = [
       { type: 'text', text: 'Text [[a1]], figures [[a3]][[a4]], guideline [[a2]]' },
-      { type: 'source', sourceType: 'document', citeIndex: 1, toolSign: 'a', title: 'Text' },
       { type: 'source', sourceType: 'document', citeIndex: 2, toolSign: 'a', title: 'Guideline' },
-      { type: 'source', citeIndex: 3, toolSign: 'a', title: 'First figure', url: 'https://example.com/first.png', isImage: true },
+      { type: 'source', sourceType: 'document', citeIndex: 1, toolSign: 'a', title: 'Text' },
       { type: 'source', citeIndex: 4, toolSign: 'a', title: 'Second figure', url: 'https://example.com/second.png', isImage: true },
+      { type: 'source', citeIndex: 3, toolSign: 'a', title: 'First figure', url: 'https://example.com/first.png', isImage: true },
     ];
     const marker = render(<Cite citekey='a2' />);
     const markerProps = h.citeMarkerProps.at(-1);

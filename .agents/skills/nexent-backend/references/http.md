@@ -5,7 +5,7 @@ Applies to `backend/apps/**/*.py`.
 ## Boundary and compatibility
 
 - Parse/validate inputs, invoke services, translate domain errors to HTTP, and return responses. Keep business logic out of apps.
-- Read configuration from `consts.const` or pass explicit parameters. Preserve existing routes, payloads, and response structures.
+- Read configuration from `contracts.constants.environment` or pass explicit parameters. Preserve existing routes, payloads, and response structures.
 - New collections use plural nouns and snake_case path segments; parameters use singular semantic names such as `{agent_id}`. Keep legacy prefixes such as `/agent`.
 - Prefer resource-oriented CRUD routes; use action routes for non-CRUD behavior or compatibility.
 - GET reads/lists; preserve legacy GET actions but introduce no new side-effecting GETs. POST creates, searches, or triggers actions. DELETE is idempotent. Prefer PUT for full updates and PATCH for partial updates while retaining legacy POST update routes.

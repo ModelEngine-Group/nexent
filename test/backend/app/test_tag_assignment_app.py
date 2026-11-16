@@ -1,10 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
-from apps import tag_management_app
-from consts.exceptions import TagManagementNotFoundError
-from consts.model import (
-    TagAssignmentBulkTarget,
-    TagAssignmentReplaceRequest,
-)
+from management.api.tag import tag_management as tag_management_app
+from contracts.errors.exceptions import TagManagementNotFoundError
+from contracts.tag import TagAssignmentBulkTarget, TagAssignmentReplaceRequest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from starlette.routing import Match

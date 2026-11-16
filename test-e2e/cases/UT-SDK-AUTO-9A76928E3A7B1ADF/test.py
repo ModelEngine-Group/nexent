@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import threading
 
 import pytest
 
-from nexent.core.models.model_concurrency import (
+from nexent.core.model_service.concurrency import (
     ModelConcurrencyExceeded,
     ModelConcurrencyLimiter,
     ModelConcurrencyPermit,

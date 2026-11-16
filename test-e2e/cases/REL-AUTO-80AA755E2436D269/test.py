@@ -13,8 +13,8 @@ import logging
 
 import pytest
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 
 TENANT_ID = 'tenant-d5-failopen'
@@ -34,13 +34,12 @@ ES_STORE_SIZE_BYTES = int(1.5 * GB)
 @pytest.mark.case_id('REL-AUTO-80AA755E2436D269')
 @pytest.mark.stage('D5')
 def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
-    import management.services.knowledge_base.service as kb_service
-    import management.services.knowledge_base.quota as quota_service
-    import management.services.knowledge_base.usage as usage_service
-    import management.services.configuration.tenant.quotas as tenant_quotas
+    from management.services.knowledge_base import service as kb_service
+    from management.services.configuration.tenant import quotas as tenant_quota_service
+    from management.services.knowledge_base import usage as usage_service
     from management.services.knowledge_base.quota import QuotaService
 
-    quota_service._usage_cache.clear()
+    usage_service._usage_cache.clear()
     caplog.set_level(logging.WARNING)
 
     state = {'es_error': None, 'es_detail': None, 'ledger_error': None}
@@ -85,8 +84,8 @@ def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
 
         return _Core()
 
-    # Patch consumed imports after the policy/usage split, not facade aliases.
-    monkeypatch.setattr(tenant_quotas, 'get_single_config_info', single_config)
+    # Patch the lookup sites in the extracted configuration and usage implementations.
+    monkeypatch.setattr(tenant_quota_service, 'get_single_config_info', single_config)
     monkeypatch.setattr(usage_service, 'get_knowledge_info_by_tenant_id', lambda tenant_id, ordered=False: kb_list())
     monkeypatch.setattr(usage_service, 'get_private_knowledge_info_by_creator', lambda tenant_id, created_by: kb_list())
     monkeypatch.setattr(usage_service, 'get_private_knowledge_info_by_tenant_id', lambda tenant_id: kb_list())

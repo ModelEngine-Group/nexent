@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.apps.health_app import install_health_contract
+from management.utils.health import install_health_contract
 
 
 def test_live_and_ready_are_dependency_free_process_health():

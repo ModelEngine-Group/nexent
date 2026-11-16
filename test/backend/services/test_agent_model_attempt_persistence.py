@@ -9,7 +9,7 @@ import pytest
 
 from management.services.agent import run as agent_run_service
 from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments, is_stream_unit_continuation as _is_continuation, rollback_model_attempt_units as _rollback_model_attempt_units
-import management.services.agent.execution as agent_execution
+from management.services.agent import execution as agent_execution
 
 
 def test_cmsr_003_rollback_removes_only_matching_attempt_units():

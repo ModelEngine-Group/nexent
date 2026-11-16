@@ -1,14 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from consts.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
-from database.market_mcp_db import (
-    get_mcp_market_record_by_source_mcp_id,
-    update_mcp_market_record,
-)
-from database.remote_mcp_db import (
-    get_mcp_record_by_id_and_tenant,
-    update_mcp_record_registry_json_by_id,
-)
+from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
+from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
+from management.db.mcp.remote import get_mcp_record_by_id_and_tenant, update_mcp_record_registry_json_by_id
 
 
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[dict]:

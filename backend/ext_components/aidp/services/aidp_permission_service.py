@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Permission resolution and runtime whitelist helpers for AIDP KBs (v7.1).
 
 This module composes three inputs to decide whether a user may act on a
@@ -13,7 +15,7 @@ Decision order:
     2. ``PRIVATE`` -> no access for every non-creator, including management
        roles.
     3. USER -> no access to any non-owned KB.
-    4. Management roles (SU/ADMIN/SPEED/ASSET_OWNER) -> EDIT for shared KBs.
+    4. Management roles (SU/ADMIN/ASSET_OWNER) -> EDIT for shared KBs.
     5. DEV with a group intersection -> ``ingroup_permission``.
     6. Empty ``group_ids`` or no intersection -> no access.
 
@@ -29,9 +31,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from database import group_db as group_db_module
-from database import user_tenant_db as user_tenant_db_module
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.roles import has_any_role
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbConflictError,
@@ -39,7 +40,8 @@ from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbPermissionDeniedError,
 )
 from ext_components.aidp.database import aidp_permission_db
-
+from management.db.identity import group as group_db_module
+from management.db.identity import user_tenant as user_tenant_db_module
 
 logger = logging.getLogger("aidp_permission_service")
 
@@ -171,7 +173,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role == "USER":
+    if has_any_role(role, {"USER"}) and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -181,7 +183,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -191,7 +193,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role != "DEV" or not record_groups:
+    if not has_any_role(role, {'DEV'}) or not record_groups:
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,

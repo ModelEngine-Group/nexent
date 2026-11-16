@@ -13,7 +13,7 @@ from shared.aidp import create_payload
 
 def _first_tenant_group_id(tenant_id: str) -> int:
     """Return one real active group_id for ``tenant_id`` (LOCAL_FULL_STACK reads the real DB)."""
-    from database import group_db
+    from management.db.identity import group as group_db
 
     payload = group_db.query_groups_by_tenant(tenant_id, page=None, page_size=None)
     groups = payload.get('groups') or []

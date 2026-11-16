@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-RECOVERY-REDEPLOY-20261104
+  change_type: test-fix
+  title: Let a later Daily redeploy repair code after an ordinary deployment failure
+  description: >-
+    Replace the unconditional pre-sync mode-recovery stop with a locked, validated
+    Local configuration recovery path. Keep the prior journal, configuration and
+    original backup; synchronize repair code without certifying the environment.
+    A new campaign owns a fresh journal until preflight, runtime-mode verification,
+    Local recovery probes and final restoration pass. Active owners/locks, pending
+    D5 fault recovery and unsafe backups/configuration remain hard stops.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Suite orchestration only. Preserve all formal business contracts, bindings,
+    assertions, source cleanliness and data/volume handling. Framework regressions
+    exercise the actual launcher/controller with isolated local Git repositories,
+    temporary configuration and controlled deployment/Case boundaries; these are
+    not formal D1-D5 or live service execution receipts.
+  notes: >-
+    Run 41723821333 stopped before fetch because the PREPARED journal from run
+    41545207345 survived its unavailable SDK deployment. Existing campaign and
+    launcher regressions covered same-invocation restoration and clean Git sync,
+    but not fetching repair code after a prior failed restore. Reuse the configured
+    Local recovery selection at runtime; do not change PW-KB-LOCAL-01 or its
+    acceptance assertions. Require owned path/index/hash validation, terminal
+    legacy owner evidence, current owner exit, two deployment locks and the D5
+    fault-operation lock check. Keep targeted execution and resume strict. No
+    Ubuntu modification, real deployment, full Daily, notification or submission
+    is performed as part of local verification.

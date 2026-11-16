@@ -148,10 +148,9 @@ vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: undefined }),
 }));
 
-vi.mock("@/hooks/model/useModelList", () => {
-  const models = { availableLlmModels: [], isLoading: false };
-  return { useModelList: () => models };
-});
+vi.mock("@/hooks/model/useModelList", () => ({
+  useModelList: () => ({ llmModels: [], availableLlmModels: [], isLoading: false }),
+}));
 
 vi.mock("@/services/conversationService", () => ({
   conversationService: {
@@ -260,9 +259,12 @@ describe("workbench new conversation", () => {
 
   it("reloads the conversation list after starting a new conversation", async () => {
     const user = userEvent.setup();
-    const queryClient = new QueryClient();
     render(
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
         <WorkbenchPage />
       </QueryClientProvider>
     );

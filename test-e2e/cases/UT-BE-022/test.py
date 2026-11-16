@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-022")
 def test_monitoring_provider_and_time_range_normalization() -> None:
-    from apps.monitoring_app import _compute_time_range_filter, _normalize_monitoring_provider
+    from management.api.monitoring.monitoring import _compute_time_range_filter, _normalize_monitoring_provider
 
     assert _normalize_monitoring_provider(None) == "otlp"
     assert _normalize_monitoring_provider("  LANGFUSE ") == "langfuse"

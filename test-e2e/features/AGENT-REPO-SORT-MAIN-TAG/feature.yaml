@@ -23,8 +23,10 @@ feature:
   - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-002
     description: >-
       Every agent listing card, on both the repository tab and the my-agents tab, shows an amber main-agent badge
-      when the listing is a main agent, and an ordinary listing with no version label renders no such badge, so main
-      and ordinary agents are visually distinguished.
+      when the listing's published agent version is a main agent, and an ordinary listing with no version label
+      renders no such badge, so main and ordinary agents are visually distinguished. The badge follows the published
+      version frozen in the listing, so editing the main-agent option after publication leaves an already-published
+      card unchanged until that edit is published as a new version.
   - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-003
     description: >-
       The agent management page matches agents by tag from its search box, including a tag persisted as a stringified

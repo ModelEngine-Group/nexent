@@ -8,15 +8,11 @@ import os
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
-from consts.const import (
-    MAX_SKILL_UPLOAD_SIZE_BYTES,
-    MAX_SKILL_UPLOAD_SIZE_MB,
-    ROOT_DIR,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, ForbiddenError, SkillException
-from database import skill_db
-from database.group_db import query_group_ids_by_user
+from contracts.constants.environment import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
+from management.db.skill import repository as skill_db
+from management.db.identity.group import query_group_ids_by_user
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
@@ -313,11 +309,14 @@ class SkillService(SkillArchiveOperations):
             out.pop("config_schemas", None)
         return out
 
-    def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_skills(
+        self, tenant_id: Optional[str] = None, *, for_mount: bool = False
+    ) -> List[Dict[str, Any]]:
         """List all skills for a tenant.
 
         Args:
             tenant_id: Tenant ID for filtering skills. Uses instance tenant_id if not provided.
+            for_mount: Omit Skill content and tool relations while retaining configuration metadata.
 
         Returns:
             List of skill info dicts
@@ -326,7 +325,10 @@ class SkillService(SkillArchiveOperations):
         if not effective_tenant_id:
             raise SkillException("tenant_id is required")
         try:
-            skills = skill_db.list_skills(effective_tenant_id)
+            skills = (
+                skill_db.list_skill_mount_summaries(effective_tenant_id)
+                if for_mount else skill_db.list_skills(effective_tenant_id)
+            )
             enriched = [self._enrich_configs_from_yaml(s) for s in skills]
             return enriched
         except Exception as e:
@@ -338,13 +340,18 @@ class SkillService(SkillArchiveOperations):
         *,
         tenant_id: Optional[str] = None,
         user_id: str,
+        for_mount: bool = False,
     ) -> List[Dict[str, Any]]:
         """List skills visible to a user and attach the resolved permission."""
         user_role = _get_user_role(user_id)
         user_group_ids = set(query_group_ids_by_user(user_id) or [])
+        skills = (
+            self.list_skills(tenant_id=tenant_id, for_mount=True)
+            if for_mount else self.list_skills(tenant_id=tenant_id)
+        )
         visible_skills = [
             skill
-            for skill in self.list_skills(tenant_id=tenant_id)
+            for skill in skills
             if can_view_skill(
                 skill=skill,
                 user_id=user_id,
@@ -1209,7 +1216,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             Created or updated skill instance dict
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.create_or_update_skill_by_skill_info(
             skill_info=skill_info,
@@ -1231,7 +1238,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             List of skill instance dicts
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.query_skill_instances_by_agent_id(
             agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -1251,7 +1258,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             Skill instance dict or None if not found
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.query_skill_instance_by_id(
             agent_id=agent_id,

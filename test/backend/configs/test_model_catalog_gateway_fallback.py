@@ -183,7 +183,7 @@ def test_effort_only_profile_keeps_gateway_factory_and_actual_url(catalog):
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_resolved_gateway_controls_build_generic_sdk_parameters(catalog, enabled):
-    from consts.model import ReasoningCapability
+    from contracts.model import ReasoningCapability
     from management.services.model.reasoning import normalize_reasoning_params
     from nexent.core.models.openai_llm import OpenAIModel
 
@@ -205,3 +205,13 @@ def test_resolved_gateway_controls_build_generic_sdk_parameters(catalog, enabled
         "extra_body": {"enable_thinking": enabled},
         **({"reasoning_effort": "xhigh"} if enabled else {}),
     }
+
+
+def test_legacy_migration_keeps_pre_gateway_matching_boundary(catalog):
+    assert loader.resolve_reasoning_capability(
+        "qwen3.8-max", GATEWAY, "custom", allow_gateway_fallback=False,
+    ) is None
+    assert loader.resolve_reasoning_capability(
+        "qwen3.8-max", OFFICIAL, "alibaba-cn", allow_gateway_fallback=False,
+    )["provider_id"] == "alibaba-cn"
+    assert resolve() is not None  # Current gateway behavior remains enabled.

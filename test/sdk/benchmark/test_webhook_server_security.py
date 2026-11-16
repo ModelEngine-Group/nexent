@@ -186,7 +186,7 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
     caplog,
 ):
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
 
     item = FakeItem("item-1")
     fake_langfuse = FakeLangfuse([item])
@@ -321,7 +321,7 @@ def test_run_experiment_task_redacts_task_exception_from_logs_and_trace(
     caplog,
 ):
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
 
     item = FakeItem("item-1")
     fake_langfuse = FakeLangfuse([item])

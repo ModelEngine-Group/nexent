@@ -2,7 +2,7 @@
 
 """Service boundary for Agent-chat history group queries."""
 
-from database.conversation_agent_history_db import (
+from management.db.identity.conversation_agent_history_db import (
     get_agent_conversation_group_page,
     get_agent_group_conversation_page,
     list_agent_conversation_ids,

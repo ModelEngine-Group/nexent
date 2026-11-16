@@ -6,10 +6,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import tag_management_app
-from database.skill_db import get_skills_for_tag_read
-from database.knowledge_db import get_knowledge_records_for_tag_read
-from database.tag_management_db import TagManagementDB
+from management.api.tag import tag_management as tag_management_app
+from management.db.skill.repository import get_skills_for_tag_read
+from management.db.knowledge_base.repository import get_knowledge_records_for_tag_read
+from management.db.tag.repository import TagManagementDB
 from management.services.knowledge_base import permission
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
@@ -66,7 +66,6 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
     groups = MagicMock(return_value=[9])
     monkeypatch.setattr(permission, "get_user_tenant_by_user_id", role)
     monkeypatch.setattr(permission, "query_group_ids_by_user", groups)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", False)
     assignments = MagicMock(return_value={"owned": [], "group": []})
     monkeypatch.setattr(TagManagementDB, "list_resource_assignments_batch", assignments)
     result = TagManagementService.get_knowledge_assignments_batch(
@@ -81,24 +80,24 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
     assert permission.resolve_knowledge_base_permission("owned", "reader", "tenant-a") == "CREATOR"
 
 
-@pytest.mark.parametrize("speed,user_id,tenant,user_tenant", [
-    (True, "reader", None, None),
-    (False, "tenant-a", "tenant-a", {"tenant_id": "tenant-a", "user_role": "USER"}),
-    (False, "reader", "tenant-a", {"tenant_id": "tenant-a", "user_role": "ADMIN"}),
+@pytest.mark.parametrize("user_id,roles,expected", [
+    ("tenant-a", ["USER"], None),
+    ("reader", ["ADMIN", "OPS"], "EDIT"),
 ])
-def test_knowledge_batch_preserves_speed_and_legacy_admin_roles(monkeypatch, speed, user_id, tenant, user_tenant):
-    monkeypatch.setattr(permission, "get_user_tenant_by_user_id", lambda _: user_tenant)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", speed)
+def test_knowledge_batch_uses_account_roles_for_admin_access(monkeypatch, user_id, roles, expected):
+    monkeypatch.setattr(
+        permission, "get_user_tenant_by_user_id",
+        lambda _: {"tenant_id": "tenant-a", "user_roles": roles},
+    )
     monkeypatch.setattr(permission, "query_group_ids_by_user", lambda _: [])
     result = permission.resolve_knowledge_base_permissions(
-        [{"index_name": "kb", "tenant_id": "tenant-a", "created_by": "other"}], user_id, tenant
+        [{"index_name": "kb", "tenant_id": "tenant-a", "created_by": "other"}], user_id, "tenant-a"
     )
-    assert result["kb"] in {"EDIT", "READ_ONLY"}
+    assert result["kb"] == expected
 
 
 def test_knowledge_without_user_membership_denies_without_group_lookup(monkeypatch):
     monkeypatch.setattr(permission, "get_user_tenant_by_user_id", lambda _: None)
-    monkeypatch.setattr(permission, "IS_SPEED_MODE", False)
     group_read = MagicMock()
     monkeypatch.setattr(permission, "query_group_ids_by_user", group_read)
     assert permission.resolve_knowledge_base_permissions([{"index_name": "kb"}], "reader", "t") == {"kb": None}
@@ -106,8 +105,8 @@ def test_knowledge_without_user_membership_denies_without_group_lookup(monkeypat
 
 
 @pytest.mark.parametrize("loader,module,id_field,ids", [
-    (get_skills_for_tag_read, "database.skill_db", "skill_id", [1, 2]),
-    (get_knowledge_records_for_tag_read, "database.knowledge_db", "index_name", ["a", "b"]),
+    (get_skills_for_tag_read, "management.db.skill.repository", "skill_id", [1, 2]),
+    (get_knowledge_records_for_tag_read, "management.db.knowledge_base.repository", "index_name", ["a", "b"]),
 ])
 def test_visibility_queries_are_single_tenant_scoped_in_reads(monkeypatch, loader, module, id_field, ids):
     session = MagicMock()

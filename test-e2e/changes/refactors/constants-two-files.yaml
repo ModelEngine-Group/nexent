@@ -1,0 +1,95 @@
+schema_version: '1.0'
+change:
+  change_id: CONSTANTS-TWO-FILES-20261022
+  change_type: refactor
+  title: Consolidate environment and pure constants and rename gateway auth owners
+  description: Move centralized deployment settings to contracts/constants/environment.py,
+    consolidate pure constants into constants.py with comment groups and one physical
+    line per declaration, relocate helper/type logic, and rename authentication files
+    without changing runtime contracts.
+  affected_features:
+    existing:
+    - F-013
+    - F-036
+    - F-045
+    - F-079
+    - F-131
+    - F-177
+    - F-178
+    - F-185
+    - MSRF-001
+    - TFP-001
+    - V5-REL-AUTO-4045B602F3B5254D
+    - V5-REL-AUTO-4CBD1BF08020ABF9
+    - V5-REL-AUTO-53457E34A331A3FF
+    - V5-REL-AUTO-BCE0AAF43667C67B
+    - V5-REL-AUTO-CCF3D3CB5D0FC268
+    - V5-REL-AUTO-D78B50240E78970B
+    - V5-REL-AUTO-DAF6A75DB19AEFBC
+    - V5-REL-AUTO-ECAC7A02C22B21FF
+    - V5-SEC-AUTO-223E157CE3543948
+    - V5-UT-BE-006
+    - V5-UT-BE-007
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-AUTO-01804EF17A1DF51B
+    - API-AUTO-19E0779FED1B649A
+    - API-AUTO-357B84F01BA6D321
+    - API-AUTO-EA69132B4642BB43
+    - MSRF-D1-002
+    - REL-AUTO-4045B602F3B5254D
+    - REL-AUTO-4CBD1BF08020ABF9
+    - REL-AUTO-53457E34A331A3FF
+    - REL-AUTO-BCE0AAF43667C67B
+    - REL-AUTO-CCF3D3CB5D0FC268
+    - REL-AUTO-D78B50240E78970B
+    - REL-AUTO-DAF6A75DB19AEFBC
+    - REL-AUTO-ECAC7A02C22B21FF
+    - SEC-AUTO-223E157CE3543948
+    - TFP-D1-006
+    - UT-BE-001
+    - UT-BE-002
+    - UT-BE-006
+    - UT-BE-007
+    - UT-BE-AUTO-51975A59626F5BE8
+    - UT-BE-AUTO-51D1EA0883A79983
+    - UT-BE-AUTO-92A31CE48AF8724C
+    - UT-BE-AUTO-97496DA0E32E2AD0
+    - UT-BE-AUTO-A5E5C8329C318684
+    - UT-BE-AUTO-BCADEBF043C5DE3C
+    - UT-BE-AUTO-CE8011DE9D3EAB17
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Ownership and formatting changes preserve existing credential,
+    HTTP, validation, catalog, configuration and lifecycle semantics.
+  notes: Continues PR 4160 against 9f93ac00c. Reuse affected D1 and local process
+    lifecycle regressions. Higher-layer imports follow canonical owners; live browser/provider/deployed-service
+    acceptance is unchanged and is not claimed.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Use exactly two constants implementation files with single-line declarations
+      and comment groups
+    - Preserve environment defaults, overrides, validation, version search and OAuth
+      credential enablement
+    - Preserve every pure constant value, business enum behavior and one shared typed
+      model catalog
+    - Preserve credential policy separation after auth module renaming
+    reason: Reuse actual affected schema/config/auth/service/API tests and strengthen
+      ownership and physical-line guards. Source/value audits compare the pre-change
+      snapshot independently.
+    test_selectors:
+    - test/backend/management/test_contracts_directory_architecture.py
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/management/test_gateway_layout.py
+    - test/backend/consts/test_app_version.py
+    - test/backend/consts/test_runtime_thread_config.py
+    - test/backend/consts/test_config_import_contexts.py
+    - test/backend/test_model_consts.py
+    - test/backend/services/test_oauth_service.py
+    - test/backend/consts/test_tool_labels.py

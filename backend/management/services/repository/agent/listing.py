@@ -4,46 +4,18 @@ import logging
 import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
-from consts.agent_repository import (
-    OWNERSHIP_ALL,
-    OWNERSHIP_CREATED,
-    OWNERSHIP_OTHERS,
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_OWNERSHIP_FILTERS,
-    VALID_REPOSITORY_STATUSES,
-)
-from consts.const import SYSTEM_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.model import (
-    AgentRepositorySnapshot,
-    KnowledgeBaseResolution,
-    SkillResolution,
-)
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-)
-from database.agent_db import delete_agent_by_id, search_agent_info_by_agent_id
-from database.agent_repository_db import (
-    fetch_draft_agent_mine_metadata,
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    insert_agent_repository_record,
-    list_agent_repository_by_agent_ids,
-    list_agent_repository_summaries,
-    reset_agent_repository_status,
-    soft_delete_agent_repository_record,
-    sum_agent_repository_downloads_by_agent_ids,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-)
-from database.agent_version_db import search_version_by_version_no
-from database.tag_management_db import TagManagementDB
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
+from contracts.constants.constants import SYSTEM_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.agent import AgentRepositorySnapshot
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.skill import SkillResolution
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from management.db.agent.repository import delete_agent_by_id, search_agent_info_by_agent_id
+from management.db.agent.catalog import fetch_draft_agent_mine_metadata, get_agent_repository_by_agent_id, get_agent_repository_by_id, increment_agent_repository_downloads, insert_agent_repository_record, list_agent_repository_by_agent_ids, list_agent_repository_summaries, reset_agent_repository_status, soft_delete_agent_repository_record, sum_agent_repository_downloads_by_agent_ids, update_agent_repository_by_id, update_agent_repository_status_by_id
+from management.db.agent.version import search_version_by_version_no
+from management.db.tag.repository import TagManagementDB
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import read_icon_image, upload_icon_image
 from management.services.agent.service import (
     collect_skill_zip_entries,
@@ -234,12 +206,7 @@ def list_agent_repository_listings_impl(
         for record in paged_records
         if record.get("agent_id") is not None
     ]
-    main_flags = _get_agent_main_flags(paged_agent_ids)
-    for record in paged_records:
-        agent_id = record.get("agent_id")
-        record["is_main_agent"] = (
-            main_flags.get(int(agent_id), True) if agent_id is not None else True
-        )
+    _apply_agent_main_flags(paged_records)
     download_totals = _get_agent_download_totals(paged_agent_ids)
     return {
         "items": [
@@ -637,7 +604,7 @@ def get_agent_repository_listing_detail_impl(
             int(agent_id),
             0,
         )
-    main_flags = _get_agent_main_flags([int(agent_id)]) if agent_id is not None else {}
+    _apply_agent_main_flags([record])
 
     return {
         "agent_repository_id": record.get("agent_repository_id"),
@@ -658,9 +625,7 @@ def get_agent_repository_listing_detail_impl(
         "prompt": root_agent.get("prompt"),
         "tools": _extract_tool_names(root_agent),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
-        "is_main_agent": (
-            main_flags.get(int(agent_id), True) if agent_id is not None else True
-        ),
+        "is_main_agent": record.get("is_main_agent", True),
     }
 
 
@@ -701,23 +666,40 @@ from management.services.repository.agent.publishing import (
 )
 
 
-def _get_agent_main_flags(agent_ids: Collection[int]) -> Dict[int, bool]:
-    """Return the main-agent flag per agent_id, degrading to no flags on error.
+def _apply_agent_main_flags(records: List[Dict[str, Any]]) -> None:
+    """Attach each listing's main-agent flag from its published agent version.
 
-    The flag is presentational only; when the lookup is unavailable the caller
-    falls back to the main-agent default instead of failing the listing request.
+    A repository row freezes the version it published, so the flag must follow
+    that version row rather than the editable draft (``version_no = 0``);
+    otherwise toggling the draft option changes an already-published card.  The
+    flag is presentational only, so an unavailable lookup degrades to the
+    main-agent default instead of failing the listing request.
     """
-    normalized_ids = {int(agent_id) for agent_id in agent_ids if agent_id is not None}
-    if not normalized_ids:
-        return {}
-    try:
-        return batch_get_agent_main_flags(list(normalized_ids))
-    except Exception as error:  # noqa: BLE001 - degrade to the default flag
-        logger.warning(
-            "Failed to resolve agent main-agent flags; defaulting to main: %s",
-            error,
-        )
-        return {}
+    record_keys: List[Optional[Tuple[int, int]]] = []
+    for record in records:
+        agent_id = record.get("agent_id")
+        version_no = record.get("version_no")
+        key: Optional[Tuple[int, int]] = None
+        if agent_id is not None and version_no is not None:
+            try:
+                key = (int(agent_id), int(version_no))
+            except (TypeError, ValueError):
+                key = None
+        record_keys.append(key)
+    pairs = [key for key in record_keys if key is not None]
+    flags: Dict[Tuple[int, int], bool] = {}
+    if pairs:
+        try:
+            flags = batch_get_agent_version_main_flags(pairs)
+        except Exception as error:  # noqa: BLE001 - degrade to the default flag
+            logger.warning(
+                "Failed to resolve agent version main-agent flags; "
+                "defaulting to main: %s",
+                error,
+            )
+            flags = {}
+    for record, key in zip(records, record_keys):
+        record["is_main_agent"] = flags.get(key, True) if key is not None else True
 
 
 def _repository_id_sort_key(record: Dict[str, Any]) -> int:
@@ -763,4 +745,4 @@ def _order_listings_by_publish_time(
 
 from datetime import datetime
 
-from database.agent_db import batch_get_agent_main_flags
+from management.db.agent.repository import batch_get_agent_version_main_flags

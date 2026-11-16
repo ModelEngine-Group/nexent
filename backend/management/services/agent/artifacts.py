@@ -6,11 +6,7 @@ import json
 import logging
 import os
 
-from database.attachment_db import (
-    _build_mcp_presigned_url,
-    get_file_url,
-    upload_fileobj,
-)
+from management.db.file.attachment import _build_mcp_presigned_url, get_file_url, upload_fileobj
 from management.services.file.service import is_allowed_skill_upload_path
 
 logger = logging.getLogger(__name__)

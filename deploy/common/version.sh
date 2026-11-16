@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 deployment_project_root() {
   local script_dir
@@ -21,7 +22,7 @@ deployment_read_version() {
     return 0
   fi
 
-  local const_file="$root/backend/consts/const.py"
+  local const_file="$root/backend/contracts/constants/environment.py"
   if [ -f "$const_file" ]; then
     local line
     line="$(grep -E '^APP_VERSION[[:space:]]*=' "$const_file" | tail -n 1 || true)"

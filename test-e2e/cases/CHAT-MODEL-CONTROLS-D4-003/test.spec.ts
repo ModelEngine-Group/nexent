@@ -15,9 +15,14 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
     const advanced = settings(page).getByRole("button", { name: "高级设置", exact: true });
     await advanced.focus(); await advanced.hover(); await expect(panel).toBeVisible();
   };
+  const refreshed = () => page.waitForResponse(response => response.request().method() === "GET" &&
+    /\/model\/outlets\/\d+$|\/model_preferences\/\d+$/.test(new URL(response.url()).pathname) && response.status() === 200);
   const set = async (t: string, p: string) => {
-    await open(); await temperature.fill(t); await temperature.press("Enter");
-    await topP.fill(p); await topP.press("Enter");
+    await open();
+    const temperatureSaved = refreshed();
+    await temperature.fill(t); await temperature.press("Enter"); await temperatureSaved; await expect(temperature).toBeEnabled();
+    const topPSaved = refreshed();
+    await topP.fill(p); await topP.press("Enter"); await topPSaved; await expect(topP).toBeEnabled();
   };
   for (const id of contract.expectedIds("preconditions")) await contract.precondition(id, async () => {
     await enter(page, "workbench-agent"); await chooseModel(page, "Default A"); await open();
@@ -36,7 +41,9 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
         await expect(panel.getByRole("slider", { name: "Top P 滑块", exact: true })).toHaveAttribute("aria-valuenow", pValue);
       }
       const slider = panel.getByRole("slider", { name: "温度 滑块", exact: true });
-      await slider.focus(); await slider.press("ArrowLeft"); await expect(temperature).toHaveValue("1.9");
+      const sliderSaved = refreshed();
+      await slider.focus(); await slider.press("ArrowLeft"); await sliderSaved;
+      await expect(temperature).toBeEnabled(); await expect(temperature).toHaveValue("1.9");
       for (const invalid of ["-0.1", "2.1", ""]) {
         await temperature.fill(invalid); await temperature.press("Enter");
         await expect(temperature).toHaveAttribute("aria-invalid", "true");
@@ -46,8 +53,8 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
       await expect(temperature).toHaveValue("0.6"); await expect(topP).toHaveValue("0.85");
       await page.keyboard.press("Escape");
       const inherited = await send(page,state);
-      expect(inherited.body.generation_config.temperature ?? null).toBeNull();
-      expect(inherited.body.generation_config.top_p ?? null).toBeNull();
+      expect(inherited.explicit.temperature ?? null).toBeNull();
+      expect(inherited.explicit.top_p ?? null).toBeNull();
     }
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
@@ -72,12 +79,13 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
   await contract.step(contract.expectedIds("steps")[2], async () => {
     for (const entry of creatorEntries) {
       await enter(page, entry); await chooseModel(page, "Effort B"); await set("0.7", "0.6"); await page.keyboard.press("Escape");
-      const { body } = await send(page, state);
+      const { body, effective } = await send(page, state);
       expect(body.model_id).toBe(3);
-      expect(body.generation_config).toMatchObject({temperature:0.7,top_p:0.6});
+      expect(effective).toMatchObject({temperature:0.7,top_p:0.6});
+      expect(body).not.toHaveProperty("generation_config");
       expect(body).not.toHaveProperty("temperature"); expect(body).not.toHaveProperty("top_p");
       if (body.workbench_config) {
-        expect(body.workbench_config.generation_config).toMatchObject({temperature:0.7,top_p:0.6});
+        expect(body.workbench_config).not.toHaveProperty("generation_config");
       }
     }
   });

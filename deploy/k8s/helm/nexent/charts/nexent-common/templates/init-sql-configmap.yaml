@@ -14,8 +14,3 @@ data:
   {{ printf "migrations-%s" $name | quote }}: |
 {{ $content | nindent 4 }}
 {{ end }}
-  supabase-.keep: ""
-{{ range $name, $content := default dict $sqlFiles.supabase }}
-  {{ printf "supabase-%s" $name | quote }}: |
-{{ $content | nindent 4 }}
-{{ end }}

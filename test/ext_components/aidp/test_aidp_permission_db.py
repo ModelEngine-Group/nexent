@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``aidp_permission_db`` CRUD functions.
 
 These tests use a mocked SQLAlchemy ``Session`` rather than a real database
@@ -148,7 +150,7 @@ def fake_session(monkeypatch):
 
     monkeypatch.setattr(target_mod, "get_db_session", _patched)
 
-    # ``database.client.as_dict`` performs a non-trivial dispatch on ORM vs.
+    # ``management.utils.orm.as_dict`` performs a non-trivial dispatch on ORM vs.
     # Row objects. Our fake session returns plain dicts, so replace it with a
     # simpler adapter for the duration of the test.
     def _passthrough_dict(obj):

@@ -28,7 +28,7 @@ from nexent.core.concurrency.context import (
     set_default_thread_manager,
 )
 
-import apps.config_app as config_app
+import management.api.application as config_app
 import management.recovery as startup_recovery
 import management.services.evaluation.maintenance as evaluation_maintenance
 import management.services.memory.dreaming.scheduler as memory_scheduler
@@ -209,7 +209,7 @@ async def test_startup_order_and_conditional_backfill(lifecycle, monkeypatch, wo
         if workbench_enabled:
             expected.append('workbench_backfill')
         assert lifecycle.calls == [*expected, 'validate_external', 'dreaming_start']
-        assert lifecycle.run_calls == [('control-io', 'recover-config-tasks', 'apps.config_app')]
+        assert lifecycle.run_calls == [('control-io', 'recover-config-tasks', 'management.api.application')]
         assert lifecycle.manager.state is ManagerState.RUNNING
         assert get_default_thread_manager() is lifecycle.manager
     await _assert_released(lifecycle)

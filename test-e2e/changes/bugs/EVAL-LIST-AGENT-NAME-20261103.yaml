@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: EVAL-LIST-AGENT-NAME-20261103
+  change_type: bugfix
+  bug_id: EVAL-LIST-AGENT-NAME-20261103
+  title: Show agent names in the evaluation task list
+  description: Resolve agent names from tenant-scoped evaluation metadata independently of the published catalog.
+  observed_behavior: Historical evaluation rows fall back to the numeric agent ID when the published catalog omits the agent.
+  expected_behavior: The list displays the stored agent name when available and preserves the existing fallback for missing names.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The existing evaluation journey never checks the agent name after a reload without the published catalog.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-EVAL-RUN-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-EVAL-RUN-01]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Return one row per evaluation with a same-tenant name or the empty fallback.
+    - Prefer the display name to the programmatic name of the latest stored version.
+    - Preserve the list ordering, filtering and pagination.
+    test_selectors:
+    - test/backend/database/test_agent_evaluation_list_names.py::test_list_agent_names_are_tenant_scoped_and_preserve_the_run_window
+    reason: Existing DB tests assert list counters and filters but do not verify names.
+  notes: >-
+    The sibling SPEC checkout is absent; inspected the product evaluation guides,
+    the list/detail queries and the existing browser journey. The legacy-route D5
+    case and runtime scoring scenarios do not exercise this list contract.

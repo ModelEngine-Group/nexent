@@ -68,11 +68,20 @@ class OwnershipTests(unittest.TestCase):
             result = route({'case_id': identifier, 'feature_id': 'F-171'}, {}, rules)
             self.assertEqual(result['owner'], expected)
 
-    def test_cross_area_security_cases_remain_unassigned(self):
+    def test_cross_area_security_routes_follow_the_actual_primary_boundary(self):
         rules = load_rules(REPO)
-        for identifier in ['V5-SEC-06', 'V5-SEC-07']:
-            self.assertEqual(route({'case_id': identifier[3:], 'feature_id': identifier}, {}, rules)['status'],
-                             'UNASSIGNED')
+        for identifier, expected in [('V5-SEC-06', 'MCP仓库'), ('V5-SEC-07', 'Skill仓库')]:
+            self.assertEqual(route({'case_id': identifier[3:], 'feature_id': identifier}, {}, rules)['domain'], expected)
+
+    def test_model_workbench_and_kernel_case_exceptions(self):
+        rules = load_rules(REPO)
+        for cid, fid, expected in [('CHAT-MODEL-CONTROLS-D3-001', 'CHAT-MODEL-CONTROLS', '@潘业宏'),
+                                   ('CHAT-MODEL-CONTROLS-D4-001', 'CHAT-MODEL-CONTROLS', '@徐雅琦'),
+                                   ('USER-MODEL-READ-D5-001', 'CHAT-MODEL-CONTROLS', '@武兆福'),
+                                   ('WB-CONTROLS-D4-004', 'WB-CONTROLS', '@曹杰'),
+                                   ('SAI-D3-001', 'SAI-001', '@杜宇骁'), ('SAI-D1-001', 'SAI-001', '@潘业宏')]:
+            with self.subTest(cid=cid):
+                self.assertEqual(route({'case_id': cid, 'feature_id': fid}, {}, rules)['owner'], expected)
 
     def test_git_uses_pinned_case_assets_not_shared_helper_or_current_head(self):
         with tempfile.TemporaryDirectory() as root:

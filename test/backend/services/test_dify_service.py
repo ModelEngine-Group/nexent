@@ -10,8 +10,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 import httpx
 
-from backend.consts.error_code import ErrorCode
-from backend.consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 
 def _create_mock_client(mock_response):

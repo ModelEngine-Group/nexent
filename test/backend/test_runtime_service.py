@@ -98,7 +98,7 @@ sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 storage_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 # Pre-inject a stubbed base_app to avoid import side effects
 backend_pkg = types.ModuleType("backend")
@@ -126,10 +126,10 @@ sys.modules["infrastructure.logging"] = logging_utils_mod
 
 # Also stub non-namespaced imports used by the application
 apps_pkg_flat = types.ModuleType("apps")
-base_app_mod_flat = types.ModuleType("apps.runtime_app")
+base_app_mod_flat = types.ModuleType("runtime.api.application")
 base_app_mod_flat.app = MagicMock()
 sys.modules["apps"] = apps_pkg_flat
-sys.modules["apps.runtime_app"] = base_app_mod_flat
+sys.modules["runtime.api.application"] = base_app_mod_flat
 setattr(apps_pkg_flat, "runtime_app", base_app_mod_flat)
 
 # Wire package attributes

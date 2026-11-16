@@ -12,8 +12,10 @@ from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session, registry
 from sqlalchemy.pool import StaticPool
 
-from apps import group_app, user_app
-from database import user_tenant_db, user_identity_db
+from management.api.identity import group as group_app
+from management.api.identity import user as user_app
+from management.db.identity import user_tenant as user_tenant_db
+from management.db.identity import user_identity as user_identity_db
 from management.services.permission.identity import groups as group_service
 from management.services.permission.identity import display as user_identity_service
 from management.services.permission.identity import users as user_service

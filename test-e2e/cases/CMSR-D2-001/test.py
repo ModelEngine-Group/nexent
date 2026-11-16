@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from management.services.agent import run as agent_run_service
-import management.services.agent.execution as agent_execution
+from management.services.agent import execution as agent_execution
 
 pytestmark = [pytest.mark.case_id("CMSR-D2-001"), pytest.mark.stage("D2")]
 

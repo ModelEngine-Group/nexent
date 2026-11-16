@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Journal exact DB rows and deletion fences for the delete-chain scenario."""
 from __future__ import annotations
 
@@ -37,7 +39,7 @@ def register_fence(file_id):
 
 
 def delete_knowledge(*, index_name, knowledge_id, tenant_id, user_id):
-    from database.knowledge_db import delete_knowledge_record, get_knowledge_record
+    from management.db.knowledge_base.repository import delete_knowledge_record, get_knowledge_record
     row = get_knowledge_record({'index_name': index_name, 'tenant_id': tenant_id})
     if not row:
         return
@@ -48,7 +50,7 @@ def delete_knowledge(*, index_name, knowledge_id, tenant_id, user_id):
 
 
 def delete_file(*, file_id, index_name, knowledge_id, tenant_id):
-    from database.knowledge_file_lifecycle_db import get_file_record, delete_file_record
+    from management.db.knowledge_base.file_lifecycle import get_file_record, delete_file_record
     row = get_file_record(file_id=file_id, include_hidden=True)
     if not row:
         return

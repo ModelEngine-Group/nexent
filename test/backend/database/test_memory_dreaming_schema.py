@@ -1,13 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import re
 from pathlib import Path
 
-from database.db_models import (
-    MemoryDreamingAudit,
-    MemoryDreamingDecision,
-    MemoryDreamingSchedule,
-    MemoryLongTermVersion,
-    TableBase,
-)
+from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryDreamingSchedule, MemoryLongTermVersion, TableBase
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 

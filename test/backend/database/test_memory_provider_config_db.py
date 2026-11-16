@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.memory_provider_config_db``."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.memory.provider_config``."""
 
 from unittest.mock import MagicMock
 
@@ -28,15 +30,7 @@ class MemoryProviderConfig:
 
 install_database_stubs("MemoryProviderConfig", MemoryProviderConfig)
 
-from backend.database.memory_provider_config_db import (
-    disable_provider_config,
-    get_provider_config,
-    get_provider_config_by_name,
-    insert_provider_config,
-    list_provider_configs,
-    soft_delete_provider_config,
-    update_provider_config,
-)
+from management.db.memory.provider_config import disable_provider_config, get_provider_config, get_provider_config_by_name, insert_provider_config, list_provider_configs, soft_delete_provider_config, update_provider_config
 
 
 @pytest.fixture
@@ -63,7 +57,7 @@ def test_get_provider_config_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = row
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     result = get_provider_config(1)
 
@@ -79,7 +73,7 @@ def test_get_provider_config_not_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = None
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert get_provider_config(999) is None
 
@@ -99,7 +93,7 @@ def test_get_provider_config_by_name_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = row
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     result = get_provider_config_by_name("t1", "mem0")
 
@@ -114,7 +108,7 @@ def test_get_provider_config_by_name_not_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = None
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert get_provider_config_by_name("t1", "nonexistent") is None
 
@@ -128,7 +122,7 @@ def test_list_provider_configs_empty(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = []
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert list_provider_configs("t1") == []
 
@@ -150,7 +144,7 @@ def test_list_provider_configs_with_results(monkeypatch, mock_session_ctx):
     mock_filter.filter.return_value = mock_filter
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     result = list_provider_configs("t1")
     assert len(result) == 3
@@ -164,7 +158,7 @@ def test_list_provider_configs_enabled_only(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = []
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     list_provider_configs("t1", enabled_only=True)
     # enabled_only adds an extra .filter() call
@@ -189,7 +183,7 @@ def test_insert_provider_config_success(monkeypatch, mock_session_ctx):
         obj.provider_config_id = 42
 
     session.refresh.side_effect = fake_refresh
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     result = insert_provider_config({"tenant_id": "t1", "provider_name": "p1"})
     assert result == 42
@@ -199,7 +193,7 @@ def test_insert_provider_config_success(monkeypatch, mock_session_ctx):
 def test_insert_provider_config_failure(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.add.side_effect = Exception("unique constraint")
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     result = insert_provider_config({"tenant_id": "t1", "provider_name": "dup"})
     assert result is None
@@ -215,7 +209,7 @@ def test_update_provider_config_success(monkeypatch, mock_session_ctx):
     mock_filter.update.return_value = 1
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert update_provider_config(1, {"provider_name": "new_name"}) is True
     session.commit.assert_called_once()
@@ -228,7 +222,7 @@ def test_update_provider_config_failure(monkeypatch, mock_session_ctx):
     mock_filter.update.side_effect = Exception("db error")
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert update_provider_config(1, {"provider_name": "x"}) is False
     session.rollback.assert_called_once()
@@ -243,7 +237,7 @@ def test_soft_delete_provider_config_success(monkeypatch, mock_session_ctx):
     mock_filter.update.return_value = 1
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert soft_delete_provider_config(1, "u1") is True
     session.commit.assert_called_once()
@@ -256,7 +250,7 @@ def test_soft_delete_provider_config_failure(monkeypatch, mock_session_ctx):
     mock_filter.update.side_effect = Exception("db error")
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert soft_delete_provider_config(1, "u1") is False
     session.rollback.assert_called_once()
@@ -271,7 +265,7 @@ def test_disable_provider_config_success(monkeypatch, mock_session_ctx):
     mock_filter.update.return_value = 1
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert disable_provider_config(1) is True
     session.commit.assert_called_once()
@@ -284,7 +278,7 @@ def test_disable_provider_config_failure(monkeypatch, mock_session_ctx):
     mock_filter.update.side_effect = Exception("db error")
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config.get_db_session", lambda: ctx)
 
     assert disable_provider_config(1) is False
     session.rollback.assert_called_once()

@@ -2,6 +2,7 @@
 
 """Actual router/DTO/RBAC contracts with an isolated service boundary."""
 
+import gateway.authentication.auth as depends_dependencies
 import json
 from dataclasses import dataclass, field
 
@@ -9,12 +10,14 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from apps import agent_app, skill_app
-from agents import create_agent_info
-from consts.exceptions import ForbiddenError
+from runtime.api.agent import execution as agent_app_execution
+from runtime.api.skill import creation as skill_app_creation
+from management.services.model import run_bindings
+from contracts.errors.exceptions import ForbiddenError
 from management.services.model import run_controls
 from nexent.core.agents.agent_model import AgentConfig
-from permissions import depends, rbac
+import permissions.depends as depends
+from permissions import rbac
 from permissions.models import CurrentUser
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -44,8 +47,8 @@ class ApiFixture:
 
 def api_fixture(monkeypatch):
     app = FastAPI()
-    app.include_router(agent_app.agent_runtime_router, prefix="/api")
-    app.include_router(skill_app.skill_creator_router, prefix="/api")
+    app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+    app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
     records = {}
     for index, label in enumerate(["effort", "budget", "plain", "unavailable", "foreign", "embedding"], start=1):
         records[label] = {"model_id": index, "model_name": label, "model_repo": "", "display_name": label,
@@ -65,45 +68,50 @@ def api_fixture(monkeypatch):
         role = authorization.removeprefix("Bearer ").upper()
         return CurrentUser("fixture-owner", "tenant", role)
 
-    app.dependency_overrides[depends.authenticate] = authenticate
+    app.dependency_overrides[depends_dependencies.authenticate] = authenticate
     monkeypatch.setattr(rbac, "_INITIALIZED", True)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {
         "CREATOR": {"agent:create", "skill:create"}, "NO-AGENT-CREATE": {"skill:create"},
         "NO-SKILL-CREATE": {"agent:create"},
     })
-    monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(agent_app, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
-    monkeypatch.setattr(skill_app, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
+    monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
+    def identity(authorization):
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return "fixture-owner", "tenant"
+
+    monkeypatch.setattr(agent_app_execution, "get_current_user_id", identity)
+    monkeypatch.setattr(agent_app_execution, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
+    monkeypatch.setattr(skill_app_creation, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
 
     def lookup(model_id, tenant_id):
         return next((r for r in records.values() if r["model_id"] == model_id and r["tenant_id"] == tenant_id), None)
 
     monkeypatch.setattr(run_controls, "get_model_by_model_id", lookup)
-    monkeypatch.setattr(create_agent_info, "_resolve_reasoning_capability",
+    monkeypatch.setattr(run_bindings, "_resolve_reasoning_capability",
                         lambda model_name, **kwargs: BUDGET if model_name == "budget" else
                         {"status": "unsupported", "levels": []} if model_name == "plain" else CAPABILITY)
+
+    from model_controls.profiles import frozen_fixture_profile
+    profiles = {row["model_id"]: frozen_fixture_profile(row, BUDGET if label == "budget" else
+        {"status": "unsupported"} if label == "plain" else CAPABILITY)
+        for label, row in records.items() if label != "embedding"}
+    from management.db.model import outlets as model_outlet_db
+    monkeypatch.setattr(model_outlet_db, "get_resolved_model_record", lambda identifier, *args, **kwargs: profiles.get(identifier))
 
     async def stream(request, ordinary=False):
         if ordinary and request.entrypoint != "workbench" and request.model_id and request.model_id not in state.configured:
             raise ForbiddenError("The selected model is not configured for this Agent")
-        if ordinary and request.workbench:
-            request.model_id = request.workbench.model_id
-            request.generation_config = request.workbench.generation_config
         run_controls.preflight_turn_controls(request, "tenant")
         selected = lookup(request.model_id, "tenant") if request.model_id else records["effort"]
-        base = create_agent_info.create_model_config_from_record(selected)
-        values = request.generation_config.model_dump(exclude_unset=True) if request.generation_config else {}
-        for legacy, canonical in (("reasoning_effort", "thinking_effort"), ("reasoning_budget_tokens", "reasoning_budget_tokens")):
-            value = getattr(request, legacy, None)
-            if value is not None:
-                values[canonical] = value
-        root = run_controls.overlay_root_model(base, values, "root")
-        payload = {"model_id": selected["model_id"], "enabled": root.enable_thinking,
-                   "effort": root.reasoning_effort, "budget": root.reasoning_budget_tokens,
-                   "temperature": root.temperature, "top_p": root.top_p}
+        from management.services.conversation.model_preferences import merge_model_preferences
+        root = merge_model_preferences(profiles[selected["model_id"]], request.model_parameter_preferences.get(str(selected["model_id"]), {}))
+        values = root.parameter_values
+        payload = {"model_id": selected["model_id"], "enabled": values.get("enable_thinking"),
+                   "effort": values.get("reasoning_effort"), "budget": values.get("reasoning_budget_tokens"),
+                   "temperature": values.get("temperature"), "top_p": values.get("top_p")}
         state.calls.append(request.model_dump(exclude_unset=True))
-
         async def chunks():
             yield f"data: {json.dumps(payload)}\n\n"
         return chunks()
@@ -114,7 +122,16 @@ def api_fixture(monkeypatch):
     async def creator_stream(request, **kwargs):
         return await stream(request)
 
-    monkeypatch.setattr(agent_app, "run_agent_stream", agent_run_stream)
-    monkeypatch.setattr(agent_app, "create_nl2agent_stream", creator_stream)
-    monkeypatch.setattr(skill_app, "create_nl2skill_stream", creator_stream)
+    async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory):
+        # The real history service validates this resource declaration before saving it.
+        from contracts.agent import WorkbenchSessionConfig
+        if request.workbench_config is not None:
+            WorkbenchSessionConfig.model_validate(request.workbench_config)
+        return await stream_factory(request, None), 1
+
+    monkeypatch.setattr(agent_app_execution, "start_creation_turn", creation_turn)
+    monkeypatch.setattr(skill_app_creation, "start_creation_turn", creation_turn)
+    monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
+    monkeypatch.setattr(agent_app_execution, "create_nl2agent_stream", creator_stream)
+    monkeypatch.setattr(skill_app_creation, "create_nl2skill_stream", creator_stream)
     return state

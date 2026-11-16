@@ -1,4 +1,6 @@
-"""Unit tests for database.notification_db."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for management.db.notification.repository."""
 import sys
 import types
 from contextlib import contextmanager
@@ -7,14 +9,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-client_mod = types.ModuleType("database.client")
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.filter_property = MagicMock(name="filter_property")
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class Notification:
@@ -48,25 +56,17 @@ class UserTenant:
     tenant_id = MagicMock(name="UserTenant.tenant_id")
     delete_flag = MagicMock(name="UserTenant.delete_flag")
     user_role = MagicMock(name="UserTenant.user_role")
+    roles = MagicMock(name="UserTenant.roles")
 
 
 db_models_mod.Notification = Notification
 db_models_mod.NotificationReceiver = NotificationReceiver
 db_models_mod.UserTenant = UserTenant
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
-from backend.database import notification_db as db
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_APPROVED,
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-    SCOPE_SU,
-    SCOPE_TENANT,
-    SCOPE_TENANT_ADMIN,
-    SCOPE_TENANT_USER,
-    SCOPE_USER,
-)
+from management.db.notification import repository as db
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER
 
 
 @pytest.fixture
@@ -172,6 +172,7 @@ def test_create_notification_user_scope_success(mock_session):
 def test_create_notification_resolves_scoped_receivers(
     mock_session, scope, query_rows, expected_count, expected_users
 ):
+    UserTenant.roles.overlap.reset_mock()
     query_chain = MagicMock()
     query_chain.filter.return_value = query_chain
     query_chain.all.return_value = query_rows
@@ -196,6 +197,10 @@ def test_create_notification_resolves_scoped_receivers(
     assert result["receiver_count"] == expected_count
     receivers = mock_session.add_all.call_args[0][0]
     assert {r.receiver_user_id for r in receivers} == expected_users
+    if scope == SCOPE_TENANT_ADMIN:
+        UserTenant.roles.overlap.assert_called_once_with(["ADMIN"])
+    elif scope == SCOPE_SU:
+        assert set(UserTenant.roles.overlap.call_args.args[0]) == {"SU", "SUPER_ADMIN"}
 
 
 def test_deactivate_notifications(mock_session):

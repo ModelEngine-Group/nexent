@@ -7,7 +7,7 @@ import logging
 from typing import Any, AsyncIterator, Dict, Optional
 import aiohttp
 
-from consts.const import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
+from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 

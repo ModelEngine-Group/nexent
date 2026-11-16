@@ -376,8 +376,8 @@ export const InstalledResourceBindingCard: FC<{
   }, [currentAgentId, editedAgent, payload.agent_id]);
 
   useEffect(() => {
-    registerCard(cardKey, payload.subtype);
-  }, [cardKey, payload.subtype, registerCard]);
+    if (!disabled) registerCard(cardKey, payload.subtype);
+  }, [cardKey, disabled, payload.subtype, registerCard]);
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const isInteractionLocked =

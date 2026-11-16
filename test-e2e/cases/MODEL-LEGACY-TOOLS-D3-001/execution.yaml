@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: MODEL-LEGACY-TOOLS-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_native_tool_continuation
+  profiles: [mock]
+acceptance_bindings:
+  AC-TOOL-CONTINUATION: [test_native_tool_continuation]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained protocol mock only; owns and releases its loopback provider and thread. Product conversion, service, adapter, sender and stream parsing are real. No persistent assets required.

@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for tenant-scoped Skill name uniqueness."""
 
 from pathlib import Path
 
-from backend.database.db_models import SkillInfo
+from management.db.models import SkillInfo
 
 
 MIGRATION_PATH = Path(

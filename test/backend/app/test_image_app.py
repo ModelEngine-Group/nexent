@@ -20,7 +20,7 @@ mock_const = helpers_env["mock_const"]
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from backend.apps.image_app import router
+from management.api.file.image import router
 
 # Create a FastAPI app and include the router for testing
 app = FastAPI()
@@ -224,7 +224,7 @@ async def test_proxy_image_stream_format(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         return success_response_stream
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
 
     resp = await image_app.proxy_image(url=encoded_test_url, format="stream")
@@ -253,7 +253,7 @@ async def test_proxy_image_stream_format_error(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         return error_response
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
     from fastapi import HTTPException
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
@@ -280,7 +280,7 @@ async def test_proxy_image_stream_format_base64_decode_error(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         return success_response_invalid
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
     from fastapi import HTTPException
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
@@ -297,7 +297,7 @@ async def test_proxy_image_stream_format_exception(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         raise ValueError("Unexpected error")
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
     from fastapi import HTTPException
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
@@ -315,7 +315,7 @@ async def test_proxy_image_json_format_default(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         return success_response
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
 
@@ -330,7 +330,7 @@ async def test_proxy_image_json_format_exception(monkeypatch):
     async def fake_proxy_image_impl(decoded_url):
         raise RuntimeError("Service unavailable")
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
 
@@ -351,7 +351,7 @@ async def test_proxy_image_url_decoding(monkeypatch):
         call_urls.append(decoded_url)
         return success_response
 
-    from backend.apps import image_app
+    from management.api.file import image as image_app
 
     monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
 

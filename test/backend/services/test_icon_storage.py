@@ -16,10 +16,10 @@ from management.services.agent.icon import (
 
 @pytest.fixture
 def storage(mocker, monkeypatch):
-    module = ModuleType("database.attachment_db")
+    module = ModuleType("management.db.file.attachment")
     module.upload_file_bytes = MagicMock(return_value=(True, None))
     module.get_file_stream = MagicMock()
-    monkeypatch.setitem(sys.modules, "database.attachment_db", module)
+    monkeypatch.setitem(sys.modules, "management.db.file.attachment", module)
     return module
 
 

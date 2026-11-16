@@ -25,7 +25,7 @@ def main():
         sys.path.insert(0, str(source))
 
     import uvicorn
-    import apps.config_app as config_app
+    import management.api.application as config_app
     import management.recovery as recovery
     import management.services.evaluation.maintenance as maintenance
     import management.services.memory.dreaming.scheduler as memory

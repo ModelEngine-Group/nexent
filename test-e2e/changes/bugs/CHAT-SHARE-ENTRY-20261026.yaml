@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SHARE-ENTRY-20261026
+  change_type: bugfix
+  bug_id: CHAT-SHARE-ENTRY-20261026
+  title: Restore conversation sharing after the chat UI redesign
+  description: Restore history and answer overflow entries and reuse grouped selection and the public snapshot renderer.
+  observed_behavior: The redesigned chat hides the old header share button and neither overflow menu offers sharing.
+  expected_behavior: History sharing selects all turns; answer sharing selects only its owning turn. Selection can be adjusted before creating a public link.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: UT-FE-032 currently checks asset URL construction, not its declared share selection contract; PW-SHARE-01 uses the removed header entry.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-UT-FE-032, V5-PW-SHARE-01, F-116, F-117]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-032, PW-SHARE-01]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Both entry defaults select the intended turns and retain stable persisted message identities
+    - Empty selection, running chats and failed identity loading cannot create unintended shares
+    - Conversation switches and stale requests discard old selection; creation errors preserve retry and clipboard failure preserves the created link
+    test_selectors:
+    - frontend/tests/workbench/ConversationShare.test.tsx
+    reason: Frontend hook and interaction tests are required; Python API and persistence contracts are unchanged.
+  notes: Baseline and current-fix design are maintained in sibling nexent-doc/docs/Developing/chat-share-conversation-snapshot/design.md and task.md. Strengthen existing component and journey scripts without changing historical contracts or adding D1 cases. API/security baseline is retained; no backend changes.

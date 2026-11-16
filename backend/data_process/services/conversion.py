@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 
-from consts.const import LIBREOFFICE_PROFILE_DIR
+from contracts.constants.environment import LIBREOFFICE_PROFILE_DIR
 from pathlib import Path
 import os
 from nexent.core.concurrency import run_blocking

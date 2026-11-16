@@ -6,14 +6,8 @@ from typing import Dict, Any
 from pydantic import ValidationError
 from sqlalchemy.sql import func
 
-from database.model_management_db import get_model_by_model_id
-from database.tenant_config_db import (
-    delete_config_by_tenant_config_id,
-    get_all_configs_by_tenant_id,
-    get_single_config_info,
-    insert_config,
-    update_config_by_tenant_config_id_and_data,
-)
+from management.db.model.repository import get_model_by_model_id
+from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_all_configs_by_tenant_id, get_single_config_info, insert_config, update_config_by_tenant_config_id_and_data
 
 logger = logging.getLogger("config_utils")
 

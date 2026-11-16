@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: CASE-NAMING-POLICY-20261029
+  change_type: test-fix
+  title: Standardize new formal Case IDs without renaming historical assets
+  description: >-
+    Require readable module/scenario/stage/three-digit IDs for new Cases in both
+    validation phases. Freeze existing nonstandard IDs for compatibility and check
+    the embedded stage. Document title semantics and stable framework script names.
+    Do not modify formal Case contracts, scripts, bindings or generated views.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Infrastructure naming policy and offline regressions only; all existing Case IDs and assets are preserved.
+  notes: >-
+    The 650 historical exceptions exactly match pre-policy develop commit
+    25704c463e59d31f737383334aa6b950e6c245bd, including the already-merged
+    DEP-UV-DEPENDENCY-VARIANTS manual Case. A pinned content digest rejects
+    catalog/anchor changes without requiring Git history. The list is not extended
+    for new Cases. Title semantics remain a review obligation.
+    No product runtime, deployment, workflow, notification or result upload changes.

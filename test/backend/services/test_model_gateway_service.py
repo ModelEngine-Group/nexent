@@ -6,6 +6,7 @@ the VLM config-fetch helpers. Heavy database / utils / consts modules
 are stubbed before import so only the gateway bridge logic is exercised.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
 from unittest import mock
@@ -26,13 +27,14 @@ class MockModule(mock.MagicMock):
 
 # Mock required heavy modules before any import of the service occurs.
 sys.modules['database'] = MockModule()
-sys.modules['database.model_management_db'] = MockModule()
+sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
 consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key", "llm": "llm_config_key", "embedding": "embedding_config_key"}
-sys.modules['consts.const'] = consts_const_module
+sys.modules['contracts.constants.environment'] = consts_const_module
+install_business_constant_stubs(consts_const_module)
 
 from nexent import MessageObserver
 from nexent.core.gateway import ModelContext, VLMContext

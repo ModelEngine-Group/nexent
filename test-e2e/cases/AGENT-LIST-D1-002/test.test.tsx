@@ -38,14 +38,10 @@ vi.mock("@/app/[locale]/agents/components/agent-config-actions", () => ({
   default: function MockAgentConfigActions({
     agentId,
     readOnly,
-    onConfigure,
-    onPublish,
     onManageVersions,
   }: {
     agentId: number;
     readOnly: boolean;
-    onConfigure: (agentId: number) => void;
-    onPublish: (agentId: number) => void;
     onManageVersions: (agentId: number) => void;
   }) {
     const [open, setOpen] = useState(false);
@@ -60,16 +56,6 @@ vi.mock("@/app/[locale]/agents/components/agent-config-actions", () => ({
         </button>
         {open && (
           <>
-            <button type="button" onClick={() => onConfigure(agentId)}>
-              配置
-            </button>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => onPublish(agentId)}
-            >
-              发布
-            </button>
             <button type="button" onClick={() => onManageVersions(agentId)}>
               版本管理
             </button>
@@ -95,8 +81,6 @@ const publishedAgent = {
 function renderCard(agent: Agent) {
   const callbacks = {
     onOpen: vi.fn(),
-    onConfigure: vi.fn(),
-    onPublish: vi.fn(),
     onManageVersions: vi.fn(),
   };
   render(<AgentListCard agent={agent} {...callbacks} />);
@@ -141,10 +125,7 @@ describe("[AGENT-LIST-D1-002] measured Agent card metadata and callbacks", () =>
     expect(screen.getByTestId("agent-card-status")).toHaveTextContent("未上线");
     expect(screen.queryByText("医疗")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    const publish = screen.getByRole("button", { name: "发布" });
-    expect(publish).toBeDisabled();
-    fireEvent.click(publish);
-    expect(callbacks.onPublish).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
     expect(screen.getByRole("button", { name: "更多" })).toHaveAttribute(
       "data-read-only",
       "true",
@@ -179,15 +160,10 @@ describe("[AGENT-LIST-D1-002] measured Agent card metadata and callbacks", () =>
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     expect(callbacks.onOpen).toHaveBeenCalledExactlyOnceWith(publishedAgent);
-    expect(callbacks.onConfigure).not.toHaveBeenCalled();
-    expect(callbacks.onPublish).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置" }));
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    expect(screen.queryByRole("button", { name: "配置" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "版本管理" }));
-    expect(callbacks.onConfigure).toHaveBeenCalledExactlyOnceWith(42);
-    expect(callbacks.onPublish).toHaveBeenCalledExactlyOnceWith(42);
     expect(callbacks.onManageVersions).toHaveBeenCalledExactlyOnceWith(42);
   });
 });

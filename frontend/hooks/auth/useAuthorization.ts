@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { isOperationsOnly, hasRole } from "@/lib/roles";
 
 import {
   useState,
@@ -12,13 +12,12 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import { User, AuthInfoResponse, AuthorizationContextType } from "@/types/auth";
-import { USER_ROLES } from "@/const/auth";
+
 import { authService } from "@/services/authService";
 import { authEvents, authzEventUtils } from "@/lib/authEvents";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { checkSessionValid } from "@/lib/session";
 import { useGroupList } from "@/hooks/group/useGroupList";
 
@@ -29,7 +28,6 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 export function useAuthorization(): AuthorizationContextType {
   const router = useRouter();
   const pathname = usePathname();
-  const { isSpeedMode } = useDeployment();
 
   // Authorization state
   const [user, setUser] = useState<User | null>(null);
@@ -127,13 +125,6 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Initialize authorization on mount
   useEffect(() => {
-    // In speed mode, fetch authorization data immediately
-    if (isSpeedMode) {
-      log.info("Speed mode: fetching authorization info...");
-      fetchAuthzData();
-      return;
-    }
-
     // On page refresh, if there is a valid session in storage,
     // proactively load authorization info so that user/permissions are ready.
     if (checkSessionValid()) {
@@ -142,12 +133,10 @@ export function useAuthorization(): AuthorizationContextType {
       );
       fetchAuthzData();
     }
-  }, [isSpeedMode, fetchAuthzData]);
+  }, [fetchAuthzData]);
 
   // Listen for authentication events
   useEffect(() => {
-    if (isSpeedMode) return;
-
     // Handle login success - fetch authorization data
     const handleLoginSuccess = () => {
       log.info("Login success: fetching authorization info...");
@@ -181,7 +170,7 @@ export function useAuthorization(): AuthorizationContextType {
       cleanupLogout();
       cleanupSessionExpired();
     };
-  }, [isSpeedMode, fetchAuthzData, clearAuthzData]);
+  }, [fetchAuthzData, clearAuthzData]);
 
   // Authz prompt modal control functions
   const openAuthzPromptModal = useCallback(
@@ -197,7 +186,8 @@ export function useAuthorization(): AuthorizationContextType {
   const cleanPath = getEffectiveRoutePath(pathname);
 
   // Share pages are always accessible to any logged-in user (covers /share/...).
-  const isSharePage = cleanPath.startsWith("/share/");
+  const isSharePage =
+    !isOperationsOnly(user) && cleanPath.startsWith("/share/");
 
   // Support prefix matching so nested routes such as /evaluation/{id} are
   // covered by /evaluation.
@@ -212,6 +202,10 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Route guard
   useLayoutEffect(() => {
+    if (isOperationsOnly(user) && cleanPath === "/") {
+      router.replace("/ops/dashboard");
+      return;
+    }
     if (isSharePage) {
       return;
     }
@@ -276,21 +270,20 @@ export function useAuthorization(): AuthorizationContextType {
   );
 
   // Internal group list query - fetches all groups for the user's tenant
-  const { data: allGroupsData } = useGroupList(user?.tenantId ?? null);
+  const { data: allGroupsData } = useGroupList(
+    isOperationsOnly(user) ? null : (user?.tenantId ?? null)
+  );
   const allGroupIds = useMemo(
     () => allGroupsData?.groups.map((g) => g.group_id) ?? [],
     [allGroupsData]
   );
 
   const getAccessibleGroupIds = useCallback((): number[] => {
-    const canSelectAllGroups =
-      user?.role === USER_ROLES.SU ||
-      user?.role === USER_ROLES.ADMIN ||
-      user?.role === USER_ROLES.SPEED;
+    const canSelectAllGroups = hasRole(user, "SU") || hasRole(user, "ADMIN");
     return canSelectAllGroups
       ? allGroupIds
       : allGroupIds.filter((id) => groupIds.includes(id));
-  }, [allGroupIds, groupIds, user?.role]);
+  }, [allGroupIds, groupIds, user]);
 
   return {
     user,

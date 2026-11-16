@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import threading
 from unittest.mock import Mock
 
 import pytest
 
-from backend.agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     AgentRunManager,
@@ -186,7 +188,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_nonexistent(self, monkeypatch):
         """Return false when neither a local run nor a remote signal exists."""
         monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: False,
         )
         result = self.manager.stop_agent_run(999, "nonexistent_user")
@@ -195,7 +197,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_wrong_user(self, monkeypatch):
         """A different user cannot stop the locally registered run."""
         monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: False,
         )
         conversation_id = 123
@@ -213,7 +215,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_returns_remote_signal_result(self, monkeypatch):
         """A remote cancellation signal is a successful stop request."""
         monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: True,
         )
 

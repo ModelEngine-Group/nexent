@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D2 contract test for KNOWLEDGE_DELETE_BLOCKED (060109) error code and HTTP 409 mapping consistency between backend and frontend."""
 
 from __future__ import annotations
@@ -8,9 +10,9 @@ import pytest
 
 from shared.config import repo_root
 
-from consts.error_code import ERROR_CODE_HTTP_STATUS, ErrorCode
-from consts.error_message import ErrorMessage
-from consts.exceptions import AppException
+from contracts.errors.codes import ERROR_CODE_HTTP_STATUS, ErrorCode
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import AppException
 
 CASE_ID = "API-AUTO-6A4110F4BD10BA0F"
 EXPECTED_CODE = "060109"

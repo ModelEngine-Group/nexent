@@ -1,0 +1,485 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""D5: real PostgreSQL account import, transaction recovery and credential retention."""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from uuid import uuid4
+
+import bcrypt
+import psycopg2
+import pytest
+from psycopg2.extensions import parse_dsn
+from psycopg2.extras import Json
+
+pytestmark = [pytest.mark.case_id("AUTH-LOCAL-D5-001"), pytest.mark.stage("D5")]
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
+    MigrationConflict,
+    import_users,
+    read_source_users,
+)
+from infrastructure.security.passwords import verify_password
+from local_auth import disposable_database
+
+
+def availability_sql():
+    directory = ROOT / "deploy/sql/migrations"
+    account_sql = (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    roles_sql = (directory / "v2.9.0_010_account_and_ops_roles.sql").read_text(encoding="utf-8")
+    return (
+        account_sql + "\nSET LOCAL nexent.account_import = 'on';\n" + roles_sql
+        + "\nSET LOCAL nexent.account_import = 'off';\n"
+    )
+
+
+def initialize_legacy(dsn):
+    with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+        cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")
+
+
+def test_speed_seed_is_system_identity_and_replay_preserves_operator_changes():
+    import re
+    historical = (ROOT / "deploy/sql/migrations/v1_merged_migrations.sql").read_text(encoding="utf-8")
+    seed = re.search(r"INSERT INTO nexent.user_tenant_t \(user_id, tenant_id, user_role, user_email, created_by, updated_by\).*?DO NOTHING;", historical, re.S).group()
+    with disposable_database() as dsn:
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),created_by varchar(100),updated_by varchar(100),delete_flag varchar(1) DEFAULT 'N',PRIMARY KEY(user_id,tenant_id))")
+            cursor.execute(seed)
+            assert import_users(connection, [], dry_run=False)["source"] == 0
+            cursor.execute("SELECT user_id,user_roles,delete_flag,password_login_enabled,password_hash,source_metadata FROM nexent.user_account_t")
+            assert cursor.fetchone() == ('user_id',[],'Y',False,None,{'system_identity':'speed'})
+            cursor.execute("SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='user_id'")
+            assert cursor.fetchone() == ('tenant_id',)
+            cursor.execute("UPDATE nexent.user_account_t SET updated_by='operator',token_version=3")
+            cursor.execute(availability_sql())
+            cursor.execute(availability_sql())
+            cursor.execute("SELECT token_version,delete_flag FROM nexent.user_account_t")
+            assert cursor.fetchone() == (3,'Y')
+
+
+def _load_case_helper(name):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
+    _load_case_helper("automatic_upgrade").assert_automatic_upgrade(ROOT, tmp_path)
+
+
+def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import URL
+    from sqlalchemy.orm import sessionmaker
+
+    from gateway.authentication import northbound_auth
+    from management.db import models
+    from management.db.client import db_client
+
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    with disposable_database() as dsn:
+        params = parse_dsn(dsn)
+        engine = create_engine(URL.create("postgresql+psycopg2", username=params["user"], password=params["password"], host=params["host"], port=int(params["port"]), database=params["dbname"]))
+        try:
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.execute("CREATE SCHEMA nexent")
+                cursor.execute("CREATE TABLE nexent.user_tenant_t (user_id varchar(100), tenant_id varchar(100), user_role varchar(30), user_email varchar(255), delete_flag varchar(1) DEFAULT 'N')")
+            models.UserTokenInfo.__table__.create(engine)
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.executemany("INSERT INTO nexent.user_tenant_t VALUES (%s,'tenant',%s,%s,%s)", [
+                    ("api", "USER", None, "N"), ("revoked", "DEV", "", "N"),
+                    ("normal", "USER", "normal@example.com", "N"), ("unknown", "USER", None, "N"),
+                    ("deleted", "USER", None, "Y"), ("admin", "SU", None, "N"),
+                ])
+                for token_id, uid in enumerate(["api", "revoked", "normal", "deleted", "admin"], 1):
+                    cursor.execute("INSERT INTO nexent.user_token_info_t (token_id,access_key,user_id,delete_flag) VALUES (%s,%s,%s,%s)",
+                                   (token_id, "nexent-original-" + uid, uid, "Y" if uid == "revoked" else "N"))
+                cursor.execute(sql)
+                cursor.execute(availability_sql())
+                cursor.execute("SELECT user_id,delete_flag,password_login_enabled,password_hash,user_email,source_metadata,delete_flag FROM nexent.user_account_t")
+                rows = {r[0]: r[1:] for r in cursor.fetchall()}
+                assert rows["api"][:4] == rows["revoked"][:4] == ("N", False, None, None)
+                assert rows["api"][4] == {"api_only": True}
+                assert set(rows) == {"api", "revoked"}
+                cursor.execute(availability_sql())
+                cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',updated_by='operator' WHERE user_id='revoked'")
+                cursor.execute(availability_sql())
+            with monkeypatch.context() as patch:
+                patch.setattr(db_client, "session_maker", sessionmaker(bind=engine))
+                assert northbound_auth.validate_bearer_token("nexent-original-api")[0]
+                assert not northbound_auth.validate_bearer_token("nexent-original-revoked")[0]
+                assert not northbound_auth.validate_bearer_token("nexent-original-deleted")[0]
+                with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                    cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',updated_by='operator' WHERE user_id='api'")
+                    cursor.execute(availability_sql())
+                assert not northbound_auth.validate_bearer_token("nexent-original-api")[0]
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT access_key,user_id FROM nexent.user_token_info_t ORDER BY user_id")
+                assert cursor.fetchall() == [("nexent-original-" + uid, uid) for uid in sorted(["api", "revoked", "normal", "deleted", "admin"])]
+        finally:
+            engine.dispose()
+
+
+def test_successful_apply_reclaims_source_stack_and_retains_data(tmp_path):
+    build_worker_image = _load_case_helper("automatic_upgrade").build_worker_image
+    _load_case_helper("source_cleanup").assert_source_cleanup(ROOT, tmp_path, build_worker_image)
+
+
+@pytest.fixture
+def target():
+    with disposable_database() as dsn:
+        initialize_legacy(dsn)
+        yield dsn
+
+
+def historical_user(**extra):
+    return dict(
+        id=str(uuid4()),
+        email="historical@example.com",
+        encrypted_password=bcrypt.hashpw(
+            b"OriginalPassword123", bcrypt.gensalt(rounds=4)
+        ).decode(),
+        email_confirmed_at="2020-01-01T00:00:00Z",
+        created_at="2020-01-01T00:00:00Z",
+        updated_at="2020-01-02T00:00:00Z",
+        raw_app_meta_data={"role": "admin"},
+        **extra,
+    )
+
+
+def member(dsn, row):
+    with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+        cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email) VALUES (%s,'tenant','USER',%s)", (row["id"],row["email"]))
+
+
+def count(dsn):
+    with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+        if cursor.fetchone()[0] is None:
+            return 0
+        cursor.execute("SELECT count(*) FROM nexent.user_account_t")
+        return cursor.fetchone()[0]
+
+
+def test_account_migration_retains_original_password_and_repeat_safety(target):
+    row = historical_user()
+    member(target, row)
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [row])["dry_run"] is True
+    assert count(target) == 0
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [row], dry_run=False)["updated"] == 1
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT user_id,password_hash,create_time,source_metadata FROM nexent.user_account_t"
+        )
+        identity, encoded, created, metadata = cursor.fetchone()
+        assert identity == row["id"]
+        cursor.execute("SELECT user_roles FROM nexent.user_account_t WHERE user_id=%s", (identity,))
+        assert cursor.fetchone() == (["USER"],)
+        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name IN ('user_role','roles')")
+        assert cursor.fetchall() == []
+        assert encoded == row["encrypted_password"]
+        assert verify_password("OriginalPassword123", encoded)
+        assert not verify_password("wrong", encoded)
+        assert created.year == 2020
+        assert metadata["raw_app_meta_data"] == {"role": "admin"}
+        cursor.execute(
+            "UPDATE nexent.user_account_t SET password_hash=NULL,password_login_enabled=false,token_version=1"
+        )
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [row], dry_run=False)["skipped"] == 1
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT password_hash,token_version FROM nexent.user_account_t")
+        assert cursor.fetchone() == (None, 1)
+        cursor.execute(
+            "SELECT ut.user_id,a.user_email,ut.delete_flag FROM nexent.user_tenant_t ut JOIN nexent.user_account_t a ON a.user_id=ut.user_id"
+        )
+        assert cursor.fetchone() == (row["id"], row["email"], "N")
+
+
+def test_account_migration_conflict_rolls_back_all_users(target):
+    first = historical_user()
+    conflict = historical_user()
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.executemany("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role) VALUES (%s,'tenant','USER')", [(first["id"],),(conflict["id"],)])
+    with pytest.raises(MigrationConflict) as error, psycopg2.connect(target) as connection:
+        import_users(connection, [first, conflict], dry_run=False)
+    assert first["id"] in str(error.value) and conflict["id"] in str(error.value)
+    assert count(target) == 0
+    with pytest.raises(MigrationConflict, match=conflict["id"]), psycopg2.connect(target) as connection:
+        import_users(connection, [first], dry_run=False)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id=%s", (conflict["id"],))
+        import_users(connection, [first], dry_run=False)
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [conflict], dry_run=False)["complete"]
+    assert count(target) == 1
+
+
+def test_account_migration_keeps_orphans_disabled(target):
+    row = historical_user()
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [row], dry_run=False)["disabled_orphans"] == 1
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_id,delete_flag FROM nexent.user_account_t")
+        assert cursor.fetchone() is None
+
+
+@pytest.mark.parametrize("source_history", ["absent", "deleted", "membership-deleted"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_email_reuse_excludes_inactive_identity_and_preserves_membership(target, source_history, reverse):
+    old, new = historical_user(), historical_user()
+    member(target, old)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id=%s", (old["id"],))
+    member(target, new)
+    rows = [new]
+    if source_history != "absent":
+        if source_history == "deleted":
+            old["deleted_at"] = "2025-01-01T00:00:00Z"
+        rows.append(old)
+    if reverse:
+        rows.reverse()
+    with psycopg2.connect(target) as connection:
+        result = import_users(connection, rows, dry_run=False)
+        assert result["updated"] == 1
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_id,password_hash,delete_flag FROM nexent.user_account_t")
+        assert cursor.fetchall() == [(new["id"],new["encrypted_password"],"N")]
+        cursor.execute("SELECT user_id,delete_flag FROM nexent.user_tenant_t ORDER BY user_id")
+        assert dict(cursor.fetchall()) == {old["id"]:"Y",new["id"]:"N"}
+
+
+def test_all_inactive_email_reuse_creates_no_accounts(target):
+    rows = [historical_user(), historical_user()]
+    for row in rows:
+        member(target,row)
+        row["deleted_at"] = "2025-01-01T00:00:00Z"
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y'")
+    with psycopg2.connect(target) as connection:
+        result = import_users(connection,rows,dry_run=False)
+        assert result["excluded_inactive"] == 2
+    assert count(target) == 0
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM nexent.user_tenant_t")
+        assert cursor.fetchone()[0] == 2
+
+
+def test_banned_account_excluded_with_original_active_association_and_su_preflight(target, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from infrastructure.security.account_cli import bootstrap_super_admin
+    from management.db.client import db_client
+
+    old, new = historical_user(), historical_user()
+    old["banned_until"] = "2999-01-01T00:00:00Z"
+    member(target,old)
+    member(target,new)
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection,[old,new],dry_run=False)["excluded_inactive"] == 1
+    engine = create_engine("postgresql+psycopg2://",connect_args=parse_dsn(target))
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(db_client,"session_maker",sessionmaker(bind=engine))
+            assert bootstrap_super_admin("suadmin@nexent.com","",check_only=True) == {"exists":False}
+        with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT user_id FROM nexent.user_account_t")
+            assert cursor.fetchall() == [(new["id"],)]
+            cursor.execute("SELECT delete_flag FROM nexent.user_tenant_t WHERE user_id=%s",(old["id"],))
+            assert cursor.fetchone()[0] == "N"
+    finally:
+        engine.dispose()
+
+
+def test_account_migration_source_snapshot_without_audit_import(target, capsys):
+    row = historical_user()
+    member(target, row)
+    with disposable_database() as source_dsn:
+        with psycopg2.connect(source_dsn) as source, source.cursor() as cursor:
+            cursor.execute(
+                "CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid, email text, encrypted_password text, email_confirmed_at timestamptz,created_at timestamptz)"
+            )
+            cursor.execute(
+                "CREATE TABLE auth.identities (user_id uuid,provider text,identity_data jsonb)"
+            )
+            cursor.execute(
+                "CREATE FUNCTION auth.reject_audit_read() RETURNS jsonb LANGUAGE plpgsql AS "
+                "$$ BEGIN RAISE EXCEPTION 'audit reads are forbidden'; END $$; "
+                "CREATE VIEW auth.audit_log_entries AS SELECT "
+                "'00000000-0000-0000-0000-000000000001'::uuid AS id, "
+                "auth.reject_audit_read() AS payload"
+            )
+            cursor.execute(
+                "INSERT INTO auth.users VALUES (%s,%s,%s,%s,%s)",
+                (
+                    row["id"],
+                    row["email"],
+                    row["encrypted_password"],
+                    row["email_confirmed_at"],
+                    row["created_at"],
+                ),
+            )
+            cursor.execute(
+                "INSERT INTO auth.identities VALUES (%s,'email',%s)",
+                (row["id"], Json({"email": row["email"]})),
+            )
+        with psycopg2.connect(source_dsn) as source:
+            source.set_session(readonly=True, isolation_level="REPEATABLE READ")
+            rows = read_source_users(source)
+            assert rows[0]["id"] == row["id"]
+        params = parse_dsn(target)
+        source_params = parse_dsn(source_dsn)
+        env = {
+            **os.environ,
+            "SUPABASE_POSTGRES_HOST": source_params["host"],
+            "SUPABASE_POSTGRES_PORT": source_params["port"],
+            "SUPABASE_POSTGRES_USER": source_params["user"],
+            "SUPABASE_POSTGRES_DB": source_params["dbname"],
+            "SUPABASE_POSTGRES_PASSWORD": source_params["password"],
+            "POSTGRES_HOST": params["host"],
+            "POSTGRES_PORT": params["port"],
+            "POSTGRES_USER": params["user"],
+            "POSTGRES_DB": params["dbname"],
+            "NEXENT_POSTGRES_PASSWORD": params["password"],
+        }
+        command = [sys.executable, str(ROOT / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"), "--container"]
+
+        def run_cli(*args):
+            result = subprocess.run(command + list(args), cwd=ROOT / "backend", env=env,
+                                    capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stderr
+            assert row["encrypted_password"] not in result.stdout + result.stderr
+            assert source_dsn not in result.stdout + result.stderr
+            return json.loads(result.stdout)
+
+        preview = run_cli()
+        assert preview["dry_run"] is True and preview["updated"] == 1
+        with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+            assert cursor.fetchone()[0] is None
+            cursor.execute("SELECT to_regclass('nexent.user_auth_history_t')")
+            assert cursor.fetchone()[0] is None
+        applied = run_cli("--apply")
+        assert applied["updated"] == 1
+        assert "audit_history" not in preview and "audit_history" not in applied
+        repeated = run_cli("--apply")
+        assert repeated["skipped"] is True and repeated["complete"] is True
+        assert "audit_history" not in repeated
+    output = capsys.readouterr()
+    assert row["encrypted_password"] not in output.out + output.err
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT source_metadata->'source_provider_identities' FROM nexent.user_account_t"
+        )
+        assert cursor.fetchone()[0][0]["provider"] == "email"
+        cursor.execute("SELECT to_regclass('nexent.user_auth_history_t')")
+        assert cursor.fetchone()[0] is None
+
+
+def test_account_migration_database_error_rolls_back_partial_inserts(target):
+    first, second = historical_user(), historical_user()
+    second["email"] = "reject@example.com"
+    member(target, first)
+    member(target, second)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("""CREATE FUNCTION nexent.reject_test_row() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.user_email='reject@example.com' THEN RAISE EXCEPTION 'test rejection'; END IF; RETURN NEW; END $$;
+          CREATE FUNCTION nexent.attach_test_trigger() RETURNS event_trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_event_trigger_ddl_commands() WHERE object_identity='nexent.user_account_t') THEN
+              CREATE TRIGGER reject_test_row BEFORE INSERT ON nexent.user_account_t
+              FOR EACH ROW EXECUTE PROCEDURE nexent.reject_test_row();
+            END IF;
+          END $$;
+          CREATE EVENT TRIGGER attach_test_trigger ON ddl_command_end WHEN TAG IN ('CREATE TABLE')
+          EXECUTE PROCEDURE nexent.attach_test_trigger();""")
+    with pytest.raises(psycopg2.Error), psycopg2.connect(target) as connection:
+        import_users(connection, [first, second], dry_run=False)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+        assert cursor.fetchone()[0] is None
+        cursor.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name IN ('user_email','user_role')")
+        assert cursor.fetchone()[0] == 2
+
+
+def test_account_migration_serializes_online_creation_with_one_writer_lock(target):
+    with psycopg2.connect(target) as migration, psycopg2.connect(target) as writer:
+        import_users(migration, [historical_user()], dry_run=True)
+        with writer.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_xact_lock_shared(hashtext('account-writers'))")
+            assert cursor.fetchone()[0] is False
+        migration.commit()
+        with writer.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_xact_lock_shared(hashtext('account-writers'))")
+            assert cursor.fetchone()[0] is True
+
+
+def test_account_profile_single_sql_upgrade_and_replay():
+    original = historical_user()
+    with disposable_database() as dsn:
+        initialize_legacy(dsn)
+        member(dsn, original)
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            assert import_users(connection,[original],dry_run=False)["updated"] == 1
+            cursor.execute("ALTER TABLE nexent.user_account_t ADD COLUMN account_status varchar(30) DEFAULT 'active'")
+            cursor.execute("INSERT INTO nexent.user_account_t (user_id,user_email,user_roles,account_status,source_metadata) VALUES ('disabled-identity','disabled@example.com',ARRAY['DEV']::varchar[],'disabled','{\"credential_migration_pending\":true}')")
+            cursor.execute(availability_sql())
+            cursor.execute(availability_sql())
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t'")
+            assert not {"user_role","user_email"} & {row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t'")
+            columns = {row[0] for row in cursor.fetchall()}
+            assert {"user_roles","user_email"} <= columns and not {"user_role","roles","email","account_status"} & columns
+            cursor.execute("SELECT delete_flag,source_metadata FROM nexent.user_account_t WHERE user_id='disabled-identity'")
+            assert cursor.fetchone() == ('Y',{})
+            cursor.execute("UPDATE nexent.user_account_t SET user_roles=ARRAY['ADMIN','OPS']::varchar[],user_email='edited@example.com',token_version=7,delete_flag='Y' WHERE user_id=%s",(original["id"],))
+            cursor.execute(availability_sql())
+            cursor.execute("SELECT user_roles,user_email,password_hash,token_version,delete_flag FROM nexent.user_account_t WHERE user_id=%s",(original["id"],))
+            assert cursor.fetchone() == (["ADMIN","OPS"],"edited@example.com",original["encrypted_password"],7,'Y')
+
+
+@pytest.mark.parametrize("role,email", [("SU","same@example.com"),("USER","different@example.com")])
+def test_account_profile_conflict_rolls_back_single_sql(role, email):
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    with disposable_database() as dsn:
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")
+            cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,user_role,user_email) VALUES ('same-id','USER','same@example.com'),('same-id',%s,%s)",(role,email))
+        with pytest.raises(psycopg2.Error), psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute(sql)
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+            assert cursor.fetchone()[0] is None
+            cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE user_role IS NOT NULL AND user_email IS NOT NULL")
+            assert cursor.fetchone()[0] == 2
+
+
+def test_consolidated_schema_provider_identities_and_final_email_conflicts():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("consolidated_schema_proof", Path(__file__).with_name("schema_upgrade.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_consolidated_schema(ROOT)
+    module.assert_legacy_account_columns(ROOT)
+
+
+@pytest.mark.parametrize("scenario", ["valid", "source-empty", "source-passwordless", "existing-empty", "existing-partial", "excluded"])
+def test_account_data_coverage_and_safe_recovery(scenario):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("account_coverage_proof", Path(__file__).with_name("completeness.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_account_coverage(scenario)

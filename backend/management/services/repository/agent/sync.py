@@ -8,17 +8,13 @@ import asyncio
 import logging
 from typing import Any
 
-from consts.agent_repository import STATUS_SHARED
-from consts.const import (
-    SYSTEM_TENANT_ID,
-    SYSTEM_USER_ID,
-    OFFICIAL_AGENTS_PATH,
-    OFFICIAL_AGENT_PROFILES,
-)
+from contracts.constants.constants import STATUS_SHARED
+from contracts.constants.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from contracts.constants.environment import OFFICIAL_AGENTS_PATH, OFFICIAL_AGENT_PROFILES
 
-from database.agent_db import create_agent, find_agent_id_by_agent_name
-from database.agent_repository_db import upsert_agent_repository_record
-from database.agent_repository_db import update_agent_repository_by_id
+from management.db.agent.repository import create_agent, find_agent_id_by_agent_name
+from management.db.agent.catalog import upsert_agent_repository_record
+from management.db.agent.catalog import update_agent_repository_by_id
 from management.services.repository.agent.bundles import (
     OfficialAgentBundle,
     load_official_bundles,

@@ -25,7 +25,7 @@
 
 1. 克隆项目到本地
 2. 在 Cursor 中打开项目文件夹
-3. 在项目根目录运行 `bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development` 启动基础容器
+3. 在项目根目录运行 `bash deploy.sh docker --components infrastructure,application,data-process --port-policy development` 启动基础容器
 4. 部署脚本会把生成的 `MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`ELASTICSEARCH_API_KEY` 等变量写回 `deploy/env/.env`，`deploy/docker/compose/docker-compose.dev.yml` 中的服务通过 `env_file` 自动加载这些配置，无需手动复制
 5. 按下 `F1` 或 `Ctrl+Shift+P`，输入 `Dev Containers: Reopen in Container ...`
 6. Cursor 将根据 `.devcontainer` 目录中的配置启动开发容器

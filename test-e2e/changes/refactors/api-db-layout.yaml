@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: API-DB-LAYOUT-20261021
+  change_type: refactor
+  title: Relocate business API and persistence ownership
+  description: Preserve route and storage behavior while relocating implementations and shared constants.
+  affected_features:
+    existing:
+    - MSRF-001
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - MSRF-D1-001
+    - MSRF-D1-002
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Existing model relocation Cases retain their contracts; ownership checks and caller regressions stay in traditional UT.
+  notes: Structural continuation of the four-service directory migration; existing formal regression assertions are retained.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve HTTP routes and identity/error mapping after module relocation
+    - Preserve repository session ownership and ORM table metadata
+    - Preserve constants and shared helper boundaries
+    reason: Reuse app/database/caller suites and add focused ownership/import regression assertions.
+    test_selectors:
+    - test/backend/management/test_api_db_directory_architecture.py
+    - test/backend/app/test_agent_app.py
+    - test/backend/app/test_file_management_app.py
+    - test/backend/app/test_voice_app.py
+    - test/backend/app/test_skill_app.py
+    - test/backend/app/test_config_app.py
+    - test/backend/app/test_northbound_base_app.py
+    - test/backend/database/test_client.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/database/test_agent_db.py
+    - test/backend/database/test_a2a_agent_db.py
+    - test/backend/consts/test_error_message.py
+    - test/backend/consts/test_exceptions.py

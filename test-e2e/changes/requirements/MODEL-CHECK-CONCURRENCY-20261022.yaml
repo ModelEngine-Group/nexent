@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-CHECK-CONCURRENCY-20261022
+  change_type: requirement
+  requirement_id: MODEL-CHECK-CONCURRENCY-20261022
+  title: Share three frontend model check slots across batch and row entry points
+  description: Queue explicit model connectivity checks in the shared service boundary with FIFO, failure recovery and queued cancellation. State reset rules are proposal-only.
+  traditional_ut:
+    decision: add
+    reason: No existing test proves the shared queue or mixed profile/legacy check boundary. Keep pure scheduler proof in UT rather than duplicate D1.
+    behaviors:
+    - At most three active tasks across profile and legacy connectivity services with immediate FIFO refill.
+    - Failure and cancellation do not leak slots; cancelled queued tasks never send HTTP.
+    - Rapid row clicks are independent and saving remains free of automatic probes.
+    test_selectors:
+    - frontend/tests/component/modelCheckQueue.test.tsx
+    - frontend/tests/component/modelCheckConcurrency.test.tsx
+    - frontend/tests/component/modelLibraryChecks.test.tsx
+  affected_features:
+    existing: []
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added: []
+    retired: []
+  notes: SPEC CHECK-CONCURRENCY-20261022 approved. Existing PW-MODEL-01 has a single-model workflow and does not prove mixed concurrency. Use owning UT plus targeted actual dev browser and controlled HTTP peer; no new D1 or full Agent journey, no image build or remote updates. Per-browser-page queue, not an account-wide backend quota. State updates/reset proposal is not implemented.

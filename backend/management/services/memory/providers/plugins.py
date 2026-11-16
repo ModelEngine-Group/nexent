@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from consts.const import MEMORY_PROVIDER_PLUGINS_DIR
+from contracts.constants.environment import MEMORY_PROVIDER_PLUGINS_DIR
 from nexent.memory.providers.base import (
     IngestibleMemoryProvider,
     SearchableMemoryProvider,

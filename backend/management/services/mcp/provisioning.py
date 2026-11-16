@@ -7,16 +7,10 @@ import socket
 import tempfile
 from typing import Awaitable, Callable
 
-from consts.const import NEXENT_MCP_DOCKER_IMAGE
-from consts.exceptions import (
-    MCPConnectionError,
-    McpNameConflictError,
-    MCPNameIllegal,
-    McpPortConflictError,
-    McpValidationError,
-)
-from consts.model import MCPConfigRequest
-from database.remote_mcp_db import check_mcp_name_exists
+from contracts.constants.environment import NEXENT_MCP_DOCKER_IMAGE
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, MCPNameIllegal, McpPortConflictError, McpValidationError
+from contracts.tool import MCPConfigRequest
+from management.db.mcp.remote import check_mcp_name_exists
 from management.services.mcp.common import (
     logger,
 )
@@ -48,7 +42,7 @@ def _is_container_record(record: dict | None) -> bool:
 
 def check_container_port_conflict_records(port: int) -> bool:
     """Check if there are enabled MCP records that already use the given container port."""
-    from database.remote_mcp_db import get_mcp_records_by_container_port
+    from management.db.mcp.remote import get_mcp_records_by_container_port
 
     return not get_mcp_records_by_container_port(container_port=port)
 

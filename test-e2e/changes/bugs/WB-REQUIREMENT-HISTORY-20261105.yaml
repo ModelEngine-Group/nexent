@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: WB-REQUIREMENT-HISTORY-20261105
+  change_type: bugfix
+  bug_id: WB-REQUIREMENT-HISTORY-20261105
+  title: Restore submitted Agent requirement cards through both creator entries
+  description: Associate each persisted NL2Agent answer with its source message and hydrate readonly controls without replaying generation.
+  observed_behavior: Saved requirement answers exist in user-action history but restored cards display blank disabled controls and an unsubmitted label.
+  expected_behavior: Workbench and configuration-page creator histories restore choices, other text and free text as submitted and readonly without starting another run.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing historical-lock UT uses empty questions; ordinary clarification restoration does not exercise NL2Agent cards. Existing real protocol journeys do not assert saved requirement controls.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [WB-REQUIREMENT-HISTORY-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Frontend-only history association and component hydration require adapter, form and shared-entry regression tests; no backend or Python behavior changes.
+    behaviors:
+    - Restore single and multiple choices, other text and free text without a duplicate run.
+    - Match the immediate answer turn and target Agent, isolating repeated question IDs and separate conversations.
+    - Hydrate delayed history and reset across card identity changes without resetting unchanged drafts.
+    - Preserve readonly historical cards and ignore missing, malformed or mismatched actions.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentRequirementHistory.test.tsx
+    - frontend/tests/workbench/Nl2AgentRequirementHistoryAdapter.test.ts
+    - frontend/tests/workbench/Nl2AgentHistoricalCardLock.test.tsx
+    - frontend/tests/workbench/Nl2AgentCardBoundary.test.tsx
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+  notes: >-
+    Design and acceptance: ../nexent-doc/docs/Developing/chat-workbench-session-state/design.md,
+    Agent requirement-history repair section. SYS-AGENT-LIFECYCLE-RULE-004/005 retain existing creator persistence.
+    The Feature's original chat-shared-system-agents SPEC is unavailable in this checkout; adjacent readable session-state
+    documentation is reused without reconstructing that baseline. D4 adds browser-entry evidence beyond UT.
+    Controlled tenant APIs create no backend resources, install no tools, publish nothing and issue no real model requests.

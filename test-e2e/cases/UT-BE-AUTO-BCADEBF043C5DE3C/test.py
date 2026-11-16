@@ -1,17 +1,20 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 # D1 BE-UT: skill description over 1000 chars is truncated to 1000 and DB write has no error.
 
 from __future__ import annotations
 
+from contracts.constants import constants as skill_db_skill_repository
 import logging
 from contextlib import contextmanager
 
 import pytest
 
-from database import skill_db
+from management.db.skill import repository as skill_db
 
 
 CASE_ID = "UT-BE-AUTO-BCADEBF043C5DE3C"
-MAX_LENGTH = skill_db.SKILL_DESCRIPTION_MAX_LENGTH
+MAX_LENGTH = skill_db_skill_repository.SKILL_DESCRIPTION_MAX_LENGTH
 
 pytestmark = [
     pytest.mark.stage("D1"),
@@ -70,7 +73,7 @@ def _patch_get_db_session(monkeypatch, store):
 def test_skill_description_truncated_to_1000_and_write_ok(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
 
-    assert skill_db.SKILL_DESCRIPTION_MAX_LENGTH == 1000
+    assert skill_db_skill_repository.SKILL_DESCRIPTION_MAX_LENGTH == 1000
 
     assert skill_db._normalize_skill_description(None) == ""
     assert skill_db._normalize_skill_description("") == ""

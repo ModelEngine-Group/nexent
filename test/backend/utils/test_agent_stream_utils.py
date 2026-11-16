@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import backend.management.services.agent.artifacts as agent_artifacts_backend
+from management.services.agent import artifacts as agent_artifacts_backend
 """Unit tests for agent stream skill-file helpers."""
 
 import json
@@ -13,18 +13,18 @@ import pytest
 
 # Keep these utility tests isolated from database and file-service import chains.
 # The functions are patched at their import site by individual tests below.
-attachment_db = types.ModuleType("database.attachment_db")
+attachment_db = types.ModuleType("management.db.file.attachment")
 attachment_db._build_mcp_presigned_url = MagicMock(side_effect=lambda url: f"/proxy?url={url}")
 attachment_db.get_file_url = MagicMock()
 attachment_db.upload_fileobj = MagicMock()
-sys.modules["database.attachment_db"] = attachment_db
+sys.modules["management.db.file.attachment"] = attachment_db
 
 file_management_service = types.ModuleType("management.services.file.service")
 file_management_service.is_allowed_skill_upload_path = MagicMock(return_value=True)
 sys.modules["management.services.file.service"] = file_management_service
 
-from backend.management.services.agent import stream as agent_stream_utils
-from backend.management.services.agent import artifacts as agent_artifacts
+from management.services.agent import stream as agent_stream_utils
+from management.services.agent import artifacts as agent_artifacts
 
 
 def test_rollback_removes_only_failed_attempt_and_preserves_list_identity():

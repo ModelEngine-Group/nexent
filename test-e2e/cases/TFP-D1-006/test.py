@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TFP-D1-006: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -205,7 +206,7 @@ def test_tfp_d1_006_configuration(enabled, allowed, expected):
     source = (
         "import json\nfrom unittest.mock import patch\n"
         "with patch('dotenv.load_dotenv'):\n"
-        "    import backend.consts.const as c\n"
+        "    import backend.contracts.constants.environment as c\n"
         "print(json.dumps([c.NEXENT_TOOL_FASTPATH_ENABLED, c.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS]))\n"
     )
     result = subprocess.run(

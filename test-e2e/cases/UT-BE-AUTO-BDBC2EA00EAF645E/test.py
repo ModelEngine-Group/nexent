@@ -6,14 +6,14 @@ import logging
 
 import pytest
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.services.knowledge_base import management as kb_management
 from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
     KnowledgeBaseManagementService,
 )
-import management.services.knowledge_base.files as knowledge_base_files
+from management.services.knowledge_base import files as knowledge_base_files
 
 INDEX_NAME = 'kb-delete-guard-test-index'
 

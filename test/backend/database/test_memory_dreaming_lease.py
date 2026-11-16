@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for Dreaming lease store DB functions (AC-028, AC-029, AC-030)."""
 
 from contextlib import contextmanager
@@ -5,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from database import memory_dreaming_db
+from management.db.memory import dreaming as memory_dreaming_db
 
 
 def _mock_session(monkeypatch, module=None):

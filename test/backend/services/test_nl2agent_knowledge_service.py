@@ -137,7 +137,7 @@ def test_local_catalog_reads_only_authorized_indices_and_stored_summary(mocker):
         return_value={"indices": ["allowed"]},
     )
     metadata = mocker.patch(
-        "database.knowledge_db.get_knowledge_metadata_by_index_names",
+        "management.db.knowledge_base.repository.get_knowledge_metadata_by_index_names",
         return_value=[
             {
                 "knowledge_id": 1,
@@ -308,16 +308,16 @@ async def test_no_match_keeps_generic_and_provider_error_is_retryable(mocker):
 
 
 def test_metadata_bulk_read_skips_empty_and_returns_active_query(mocker):
-    from database.knowledge_db import get_knowledge_metadata_by_index_names
+    from management.db.knowledge_base.repository import get_knowledge_metadata_by_index_names
 
-    sessions = mocker.patch("database.knowledge_db.get_db_session")
+    sessions = mocker.patch("management.db.knowledge_base.repository.get_db_session")
     assert get_knowledge_metadata_by_index_names([]) == []
     sessions.assert_not_called()
     query = sessions.return_value.__enter__.return_value.query.return_value.filter.return_value
     record = object()
     query.all.return_value = [record]
     mocker.patch(
-        "database.knowledge_db.as_dict", return_value={"index_name": "allowed"}
+        "management.db.knowledge_base.repository.as_dict", return_value={"index_name": "allowed"}
     )
     assert get_knowledge_metadata_by_index_names(["allowed"]) == [
         {"index_name": "allowed"}

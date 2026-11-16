@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 
-from consts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.agent import AgentUnavailableReason
 from management.services.agent.read import apply_duplicate_name_availability_rules
 
 CASE_ID = 'UT-BE-AUTO-97496DA0E32E2AD0'

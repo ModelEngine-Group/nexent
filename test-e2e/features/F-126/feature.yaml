@@ -11,9 +11,20 @@ feature:
   - rule_id: F-126-RULE-01
     description: pause/resume/run now/history
   - rule_id: F-126-RULE-02
-    description: Only CHAT user messages consume the ordinary conversation quota; scheduled and run-now messages
-      remain executable at the limit.
+    description: Only CHAT user messages consume the ordinary conversation quota;
+      scheduled and run-now messages remain executable at the limit.
+  - rule_id: F-126-RULE-03
+    description: Each automation run atomically links its committed user and root
+      assistant messages at creation. Final status reflects execution and persistence
+      outcomes, never a previous conversation message. Failure, timeout, cancellation
+      and recovery preserve existing links; conditional terminal updates prevent late
+      completion from overriding cancellation or double-counting task state. Background
+      turns isolate cancellation, scheduled cancellation consumes one occurrence atomically,
+      manual requests return the actual terminal result, and recent results use actual
+      execution time and refresh safely.
   required_test_stages:
   - D2
+  - D3
+  - D5
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

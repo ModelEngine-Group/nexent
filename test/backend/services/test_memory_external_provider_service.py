@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,18 +9,19 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 database_pkg = types.ModuleType("database")
-config_db_mod = types.ModuleType("database.memory_provider_config_db")
+config_db_mod = types.ModuleType("management.db.memory.provider_config")
 config_db_mod.disable_provider_config = MagicMock(name="disable_provider_config")
 database_pkg.memory_provider_config_db = config_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_provider_config_db"] = config_db_mod
+sys.modules["management.db.memory.provider_config"] = config_db_mod
 
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-memory-provider-plugins"
 consts_pkg.const = consts_mod
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")
@@ -239,7 +241,7 @@ def test_build_provider_missing_plugin_name(service):
 
 def test_ac_009_runtime_factory_loads_builtin_and_external_plugins(monkeypatch):
     monkeypatch.setattr(
-        sys.modules["consts.const"],
+        sys.modules["contracts.constants.environment"],
         "MEMORY_PROVIDER_PLUGINS_DIR",
         "/tmp/test-memory-provider-plugins",
         raising=False,

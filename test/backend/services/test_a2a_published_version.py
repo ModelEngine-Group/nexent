@@ -76,7 +76,7 @@ async def test_a2a_invalid_version_never_dispatches_draft(mocker, streaming, ver
 @pytest.mark.parametrize("metadata", [None, {}, {"session": "s1"}])
 async def test_a2a_preserves_absent_vs_explicit_metadata(mocker, streaming, metadata):
     from management.services.agent.a2a import service as module
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
 
     service = module.A2AServerService()
     mocker.patch.object(module.a2a_agent_db, "get_server_agent_by_endpoint", return_value={

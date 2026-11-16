@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -38,7 +40,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-005")
 def test_monitoring_status_normalizes_runtime_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    from apps import monitoring_app
+    from management.api.monitoring import monitoring as monitoring_app
 
     monkeypatch.setattr(monitoring_app, "ENABLE_TELEMETRY", True)
     monkeypatch.setattr(monitoring_app, "MONITORING_PROVIDER", "  OTLP ")

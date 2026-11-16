@@ -22,17 +22,18 @@ _MODULE_PATCH_NAMES = [
     'sqlalchemy.dialects',
     'sqlalchemy.dialects.postgresql',
     'sqlalchemy.sql',
-    'database.agent_db',
-    'database.tool_db',
-    'database.model_management_db',
-    'database.knowledge_db',
-    'database.client',
-    'database.db_models',
+    'management.db.agent.repository',
+    'management.db.tool.repository',
+    'management.db.model.repository',
+    'management.db.knowledge_base.repository',
+    'management.db.client',
+    'management.db.models',
     'management.services.model.invocation',
     'management.services.agent.prompt',
     'management.services.agent.service',
     'nexent',
     'nexent.core',
+    'nexent.core.agent_names',
     'nexent.core.prompts',
     'nexent.core.agents.prompt',
     'nexent.core.agents.prompt.auxiliary',
@@ -74,8 +75,10 @@ class MockToolConfig:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
-nexent_mock = MagicMock()
-nexent_core_mock = MagicMock()
+nexent_mock = types.ModuleType('nexent')
+nexent_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent')]
+nexent_core_mock = types.ModuleType('nexent.core')
+nexent_core_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core')]
 nexent_core_agents_mock = MagicMock()
 nexent_core_agents_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/agents')]
 nexent_agent_model_mock = MagicMock()
@@ -159,9 +162,9 @@ sys.modules['sqlalchemy.sql'] = MagicMock()
 # DO NOT mock consts - import real ones
 # The backend path is already in sys.path via sys.path.insert above
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from consts.const import ENABLE_JIUWEN_SDK
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from contracts.constants.environment import ENABLE_JIUWEN_SDK
 
 # Mock boto3 and minio client before importing the module under test
 import sys
@@ -184,16 +187,22 @@ minio_client_mock._ensure_bucket_exists = MagicMock()
 minio_client_mock.client = MagicMock()
 
 # Mock database submodules BEFORE importing prompt_service
-sys.modules['database.agent_db'] = MagicMock()
-sys.modules['database.tool_db'] = MagicMock()
-sys.modules['database.model_management_db'] = MagicMock()
-sys.modules['database.knowledge_db'] = MagicMock()
+sys.modules['management.db.agent.repository'] = MagicMock()
+sys.modules['management.db.tool.repository'] = MagicMock()
+sys.modules['management.db.model.repository'] = MagicMock()
+sys.modules['management.db.knowledge_base.repository'] = MagicMock()
 mock_database_client = MagicMock()
 mock_database_client.MinioClient.return_value = minio_client_mock
 mock_database_client.minio_client = minio_client_mock
-sys.modules['database.client'] = mock_database_client
-sys.modules['backend.database.client'] = mock_database_client
-sys.modules['database.db_models'] = MagicMock()
+sys.modules['management.db.client'] = mock_database_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = mock_database_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.models'] = MagicMock()
 
 from jinja2 import StrictUndefined
 
@@ -714,7 +723,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_is_jiuwen_mode_available_env_disabled(self):
         """开关关闭时 Jiuwen SDK 不可用"""
-        from consts.const import ENABLE_JIUWEN_SDK
+        from contracts.constants.environment import ENABLE_JIUWEN_SDK
 
         # Patch ENABLE_JIUWEN_SDK to False
         with patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False):

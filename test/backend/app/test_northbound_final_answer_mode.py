@@ -17,8 +17,8 @@ def test_northbound_validates_and_forwards_answer_mode(options, expected):
     async def events():
         yield 'data: {"type":"final_answer","content":"answer"}\n\n'
 
-    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as identity, \
-            patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as run:
+    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as identity, \
+            patch("gateway.api.northbound.start_streaming_chat", new_callable=AsyncMock) as run:
         identity.return_value = MagicMock()
         run.return_value = StreamingResponse(events(), media_type="text/event-stream")
         response = client.post("/nb/v1/chat/run", json={"agent_name": "agent", "query": "hello", **options})
@@ -29,8 +29,8 @@ def test_northbound_validates_and_forwards_answer_mode(options, expected):
 
 @pytest.mark.parametrize("mode", ["unknown", "", True, 1, {}, []])
 def test_northbound_rejects_invalid_answer_mode_before_side_effects(mode):
-    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as identity, \
-            patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as run:
+    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as identity, \
+            patch("gateway.api.northbound.start_streaming_chat", new_callable=AsyncMock) as run:
         response = client.post("/nb/v1/chat/run", json={
             "agent_name": "agent", "query": "hello", "final_answer_mode": mode,
         })

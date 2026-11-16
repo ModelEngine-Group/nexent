@@ -4,15 +4,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from database.db_models import ResourceTagAssignment, TagDefinition, TagValue
-from database.tool_default_tags_db import initialize_search_tool_tags
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from management.db.models import ResourceTagAssignment, TagDefinition, TagValue
+from management.db.tool.default_tags import initialize_search_tool_tags
 
 
 @pytest.fixture
 def tags(mocker):
     session = MagicMock()
     binding = mocker.patch(
-        "database.tool_default_tags_db.TagManagementDB._get_active_resource_binding",
+        "management.db.tool.default_tags.TagManagementDB._get_active_resource_binding",
         return_value=SimpleNamespace(bucket_id=3),
     )
     definition = TagDefinition(definition_id=4, status="active", selection_mode="multi_select")
@@ -85,4 +86,13 @@ def test_tag_failure_propagates_to_tool_registration_transaction(tags):
     binding.side_effect = ValueError("binding unavailable")
     with pytest.raises(ValueError, match="binding unavailable"):
         initialize_search_tool_tags(session, "tenant", 220, "actor")
+    session.add.assert_not_called()
+
+
+def test_shared_catalog_registration_does_not_require_tenant_tag_library(tags):
+    session, binding, _, _, _ = tags
+    binding.side_effect = ValueError("shared catalog has no tenant tag library")
+    initialize_search_tool_tags(session, ASSET_OWNER_TENANT_ID, 220, "system")
+    binding.assert_not_called()
+    session.query.assert_not_called()
     session.add.assert_not_called()

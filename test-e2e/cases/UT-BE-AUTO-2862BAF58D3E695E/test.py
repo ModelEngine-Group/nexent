@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-import management.services.agent.run_state as rss
+from management.services.agent import run_state as rss
 from management.services.agent.run_state import RuntimeStateService
 
 

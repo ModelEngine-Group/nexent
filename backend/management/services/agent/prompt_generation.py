@@ -13,12 +13,13 @@ from nexent.core.agents.prompt.meta import (
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
-from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
-from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
-from database.tool_db import query_tools_by_ids
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.environment import ENABLE_JIUWEN_SDK
+from contracts.constants.constants import PARALLEL_EXECUTOR_TOOL_NAME
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.db.agent.repository import search_agent_info_by_agent_id, query_sub_agents_id_list
+from management.db.tool.repository import query_tools_by_ids
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.model.invocation import call_llm_for_system_prompt
 

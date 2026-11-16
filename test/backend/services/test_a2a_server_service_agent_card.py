@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 # Mock database modules before importing the service
 import sys
 _agent_db_mock = MagicMock()
-sys.modules['database.agent_db'] = _agent_db_mock
-sys.modules['backend.database.agent_db'] = _agent_db_mock
+sys.modules['management.db.agent.repository'] = _agent_db_mock
+sys.modules['management.db.agent.repository'] = _agent_db_mock
 
 
 class TestResolveBaseUrl:
@@ -166,7 +166,7 @@ class TestBuildSupportedInterfaces:
     def test_builds_interfaces_with_prefix(self):
         """Test building supported interfaces with prefix."""
         from management.services.agent.a2a.service import A2AServerService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 
@@ -490,7 +490,7 @@ class TestBuildSupportedInterfacesEdgeCases:
     def test_protocol_bindings_are_correct(self):
         """Test built interfaces have correct protocol bindings."""
         from management.services.agent.a2a.service import A2AServerService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 
@@ -588,10 +588,10 @@ class TestGetAgentCardEdgeCases:
         with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
-            # Mock the database.agent_db module that is imported inside get_agent_card
+            # Mock the management.db.agent.repository module that is imported inside get_agent_card
             mock_agent_db_module = MagicMock()
             mock_agent_db_module.search_agent_info_by_agent_id.return_value = mock_agent_info
-            with patch.dict("sys.modules", {"database.agent_db": mock_agent_db_module}):
+            with patch.dict("sys.modules", {"management.db.agent.repository": mock_agent_db_module}):
                 with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
                     result = service.get_agent_card("test-endpoint")
 

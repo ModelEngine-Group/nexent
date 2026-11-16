@@ -42,10 +42,8 @@ def test_card_field_validation_and_tag_normalization(caplog):
             _normalize_listing_tags(None)
         with pytest.raises(ValueError, match="tags must be a list of strings"):
             _normalize_listing_tags(["ok", 1])
-        with pytest.raises(
-            ValueError, match="tags must contain at least one non-empty tag"
-        ):
-            _normalize_listing_tags(["", "  ", "\t"])
+        assert _normalize_listing_tags([]) == []
+        assert _normalize_listing_tags(["", "  ", "\t"]) == []
 
         repository_data = {"icon_url": "https://example.test/icon.png", "tags": ["a", "b"]}
         assert _validate_card_fields(repository_data) is None
@@ -72,11 +70,10 @@ def test_card_field_validation_and_tag_normalization(caplog):
         ):
             _validate_card_fields({"icon_url": icon_1024 + "i", "tags": ["a"]})
 
-        with pytest.raises(
-            ValueError,
-            match="tags is required for marketplace listing submission",
-        ):
-            _validate_card_fields({"icon_url": "https://example.test/icon.png"})
+        for optional in ({}, {"tags": None}, {"tags": []}, {"tags": ["", "  "]}):
+            card = {"icon_url": "https://example.test/icon.png", **optional}
+            _validate_card_fields(card)
+            assert card["tags"] == []
 
     secret_markers = ("api_key", "api key", "access_key", "token", "password", "secret")
     for record in caplog.records:

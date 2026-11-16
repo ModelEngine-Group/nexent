@@ -2,6 +2,7 @@
 """Clarification validation and atomic persistence regressions."""
 
 import json
+import sqlite3
 from contextlib import contextmanager
 from copy import deepcopy
 
@@ -11,9 +12,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from consts.exceptions import AppException
+from contracts.errors.exceptions import AppException
 from contracts.clarification import ClarificationResponse
-from database import conversation_db as db
+from management.db.conversation import repository as db
 
 FORM = {
     'schema_version': 1,
@@ -74,7 +75,11 @@ def test_answer_length_boundary_and_other_only_selection():
 
 @pytest.fixture
 def storage(monkeypatch):
-    engine = create_engine('sqlite://')
+    dbapi = sqlite3
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        # Keep real transaction/RETURNING coverage on older Linux runner images.
+        import pysqlite3 as dbapi
+    engine = create_engine('sqlite://', module=dbapi)
     with engine.connect() as connection:
         connection.execute(text("ATTACH DATABASE ':memory:' AS nexent"))
         connection.execute(text('CREATE TABLE nexent.conversation_record_t '
@@ -194,7 +199,7 @@ def test_ambiguous_form_without_unit_index_is_rejected(storage):
 
 
 def test_agent_request_retains_structured_response():
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
 
     request = AgentRequest(query='Readable answers', conversation_id=1, clarification_response=RESPONSE)
     assert request.clarification_response.answers[1].value == 'b'
@@ -202,7 +207,7 @@ def test_agent_request_retains_structured_response():
 
 
 def test_service_passes_structured_answers_to_atomic_message_save(monkeypatch):
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
     from management.services.conversation import service
 
     captured = []

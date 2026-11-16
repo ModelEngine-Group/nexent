@@ -1,17 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+
 from typing import Any
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
-from database.agent_db import query_agent_records_for_nl2agent
-from database.user_tenant_db import get_user_role_by_tenant
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
+from contracts.errors.exceptions import (
+    AgentDraftEditError,
+    AgentNotFoundError,
+    ForbiddenError,
+    ResourceBindingError,
+)
+from contracts.roles import has_any_role
+from management.db.agent.repository import (
+    is_system_agent,
+    query_agent_records_for_nl2agent,
+)
+from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.asset_owner import resolve_agent_list_permission
-
-
-from consts.exceptions import AgentDraftEditError
-
-
-from consts.exceptions import ResourceBindingError
 
 
 def require_agent_draft_edit(
@@ -40,16 +45,11 @@ def require_agent_draft_edit(
         user_role=user_role,
         agent=draft,
         user_id=user_id,
-        can_edit_all=(user_role or "").upper() in CAN_EDIT_ALL_USER_ROLES,
+        can_edit_all=has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES),
     )
     if permission != PERMISSION_EDIT:
         raise AgentDraftEditError("agent_read_only")
     return draft
-
-
-from consts.exceptions import AgentNotFoundError, ForbiddenError
-from database.agent_db import is_system_agent
-from consts.exceptions import AgentDraftEditError
 
 
 def require_external_relation_edit(local_agent_id: int, tenant_id: str, user_id: str) -> None:

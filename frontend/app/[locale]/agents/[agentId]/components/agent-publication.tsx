@@ -5,7 +5,17 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Collapse, Spin, Table, Tag, Tooltip } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Collapse,
+  Spin,
+  Table,
+  Tag,
+  Tooltip,
+  Input,
+} from "antd";
 import {
   Copy,
   ExternalLink,
@@ -18,8 +28,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
 import {
   buildAgentShareUrl,
   buildCopyAriaLabel,
@@ -64,8 +72,7 @@ export function AgentPublication({
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const shareUrl = buildAgentShareUrl(origin, locale, agentId);
   const northboundUrl = buildNorthboundRunUrl(
-    frontendConfig.data?.northboundBaseUrl,
-    origin
+    frontendConfig.data?.northboundBaseUrl
   );
   const publishedName = publishedAgents.data?.find(
     (agent) => agent.id === String(agentId)
@@ -167,7 +174,7 @@ export function AgentPublication({
           )}
         </span>
       )}
-      <StandardInput
+      <Input
         readOnly
         aria-label={label}
         value={value}
@@ -227,15 +234,15 @@ export function AgentPublication({
                 />
                 <div className="flex flex-wrap items-end gap-3">
                   {copyField(t("agent.publication.agentLink"), shareUrl)}
-                  <StandardButton icon={<Send size={14} />} href={shareUrl}>
+                  <Button icon={<Send size={14} />} href={shareUrl}>
                     {t("agent.publication.preview")}
-                  </StandardButton>
-                  <StandardButton
+                  </Button>
+                  <Button
                     icon={<Share2 size={14} />}
                     onClick={() => copy(shareUrl)}
                   >
                     {t("agent.publication.share")}
-                  </StandardButton>
+                  </Button>
                 </div>
               </div>
             ),

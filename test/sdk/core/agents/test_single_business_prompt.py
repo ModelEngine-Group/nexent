@@ -7,7 +7,7 @@ import inspect
 import pytest
 
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
-from backend.management.services.agent.context import build_context_inputs
+from management.services.agent.context import build_context_inputs
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])

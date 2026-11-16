@@ -3,7 +3,6 @@
 import ast
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -24,7 +23,7 @@ from smolagents.agents import (
     RunResult,
     handle_agent_output_types,
 )
-from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
+from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep
 from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT, MessageRole
 from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
@@ -40,14 +39,13 @@ from ..utils.model_output_diagnostics import (
     bounded_rejected_output_preview,
     rejected_output_preview_enabled,
 )
-from jinja2 import Template, StrictUndefined
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
-from ...consts.mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
+from ...consts.mcp_errors import classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message, propagate_mcp_timeout
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -87,6 +85,27 @@ def _extract_final_answer_body(output: Any) -> str | None:
     text = str(output)
     opening = re.search(r"<final_answer>", text, re.IGNORECASE)
     return re.sub(r"</?final_answer>", "", text[opening.end():], flags=re.IGNORECASE) if opening else None
+
+
+def _strip_reserved_metadata_keys(node: Any) -> Any:
+    """Recursively remove every top-level and nested dict entry whose key
+    starts with an underscore.  This keeps Phase-1 reserved fields like
+    ``_mcp_headers`` / ``_mcp_headers_by_server`` out of the LLM prompt
+    while leaving the rest of the metadata intact.
+
+    The filter runs on a shallow copy of every dict so the caller-owned
+    runtime metadata is never mutated in place.
+    """
+    if isinstance(node, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, value in node.items():
+            if isinstance(key, str) and key.startswith("_"):
+                continue
+            cleaned[key] = _strip_reserved_metadata_keys(value)
+        return cleaned
+    if isinstance(node, list):
+        return [_strip_reserved_metadata_keys(item) for item in node]
+    return node
 
 
 class NonterminalThoughtTurn(Exception):
@@ -567,6 +586,7 @@ class CoreAgent(CodeAgent):
         if self.output_protocol not in ("code_action", "final_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
         if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
@@ -1443,12 +1463,6 @@ Additional Args:
                 raise RuntimeFinalAnswer(
                     self._empty_model_response_hint(), "empty_model_output"
                 ) from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
-                raise ModelOutputProtocolError(
-                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                    protocol=getattr(self, "output_protocol", "code_action"),
-                    logger=self.logger,
-                ) from terminal_error
             raise
         except Exception as e:
             if self.stop_event.is_set():
@@ -1548,11 +1562,23 @@ Additional Args:
                 except ModelOutputProtocolError as protocol_error:
                     if not legacy_code_action:
                         raise
+                    if self.stop_event.is_set():
+                        raise RunTerminated()
+                    self._consecutive_clarification_errors = getattr(self, "_consecutive_clarification_errors", 0) + 1
+                    if self._consecutive_clarification_errors >= 3:
+                        hint = (
+                            "确认选项暂时无法生成，请重试当前请求。已保留本轮需求。"
+                            if str(getattr(self, "lang", "en")).lower().startswith("zh") else
+                            "The confirmation options could not be generated. Please retry this request; "
+                            "your requirements remain in the conversation."
+                        )
+                        raise RuntimeFinalAnswer(hint, source="clarification_protocol_failure") from protocol_error
                     raise AgentExecutionError(
                         "Legacy code action could not be parsed for optional clarification: "
-                        f"{protocol_error.reason.value}",
+                        f"{protocol_error.reason.value}. {protocol_error.repair_instruction}",
                         self.logger,
                     ) from protocol_error
+            self._consecutive_clarification_errors = 0
             if form is not None:
                 form = self._screen_clarification(form)
                 if self.stop_event.is_set():
@@ -1567,7 +1593,7 @@ Additional Args:
                 self._pending_thought_continuation = False
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
-                    {"schema_version": 1, **form.model_dump(mode="json")},
+                    {"schema_version": 1, **form.model_dump(mode="json", exclude_none=True)},
                 )
                 raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
             code_action = _remove_parallel_executor_import(code_action)
@@ -1732,6 +1758,23 @@ Additional Args:
                     Group(Text("Execution logs:", style="bold"), Text(partial_logs)), level=LogLevel.INFO,
                 )
             error_msg, _ = self._screen_execution_output(str(e), code_action)
+            category, leaf = classify_mcp_failure(e)
+            if category:
+                # This text becomes the ReAct observation: keep it short and
+                # actionable; the full exception tree goes to the log only.
+                error_msg = mcp_failure_message(
+                    category,
+                    getattr(getattr(self, "observer", None), "lang", "en"),
+                    server=find_mcp_server_url(e),
+                    leaf=leaf,
+                )
+                logger.error(
+                    "event=mcp_code_execution_failure agent=%s step=%s category=%s",
+                    self.name,
+                    memory_step.step_number,
+                    category,
+                    exc_info=True,
+                )
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,
@@ -1860,8 +1903,9 @@ Additional Args:
             if other_args:
                 self.task += render_user_context(getattr(self, "lang", "en"), "additional_arguments", {"arguments": str(other_args)})
             if runtime_metadata is not None:
+                runtime_metadata_for_prompt = _strip_reserved_metadata_keys(runtime_metadata)
                 serialized_metadata = json.dumps(
-                    runtime_metadata,
+                    runtime_metadata_for_prompt,
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
@@ -2007,6 +2051,7 @@ Additional Args:
         self._emitted_step_count = None
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
         self._pending_thought_continuation = False
         final_verification_round = 0

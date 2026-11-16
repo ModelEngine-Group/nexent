@@ -22,6 +22,7 @@ Covers:
 
 from __future__ import annotations
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
@@ -327,9 +328,9 @@ sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_m
 sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
 
 
-# Stub ``consts.const`` with the constants the unit under test imports.
+# Stub ``contracts.constants.environment`` with the constants the unit under test imports.
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 14
 consts_mod.MMR_CANDIDATE_TOP_K = 10
 consts_mod.MMR_DUPLICATE_THRESHOLD = 0.92
@@ -348,7 +349,8 @@ class _VectorDatabaseType:
 
 consts_mod.VectorDatabaseType = _VectorDatabaseType
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +536,7 @@ class TestPrepareSearchEmbedding:
 
 class TestBuildPipelineConfig:
     def test_reads_constants_from_consts(self, monkeypatch):
-        # The module imports each constant via ``from consts.const import X``,
+        # The module imports each constant via ``from contracts.constants.environment import X``,
         # so the local binding in ``memory_context_service`` is what the
         # builder reads. Update the local bindings, not the source module.
         monkeypatch.setattr(

@@ -1,11 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``backend.apps.memory_record_app`` (Phase 2).
+"""Unit tests for ``management.api.memory.memory_record`` (Phase 2).
 
 Tests use FastAPI's ``TestClient`` against the app router with stubbed
 services so the request/response shape can be validated without touching
 the database or Elasticsearch.
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
 import logging
 import sys
 import types
@@ -28,13 +29,13 @@ database_pkg = types.ModuleType("database")
 database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
-user_tenant_db_mod = types.ModuleType("database.user_tenant_db")
+user_tenant_db_mod = types.ModuleType("management.db.identity.user_tenant")
 user_tenant_db_mod.get_user_tenant_by_user_id = MagicMock(
     return_value={"user_role": "ADMIN"}
 )
 sys.modules["database"] = database_pkg
 sys.modules["backend.database"] = database_pkg
-sys.modules["database.user_tenant_db"] = user_tenant_db_mod
+sys.modules["management.db.identity.user_tenant"] = user_tenant_db_mod
 
 services_pkg = types.ModuleType("services")
 record_service_mod = types.ModuleType("management.services.memory.records")
@@ -104,24 +105,24 @@ sys.modules["nexent.memory"] = memory_pkg
 
 
 # Stub auth utils
-auth_utils_mod = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_mod = types.ModuleType("gateway.authentication.auth")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
+sys.modules["gateway.authentication.auth"] = auth_utils_mod
+sys.modules["gateway.authentication.auth"] = auth_utils_mod
 
 
 # Stub exceptions
 consts_pkg = types.ModuleType("consts")
-exceptions_mod = types.ModuleType("consts.exceptions")
+exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 exceptions_mod.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.exceptions"] = exceptions_mod
+install_shared_contract_stub(exceptions_mod, 'exceptions')
 
 
 @pytest.fixture
 def client(monkeypatch):
     """Build a TestClient and patch services per test."""
-    from apps import memory_record_app
+    from management.api.memory import memory_record as memory_record_app
 
     user_tenant_db_mod.get_user_tenant_by_user_id.return_value = {
         "user_role": "ADMIN"
@@ -701,7 +702,7 @@ def test_create_user_record_with_minimal_payload_is_gone(client):
 
 def test_create_record_missing_authorization_raises(monkeypatch):
     """An exception in auth_utils should surface as a 500 from the endpoint."""
-    from apps import memory_record_app as app_module
+    from management.api.memory import memory_record as app_module
 
     monkeypatch.setattr(
         app_module,

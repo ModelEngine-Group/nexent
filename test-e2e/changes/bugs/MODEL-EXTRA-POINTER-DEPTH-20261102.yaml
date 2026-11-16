@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-EXTRA-POINTER-DEPTH-20261102
+  change_type: bugfix
+  bug_id: MODEL-EXTRA-POINTER-DEPTH-20261102
+  title: Include JSON Pointer nesting in extra parameter depth budget
+  description: Apply the existing finite depth budget before constructing a deeply nested request body.
+  observed_behavior: A scalar at a thousands-segment pointer passes validation but produces a body that cannot be serialized at inference.
+  expected_behavior: Combined pointer and value nesting is bounded before construction; the existing sixteen levels below a top-level custom parameter remain valid and rejected inputs never mutate caller data.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests measured only deeply nested values, not deep pointers or mixed path and value nesting.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reject deep scalar pointers and combined pointer plus value nesting beyond the current budget.
+    - Preserve boundary, escaped pointer, byte and leaf behavior without mutating input.
+    - Reject overdeep parameter binding paths at admission while retaining valid structured parameter values.
+    reason: The defect is a local finite-depth calculation; strengthening the existing UT gives direct red-to-green proof without a redundant formal Case.
+    test_selectors:
+    - test/sdk/core/model_service/test_request_parameters.py
+    - test/sdk/core/model_service/test_parameter_bindings.py
+  notes: Fresh private review of merged4119; forward fix belongs to4083. Reuse the existing depth evaluator with an initial path offset, rather than adding configuration or a second validator. The full model message body is not subject to this configuration-only limit. A fresh second review identified the same path-only bypass for declared bindings; binding admission now shares the existing path-depth check, without extending extras value limits to declared structured parameters.

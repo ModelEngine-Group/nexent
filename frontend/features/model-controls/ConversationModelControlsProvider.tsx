@@ -10,26 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterValue } from "@/types/modelParameterSettings";
-
-export interface ModelState {
-  enabled: boolean;
-  effort: ReasoningEffort;
-  budget: number;
-}
-
-interface SessionState {
-  modelId: string;
-  values: Record<string, ModelState>;
-}
-
-function useLocalModelControlsState() {
-  const [sessions, setSessions] = useState<Record<string, SessionState>>({});
-  const [sampling, setSampling] = useState<Record<string, ModelParameterValue>>(
-    {}
-  );
-  const [rejected, setRejected] = useState<Record<string, boolean>>({});
+function useThreadBindings() {
   const [threadBindings, setThreadBindings] = useState<Record<string, string>>(
     {}
   );
@@ -45,21 +26,15 @@ function useLocalModelControlsState() {
   }, []);
   return useMemo(
     () => ({
-      sessions,
-      setSessions,
-      sampling,
-      setSampling,
-      rejected,
-      setRejected,
       threadBindings,
       bindThread,
     }),
-    [sessions, sampling, rejected, threadBindings, bindThread]
+    [threadBindings, bindThread]
   );
 }
 
 const ModelControlsContext = createContext<ReturnType<
-  typeof useLocalModelControlsState
+  typeof useThreadBindings
 > | null>(null);
 
 /** Owns controls for one chat page lifetime, above loading and landing views. */
@@ -68,18 +43,12 @@ export function ConversationModelControlsProvider({
 }: {
   children: ReactNode;
 }) {
-  const state = useLocalModelControlsState();
+  const state = useThreadBindings();
   return (
     <ModelControlsContext.Provider value={state}>
       {children}
     </ModelControlsContext.Provider>
   );
-}
-
-export function useModelControlsState() {
-  const shared = useContext(ModelControlsContext);
-  const local = useLocalModelControlsState();
-  return shared ?? local;
 }
 
 /** Keep a draft and its later server-backed history on the original cache key. */

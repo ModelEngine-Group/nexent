@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, ValidationError
 from management.services.conversation.service import (
     update_conversation_knowledge_scope_service,
 )

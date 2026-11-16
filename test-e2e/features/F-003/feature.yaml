@@ -4,12 +4,12 @@ module:
   name: Migrated V5 baseline
 feature:
   feature_id: F-003
-  name: refresh token、session、current_user_info/current_user_id
+  name: 本地 JWT 身份查询与历史刷新令牌拒绝
   status: active
-  description: '身份认证与账号 / 会话: refresh token、session、current_user_info/current_user_id'
+  description: 保留身份查询接口，普通 JWT 到期后重新登录。
   business_rules:
   - rule_id: F-003-RULE-01
-    description: refresh token、session、current_user_info/current_user_id
+    description: 本地 JWT 支持 session/current_user 查询；历史 refresh token 返回 401，不延长登录。
   required_test_stages:
   - D2
   source:

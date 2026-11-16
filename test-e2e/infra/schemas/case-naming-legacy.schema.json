@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Frozen historical Case ID compatibility list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "baseline_commit", "case_ids"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "baseline_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "case_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"}
+    }
+  }
+}

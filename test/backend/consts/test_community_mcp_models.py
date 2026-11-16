@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-# Stub optional SDK deps and agent model imports used by consts.model.
+# Stub optional SDK deps and agent model imports used by contracts.agent.
 sys.modules.setdefault("boto3", MagicMock())
 sys.modules.setdefault("botocore", MagicMock())
 sys.modules.setdefault("botocore.client", MagicMock())
@@ -28,13 +28,8 @@ sys.modules["nexent.core"].__path__ = [
 sys.modules.setdefault("nexent.core.agents", MagicMock())
 sys.modules["nexent.core.agents.agent_model"] = _agent_model_mod
 
-from backend.consts.model import (
-    CommunityPublishRequest,
-    CommunityReviewActionRequest,
-    CommunityStatusUpdateRequest,
-    CommunityUpdateRequest,
-    SkillRepositoryListingCreateRequest,
-)
+from contracts.tool import CommunityPublishRequest, CommunityReviewActionRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
+from contracts.skill import SkillRepositoryListingCreateRequest
 
 
 @pytest.mark.parametrize(

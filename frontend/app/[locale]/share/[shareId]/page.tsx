@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -87,14 +89,14 @@ export default function ShareConversationPage() {
       .then((data) => setPayload(data))
       .catch((err) => {
         if (controller.signal.aborted) return;
-        setError(err?.message || "Failed to load share");
+        setError(err?.message || t("chatInterface.shareLoadFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => controller.abort();
-  }, [shareId]);
+  }, [shareId, t]);
 
   const title =
     payload?.snapshot?.conversation_title ||

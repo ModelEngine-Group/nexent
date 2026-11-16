@@ -5,7 +5,7 @@ import pytest
 
 from nexent.core.agents.agent_model import AgentConfig
 
-from agents.nl2agent_agent import create_nl2agent_agent_config
+from management.services.agent.creation import create_nl2agent_agent_config
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])

@@ -1,4 +1,6 @@
-"""Unit tests for ``database.evaluation_annotation_db``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.evaluation.annotation``.
 
 Targets
 -------
@@ -41,7 +43,7 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-MODULE_UNDER_TEST = "database.evaluation_annotation_db"
+MODULE_UNDER_TEST = "management.db.evaluation.annotation"
 
 
 def _register_package(name: str) -> types.ModuleType:
@@ -105,10 +107,14 @@ def _install_stubs():
     """Register placeholder modules for every transitive import of the target."""
     _db_pkg = _register_package("database")
 
-    _client = types.ModuleType("database.client")
+    _client = types.ModuleType("management.db.client")
     _client.get_db_session = None  # patched per test
     _db_pkg.client = _client
-    sys.modules["database.client"] = _client
+    sys.modules["management.db.client"] = _client
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
 
     _SchemaCls = _make_orm(
         "EvaluationAnnotationSchema",
@@ -143,12 +149,12 @@ def _install_stubs():
         "AgentEvaluationCase",
         ["agent_evaluation_case_id", "agent_evaluation_id", "tenant_id"],
     )
-    db_mod = types.ModuleType("database.db_models")
+    db_mod = types.ModuleType("management.db.models")
     db_mod.EvaluationAnnotationSchema = _SchemaCls
     db_mod.EvaluationAnnotation = _AnnCls
     db_mod.AgentEvaluationCase = _CaseCls
     _db_pkg.db_models = db_mod
-    sys.modules["database.db_models"] = db_mod
+    sys.modules["management.db.models"] = db_mod
     return _SchemaCls, _AnnCls, _CaseCls
 
 
@@ -170,7 +176,7 @@ def ann_mod():
     if hasattr(db_pkg, "evaluation_annotation_db"):
         delattr(db_pkg, "evaluation_annotation_db")
 
-    src = _BACKEND_DIR / "database" / "evaluation_annotation_db.py"
+    src = _BACKEND_DIR / 'management' / 'db' / 'evaluation' / 'annotation.py'
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)

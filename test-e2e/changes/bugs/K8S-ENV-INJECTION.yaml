@@ -22,14 +22,4 @@ change:
     added: []
     modified: []
     retired: []
-  traditional_ut:
-    decision: add
-    behaviors:
-      - Preserve Bash-loaded string values, empty values, quoting, JSON, multiline strings and last duplicate assignments; emit only file-declared keys.
-      - Reject unreadable or invalid env files without publishing partial values or sensitive diagnostics; generated application Secret values are mode 0600.
-      - Verify default Helm compatibility, backend-only Secret references, platform overrides, update/removal and deterministic rollout checksums using synthetic configuration.
-      - Remove redundant backend runtime-value copies while retaining Web-specific mappings, Redis runtime-state fallback, derived worker concurrency, final credentials and direct Helm defaults.
-    reason: The new renderer and manifest composition have isolated contracts suitable for traditional UT. Real Kubernetes env resolution and replacement need separate D5 evidence; no additional D1-D4 boundary is introduced.
-    test_selectors:
-      - test/backend/deploy/test_k8s_env_injection.py
-  notes: 'Historical change and UT evidence are retained. K8S-ENV-D5-001 was physically removed from the formal baseline at user request on 2026-10-23; the linked design records historical, not current, D5 coverage. Product Kubernetes code and traditional UT remain unchanged. The retained sandbox Case now covers Docker/local configuration only.'
+  notes: 'Historical change and execution evidence are retained in the linked design. K8S-ENV-D5-001 was physically removed at user request on 2026-10-23. On 2026-10-29 the user also requested removal of the pytest-based Bash/Helm rendering suite because it verifies deployment behavior rather than backend/sdk Python coverage. Its obsolete active UT selector has been removed; historical results are not current executable coverage. Product Kubernetes code is unchanged. The retained sandbox Case covers Docker/local configuration only.'

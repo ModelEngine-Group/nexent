@@ -8,13 +8,7 @@ import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    ValidationError,
-    UnauthorizedError,
-)
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -23,7 +17,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 
 # Import exceptions
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -44,8 +38,8 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 
@@ -62,13 +56,13 @@ tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
 
-auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_module = types.ModuleType("gateway.authentication.auth")
 auth_utils_module.get_current_user_id = MagicMock()
 auth_utils_module.get_current_user_context = MagicMock()
 
 sys.modules["services"] = services_module
 sys.modules["management.services.permission.identity.tenants"] = tenant_service_module
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_module
+sys.modules["gateway.authentication.auth"] = auth_utils_module
 
 # The `services` stub above is not a package, so the audit submodule is loaded from
 # its file: without it collection fails, and the audit assertions further down would
@@ -81,7 +75,7 @@ _audit_service = importlib.util.module_from_spec(_audit_spec)
 _audit_spec.loader.exec_module(_audit_service)
 sys.modules["management.services.monitor.audit"] = _audit_service
 
-from apps.tenant_app import router
+from management.api.identity.tenant import router
 
 app = FastAPI()
 app.include_router(router)
@@ -403,7 +397,7 @@ class TestTenantAuth:
 
     def test_get_current_user_id_is_called(self):
         """Test that get_current_user_id is used for authorization."""
-        from management.services.permission.identity.authentication_helpers import get_current_user_id
+        from gateway.authentication.auth import get_current_user_id
 
         self.mock_utils.get_current_user_id.return_value = ("user-456", "tenant-123")
 
@@ -415,7 +409,7 @@ class TestTenantAuth:
 
     def test_get_current_user_id_raises_unauthorized(self):
         """Test that get_current_user_id raises UnauthorizedError for invalid tokens."""
-        from management.services.permission.identity.authentication_helpers import get_current_user_id
+        from gateway.authentication.auth import get_current_user_id
 
         self.mock_utils.get_current_user_id.side_effect = UnauthorizedError("Invalid token")
 

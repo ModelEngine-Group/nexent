@@ -7,14 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AppException,
-    FileTooLargeException,
-    OfficeConversionException,
-    QuotaExceededError,
-    UnsupportedFileTypeException,
-)
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, FileTooLargeException, OfficeConversionException, QuotaExceededError, UnsupportedFileTypeException
 
 
 _MAX_ERROR_MESSAGE_LENGTH = 500

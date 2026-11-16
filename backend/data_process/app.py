@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Celery application configuration for data processing tasks
 """
@@ -6,7 +7,7 @@ import logging
 from celery import Celery
 from celery.backends.base import DisabledBackend
 
-from consts.const import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
+from contracts.constants.environment import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
 
 
 # Configure logging

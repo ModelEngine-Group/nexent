@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-NAMING-POLICY-20261102
+  change_type: test-fix
+  title: Keep Case ID style findings from aborting Daily execution
+  description: >-
+    Emit a typed Case-scoped naming-format finding. Daily reports it as a metadata
+    warning for a known Case and preserves every original ID, stage, binding and
+    declared status. Strict developer validation continues to reject nonstandard
+    new IDs. Configuration, schema, identity ambiguity and path safety gates stay
+    rejecting; warnings prevent complete coverage and an all-green batch.
+  affected_features:
+    existing: [AIDP-RETRIEVAL, F-146]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AIDP-RET-CONFIG-API-D2-001, AIDP-RET-JOURNEY-D4-001, AIDP-RET-MIGRATION-D5-001,
+      AIDP-RET-PROTOCOL-D2-001, AIDP-RET-REAL-D3-001, AIDP-RET-RUNTIME-D3-001, NB-CHAT-FINAL-ANSWER-D2-001]
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Framework classification only. Preserve all formal contracts, fixed scripts,
+    runtime Case identity and the frozen historical naming catalog. The separate
+    user-authorized CASE-ID-NORMALIZATION-20261102 records the seven source ID
+    corrections. Keep existing blocked declarations unchanged.
+    ASSET-READINESS-REPAIR-20261102 separately resolves the
+    existing protocol preparation omission without changing this classification policy.
+  notes: >-
+    Reproduce scheduled runs 41236191523 and 41346817743 in offline framework
+    regressions under infra/tools/tests/test_daily_naming_validation.py. Use the
+    real naming/asset validators and CLI to prove strict rejection, warning-only
+    Daily continuation, stable plan identity, no checkout writes and original
+    blocked accounting. Exercise duplicate identity, directory mismatch, invalid
+    ID/stage, script escape, naming catalog damage and unknown warning scope as
+    fatal controls. Replay the current repository inventory without executing
+    business Cases. Framework tests are separate from formal D1-D5 execution.
+    A separate offline audit reproduced two additional metadata/coverage gates:
+    whitespace-only Case titles and missing Feature-required stages still stop
+    Daily. Neither occurs in the current incident; their policy is recorded for
+    separate review rather than silently broadening this ID-format change.

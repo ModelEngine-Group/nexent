@@ -13,7 +13,7 @@ PRODUCTION_PATHS = (
     "backend/management/services/agent/prompt_generation.py",
     "backend/management/services/agent/naming.py",
     "backend/management/services/agent/prompt.py",
-    "backend/agents/nl2agent_agent.py",
+    "backend/management/services/agent/creation.py",
     "backend/management/services/conversation/service.py",
     "backend/management/services/automation/intent.py",
     "backend/management/services/automation/prompt.py",
@@ -60,7 +60,7 @@ def test_ut_be_fps_018_backend_imports_only_current_assembly_modules():
         "backend/management/services/evaluation/sets.py": "nexent.core.agents.prompt.evaluation",
         'backend/management/services/knowledge_base/summary.py': "nexent.core.agents.prompt.document",
         "backend/management/services/memory/extraction.py": "nexent.core.agents.prompt.memory",
-        "backend/agents/create_agent_info.py": "nexent.core.agents.prompt.user_context",
+        "backend/management/services/agent/preparation/inputs.py": "nexent.core.agents.prompt.user_context",
     }
     for path, module in direct_callers.items():
         assert module in (ROOT / path).read_text(encoding="utf-8-sig")

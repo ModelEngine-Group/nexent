@@ -84,8 +84,8 @@ def test_ac002_preview_key_matches_existing_contract(monkeypatch):
 
 @pytest.fixture
 def naming(monkeypatch):
-    dependency(monkeypatch, "consts.const", LANGUAGE={"ZH": "zh", "EN": "en"})
-    dependency(monkeypatch, "database.agent_db", query_all_agent_info_by_tenant_id=lambda tenant: [])
+    dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})
+    dependency(monkeypatch, "management.db.agent.repository", query_all_agent_info_by_tenant_id=lambda tenant: [])
     dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
         monkeypatch, "management.services.agent.prompt",
@@ -226,9 +226,9 @@ def model_resolver(monkeypatch):
     status = types.SimpleNamespace(
         AVAILABLE=types.SimpleNamespace(value="available"), get_value=lambda value: value or "not_detected"
     )
-    dependency(monkeypatch, "consts.model", ModelConnectStatusEnum=status)
+    dependency(monkeypatch, "contracts.constants.constants", ModelConnectStatusEnum=status)
     dependency(
-        monkeypatch, "database.model_management_db",
+        monkeypatch, "management.db.model.repository",
         get_model_by_model_id=lambda *args: None, get_model_records=lambda *args: [],
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
@@ -286,12 +286,12 @@ def test_ac006_catalog_failure_and_capability_single_lookup(model_resolver, monk
 
 @pytest.fixture
 def agent_reader(monkeypatch, model_resolver):
-    dependency(monkeypatch, "database.agent_db", search_agent_info_by_agent_id=lambda *args: None)
+    dependency(monkeypatch, "management.db.agent.repository", search_agent_info_by_agent_id=lambda *args: None)
     dependency(
-        monkeypatch, "database.tool_db", search_tools_for_sub_agent=lambda **kwargs: [],
+        monkeypatch, "management.db.tool.repository", search_tools_for_sub_agent=lambda **kwargs: [],
         check_tool_is_available=lambda ids: [True] * len(ids),
     )
-    load_source(monkeypatch, "backend/consts/agent_unavailable_reasons.py", "consts.agent_unavailable_reasons")
+    load_source(monkeypatch, "backend/contracts/constants/constants.py", "contracts.constants.constants")
     return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")
 
 
@@ -311,9 +311,9 @@ def test_ac007_projection_keeps_distinct_legacy_name_rules(agent_reader, monkeyp
     assert listed.deleted_model_ids == detail.deleted_model_ids == frozenset({9})
 
 
-def test_ac007_projection_filters_unavailable_models(agent_reader, monkeypatch, model_resolver):
+def test_ac007_projection_filters_deleted_models(agent_reader, monkeypatch, model_resolver):
     records = {
-        7: {"display_name": "Unavailable", "connect_status": "unavailable"},
+        7: {"display_name": "Unavailable", "connect_status": "unavailable", "delete_flag": "Y"},
         8: {"display_name": "Available", "connect_status": "available"},
     }
     monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda mid, *args: records[mid])
@@ -342,7 +342,7 @@ def test_ac010_deleted_model_reason_is_added_once(agent_reader):
 
 
 def test_ac012_knowledge_list_merge_uses_one_compatible_executor(monkeypatch):
-    dependency(monkeypatch, "consts.const", PERMISSION_READ="READ_ONLY")
+    dependency(monkeypatch, "contracts.constants.environment", PERMISSION_READ="READ_ONLY")
     module = load_source(
         monkeypatch,
         "backend/management/services/knowledge_base/listing.py",
@@ -375,14 +375,14 @@ def test_ac012_knowledge_list_merge_uses_one_compatible_executor(monkeypatch):
 def test_ac012_permission_requirements_share_resolver(monkeypatch):
     dependency(
         monkeypatch,
-        "consts.const",
+        "contracts.constants.environment",
         ASSET_OWNER_TENANT_ID="asset",
         IS_SPEED_MODE=False,
         PERMISSION_EDIT="EDIT",
     )
-    dependency(monkeypatch, "database.knowledge_db", get_knowledge_record=lambda query: {})
-    dependency(monkeypatch, "database.group_db", query_group_ids_by_user=lambda user_id: [])
-    dependency(monkeypatch, "database.user_tenant_db", get_user_tenant_by_user_id=lambda user_id: {})
+    dependency(monkeypatch, "management.db.knowledge_base.repository", get_knowledge_record=lambda query: {})
+    dependency(monkeypatch, "management.db.identity.group", query_group_ids_by_user=lambda user_id: [])
+    dependency(monkeypatch, "management.db.identity.user_tenant", get_user_tenant_by_user_id=lambda user_id: {})
     dependency(monkeypatch, "permissions.models", Resource=object)
     dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object)
     module = load_source(
@@ -401,7 +401,8 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
 @pytest.mark.parametrize("configured,available", [(False, False), (True, False), (True, True)])
 def test_ac007_availability_uses_real_shared_model_predicate(agent_reader, model_resolver, monkeypatch, configured, available):
     monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda *args: {
-        "connect_status": "available" if available else "unavailable"
+        "connect_status": "available" if available else "unavailable",
+        "delete_flag": "N" if available else "Y",
     })
     ok, reasons = agent_reader.check_agent_availability(
         1, "tenant", {"agent_id": 1, "model_ids": [7] if configured else []}
@@ -494,3 +495,13 @@ def test_ac017_repository_has_no_flat_management_service_references():
                     stale_references.append(f"{path.relative_to(ROOT)}: {stale_prefix}")
 
     assert stale_references == []
+
+
+@pytest.mark.parametrize("status", ["available", "unavailable", "unknown", None])
+def test_agent_configured_model_remains_selectable_independently_of_probe(agent_reader, model_resolver, monkeypatch, status):
+    monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda *_args: {
+        "display_name": "Configured", "connect_status": status, "delete_flag": "N", "model_type": "llm",
+    })
+    projected = agent_reader.project_agent_models({"model_ids": [7]}, "tenant", {})
+    assert projected.fields["model_ids"] == [7]
+    assert agent_reader.check_agent_availability(1, "tenant", {"agent_id": 1, "model_ids": [7]}) == (True, [])

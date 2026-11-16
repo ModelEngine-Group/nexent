@@ -100,6 +100,8 @@ def _render_tool_arguments(arguments: Any) -> str:
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
+    from .execution_history import result_text
+
     c = item.content
     labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
     parts = [

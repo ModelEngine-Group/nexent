@@ -4,7 +4,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Select, Tooltip } from "antd";
-import { InfoCircleOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { QuestionCircleOutlined } from "@ant-design/icons";
 import { Plus, Trash2 } from "lucide-react";
 
 import { SliderStepper } from "@/components/common/SliderStepper";
@@ -27,13 +27,10 @@ import {
 
 // =============================================================================
 // ModelParamsModal — design-spec modal for per-agent model parameter overrides.
-// Reuses the ParamDialog design primitives (deep-thinking toggle, capacity
-// token grid with info/suggestion, temperature / top-p sliders with steppers)
+// Reuses the ParamDialog design primitives (deep-thinking toggle and
+// temperature / top-p sliders with steppers)
 // while preserving the custom key/value params functionality.
 // =============================================================================
-
-const numberText = (value: unknown): string =>
-  typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 
 interface ModelParamsModalProps {
   open: boolean;
@@ -109,57 +106,6 @@ export function ModelParamsModal({
     value.reasoning_budget_tokens
   );
 
-  const tokenFields = [
-    {
-      key: "context_window_tokens",
-      label: t("modelParams.token.contextWindow", {
-        defaultValue: "上下文总Token数",
-      }),
-      hint: t("modelParams.token.contextWindowHint", {
-        defaultValue: "建议：500000-2000000",
-      }),
-      info: t("modelParams.token.contextWindowInfo", {
-        defaultValue: "模型一次处理的最大上下文长度",
-      }),
-    },
-    {
-      key: "max_input_tokens",
-      label: t("modelParams.token.maxInput", {
-        defaultValue: "最大输入Token数",
-      }),
-      hint: t("modelParams.token.maxInputHint", {
-        defaultValue: "建议预留输出Token空间",
-      }),
-      info: t("modelParams.token.maxInputInfo", {
-        defaultValue: "单次请求允许的最大输入长度",
-      }),
-    },
-    {
-      key: "max_output_tokens",
-      label: t("modelParams.token.maxOutput", {
-        defaultValue: "最大输出Token数",
-      }),
-      hint: t("modelParams.token.maxOutputHint", {
-        defaultValue: "建议控制输出以减少预算",
-      }),
-      info: t("modelParams.token.maxOutputInfo", {
-        defaultValue: "单次请求允许的最大输出长度",
-      }),
-    },
-    {
-      key: "default_output_reserve_tokens",
-      label: t("modelParams.token.outputReserve", {
-        defaultValue: "输出预留Token数",
-      }),
-      hint: t("modelParams.token.outputReserveHint", {
-        defaultValue: "建议：2000-10000",
-      }),
-      info: t("modelParams.token.outputReserveInfo", {
-        defaultValue: "从上下文窗口中预留的输出空间",
-      }),
-    },
-  ];
-
   const inheritedNumber = (key: string): number => {
     const raw = inheritedDefaults[key];
     return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
@@ -212,42 +158,6 @@ export function ModelParamsModal({
           />
         </ParamField>
       )}
-
-      {/* Token capacity grid */}
-      <div className="grid grid-cols-2 gap-4">
-        {tokenFields.map((field) => (
-          <ParamField
-            key={field.key}
-            label={field.label}
-            icon={
-              <Tooltip title={field.info}>
-                <QuestionCircleOutlined
-                  style={{ color: "#8C8C8C", fontSize: 12 }}
-                />
-              </Tooltip>
-            }
-          >
-            <ParamInput
-              type="number"
-              inputSize="sm"
-              value={numberText(value[field.key])}
-              placeholder={
-                inheritedNumber(field.key)
-                  ? String(inheritedNumber(field.key))
-                  : undefined
-              }
-              onChange={(e) => {
-                const raw = e.target.value;
-                setNumberField(field.key, raw === "" ? undefined : Number(raw));
-              }}
-            />
-            <span className="flex items-center gap-1 text-[12px] leading-[18px] text-[#8C8C8C]">
-              <InfoCircleOutlined style={{ color: "#1677FF" }} />
-              {field.hint}
-            </span>
-          </ParamField>
-        ))}
-      </div>
 
       {/* Temperature slider */}
       <ParamField

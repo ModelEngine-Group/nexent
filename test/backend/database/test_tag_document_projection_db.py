@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the document tag projection persistence layer."""
 
 from contextlib import nullcontext
 
-from database import document_tag_projection_db as projection_db
-from database.db_models import DocumentTagProjection
+from management.db.tag import projection as projection_db
+from management.db.models import DocumentTagProjection
 
 
 class _Query:
@@ -115,7 +117,7 @@ def test_get_projection_state_returns_none_when_absent(monkeypatch):
     query = _Query(one=None)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -129,7 +131,7 @@ def test_get_projection_state_returns_state_when_present(monkeypatch):
     query = _Query(one=_record(status="failed", retry_count=3, last_error="boom"))
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -145,7 +147,7 @@ def test_upsert_projection_state_creates_new_record(monkeypatch):
     query = _Query(one=None)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -172,7 +174,7 @@ def test_upsert_projection_state_updates_existing_record(monkeypatch):
     query = _Query(one=existing)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -201,7 +203,7 @@ def test_upsert_preserves_existing_retry_and_actor_when_not_provided(monkeypatch
     query = _Query(one=existing)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -224,7 +226,7 @@ def test_delete_projection_state_returns_bool(monkeypatch):
     query = _Query(deleted=2)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -235,7 +237,7 @@ def test_delete_projection_state_returns_false_for_zero(monkeypatch):
     query = _Query(deleted=0)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -246,7 +248,7 @@ def test_delete_projection_states_for_knowledge_base(monkeypatch):
     query = _Query(deleted=4)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -259,7 +261,7 @@ def test_delete_projection_states_for_knowledge_base_zero(monkeypatch):
     query = _Query(deleted=0)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -275,7 +277,7 @@ def test_list_projection_states_for_knowledge_base_keyed_by_document(monkeypatch
     )
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -289,7 +291,7 @@ def test_list_due_projection_states_applies_tenant_filter_when_given(monkeypatch
     query = _Query(all_rows=[_record(status="pending")])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -305,7 +307,7 @@ def test_list_due_projection_states_without_tenant(monkeypatch):
     query = _Query(all_rows=[])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -316,7 +318,7 @@ def test_list_synced_document_ids_returns_resource_ids(monkeypatch):
     query = _Query(all_rows=[("res-1",), ("res-2",)])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -329,7 +331,7 @@ def test_filter_document_ids_without_predicates_delegates_to_synced(monkeypatch)
     query = _Query(all_rows=[("res-1",)])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -344,7 +346,7 @@ def test_filter_document_ids_joins_and_groups_assignments(monkeypatch):
     query = _Query(all_rows=[("res-1",)])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 
@@ -370,7 +372,7 @@ def test_filter_document_ids_skips_empty_predicates_in_group_count(monkeypatch):
     query = _Query(all_rows=[])
     session = _Session(query)
     monkeypatch.setattr(
-        "database.document_tag_projection_db.get_db_session",
+        "management.db.tag.projection.get_db_session",
         lambda: nullcontext(session),
     )
 

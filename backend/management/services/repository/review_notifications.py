@@ -3,14 +3,14 @@
 
 from typing import Any
 from typing import Dict
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
 from typing import Optional
-from consts.notification import SCOPE_TENANT_ADMIN
-from consts.notification import SCOPE_USER
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED
-from consts.agent_repository import STATUS_REJECTED
-from consts.agent_repository import STATUS_SHARED
-from database.notification_db import create_notification
+from contracts.constants.constants import SCOPE_TENANT_ADMIN
+from contracts.constants.constants import SCOPE_USER
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED
+from contracts.constants.constants import STATUS_REJECTED
+from contracts.constants.constants import STATUS_SHARED
+from management.db.notification.repository import create_notification
 
 import logging
 logger = logging.getLogger('management.services.notification.service')

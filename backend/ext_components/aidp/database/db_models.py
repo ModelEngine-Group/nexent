@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """ORM models for the AIDP knowledge base permission subsystem (v7.1).
 
 These models back the ``aidp_kb_permission_t`` table introduced in
@@ -25,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 
-from database.db_models import SCHEMA
+from management.db.models import SCHEMA
 
 
 # Dedicated Declarative base so the AIDP metadata can be re-declared in

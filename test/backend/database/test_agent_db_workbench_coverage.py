@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -7,7 +9,7 @@ import pytest
 from test.backend.database import test_agent_db as legacy
 
 
-agent_db = __import__("backend.database.agent_db", fromlist=["search_system_agent"])
+agent_db = __import__("management.db.agent.repository", fromlist=["search_system_agent"])
 
 
 def _session(monkeypatch, record):

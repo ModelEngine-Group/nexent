@@ -208,6 +208,15 @@ function setAuthCookies(res, session) {
     );
   }
 
+  if (!session.refresh_token) {
+    cookies.push(
+      cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
+        ...buildCookieOptions(true),
+        maxAge: 0,
+      })
+    );
+  }
+
   if (session.expires_at) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.EXPIRES_AT, String(session.expires_at), {
@@ -269,18 +278,9 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
-// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
-const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
-
-// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
 const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
 
 async function isSuperAdminRequest(req) {
-  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
-  if (IS_SPEED_MODE) {
-    return true;
-  }
-
   const cookies = parseCookies(req);
   const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
   if (!token) {
@@ -300,7 +300,12 @@ async function isSuperAdminRequest(req) {
 
     const data = await response.json();
     const userRole = data?.data?.user?.user_role;
-    return SUPER_ADMIN_ROLES.has(userRole);
+    const roles = data?.data?.user?.roles ?? [userRole];
+    return (
+      Array.isArray(roles) &&
+      roles.length === 1 &&
+      SUPER_ADMIN_ROLES.has(roles[0])
+    );
   } catch (error) {
     console.error(
       "[isSuperAdminRequest] Error checking super admin:",

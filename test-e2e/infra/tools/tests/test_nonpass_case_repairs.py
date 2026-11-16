@@ -262,7 +262,7 @@ def test_case_mcp_binding_routes_all_consumers_and_restores_their_originals():
     fixture = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'runtime_fixture')
     call = next(node for node in ast.walk(fixture) if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name) and node.func.id == '_bind_case_mcp')
-    assert {node.id for node in call.args[2:]} == {'nl2agent_service', 'create_agent_info'}
+    assert {node.id for node in call.args[2:]} == {'nl2agent_service', 'agent_preparation'}
 
 
 @pytest.mark.asyncio

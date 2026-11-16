@@ -40,7 +40,8 @@ def postgres():
     try:
         for _ in range(80):
             ready = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-U", "postgres"], capture_output=True, timeout=10,
+                # The temporary initialization server must not satisfy readiness.
+                ["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True, timeout=10,
             )
             if ready.returncode == 0:
                 break
@@ -49,7 +50,7 @@ def postgres():
             pytest.fail("Disposable PostgreSQL did not become ready")
 
         def sql(source):
-            return docker("exec", "--interactive", name, "psql", "-X", "-qAt",
+            return docker("exec", "--interactive", name, "psql", "-h", "127.0.0.1", "-X", "-qAt",
                           "-v", "ON_ERROR_STOP=1", "-U", "postgres", source=source)
 
         sql("""CREATE SCHEMA nexent;

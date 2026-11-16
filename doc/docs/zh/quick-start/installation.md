@@ -42,7 +42,6 @@ bash deploy.sh docker
 - **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
 - **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
 - **data-process（默认选中，可选）**: 数据处理服务
-- **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
@@ -64,10 +63,10 @@ bash deploy.sh docker
 bash deploy.sh docker --defaults
 
 # 默认组件组合，development 端口策略，标准镜像源
-bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application,data-process --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh docker --components infrastructure,application,data-process,terminal
 
 # 使用中国大陆镜像源
 bash deploy.sh docker --image-source mainland
@@ -104,23 +103,8 @@ bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/
 1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 > 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/resource-management)
 
-2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
-```bash
-# Step1: 在supabase容器中删除su账号记录
-docker exec -it supabase-db-mini bash
-psql -U postgres
-select id, email from auth.users;
-# 获取 suadmin@nexent.com 账号的 user_id
-delete from auth.users where id = 'your_user_id';
-delete from auth.identities where user_id = 'your_user_id';
+2️⃣ 历史账号迁移、管理员账号异常和数据恢复请查阅[统一迁移与排障手册](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md)。保留原账号 ID 和租户归属，按手册恢复一致的数据。
 
-# Step 2: 在 nexent 数据库中删除 su 账号记录
-docker exec -it nexent-postgresql bash
-psql -U root -d nexent
-delete from nexent.user_tenant_t where user_id = 'your_user_id';
-
-# Step 3: 重新部署；非交互模式将使用配置值或默认密码
-```
 ### 离线部署
 
 目标服务器无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
@@ -204,13 +188,6 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-minio | S3 兼容对象存储 |
 | redis | 缓存、分布式锁和任务消息代理 |
 
-**Supabase 服务（选择 `supabase` 组件时）:**
-| 服务 | 描述 |
-|---------|-------------|
-| supabase-kong | API 网关 |
-| supabase-auth | 认证服务 |
-| supabase-db-mini | 数据库服务 |
-
 **可选服务:**
 | 服务 | 描述 |
 |---------|-------------|
@@ -234,7 +211,6 @@ Nexent 使用 Docker volumes 进行数据持久化：
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
 | 智能体运行工作区 | nexent-agent-workspace | Docker 命名卷，由 `NEXENT_SANDBOX_WORKSPACE_VOLUME` 配置 |
-| Supabase DB（选择 supabase 时）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 默认 `dataDir` 为 `./volumes`（可在 `deploy/env/.env` 中配置 `ROOT_DIR`）。
 
@@ -353,10 +329,10 @@ MONITORING_DASHBOARD_URL=
 
 ### OAuth 登录配置
 
-OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `OAUTH_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址。
+OAuth 登录使用 application 中的本地账号。启用第三方登录时，请将 `OAUTH_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址。
 
 ```bash
-bash deploy.sh docker --components infrastructure,application,supabase
+bash deploy.sh docker --components infrastructure,application
 ```
 
 Docker 部署在 `deploy/env/.env` 中配置 OAuth：
@@ -410,7 +386,7 @@ Provider 启用规则：
 
 ### CAS 登录配置
 
-CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `CAS_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`CAS_SERVER_URL` 是 CAS Server 根地址，也不要带结尾 `/`。
+CAS SSO 使用本地账号。启用 CAS 时，请将 `CAS_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`CAS_SERVER_URL` 是 CAS Server 根地址，也不要带结尾 `/`。
 
 Docker 部署在 `deploy/env/.env` 中配置 CAS：
 

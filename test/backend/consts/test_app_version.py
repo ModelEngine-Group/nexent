@@ -1,5 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for ``backend.consts.const``'s version-resolution helpers.
+Unit tests for ``backend.contracts.constants.environment``'s version-resolution helpers.
 
 The app version is read at import time by looking for the project
 ``VERSION`` file at one of several candidate paths:
@@ -24,11 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.consts.const import (
-    _collect_version_candidates,
-    _read_version_from,
-    _resolve_app_version,
-)
+from contracts.configuration import _collect_version_candidates, _read_version_from, _resolve_app_version
 
 
 def _str_path(p):
@@ -92,23 +90,23 @@ class TestCollectVersionCandidates:
 
     def test_no_override_yields_container_and_local(self, monkeypatch, tmp_path):
         monkeypatch.delenv("APP_VERSION_FILE", raising=False)
-        candidates = [_str_path(p) for p in _collect_version_candidates()]
+        candidates = [_str_path(p) for p in _collect_version_candidates(os.getenv("APP_VERSION_FILE"))]
 
         # Container path is always present, normalised so the assertion
         # works on both POSIX and Windows hosts.
         assert os.path.normpath("/opt/nexent/VERSION") in candidates
 
         # Local layout is derived from this module's parents[2] + "VERSION".
-        from backend.consts import const as const_module
+        from contracts.constants import environment as const_module
 
         expected_local = (
-            Path(const_module.__file__).resolve().parents[2] / "VERSION"
+            Path(const_module.__file__).resolve().parents[3] / "VERSION"
         )
         assert _str_path(expected_local) in candidates
 
     def test_override_is_first_when_set(self, monkeypatch):
         monkeypatch.setenv("APP_VERSION_FILE", "/some/explicit/path")
-        candidates = [_str_path(p) for p in _collect_version_candidates()]
+        candidates = [_str_path(p) for p in _collect_version_candidates(os.getenv("APP_VERSION_FILE"))]
 
         assert candidates[0] == os.path.normpath("/some/explicit/path")
 
@@ -116,7 +114,7 @@ class TestCollectVersionCandidates:
         # ``os.getenv`` with no default returns ``""`` when the var is set
         # but empty; the helper should *not* treat that as a candidate.
         monkeypatch.setenv("APP_VERSION_FILE", "")
-        candidates = [_str_path(p) for p in _collect_version_candidates()]
+        candidates = [_str_path(p) for p in _collect_version_candidates(os.getenv("APP_VERSION_FILE"))]
         assert "/some/explicit/path" not in candidates
 
 
@@ -158,8 +156,8 @@ class TestResolveAppVersion:
             paths = [_FakePath(contents) for _path, contents in string_contents_pairs]
             installed["paths"] = paths
             monkeypatch.setattr(
-                "backend.consts.const._collect_version_candidates",
-                lambda: paths,
+                "contracts.configuration._collect_version_candidates",
+                lambda version_file=None: paths,
             )
             return paths
 
@@ -225,15 +223,15 @@ class TestResolveAppVersion:
         # local repo-root VERSION file, and assert that the helper picks
         # up the real on-disk version. This guards the integration between
         # the candidate enumeration and the parsing layer.
-        from backend.consts import const as const_module
+        from contracts.constants import environment as const_module
 
-        local_path = Path(const_module.__file__).resolve().parents[2] / "VERSION"
+        local_path = Path(const_module.__file__).resolve().parents[3] / "VERSION"
 
-        def _candidate():
+        def _candidate(version_file=None):
             return [local_path]
 
         monkeypatch.setattr(
-            "backend.consts.const._collect_version_candidates", _candidate
+            "contracts.configuration._collect_version_candidates", _candidate
         )
         monkeypatch.delenv("APP_VERSION_FILE", raising=False)
 

@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import pytest
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunConcurrencyExceededError,
     AgentRunManager,
 )

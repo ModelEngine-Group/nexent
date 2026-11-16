@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from pathlib import Path
 import subprocess
@@ -16,7 +17,7 @@ def _run_const_import(environment: dict[str, str]):
             sys.executable,
             "-c",
             (
-                "import backend.consts.const as c; "
+                "import backend.contracts.constants.environment as c; "
                 "print(c.MAX_EVALUATION_SET_FILE_SIZE_MB, "
                 "c.MAX_EVALUATION_SET_FILE_SIZE_BYTES)"
             ),

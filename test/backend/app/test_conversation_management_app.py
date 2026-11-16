@@ -10,8 +10,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, ValidationError
+from contracts.conversation import BranchConversationRequest
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,13 +38,13 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import target endpoints with all external dependencies patched
-from backend.apps.conversation_management_app import (
+from management.api.conversation.conversation_management import (
     create_new_conversation_endpoint,
     list_conversations_endpoint,
     rename_conversation_endpoint,
@@ -57,6 +58,7 @@ from backend.apps.conversation_management_app import (
     list_agent_groups_endpoint,
     list_agent_group_conversations_endpoint,
     list_agent_group_conversation_ids_endpoint,
+    branch_conversation_endpoint,
     router,
 )
 
@@ -68,28 +70,30 @@ from backend.apps.conversation_management_app import (
 @pytest.fixture
 def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
-    with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
-            patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
-            patch('backend.apps.conversation_management_app.logging') as mock_logging, \
-            patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
-            patch('backend.apps.conversation_management_app.delete_conversations_batch_service') as mock_delete_batch, \
-            patch('backend.apps.conversation_management_app.get_conversation_history_service') as mock_history_service, \
-            patch('backend.apps.conversation_management_app.get_sources_service') as mock_sources_service, \
-            patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
-            patch('backend.apps.conversation_management_app.update_message_opinion_service') as mock_update_opinion_service, \
-            patch('backend.apps.conversation_management_app.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
-            patch('backend.apps.conversation_management_app.list_agent_groups') as mock_agent_groups, \
-            patch('backend.apps.conversation_management_app.list_agent_group_conversations') as mock_agent_group_conversations, \
-            patch('backend.apps.conversation_management_app.list_agent_group_conversation_ids') as mock_agent_group_ids, \
-            patch('backend.apps.conversation_management_app.get_current_user_info') as mock_get_user_info:
+    with patch('management.api.conversation.conversation_management.get_current_user_id') as mock_get_current_user_id, \
+            patch('management.api.conversation.conversation_management.create_new_conversation') as mock_create_new_conv, \
+            patch('management.api.conversation.conversation_management.get_conversation_list_page') as mock_get_conv_list, \
+            patch('management.api.conversation.conversation_management.rename_conversation_service') as mock_rename_conv, \
+            patch('management.api.conversation.conversation_management.branch_conversation_service') as mock_branch_conv, \
+            patch('management.api.conversation.conversation_management.logging') as mock_logging, \
+            patch('management.api.conversation.conversation_management.delete_conversation_service') as mock_delete_conv, \
+            patch('management.api.conversation.conversation_management.delete_conversations_batch_service') as mock_delete_batch, \
+            patch('management.api.conversation.conversation_management.get_conversation_history_service') as mock_history_service, \
+            patch('management.api.conversation.conversation_management.get_sources_service') as mock_sources_service, \
+            patch('management.api.conversation.conversation_management.generate_conversation_title_service') as mock_generate_title_service, \
+            patch('management.api.conversation.conversation_management.update_message_opinion_service') as mock_update_opinion_service, \
+            patch('management.api.conversation.conversation_management.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
+            patch('management.api.conversation.conversation_management.list_agent_groups') as mock_agent_groups, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversations') as mock_agent_group_conversations, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversation_ids') as mock_agent_group_ids, \
+            patch('management.api.conversation.conversation_management.get_current_user_info') as mock_get_user_info:
 
         yield {
             'get_current_user_id': mock_get_current_user_id,
             'create_new_convo': mock_create_new_conv,
             'get_conversation_list': mock_get_conv_list,
             'rename_conversation': mock_rename_conv,
+            'branch_conversation': mock_branch_conv,
             'logging': mock_logging,
             'delete_conversation': mock_delete_conv,
             'delete_conversations_batch': mock_delete_batch,
@@ -372,7 +376,7 @@ async def test_rename_conversation_success(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
-    from consts.model import RenameRequest
+    from contracts.conversation import RenameRequest
 
     conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
     conversation_mocks['rename_conversation'].return_value = False
@@ -506,7 +510,7 @@ async def test_delete_conversations_batch_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_delete_conversations_batch_token_expired(conversation_mocks):
     """Expired token on batch delete maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")
@@ -692,7 +696,7 @@ async def test_update_opinion_failure(conversation_mocks):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["opinion", "lookup"])
 async def test_missing_message_returns_404(conversation_mocks, route):
-    from consts.exceptions import ConversationNotFoundError
+    from contracts.errors.exceptions import ConversationNotFoundError
 
     request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
     if route == "opinion":
@@ -746,7 +750,7 @@ async def test_get_message_id_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_conversation_endpoints_token_expired(conversation_mocks):
     """Every conversation management endpoint maps an expired token to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.title = "t"
@@ -775,7 +779,7 @@ async def test_conversation_endpoints_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_generate_conversation_title_token_expired(conversation_mocks):
     """Expired token on title generation maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.conversation_id = 1
@@ -794,8 +798,8 @@ async def test_generate_conversation_title_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
     """Expired token on knowledge-scope update maps to 401."""
-    from backend.apps.conversation_management_app import update_conversation_knowledge_scope_endpoint
-    from consts.exceptions import TokenExpiredError
+    from management.api.conversation.conversation_management import update_conversation_knowledge_scope_endpoint
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.scope = None
@@ -867,10 +871,119 @@ def test_agent_history_routes_reject_invalid_scope_and_expired_identity(conversa
     assert invalid_include.status_code == 400
     conversation_mocks["list_agent_groups"].assert_not_called()
 
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     conversation_mocks["get_current_user_id"].side_effect = TokenExpiredError(
         "expired"
     )
     expired = client.get("/api/conversation/agent_groups")
     assert expired.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation_success(conversation_mocks):
+    """Verify successful conversation branching"""
+    mock_auth_header = "Bearer test-token"
+    dummy_response = {
+        "conversation_id": 42,
+        "conversation_title": "New Conversation����֧��",
+        "branched_message_count": 4,
+    }
+
+    conversation_mocks["get_current_user_id"].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].return_value = dummy_response
+
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
+
+    result = await branch_conversation_endpoint(request_obj, authorization=mock_auth_header)
+
+    assert result.code == 0
+    assert result.data == dummy_response
+    conversation_mocks["branch_conversation"].assert_called_once_with(
+        7, 2, "user_id")
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation_invalid_turn(conversation_mocks):
+    """Invalid turn indexes are rejected with a client error"""
+    conversation_mocks["get_current_user_id"].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].side_effect = ValueError(
+        "turn_index must be a 1-based turn number")
+
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=0)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 400
+    conversation_mocks["branch_conversation"].assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation_not_found(conversation_mocks):
+    """Domain not-found errors from the service map to 404"""
+    from contracts.errors.exceptions import ConversationNotFoundError
+
+    conversation_mocks["get_current_user_id"].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].side_effect = ConversationNotFoundError(
+        "Conversation does not exist or has been deleted")
+
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation_expired_token(conversation_mocks):
+    """Expired sessions are rejected with 401"""
+    from contracts.errors.exceptions import TokenExpiredError
+
+    conversation_mocks["get_current_user_id"].side_effect = TokenExpiredError(
+        "expired")
+
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_branch_conversation_failure(conversation_mocks):
+    """Unexpected service errors return a sanitized 500 without database diagnostics."""
+    conversation_mocks["get_current_user_id"].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].side_effect = Exception(
+        "Database error: SELECT * FROM private_table; connection password=secret")
+
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to branch conversation"
+    assert "private_table" not in exc_info.value.detail
+    assert "secret" not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [
+    {"source_message_id": 123},
+    {"answer_index": 2},
+    {"source_message_id": 123, "answer_index": 2},
+])
+async def test_branch_conversation_forwards_selected_answer(conversation_mocks, target):
+    conversation_mocks["get_current_user_id"].return_value = ("user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].return_value = {"conversation_id": 42}
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2, **target)
+    result = await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+    assert result.data == {"conversation_id": 42}
+    conversation_mocks["branch_conversation"].assert_called_once_with(7, 2, "user_id", **target)

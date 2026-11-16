@@ -1,12 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AppException,
-    FileTooLargeException,
-    OfficeConversionException,
-    QuotaExceededError,
-    UnsupportedFileTypeException,
-)
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, FileTooLargeException, OfficeConversionException, QuotaExceededError, UnsupportedFileTypeException
 from infrastructure.ingestion.errors import classify_ingestion_exception
 
 
