@@ -315,6 +315,7 @@ class _ErrorCode:
     AGENT_EVALUATION_QUERY_GENERATION_EMPTY = "AGENT_EVALUATION_QUERY_GENERATION_EMPTY"
     AGENT_EVALUATION_AGENT_NOT_FOUND = "AGENT_EVALUATION_AGENT_NOT_FOUND"
     AGENT_EVALUATION_JUDGE_MODEL_REQUIRED = "AGENT_EVALUATION_JUDGE_MODEL_REQUIRED"
+    AGENT_EVALUATION_EVALUATOR_REQUIRED = "AGENT_EVALUATION_EVALUATOR_REQUIRED"
     EVALUATION_NOT_FOUND = "EVALUATION_NOT_FOUND"
     AGENT_NOT_FOUND = "AGENT_NOT_FOUND"
     MODEL_NOT_FOUND = "MODEL_NOT_FOUND"
@@ -1287,23 +1288,35 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
 
 # ---------------------------------------------------------------------------
 # ``execute_agent_evaluation_run`` — exercises the synchronous background loop.
-# We stub the agent invocation + adapter so the loop runs without real I/O.
+# We stub the agent invocation and evaluator scorer so the loop runs without
+# real I/O.
 # ---------------------------------------------------------------------------
 
 
 def _wire_executor_dependencies(service_module, cases):
     """Wire the collaborators touched by ``execute_agent_evaluation_run``."""
     _wire_full_db_module(service_module)
-    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
-    adapter = MagicMock()
-    adapter.evaluate_semantic_consistency.return_value = (1, "ok")
-    service_module.JiuwenSDKAdapter.return_value = adapter
+    bind_import_attribute(
+        service_module,
+        "get_evaluator",
+        MagicMock(
+            return_value={
+                "evaluator_id": 1,
+                "name": "eval-a",
+                "status": "PUBLISHED",
+                "pass_threshold": 0.5,
+            }
+        ),
+    )
+    scorer = MagicMock(return_value=({"eval-a": 1.0}, {"eval-a": "ok"}))
+    bind_import_attribute(service_module, "_score_with_evaluators", scorer)
 
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
         "agent_version_no": 4,
         "judge_model_id": 99,
+        "evaluator_config": {"evaluator_ids": [1]},
     }
     # Use side_effect so the pagination loop gets cases on first call, then
     # an empty list on the second call to break out of the while-True loop.
@@ -1315,7 +1328,7 @@ def _wire_executor_dependencies(service_module, cases):
         return "agent-said-X", []
 
     bind_import_attribute(service_module, '_run_agent_to_final_answer', _fake_run_to_final_answer)
-    return adapter
+    return scorer
 
 
 def _make_exec_case(case_id, query="q", expected="a"):
@@ -1328,13 +1341,19 @@ def _make_exec_case(case_id, query="q", expected="a"):
 
 def test_execute_agent_evaluation_run_completes_with_overall_score(service_module):
     cases = [_make_exec_case(1), _make_exec_case(2)]
-    adapter = _wire_executor_dependencies(service_module, cases)
+    _wire_executor_dependencies(service_module, cases)
 
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
 
-    # Adapter is constructed with the judge model id we passed in.
-    service_module.JiuwenSDKAdapter.assert_called_once_with(model_id=99, tenant_id="t1")
-    adapter.evaluate_semantic_consistency.assert_called()
+    # The selected evaluator scores each case; no adapter fallback is involved.
+    service_module._score_with_evaluators.assert_called()
+    completed_cases = [
+        c
+        for c in service_module.update_agent_evaluation_case_result.call_args_list
+        if c.kwargs.get("status") == "COMPLETED"
+    ]
+    assert len(completed_cases) == 2
+    assert all(c.kwargs["score"] == {"eval-a": 1.0} for c in completed_cases)
 
     # Final transition should mark the run COMPLETED with the mean score.
     completed_calls = [
@@ -1374,14 +1393,7 @@ def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module
 def test_execute_agent_evaluation_run_top_level_error_marks_run_failed(service_module):
     """An exception raised before the loop starts must transition the run FAILED."""
     _wire_full_db_module(service_module)
-    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock(side_effect=RuntimeError('adapter init boom')))
-    service_module.get_agent_evaluation.return_value = {
-        "agent_evaluation_id": 50,
-        "agent_id": 11,
-        "agent_version_no": 4,
-        "judge_model_id": 99,
-    }
-
+    service_module.get_agent_evaluation.side_effect = RuntimeError("db boom")
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
 
     failed = [
@@ -1390,7 +1402,7 @@ def test_execute_agent_evaluation_run_top_level_error_marks_run_failed(service_m
         if c.kwargs.get("status") == "FAILED"
     ]
     assert failed, "expected the outer except branch to mark the run FAILED"
-    assert "adapter init boom" in (failed[0].kwargs.get("error_message") or "")
+    assert "db boom" in (failed[0].kwargs.get("error_message") or "")
 
 
 def test_execute_agent_evaluation_run_falls_back_to_persisted_judge_model(
@@ -1398,18 +1410,17 @@ def test_execute_agent_evaluation_run_falls_back_to_persisted_judge_model(
 ):
     """When the queued judge_model_id is lost the persisted one is reused."""
     cases = [_make_exec_case(1)]
-    _wire_executor_dependencies(service_module, cases)
+    scorer = _wire_executor_dependencies(service_module, cases)
 
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=None)
 
-    # The adapter should be constructed with the model id from the run record.
-    service_module.JiuwenSDKAdapter.assert_called_once_with(model_id=99, tenant_id="t1")
+    # The persisted judge model is the one handed to the evaluator scorer.
+    assert scorer.call_args_list[0].kwargs["judge_model_id"] == 99
 
 
 def test_execute_agent_evaluation_run_missing_judge_model_raises(service_module):
     """Both the argument and persisted judge_model_id are absent — outer except fires."""
     _wire_full_db_module(service_module)
-    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
@@ -2271,7 +2282,7 @@ class TestEvaluateQuery:
         answer, events, score, reason = asyncio.run(
             service_module._evaluate_query(
                 tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
-                query="q", judge_model_id=99, adapter=None,
+                query="q", judge_model_id=99,
                 evaluators={1: {"name": "n1"}}, judge_system_prompt="sys",
             )
         )
@@ -2279,24 +2290,24 @@ class TestEvaluateQuery:
         assert score == {"n1": 0.9}
         service_module._score_with_evaluators.assert_called_once()
 
-    def test_without_evaluators_uses_adapter(self, service_module, monkeypatch):
+    def test_without_evaluators_raises_before_agent(self, service_module, monkeypatch):
         import asyncio
 
+        from contracts.errors.exceptions import AppException
+
+        run_agent = AsyncMock(return_value=("answer", []))
         set_import_attribute(monkeypatch,
-            service_module, "_run_agent_to_final_answer",
-            AsyncMock(return_value=("answer", [])),
+            service_module, "_run_agent_to_final_answer", run_agent,
         )
-        adapter = MagicMock()
-        adapter.evaluate_semantic_consistency.return_value = (1, "consistent")
-        answer, events, score, reason = asyncio.run(
-            service_module._evaluate_query(
-                tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
-                query="q", judge_model_id=99, adapter=adapter,
-                evaluators={}, judge_system_prompt="sys",
+        with pytest.raises(AppException):
+            asyncio.run(
+                service_module._evaluate_query(
+                    tenant_id="t1", user_id="u1", agent_id=1, agent_version_no=1,
+                    query="q", judge_model_id=99,
+                    evaluators={}, judge_system_prompt="sys",
+                )
             )
-        )
-        assert score == {"semantic_consistency": 1}
-        assert reason == {"semantic_consistency": "consistent"}
+        run_agent.assert_not_called()
 
 
 class TestCasePassStatusHelpers:
@@ -2568,13 +2579,12 @@ class TestLoadAllEvaluationCases:
 
 
 # ---------------------------------------------------------------------------
-# ``execute_agent_evaluation_run`` — SDK-unavailable + overlong-session edges.
+# ``execute_agent_evaluation_run`` — missing-evaluator + overlong-session edges.
 # ---------------------------------------------------------------------------
 
 
-def test_execute_run_sdk_unavailable_marks_failed(service_module):
+def test_execute_run_without_configured_evaluators_marks_failed(service_module):
     _wire_full_db_module(service_module)
-    bind_import_attribute(service_module, 'JiuwenSDKAdapter', None)
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
@@ -2584,6 +2594,24 @@ def test_execute_run_sdk_unavailable_marks_failed(service_module):
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
     last = service_module.update_agent_evaluation_status.call_args_list[-1]
     assert last.kwargs["status"] == service_module.EvalRunStatus.FAILED
+    assert "evaluator" in (last.kwargs.get("error_message") or "").lower()
+
+
+def test_execute_run_with_unusable_evaluators_marks_failed(service_module):
+    """Configured IDs that no longer resolve to PUBLISHED rows fail the run."""
+    _wire_full_db_module(service_module)
+    bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value=None))
+    service_module.get_agent_evaluation.return_value = {
+        "agent_evaluation_id": 50,
+        "agent_id": 11,
+        "agent_version_no": 4,
+        "judge_model_id": 99,
+        "evaluator_config": {"evaluator_ids": [1]},
+    }
+    service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
+    last = service_module.update_agent_evaluation_status.call_args_list[-1]
+    assert last.kwargs["status"] == service_module.EvalRunStatus.FAILED
+    assert "evaluator" in (last.kwargs.get("error_message") or "").lower()
 
 
 def test_execute_run_truncates_overlong_session(service_module):
@@ -2936,7 +2964,6 @@ class TestTrialRunEvaluatorImpl:
         import asyncio
         bind_import_attribute(service_module, 'get_evaluator', MagicMock(side_effect=[{'status': 'PUBLISHED', 'name': 'a'}, {'status': 'DRAFT', 'name': 'b'}]))
         bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
-        bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
 
         async def _fake_eval(**kwargs):
             return "ans", [], {"judge-a": 0.9}, {"judge-a": "ok"}
@@ -2952,11 +2979,21 @@ class TestTrialRunEvaluatorImpl:
             "reasons": {"judge-a": "ok"},
         }
 
-    def test_sdk_unavailable_raises(self, service_module):
+    def test_without_usable_evaluators_raises(self, service_module):
         import asyncio
-        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
-        bind_import_attribute(service_module, 'JiuwenSDKAdapter', None)
-        with pytest.raises(service_module.JiuwenSDKUnavailableError):
+
+        from contracts.errors.exceptions import AppException
+
+        eval_mock = MagicMock()
+        bind_import_attribute(service_module, '_evaluate_query', eval_mock)
+        with pytest.raises(AppException):
             asyncio.run(
                 service_module.trial_run_evaluator_impl("t1", "u1", 1, 2, "q", 99)
             )
+
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value={'status': 'DRAFT', 'name': 'd'}))
+        with pytest.raises(AppException):
+            asyncio.run(
+                service_module.trial_run_evaluator_impl("t1", "u1", 1, 2, "q", 99, [1])
+            )
+        eval_mock.assert_not_called()

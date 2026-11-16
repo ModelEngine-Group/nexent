@@ -47,8 +47,10 @@ interface DeploymentVersionResponse {
 }
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
-  const [agentCore, setAgentCore] = useState<"smolagents" | "jiuwen">("smolagents");
-  const [isSpeedMode, setIsSpeedMode] = useState(false);
+  const [agentCore, setAgentCore] = useState<"smolagents" | "jiuwen">(
+    "smolagents"
+  );
+  const isSpeedMode = false;
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [deploymentVersion, setDeploymentVersion] = useState("");
@@ -65,7 +67,6 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         const data: DeploymentVersionResponse = await response.json();
         setAgentCore(data.agent_core ?? "smolagents");
         setDeploymentVersion(data.deployment_version);
-        setIsSpeedMode(data.deployment_version === "speed");
         setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         setEnableAgentWorkbench(data.enable_agent_workbench ?? false);
         setHideHomePage(data.hide_home_page ?? false);
@@ -74,7 +75,6 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         log.error("Failed to fetch deployment info:", error);
-        setIsSpeedMode(false);
       } finally {
         setIsDeploymentReady(true);
       }

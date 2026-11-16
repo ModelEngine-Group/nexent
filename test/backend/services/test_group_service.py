@@ -126,7 +126,7 @@ def test_get_group_info_string_group_ids(mock_query_groups):
     mock_query_groups.assert_called_once_with("1")
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_success_with_pagination(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant with pagination"""
@@ -138,8 +138,8 @@ def test_get_groups_by_tenant_success_with_pagination(mock_query_groups_by_tenan
         "total": 2
     }
     mock_query_groups_by_tenant.return_value = mock_result
-    # Mock count_group_users to return different counts for each group
-    mock_count_users.side_effect = [5, 3]
+    # Return different counts from the single batch query.
+    mock_count_users.return_value = {1: 5, 2: 3}
 
     result = get_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="desc")
 
@@ -154,11 +154,11 @@ def test_get_groups_by_tenant_success_with_pagination(mock_query_groups_by_tenan
     assert result["groups"][1]["group_description"] == "Desc 2"
     assert result["groups"][1]["user_count"] == 3  # Check user count
     mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10, "created_at", "desc")
-    # count_group_users should be called for each group
-    assert mock_count_users.call_count == 2
+    # The page is counted in one batch.
+    assert mock_count_users.call_count == 1
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_success_without_pagination(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant without pagination (returns all data)"""
@@ -171,7 +171,7 @@ def test_get_groups_by_tenant_success_without_pagination(mock_query_groups_by_te
         "total": 3
     }
     mock_query_groups_by_tenant.return_value = mock_result
-    mock_count_users.side_effect = [5, 3, 7]
+    mock_count_users.return_value = {1: 5, 2: 3, 3: 7}
 
     result = get_groups_by_tenant("test_tenant", page=None, page_size=None)
 
@@ -181,10 +181,10 @@ def test_get_groups_by_tenant_success_without_pagination(mock_query_groups_by_te
     assert result["groups"][1]["user_count"] == 3
     assert result["groups"][2]["user_count"] == 7
     mock_query_groups_by_tenant.assert_called_once_with("test_tenant", None, None, "created_at", "desc")
-    assert mock_count_users.call_count == 3
+    assert mock_count_users.call_count == 1
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_success_with_asc_sort(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant with ascending sort order"""
@@ -195,7 +195,7 @@ def test_get_groups_by_tenant_success_with_asc_sort(mock_query_groups_by_tenant,
         "total": 1
     }
     mock_query_groups_by_tenant.return_value = mock_result
-    mock_count_users.return_value = 5
+    mock_count_users.return_value = {1: 5}
 
     result = get_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
 
@@ -206,7 +206,7 @@ def test_get_groups_by_tenant_success_with_asc_sort(mock_query_groups_by_tenant,
     assert mock_count_users.call_count == 1
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_empty_list(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant when no groups exist"""
@@ -225,14 +225,14 @@ def test_get_groups_by_tenant_empty_list(mock_query_groups_by_tenant, mock_count
     assert mock_count_users.call_count == 0
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_with_search(mock_query_groups_by_tenant, mock_count_users):
     """Test that a group search term is forwarded to the database layer."""
     mock_query_groups_by_tenant.return_value = {
         "groups": [{"group_id": 1, "group_name": "Engineering"}], "total": 1
     }
-    mock_count_users.return_value = 2
+    mock_count_users.return_value = {1: 2}
 
     result = get_groups_by_tenant("test_tenant", 1, 10, search="eng")
 
@@ -243,7 +243,7 @@ def test_get_groups_by_tenant_with_search(mock_query_groups_by_tenant, mock_coun
     )
 
 
-@patch('management.services.permission.identity.groups.count_group_users')
+@patch('management.services.permission.identity.groups.count_users_by_group_ids')
 @patch('management.services.permission.identity.groups.query_groups_by_tenant')
 def test_get_groups_by_tenant_with_missing_group_id(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant when group_id is missing in result"""
@@ -652,7 +652,7 @@ def test_add_user_to_groups_with_exception(mock_add_user):
     assert result[1]["error"] == "Group not found"
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 def test_get_tenant_default_group_id_success(mock_get_tenant_info):
     """Test getting tenant default group ID successfully"""
     mock_get_tenant_info.return_value = {"default_group_id": "123"}
@@ -663,7 +663,7 @@ def test_get_tenant_default_group_id_success(mock_get_tenant_info):
     mock_get_tenant_info.assert_called_once_with("test_tenant")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 def test_get_tenant_default_group_id_no_default(mock_get_tenant_info):
     """Test getting tenant default group ID when none is set"""
     mock_get_tenant_info.return_value = {"default_group_id": ""}
@@ -674,7 +674,7 @@ def test_get_tenant_default_group_id_no_default(mock_get_tenant_info):
     mock_get_tenant_info.assert_called_once_with("test_tenant")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 def test_get_tenant_default_group_id_exception(mock_get_tenant_info):
     """Test getting tenant default group ID when exception occurs"""
     mock_get_tenant_info.side_effect = Exception("Database error")
@@ -684,7 +684,7 @@ def test_get_tenant_default_group_id_exception(mock_get_tenant_info):
     assert result is None
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 @patch('management.services.permission.identity.groups.get_single_config_info')
 @patch('management.services.permission.identity.groups.update_config_by_tenant_config_id')
@@ -701,7 +701,7 @@ def test_set_tenant_default_group_id_update_existing(mock_update_config, mock_ge
     mock_update_config.assert_called_once_with(456, "123")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 @patch('management.services.permission.identity.groups.get_single_config_info')
 @patch('management.services.permission.identity.groups.insert_config')
@@ -722,7 +722,7 @@ def test_set_tenant_default_group_id_create_new(mock_insert_config, mock_get_con
     assert call_args["config_value"] == "123"
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 def test_set_tenant_default_group_id_tenant_not_found(mock_get_tenant_info):
     """Test setting tenant default group ID when tenant doesn't exist"""
     mock_get_tenant_info.return_value = None
@@ -731,7 +731,7 @@ def test_set_tenant_default_group_id_tenant_not_found(mock_get_tenant_info):
         set_tenant_default_group_id("test_tenant", 123, "user_123")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 def test_set_tenant_default_group_id_group_not_found(mock_query_groups, mock_get_tenant_info):
     """Test setting tenant default group ID when group doesn't exist"""
@@ -742,7 +742,7 @@ def test_set_tenant_default_group_id_group_not_found(mock_query_groups, mock_get
         set_tenant_default_group_id("test_tenant", 123, "user_123")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 def test_set_tenant_default_group_id_wrong_tenant(mock_query_groups, mock_get_tenant_info):
     """Test setting tenant default group ID when group belongs to different tenant"""
@@ -753,7 +753,7 @@ def test_set_tenant_default_group_id_wrong_tenant(mock_query_groups, mock_get_te
         set_tenant_default_group_id("test_tenant", 123, "user_123")
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 @patch('management.services.permission.identity.groups.get_single_config_info')
 @patch('management.services.permission.identity.groups.update_config_by_tenant_config_id')
@@ -769,7 +769,7 @@ def test_set_tenant_default_group_id_update_failure(mock_update_config, mock_get
     assert result is False
 
 
-@patch('management.services.permission.identity.groups.get_tenant_info')
+@patch('management.services.permission.identity.groups.tenant_service.get_tenant_info')
 @patch('management.services.permission.identity.groups.query_groups')
 @patch('management.services.permission.identity.groups.get_single_config_info')
 @patch('management.services.permission.identity.groups.insert_config')

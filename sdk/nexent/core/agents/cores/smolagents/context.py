@@ -235,6 +235,7 @@ class SmolagentsMemoryAdapter:
             if not fields:
                 fields["STDOUT"] = ""
         return {
+            "step_number": getattr(step, "step_number", action_index + 1),
             "assistant_output": getattr(step, "model_output", None) or "",
             "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
             "execution_fields": dict(fields),

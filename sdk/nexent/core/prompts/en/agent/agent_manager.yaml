@@ -41,8 +41,7 @@ system_sections:
 
   final_answer_guidance: |-
     ### Final Answer Requirements
-    Executable actions and final answers must be separate responses. After emitting code, wait for its observation. Never combine a code action and a <final_answer> envelope, print a redundant completion action, or claim file generation/upload succeeded before the tool observation confirms it.
-    After thinking, when you are ready to answer, return exactly one `<final_answer>...</final_answer>` envelope with the complete user-facing answer inside it. Do not wrap the envelope in `<code>`, put content outside it, or perform another action afterward.
+    After thinking, when you are ready to answer, return exactly one `<final_answer>...</final_answer>` envelope with the complete user-facing answer inside it. Place the envelope last. If code actions precede it, wait for runtime execution and confirm or revise the answer using actual results.
   self_verification_guidance: |-
     ### Self-verification
     - After critical events (tool calls, retrieval results, code execution, agent handoffs, and final-answer preparation), the system may run explicit verification.

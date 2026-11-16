@@ -1,35 +1,37 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Manual Dreaming run and audit endpoints."""
 
-from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
-from contracts.constants.constants import USER_DREAMING_SCOPE
-from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
-from contracts.constants.constants import USER_DREAMING_SCOPE
-from http import HTTPStatus
 from datetime import datetime, timezone
+from http import HTTPStatus
 from typing import Annotated, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
-from pydantic import model_validator
-from nexent.scheduler import ScheduleMode, ScheduleRuleType
+from pydantic import BaseModel, Field, model_validator
+
 from contracts.automation import ScheduleTrigger
+from contracts.constants.constants import USER_DREAMING_SCOPE
+from contracts.constants.environment import (
+    DREAMING_LONG_TERM_MAX_CHARS,
+    DREAMING_SOURCE_LIMIT,
+    DREAMING_SUMMARIZATION_MAX_ATTEMPTS,
+)
+from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
+from contracts.roles import roles_from_record
+from gateway.authentication.auth import get_current_user_id
+from management.db.identity.role_permission import check_role_permission
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.memory import dreaming as memory_dreaming_db
 from management.services.automation.scheduler import (
     compute_next_fire_at,
     is_valid_cron_expression,
 )
-
-from contracts.constants.environment import DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_SOURCE_LIMIT
-from management.db.memory import dreaming as memory_dreaming_db
-from management.db.identity.role_permission import check_role_permission
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.dreaming.service import (
     DreamingConflictError,
     DreamingRunError,
     get_memory_dreaming_service,
 )
-from gateway.authentication.auth import get_current_user_id
+from nexent.scheduler import ScheduleMode, ScheduleRuleType
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
 
@@ -44,7 +46,7 @@ def _resolve_target_user(
     if not target_user_id or target_user_id == caller_user_id:
         return caller_user_id, tenant_id
     caller = get_user_tenant_by_user_id(caller_user_id) or {}
-    caller_role = str(caller.get("user_role") or "").upper()
+    caller_role = roles_from_record(caller)
     if not check_role_permission(
         caller_role,
         permission_category="RESOURCE",

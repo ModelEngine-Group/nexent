@@ -4,10 +4,21 @@
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
+from sqlalchemy import JSON, Column, Integer, MetaData, String, Table, create_engine, func, select
 from sqlalchemy.orm import Session, registry
 
 from management.db.identity import user_tenant as user_db
+
+
+class SearchRoles(JSON):
+    """Use SQLite JSON arrays for the role overlap predicate in this fixture."""
+
+    class Comparator(JSON.Comparator):
+        def overlap(self, roles):
+            entries = func.json_each(self.expr).table_valued("value")
+            return select(entries.c.value).where(entries.c.value.in_(roles)).exists()
+
+    comparator_factory = Comparator
 
 
 @pytest.fixture
@@ -16,7 +27,7 @@ def search_db(monkeypatch):
     tables = {
         "UserTenant": Table("users", metadata,
             Column("user_id", String, primary_key=True), Column("tenant_id", String),
-            Column("user_email", String), Column("user_role", String),
+            Column("user_email", String), Column("roles", SearchRoles),
             Column("create_time", Integer), Column("delete_flag", String)),
         "UserOAuthAccount": Table("bindings", metadata,
             Column("oauth_account_id", Integer, primary_key=True), Column("user_id", String),
@@ -35,18 +46,18 @@ def search_db(monkeypatch):
     engine = create_engine("sqlite://")
     metadata.create_all(engine)
     user_rows = [
-        ("a", "alpha@test", "ADMIN"), ("b", "beta@test", "ADMIN"),
-        ("mail", "bob@test", "USER"), ("foreign", "foreign@test", "ADMIN"),
-        ("deleted", "deleted@test", "ADMIN"), ("removed", "removed@test", "USER"),
-        ("github", "github@test", "USER"), ("blank", "fallback@test", "USER"),
-        ("missing", "missing@test", "USER"),
+        ("a", "alpha@test", ["ADMIN", "OPS"]), ("b", "beta@test", ["ADMIN"]),
+        ("mail", "bob@test", ["USER"]), ("foreign", "foreign@test", ["ADMIN"]),
+        ("deleted", "deleted@test", ["ADMIN"]), ("removed", "removed@test", ["USER"]),
+        ("github", "github@test", ["USER"]), ("blank", "fallback@test", ["USER"]),
+        ("missing", "missing@test", ["USER"]),
     ]
     with engine.begin() as connection:
         connection.execute(tables["UserTenant"].insert(), [
-            {"user_id": key, "user_email": email, "user_role": role,
+            {"user_id": key, "user_email": email, "roles": roles,
              "tenant_id": "other" if key == "foreign" else "tenant", "create_time": i,
              "delete_flag": "Y" if key == "deleted" else "N"}
-            for i, (key, email, role) in enumerate(user_rows)
+            for i, (key, email, roles) in enumerate(user_rows)
         ])
         connection.execute(tables["UserOAuthAccount"].insert(), [
             {"oauth_account_id": i, "user_id": key, "provider_username": name,
@@ -114,10 +125,13 @@ def test_duplicate_names_and_bindings_do_not_change_totals_or_pages(search_db):
 
 def test_roles_and_active_tenant_group_membership_remain_required(search_db):
     result = user_db.get_users_by_tenant_id(
-        "tenant", search="bob", roles=["ADMIN"], group_ids=[7], search_cas_username=True,
+        "tenant", search="bob", roles=["ops"], group_ids=[7], search_cas_username=True,
     )
     assert result["total"] == 1
     assert [row["user_id"] for row in result["users"]] == ["a"]
+    assert user_db.get_users_by_tenant_id(
+        "tenant", search="bob", roles=["USER"], group_ids=[7], search_cas_username=True,
+    )["total"] == 0
     assert user_db.get_users_by_tenant_id(
         "tenant", search="bob", group_ids=[8], search_cas_username=True,
     )["total"] == 0

@@ -20,12 +20,7 @@ export function WorkbenchLoadingBoundary({
   children,
 }: WorkbenchLoadingBoundaryProps) {
   const { t } = useTranslation();
-  if (
-    !conversationReady ||
-    modelsLoading ||
-    bootstrapLoading ||
-    resourcesResolving
-  ) {
+  if (!conversationReady) {
     return (
       <div
         className="flex h-full min-w-0 flex-1 items-center justify-center"
@@ -38,5 +33,12 @@ export function WorkbenchLoadingBoundary({
       </div>
     );
   }
-  return children;
+  return (
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-1"
+      aria-busy={modelsLoading || bootstrapLoading || resourcesResolving}
+    >
+      {children}
+    </div>
+  );
 }

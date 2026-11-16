@@ -594,7 +594,7 @@ def _load_validation_outlet(model_id, tenant_id):
         raise ModelOutletValidationError("PROFILE_STORAGE_INVALID") from None
 
 
-async def validate_model_outlet(request, tenant_id, *, is_disconnected=None):
+async def validate_model_outlet(request, tenant_id, *, is_disconnected=None, persist_status=True):
     """Probe one captured endpoint/model with the common sender; no tool qualification."""
     from nexent.core.concurrency import run_blocking
 
@@ -619,7 +619,7 @@ async def validate_model_outlet(request, tenant_id, *, is_disconnected=None):
         import asyncio
         raise asyncio.CancelledError()
     ok, error = result["ok"], result["error"]
-    if request.outlet_id is not None and request.patch is None:
+    if persist_status and request.outlet_id is not None and request.patch is None:
         from management.db.model.outlets import update_model_outlet_connectivity
 
         await run_blocking("outlet-validation-status", update_model_outlet_connectivity,

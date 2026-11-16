@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { randomBytes } from "node:crypto";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { testUser, appPath } from "../../infra/automation/d4/runner/runtime-config";
@@ -113,14 +115,14 @@ journey("PW-PROFILE-01", async ({ page, contract, expect }) => {
     await dialog.getByPlaceholder("请输入密码").fill(user.password);
     const [oldResponse] = await Promise.all([
       page.waitForResponse((candidate) => candidate.url().includes("/api/user/signin") && candidate.request().method() === "POST"),
-      dialog.getByRole("button", { name: "登 录", exact: true }).click(),
+      dialog.getByRole("button", { name: "登录", exact: true }).click(),
     ]);
     observed.oldPasswordRejected = oldResponse.status() === 401;
     expect(observed.oldPasswordRejected).toBeTruthy();
     await dialog.getByPlaceholder("请输入密码").fill(temporaryPassword);
     const [newResponse] = await Promise.all([
       page.waitForResponse((candidate) => candidate.url().includes("/api/user/signin") && candidate.request().method() === "POST"),
-      dialog.getByRole("button", { name: "登 录", exact: true }).click(),
+      dialog.getByRole("button", { name: "登录", exact: true }).click(),
     ]);
     observed.newPasswordAccepted = newResponse.status() === 200;
     expect(observed.newPasswordAccepted).toBeTruthy();

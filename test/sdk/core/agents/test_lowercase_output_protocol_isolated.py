@@ -40,6 +40,6 @@ def test_uppercase_final_answer_is_accepted(protocol):
     assert answer.answer == "ok"
 
 
-def test_uppercase_legacy_run_is_rejected_even_after_code_label(protocol):
-    with pytest.raises(protocol.ModelOutputProtocolError):
-        protocol.classify_model_output("Code: ```<RUN>print(1)```", protocol="code_action")
+def test_uppercase_legacy_run_is_accepted_after_code_label(protocol):
+    result = protocol.classify_model_output("Code: ```<RUN>print(1)```", protocol="code_action")
+    assert result == protocol.ExecutableAction("print(1)", legacy_format=True)
