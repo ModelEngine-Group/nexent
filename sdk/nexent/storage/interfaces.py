@@ -120,6 +120,12 @@ class RecordStore(StoragePort, Protocol):
         """Sum a catalog numeric field within scope; an empty set returns zero."""
         ...
 
+    def sum_by(
+        self, dataset: str, field: str, group_by: str, query: RecordQuery, *, context: OperationContext
+    ) -> dict[RecordKey, int | float]:
+        """Return scoped numeric totals by a catalog string or integer field."""
+        ...
+
     def transaction(self, *, context: OperationContext) -> AbstractContextManager["RecordStore"]: ...
 
     def claim(

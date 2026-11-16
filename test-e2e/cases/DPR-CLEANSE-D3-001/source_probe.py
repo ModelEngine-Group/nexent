@@ -12,6 +12,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from contracts.constants import environment
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
+from ledger_probe import check_ledger_access
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.source_publish import SourcePublisher
 from management.services.file.source_recovery import reconcile_sources
@@ -348,6 +349,7 @@ def check_source_publication(engine, port, context):
                 ObjectRef("files", "quota.txt"), context=context()
             ).size == len(data)
             assert lost.writes == 3
+            check_ledger_access(engine, objects, blocked, len(data), context)
         finally:
             for key, value in previous.items():
                 setattr(environment, key, value)

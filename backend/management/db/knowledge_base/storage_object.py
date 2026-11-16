@@ -1,340 +1,224 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Management ledger queries and release policy over neutral storage records."""
 
-"""Database access for the knowledge-base source-object storage ledger."""
+from contextlib import contextmanager
+from time import monotonic
+from uuid import uuid4
 
-from __future__ import annotations
+from contracts.knowledge import (
+    STORAGE_LEDGER_DATASET as LEDGER,
+)
+from contracts.knowledge import (
+    STORAGE_LEDGER_HISTORY_DATASET as HISTORY,
+)
+from contracts.knowledge import (
+    STORAGE_LEDGER_OWNER_DATASET as LOOKUP,
+)
+from nexent.storage.errors import Conflict
+from nexent.storage.models import (
+    Comparison,
+    FieldPatch,
+    Junction,
+    OperationContext,
+    PageRequest,
+    RecordQuery,
+    Revision,
+    Sort,
+)
 
-from contracts.constants.constants import COMMITTED_STATUS, DELETED_STATUS
-from contracts.errors.exceptions import StorageObjectConflictError
-from typing import Any, Dict, List, Optional, Sequence
-
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
-
-from infrastructure.rdb.orm import as_dict
-from infrastructure.rdb.client import get_db_session
-from management.db.models import KnowledgeStorageObject
-
-
-def _validate_commit_input(
-    tenant_id: str,
-    knowledge_id: int,
-    index_name: str,
-    bucket_name: str,
-    object_name: str,
-    raw_bytes: int,
-) -> None:
-    required_strings = {
-        "tenant_id": tenant_id,
-        "index_name": index_name,
-        "bucket_name": bucket_name,
-        "object_name": object_name,
-    }
-    for field_name, value in required_strings.items():
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{field_name} must be a non-empty string")
-    if not isinstance(knowledge_id, int) or isinstance(knowledge_id, bool):
-        raise ValueError("knowledge_id must be an integer")
-    _validate_raw_bytes(raw_bytes)
+from infrastructure.storage_ledger import ledger_record_ports
 
 
-def _validate_raw_bytes(raw_bytes: int) -> None:
-    if not isinstance(raw_bytes, int) or isinstance(raw_bytes, bool) or raw_bytes < 0:
-        raise ValueError("raw_bytes must be a non-negative integer")
+def _context():
+    return OperationContext("knowledge-ledger-" + uuid4().hex, monotonic() + 10)
 
 
-def _find_by_identity(session: Any, bucket_name: str, object_name: str) -> Optional[KnowledgeStorageObject]:
-    return (
-        session.query(KnowledgeStorageObject)
-        .filter(
-            KnowledgeStorageObject.bucket_name == bucket_name,
-            KnowledgeStorageObject.object_name == object_name,
-        )
-        .first()
+@contextmanager
+def _operation(tenant_id, actor_id=None, *, identity=None, context=None):
+    context = context or _context()
+    with (
+        ledger_record_ports(
+            tenant_id, actor_id or "storage-ledger", context=context, identity=identity
+        ) as root,
+        root.transaction(context=context) as records,
+    ):
+        yield records, context
+
+
+def _active(*terms):
+    return Junction("and", (Comparison("status", "eq", "COMMITTED"), *terms))
+
+
+def _identity(bucket, key):
+    return Junction(
+        "and",
+        (Comparison("bucket_name", "eq", bucket), Comparison("object_name", "eq", key)),
     )
 
 
-def _resolve_idempotent_commit(
-    existing: KnowledgeStorageObject,
-    tenant_id: str,
-    knowledge_id: int,
-    index_name: str,
-    raw_bytes: int,
-) -> Dict[str, Any]:
-    expected = (tenant_id, knowledge_id, index_name, raw_bytes)
-    actual = (
-        existing.tenant_id,
-        existing.knowledge_id,
-        existing.index_name,
-        existing.raw_bytes,
+def _one(records, dataset, where, context):
+    page = records.query(
+        dataset, RecordQuery(where=where), PageRequest(limit=2), context=context
     )
-    if actual != expected:
-        raise StorageObjectConflictError("storage object identity is already bound to different ownership or size")
-    return as_dict(existing)
+    if len(page.items) > 1 or page.next_cursor:
+        raise Conflict(operation_id=context.operation_id)
+    return page.items[0] if page.items else None
 
 
-def commit_storage_object(
-    tenant_id: str,
-    knowledge_id: int,
-    index_name: str,
-    bucket_name: str,
-    object_name: str,
-    raw_bytes: int,
-    created_by: Optional[str] = None,
-    updated_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Commit one retained KB source object, idempotently by object identity.
-
-    A replay with the same tenant, KB, index, and byte size returns the existing
-    row without creating another charge. Reusing the object identity for any
-    different ownership or size raises ``StorageObjectConflictError``.
-    """
-    _validate_commit_input(
-        tenant_id,
-        knowledge_id,
-        index_name,
-        bucket_name,
-        object_name,
-        raw_bytes,
-    )
-    effective_updated_by = updated_by if updated_by is not None else created_by
-
-    try:
-        with get_db_session() as session:
-            existing = _find_by_identity(session, bucket_name, object_name)
-            if existing is not None:
-                return _resolve_idempotent_commit(
-                    existing,
-                    tenant_id,
-                    knowledge_id,
-                    index_name,
-                    raw_bytes,
-                )
-
-            row = KnowledgeStorageObject(
-                tenant_id=tenant_id,
-                knowledge_id=knowledge_id,
-                index_name=index_name,
-                bucket_name=bucket_name,
-                object_name=object_name,
-                raw_bytes=raw_bytes,
-                status=COMMITTED_STATUS,
-                delete_flag="N",
-                created_by=created_by,
-                updated_by=effective_updated_by,
+def _all(records, where, context, *, fields=()):
+    last_id = None
+    cursor = None
+    projection = tuple(dict.fromkeys((*fields, "storage_object_id"))) if fields else ()
+    while True:
+        current = (
+            where
+            if last_id is None
+            else Junction(
+                "and", (where, Comparison("storage_object_id", "gt", last_id))
             )
-            session.add(row)
-            session.flush()
-            return as_dict(row)
-    except IntegrityError:
-        # A concurrent insert can win after the initial lookup. Resolve the
-        # resulting unique-key race using the same idempotency rules.
-        with get_db_session() as session:
-            existing = _find_by_identity(session, bucket_name, object_name)
-            if existing is None:
-                raise
-            return _resolve_idempotent_commit(
-                existing,
-                tenant_id,
-                knowledge_id,
-                index_name,
-                raw_bytes,
-            )
-
-
-def get_storage_object(
-    tenant_id: str,
-    bucket_name: str,
-    object_name: str,
-    *,
-    include_deleted: bool = False,
-) -> Optional[Dict[str, Any]]:
-    """Return one tenant-owned ledger row without exposing another tenant's row."""
-    with get_db_session() as session:
-        query = session.query(KnowledgeStorageObject).filter(
-            KnowledgeStorageObject.tenant_id == tenant_id,
-            KnowledgeStorageObject.bucket_name == bucket_name,
-            KnowledgeStorageObject.object_name == object_name,
         )
-        if not include_deleted:
-            query = query.filter(
-                KnowledgeStorageObject.delete_flag == "N",
-                KnowledgeStorageObject.status == COMMITTED_STATUS,
-            )
-        row = query.first()
-        return as_dict(row) if row is not None else None
-
-
-def get_storage_object_by_identity(
-    bucket_name: str,
-    object_name: str,
-    *,
-    include_deleted: bool = False,
-) -> Optional[Dict[str, Any]]:
-    """Return the ledger row identified by its durable storage identity.
-
-    This lookup intentionally does not accept a tenant filter. The caller must
-    first resolve the owning row and then compare its tenant with the caller's
-    tenant before using any ownership data for authorization.
-    """
-    with get_db_session() as session:
-        query = session.query(KnowledgeStorageObject).filter(
-            KnowledgeStorageObject.bucket_name == bucket_name,
-            KnowledgeStorageObject.object_name == object_name,
+        page = records.query(
+            LEDGER,
+            RecordQuery(
+                where=current, fields=projection, order_by=(Sort("storage_object_id"),)
+            ),
+            PageRequest(limit=500, cursor=cursor),
+            context=context,
         )
-        if not include_deleted:
-            query = query.filter(
-                KnowledgeStorageObject.delete_flag == "N",
-                KnowledgeStorageObject.status == COMMITTED_STATUS,
-            )
-        row = query.first()
-        return as_dict(row) if row is not None else None
+        yield from page.items
+        if page.next_cursor is None:
+            return
+        if page.items:
+            last_id = page.items[-1]["storage_object_id"]
+            cursor = None
+        else:
+            cursor = page.next_cursor
 
 
-def aggregate_committed_bytes_by_kb(
-    tenant_id: str,
-    knowledge_ids: Optional[Sequence[int]] = None,
-) -> Dict[int, int]:
-    """Aggregate active committed source bytes by KB for one tenant."""
+def _chunks(values):
+    values = list(values)
+    for offset in range(0, len(values), 1000):
+        yield values[offset : offset + 1000]
+
+
+def get_storage_object(tenant_id, bucket_name, object_name, *, include_deleted=False):
+    with _operation(tenant_id) as (records, context):
+        dataset = HISTORY if include_deleted else LEDGER
+        where = _identity(bucket_name, object_name)
+        return _one(
+            records, dataset, where if include_deleted else _active(where), context
+        )
+
+
+def get_storage_object_by_identity(bucket_name, object_name, *, include_deleted=False):
+    """Discover one exact object owner; callers must authorize its tenant and KB."""
+    with _operation(None, identity=(bucket_name, object_name, include_deleted)) as (
+        records,
+        context,
+    ):
+        return _one(records, LOOKUP, None, context)
+
+
+def aggregate_committed_bytes_by_kb(tenant_id, knowledge_ids=None):
+    """Return one consistent active-tenant grouping without truncating large filters."""
     if knowledge_ids is not None and not knowledge_ids:
         return {}
-
-    with get_db_session() as session:
-        query = session.query(
-            KnowledgeStorageObject.knowledge_id,
-            func.sum(KnowledgeStorageObject.raw_bytes).label("committed_bytes"),
-        ).filter(
-            KnowledgeStorageObject.tenant_id == tenant_id,
-            KnowledgeStorageObject.delete_flag == "N",
-            KnowledgeStorageObject.status == COMMITTED_STATUS,
-        )
-        if knowledge_ids is not None:
-            query = query.filter(KnowledgeStorageObject.knowledge_id.in_(knowledge_ids))
-        rows = query.group_by(KnowledgeStorageObject.knowledge_id).all()
-        return {int(knowledge_id): int(committed_bytes or 0) for knowledge_id, committed_bytes in rows}
+    result = {}
+    with _operation(tenant_id) as (records, context):
+        filters = [None] if knowledge_ids is None else _chunks(knowledge_ids)
+        for selected in filters:
+            where = (
+                _active()
+                if selected is None
+                else _active(Comparison("knowledge_id", "in", selected))
+            )
+            totals = records.sum_by(
+                LEDGER,
+                "raw_bytes",
+                "knowledge_id",
+                RecordQuery(where=where),
+                context=context,
+            )
+            result.update({int(key): int(value) for key, value in totals.items()})
+    return result
 
 
 def get_committed_source_bytes_by_object_names(
-    tenant_id: str,
-    knowledge_id: int,
-    bucket_name: str,
-    object_names: Sequence[str],
-) -> Dict[str, int]:
-    """Return active committed source sizes for selected object identities."""
+    tenant_id, knowledge_id, bucket_name, object_names
+):
     if not object_names:
         return {}
-
-    with get_db_session() as session:
-        rows = (
-            session.query(
-                KnowledgeStorageObject.object_name,
-                KnowledgeStorageObject.raw_bytes,
+    result = {}
+    with _operation(tenant_id) as (records, context):
+        for selected in _chunks(object_names):
+            where = _active(
+                Comparison("knowledge_id", "eq", knowledge_id),
+                Comparison("bucket_name", "eq", bucket_name),
+                Comparison("object_name", "in", selected),
             )
-            .filter(
-                KnowledgeStorageObject.tenant_id == tenant_id,
-                KnowledgeStorageObject.knowledge_id == knowledge_id,
-                KnowledgeStorageObject.bucket_name == bucket_name,
-                KnowledgeStorageObject.object_name.in_(object_names),
-                KnowledgeStorageObject.delete_flag == "N",
-                KnowledgeStorageObject.status == COMMITTED_STATUS,
+            result.update(
+                {
+                    row["object_name"]: row["raw_bytes"]
+                    for row in _all(
+                        records, where, context, fields=("object_name", "raw_bytes")
+                    )
+                }
             )
-            .all()
+    return result
+
+
+def get_tenant_committed_bytes(tenant_id):
+    with _operation(tenant_id) as (records, context):
+        return records.sum(
+            LEDGER, "raw_bytes", RecordQuery(where=_active()), context=context
         )
-        return {object_name: int(raw_bytes or 0) for object_name, raw_bytes in rows}
 
 
-def get_tenant_committed_bytes(tenant_id: str) -> int:
-    """Return the active committed source bytes attributed to one tenant."""
-    with get_db_session() as session:
-        total = (
-            session.query(func.coalesce(func.sum(KnowledgeStorageObject.raw_bytes), 0))
-            .filter(
-                KnowledgeStorageObject.tenant_id == tenant_id,
-                KnowledgeStorageObject.delete_flag == "N",
-                KnowledgeStorageObject.status == COMMITTED_STATUS,
-            )
-            .scalar()
+def list_committed_storage_objects(tenant_id, knowledge_id=None):
+    with _operation(tenant_id) as (records, context):
+        where = (
+            _active()
+            if knowledge_id is None
+            else _active(Comparison("knowledge_id", "eq", knowledge_id))
         )
-        return int(total or 0)
+        return list(_all(records, where, context))
 
 
-def list_committed_storage_objects(
-    tenant_id: str,
-    knowledge_id: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    """List active committed source objects for one tenant and optional KB."""
-    with get_db_session() as session:
-        query = session.query(KnowledgeStorageObject).filter(
-            KnowledgeStorageObject.tenant_id == tenant_id,
-            KnowledgeStorageObject.delete_flag == "N",
-            KnowledgeStorageObject.status == COMMITTED_STATUS,
-        )
-        if knowledge_id is not None:
-            query = query.filter(KnowledgeStorageObject.knowledge_id == knowledge_id)
-        rows = query.order_by(KnowledgeStorageObject.storage_object_id.asc()).all()
-        return [as_dict(row) for row in rows]
-
-
-def mark_storage_object_deleted(
-    tenant_id: str,
-    bucket_name: str,
-    object_name: str,
-    updated_by: Optional[str] = None,
-) -> bool:
-    """Soft-delete one tenant-owned object charge after physical deletion."""
-    with get_db_session() as session:
-        row = (
-            session.query(KnowledgeStorageObject)
-            .filter(
-                KnowledgeStorageObject.tenant_id == tenant_id,
-                KnowledgeStorageObject.bucket_name == bucket_name,
-                KnowledgeStorageObject.object_name == object_name,
-            )
-            .first()
-        )
-        if row is None:
-            return False
-        if row.delete_flag == "Y" or row.status == DELETED_STATUS:
-            return True
-
-        row.status = DELETED_STATUS
-        row.delete_flag = "Y"
-        if updated_by is not None:
-            row.updated_by = updated_by
-        row.update_time = func.current_timestamp()
-        session.flush()
-        return True
-
-
-def update_storage_object_raw_bytes(
-    tenant_id: str,
-    bucket_name: str,
-    object_name: str,
-    raw_bytes: int,
-    updated_by: Optional[str] = None,
-) -> bool:
-    """Repair authoritative size drift for one active tenant-owned ledger row."""
-    _validate_raw_bytes(raw_bytes)
-    with get_db_session() as session:
-        row = (
-            session.query(KnowledgeStorageObject)
-            .filter(
-                KnowledgeStorageObject.tenant_id == tenant_id,
-                KnowledgeStorageObject.bucket_name == bucket_name,
-                KnowledgeStorageObject.object_name == object_name,
-                KnowledgeStorageObject.delete_flag == "N",
-                KnowledgeStorageObject.status == COMMITTED_STATUS,
-            )
-            .first()
-        )
-        if row is None:
-            return False
-        if row.raw_bytes == raw_bytes:
-            return True
-
-        row.raw_bytes = raw_bytes
-        if updated_by is not None:
-            row.updated_by = updated_by
-        row.update_time = func.current_timestamp()
-        session.flush()
-        return True
+def mark_storage_object_deleted(tenant_id, bucket_name, object_name, updated_by=None):
+    """Release a charge only after the caller confirms physical deletion; unknown commits propagate."""
+    context = _context()
+    for attempt in range(2):
+        try:
+            with _operation(tenant_id, updated_by, context=context) as (
+                records,
+                context,
+            ):
+                row = _one(
+                    records, HISTORY, _identity(bucket_name, object_name), context
+                )
+                if row is None:
+                    return False
+                if row["delete_flag"] == "Y" or row["status"] == "DELETED":
+                    return True
+                receipt = records.patch(
+                    LEDGER,
+                    row["storage_object_id"],
+                    FieldPatch(set_values={"status": "DELETED"}),
+                    expected=Revision(str(row["version"])),
+                    context=context,
+                )
+                if not receipt.matched:
+                    raise Conflict(operation_id=context.operation_id)
+                deleted = records.delete(
+                    LEDGER,
+                    row["storage_object_id"],
+                    expected=receipt.revision,
+                    context=context,
+                )
+                if not deleted.deleted:
+                    raise Conflict(operation_id=context.operation_id)
+                return True
+        except Conflict:
+            if attempt:
+                raise
+    raise AssertionError("Bounded ledger release must return or raise")

@@ -57,21 +57,15 @@ def test_discovery_is_readonly_fixed_owner_and_active_only(recovery):
         candidates.close()
 
 
-def test_root_closes_discovery_and_engine_when_query_fails(mocker):
-    engine = Mock()
+def test_root_releases_discovery_owner_when_query_fails(mocker):
     candidates = Mock()
     candidates.query.side_effect = Unavailable()
-    mocker.patch(
-        "management.services.file.source_recovery.source_engine", return_value=engine
-    )
-    mocker.patch(
-        "management.services.file.source_recovery.bind_source_candidates",
-        return_value=candidates,
-    )
+    owner = mocker.patch("management.services.file.source_recovery.source_candidate_ports")
+    owner.return_value.__enter__.return_value = candidates
     with pytest.raises(Unavailable):
         reconcile_sources("nexent-config", context=context())
-    candidates.close.assert_called_once()
-    engine.dispose.assert_called_once()
+    owner.return_value.__exit__.assert_called_once()
+    assert owner.return_value.__exit__.call_args.args[0] is Unavailable
 
 
 @pytest.mark.asyncio

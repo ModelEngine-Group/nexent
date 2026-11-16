@@ -165,11 +165,42 @@ def sum_records(store, dataset, field, query, *, context):
     )
     with store._session(context) as connection:
         result = store._execute(connection, statement, context).scalar_one()
-        if result is None:
-            return 0
-        if numeric[field] == "integer":
-            return int(result)
-        value = float(result)
-        if not math.isfinite(value):
-            raise CapabilityUnsupported()
-        return value
+        return _numeric_total(result, numeric[field])
+
+
+def _numeric_total(value, kind):
+    if value is None:
+        return 0
+    if kind == "integer":
+        return int(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise CapabilityUnsupported()
+    return result
+
+
+def sum_grouped_records(store, dataset, field, group_by, query, *, context):
+    from infrastructure.rdb.record_store import _predicate
+
+    definition, table, query = _normalized(store, dataset, query)
+    kinds = {item.name: item.kind for item in definition.fields}
+    if (
+        not isinstance(field, str)
+        or not isinstance(group_by, str)
+        or kinds.get(field) not in {"integer", "number"}
+        or kinds.get(group_by) not in {"string", "integer"}
+    ):
+        raise InvalidInput()
+    statement = (
+        sa.select(table.c[group_by], sa.func.sum(table.c[field]))
+        .where(_predicate(table, query.where))
+        .group_by(table.c[group_by])
+    )
+    with store._session(context) as connection:
+        rows = store._execute(connection, statement, context).all()
+        result = {}
+        for key, value in rows:
+            if type(key) not in {str, int}:
+                raise CapabilityUnsupported()
+            result[key] = _numeric_total(value, kinds[field])
+        return result

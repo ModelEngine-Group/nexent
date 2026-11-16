@@ -394,6 +394,7 @@ try:
         "automatic_source_identity_reconciliation": True,
         "source_ledger_atomic_domain": True,
         "recovery_accounting_and_quota": True,
+        "ledger_access_snapshot_and_release": True,
         "source_publication_hashes": {
             path: hashlib.sha256((root / path).read_bytes()).hexdigest()
             for path in (
@@ -410,6 +411,10 @@ try:
                 "infrastructure/rdb/upload_records.py",
                 "infrastructure/rdb/knowledge_storage_record.py",
                 "infrastructure/rdb/record_queries.py",
+                "infrastructure/rdb/composition.py",
+                "infrastructure/rdb/storage_ledger.py",
+                "infrastructure/storage_ledger.py",
+                "backend/management/db/knowledge_base/storage_object.py",
                 "sdk/nexent/storage/interfaces.py",
                 "infrastructure/object_storage/composition.py",
             )

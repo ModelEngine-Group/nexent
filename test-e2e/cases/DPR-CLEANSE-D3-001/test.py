@@ -58,6 +58,7 @@ def test_durable_cleanse_dispatch(record_property):
         "automatic_source_identity_reconciliation",
         "source_ledger_atomic_domain",
         "recovery_accounting_and_quota",
+        "ledger_access_snapshot_and_release",
     ):
         assert evidence[key] is True, key
     record_property("cleanse_job_probe", json.dumps(evidence, sort_keys=True))

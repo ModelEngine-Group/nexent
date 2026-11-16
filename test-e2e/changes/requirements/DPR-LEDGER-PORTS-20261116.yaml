@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-LEDGER-PORTS-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Route ledger reads and release through scoped record ports
+  description: >-
+    Replace Management ledger sessions and expressions with neutral record queries and transactions.
+    Share one ledger catalog with upload accounting, bind explicit readonly history and exact-object
+    system discovery, preserve snapshot pagination and use grouped numeric aggregation. Remove unused
+    legacy creation and raw-size repair functions; all creation now uses source accounting.
+  affected_features:
+    existing: [DPR-CLEANSE, SI-STORAGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve tenant/active/history ownership, exact-key discovery, totals and source-size filtering.
+    - Return every page and filter chunk without dropping rows or repeating charges.
+    - Release charges transactionally with audit and bounded retry for known conflicts, never blind replay after unknown commit.
+    - Keep neutral grouped sums scoped and reject invalid or non-neutral fields and keys.
+    - Close all owned stores and engines; do not expose live engines to Management business queries.
+    reason: >-
+      Replace old session-call assertions at the actual record-port boundary. Removed creation/repair
+      functions have no product caller, and active creation is already covered by account/publish UT.
+      Preserve all existing formal D1; extend D3 with actual PostgreSQL snapshots and release.
+    test_selectors:
+    - test/backend/database/test_knowledge_storage_object_db.py
+    - test/backend/infrastructure/test_ledger_records.py
+    - test/backend/infrastructure/test_record_composition.py
+    - test/backend/infrastructure/test_record_sum.py
+    - test/backend/services/test_source_recovery.py
+    - test/backend/services/test_knowledge_storage_service.py
+  notes: >-
+    Existing Feature responsibility and self-contained preparation remain. D3 owns ephemeral PostgreSQL,
+    Redis and MinIO, closes every handle and cleans only its own containers and volumes. Step 13 calls the
+    production ledger facades and factory, proves repeatable-read stability and known update conflict,
+    and releases a charge after a controlled sole writer has ended and source absence is verified.
+    This is not automatic cleanup of unknown in-flight ETag writes; the default adapter still refuses
+    unsupported atomic ETag deletion. Full deletion coordination and data-process retirement remain pending.

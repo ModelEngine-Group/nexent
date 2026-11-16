@@ -82,6 +82,7 @@ class SQLRecordStore:
                 "record.query",
                 "record.count",
                 "record.sum",
+                "record.sum_by",
             }
         )
     )
@@ -277,7 +278,9 @@ class SQLRecordStore:
             ) in {1555, 2067}
             failure = Conflict if duplicate else InvalidInput
             raise failure(operation_id=context.operation_id) from None
-        except DBAPIError:
+        except DBAPIError as error:
+            if getattr(error.orig, "pgcode", None) in {"40001", "40P01"}:
+                raise Conflict(operation_id=context.operation_id) from None
             raise Unavailable(operation_id=context.operation_id) from None
 
     def _definition(self, name, *, write=False):
@@ -487,6 +490,13 @@ class SQLRecordStore:
         from infrastructure.rdb.record_queries import sum_records
 
         return sum_records(self, dataset, field, query, context=context)
+
+    def sum_by(self, dataset, field, group_by, query, *, context):
+        from infrastructure.rdb.record_queries import sum_grouped_records
+
+        return sum_grouped_records(
+            self, dataset, field, group_by, query, context=context
+        )
 
     def claim(self, dataset, query, patch, *, limit=1, context):
         from infrastructure.rdb.record_queries import claim_records

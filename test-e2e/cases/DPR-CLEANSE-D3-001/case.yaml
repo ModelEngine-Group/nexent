@@ -56,6 +56,9 @@ case:
   - order: 12
     action: Recover another actual lost-reply source after limiting the tenant to its previously committed source bytes.
     expected: The new source is charged and enters SOURCE_REVIEW without becoming UPLOADED; its retained object and charge remain inspectable and no write is repeated.
+  - order: 13
+    action: Read actual charges through production ledger facades, exercise a repeatable-read snapshot against a concurrent record update, then delete the fixture source after its sole writer has ended and release its charge.
+    expected: Tenant/grouped totals and exact ownership queries are scoped, the snapshot keeps its original revision and maps concurrent update to Conflict, and charge release is audited and idempotent only after confirmed source absence.
   expected_results:
   - Idempotent admission preserves user/tenant and run or knowledge/file/version ownership.
   - Duplicate broker delivery does not repeat completed execution.
@@ -69,10 +72,11 @@ case:
   - Automatic discovery confirms aged source identity and finalizes upload only after accounting and quota checks.
   - Source lifecycle and storage ledger share atomic commit/rollback and tenant isolation.
   - Over-quota recovery retains its physical source charge and blocks successful publication pending cleanup.
+  - Production ledger queries and release use scoped ports with snapshot consistency and audited idempotence.
   forbidden_side_effects:
   - No application database, broker, credentials or containers are used.
   integration_boundary:
-  - Real PostgreSQL, Redis and MinIO, storage ports, Management jobs and registry; real resource/DAC policy in step 8, source recovery/quota in steps 9-10/12 and record transactions in step 11; controlled run callbacks, intent age, rollback exception, clock and parser result elsewhere.
+  - Real PostgreSQL, Redis and MinIO, storage ports, Management jobs and registry; real resource/DAC policy in step 8, source recovery/quota in steps 9-10/12 and record transactions/facades in steps 11/13; controlled run callbacks, intent age, rollback exception, clock and parser result elsewhere.
   observations:
   - Job identity, persisted artifact, execution count, rejected ownership, takeover and quarantine state.
   cleanup:
@@ -127,4 +131,9 @@ case:
     description: Over-quota recovery blocks successful publication while retaining actual object accounting for later cleanup.
     steps: [12]
     expected_results: [12]
+    forbidden_side_effects: [1]
+  - id: AC-11
+    description: Ledger facades preserve scoped reads, repeatable-read consistency, known concurrency conflicts and confirmed-source charge release.
+    steps: [13]
+    expected_results: [13]
     forbidden_side_effects: [1]

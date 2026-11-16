@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from contracts.tool import ToolParamsRequest
 
 KEY_TENANT_HARD_LIMIT_BYTES = "KB_QUOTA_TENANT_HARD_LIMIT_BYTES"
+STORAGE_LEDGER_DATASET = "knowledge_storage_objects"
+STORAGE_LEDGER_HISTORY_DATASET = "knowledge_storage_history"
+STORAGE_LEDGER_OWNER_DATASET = "knowledge_storage_owner"
 
 
 @dataclass

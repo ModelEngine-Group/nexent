@@ -4,11 +4,10 @@
 from contracts.knowledge import KEY_TENANT_HARD_LIMIT_BYTES
 from sqlalchemy import select
 
-from infrastructure.rdb.knowledge_storage_record import KnowledgeStorageObject
-from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
 from infrastructure.rdb.source_binding import DATASET as SOURCE
 from infrastructure.rdb.source_binding import source_catalog
+from infrastructure.rdb.storage_ledger import LEDGER, ledger_catalog
 from infrastructure.rdb.tenant_config_record import TenantConfig
 from infrastructure.storage.catalog import (
     DatasetCatalog,
@@ -16,31 +15,12 @@ from infrastructure.storage.catalog import (
     FieldDefinition,
 )
 
-LEDGER = "knowledge_storage_objects"
 QUOTA = "upload_tenant_config"
 
 
 def bind_upload_records(scope, engine, *, with_policy=False):
     source, source_table, source_audit = source_catalog()
-    table = KnowledgeStorageObject.__table__
-    integer_fields = {"storage_object_id", "knowledge_id", "raw_bytes", "version"}
-    fields = tuple(
-        FieldDefinition(
-            column.name,
-            "integer" if column.name in integer_fields else "string",
-            nullable=column.nullable,
-        )
-        for column in table.columns
-    )
-    ledger = DatasetDefinition(
-        LEDGER,
-        "storage_object_id",
-        fields,
-        frozenset({"management"}),
-        frozenset({"management"}),
-        tenant_field="tenant_id",
-        active_field="delete_flag",
-    )
+    ledger, table, ledger_audit = ledger_catalog()
     definitions = [source, ledger]
     tables = {SOURCE: source_table, LEDGER: table}
     if with_policy:
@@ -83,8 +63,6 @@ def bind_upload_records(scope, engine, *, with_policy=False):
         revision_fields={SOURCE: "version", LEDGER: "version"},
         audit_mappings={
             SOURCE: source_audit,
-            LEDGER: RecordAudit(
-                "create_time", "update_time", "created_by", "updated_by"
-            ),
+            LEDGER: ledger_audit,
         },
     )

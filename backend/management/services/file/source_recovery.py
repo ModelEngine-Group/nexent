@@ -22,8 +22,9 @@ from nexent.storage.models import (
     Sort,
 )
 
-from infrastructure.rdb.source_candidates import DATASET, bind_source_candidates
-from infrastructure.source_upload import source_engine, source_recovery_ports
+from infrastructure.source_upload import source_candidate_ports, source_recovery_ports
+
+DATASET = "source_reconciliation_candidates"
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,8 @@ logger = logging.getLogger(__name__)
 def reconcile_sources(owner_service, *, context, now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=300)
-    engine = source_engine(context)
-    candidates = None
     counts = {}
-    try:
-        candidates = bind_source_candidates(owner_service, engine)
+    with source_candidate_ports(owner_service, context=context) as candidates:
         where = Junction(
             "and",
             (
@@ -82,12 +80,6 @@ def reconcile_sources(owner_service, *, context, now=None):
                     )
             counts[result] = counts.get(result, 0) + 1
         return counts
-    finally:
-        try:
-            if candidates is not None:
-                candidates.close()
-        finally:
-            engine.dispose()
 
 
 async def schedule_source_reconciliation(

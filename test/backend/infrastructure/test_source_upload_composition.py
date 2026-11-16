@@ -67,7 +67,7 @@ def test_recovery_object_grant_denies_mutations_before_client_creation(
 
 def test_all_ports_close_even_if_one_close_fails(mocker, monkeypatch):
     monkeypatch.setattr(environment, "POSTGRES_PORT", "5432")
-    engine = mocker.patch.object(source_upload, "create_engine").return_value
+    engine = mocker.patch.object(source_upload, "record_engine").return_value
     records = mocker.patch.object(source_upload, "bind_upload_records").return_value
     objects = mocker.patch.object(source_upload, "bind_source_objects").return_value
     objects.close.side_effect = RuntimeError("private")
