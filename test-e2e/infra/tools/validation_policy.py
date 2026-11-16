@@ -3,7 +3,8 @@
 """Classify only explicitly typed, safely scoped Daily asset problems."""
 from __future__ import annotations
 
-CASE_CODES = {"CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING", "CASE_PREPARATION_MISSING"}
+CASE_CODES = {"CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING", "CASE_PREPARATION_MISSING",
+              "CASE_EXECUTION_INVALID"}
 WARNING_CODES = {"UT_REFERENCE_MISSING", "DERIVED_VIEW_STALE", "FEATURE_RESPONSIBILITY_UNRESOLVED"}
 CASE_WARNING_CODES = {"CASE_RESPONSIBILITY_UNRESOLVED", "CASE_ID_FORMAT_INVALID"}
 
@@ -39,8 +40,10 @@ def evaluate(root):
     from validate_execution import inspect
     from validate_test_assets import validate
 
-    issues = validate(root, "implementation", False, daily=True)
-    execution_issues, registry = inspect(root)
-    issues = list(dict.fromkeys([*issues, *execution_issues]))
+    registry = {}
+    issues = validate(root, "implementation", False, daily=True, registry_out=registry)
+    if "cases" not in registry:
+        execution_issues, registry = inspect(root)
+        issues = list(dict.fromkeys([*issues, *execution_issues]))
     validation = report(root, issues, registry["cases"])
     return validation, apply_blocks(registry["cases"], validation)

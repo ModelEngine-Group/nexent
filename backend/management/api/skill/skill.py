@@ -2,7 +2,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from starlette.responses import JSONResponse
@@ -67,6 +67,9 @@ def list_skills(
     authorization: Optional[str] = Header(None),
     request: Request = None,
     include_content: bool = Query(False, description="Include skill bodies in the list response"),
+    view: Literal["full", "mount"] = Query(
+        "full", description="Use mount for metadata without Skill content or tool associations"
+    ),
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
@@ -75,17 +78,19 @@ def list_skills(
         inventory_tenant = resource_read_tenant(request, shared=True)
         effective_tenant_id = inventory_tenant or tenant_id or current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
+        list_options = {"for_mount": True} if view == "mount" else {}
         if inventory_tenant:
             fields = ("skill_id", "name", "description", "source", "tags", "update_time")
             skills = [
                 {field: skill.get(field) for field in fields}
-                for skill in service.list_skills(include_content=False)
+                for skill in service.list_skills(include_content=False, **list_options)
             ]
             return JSONResponse(content={"skills": skills})
         skills = service.list_visible_skills(
             tenant_id=effective_tenant_id,
             user_id=user_id,
             include_content=include_content,
+            **list_options,
         )
         return JSONResponse(content={"skills": skills})
     except HTTPException:

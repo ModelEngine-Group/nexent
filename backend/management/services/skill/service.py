@@ -317,18 +317,19 @@ class SkillService(SkillArchiveOperations):
         return out
 
     def list_skills(
-        self, tenant_id: Optional[str] = None, *, include_content: bool = True
+        self, tenant_id: Optional[str] = None, *, include_content: bool = True, for_mount: bool = False
     ) -> List[Dict[str, Any]]:
         """List all skills for a tenant.
 
         Args:
             tenant_id: Tenant ID for filtering skills. Uses instance tenant_id if not provided.
             include_content: Include bodies for existing internal callers unless explicitly disabled.
+            for_mount: Omit Skill content and tool relations while retaining configuration metadata.
 
         Returns:
             List of skill info dicts
         """
-        return self._list_skills(tenant_id, include_content=include_content)
+        return self._list_skills(tenant_id, include_content=include_content, for_mount=for_mount)
 
     def _list_skills(
         self,
@@ -336,13 +337,18 @@ class SkillService(SkillArchiveOperations):
         visibility: Callable[[dict[str, Any]], bool] | None = None,
         *,
         include_content: bool = True,
+        for_mount: bool = False,
     ) -> list[dict[str, Any]]:
         """Filter database metadata before fetching relations or local configuration."""
         effective_tenant_id = tenant_id or self.tenant_id
         if not effective_tenant_id:
             raise SkillException("tenant_id is required")
         try:
-            if visibility is None:
+            if for_mount:
+                skills = skill_db.list_skill_mount_summaries(effective_tenant_id)
+                if visibility is not None:
+                    skills = [skill for skill in skills if visibility(skill)]
+            elif visibility is None:
                 skills = skill_db.list_skills(effective_tenant_id, include_content=include_content)
             else:
                 skills = [
@@ -368,6 +374,7 @@ class SkillService(SkillArchiveOperations):
         tenant_id: Optional[str] = None,
         user_id: str,
         include_content: bool = True,
+        for_mount: bool = False,
     ) -> List[Dict[str, Any]]:
         """List skills visible to a user and attach the resolved permission."""
         user_role = _get_user_role(user_id)
@@ -381,6 +388,7 @@ class SkillService(SkillArchiveOperations):
                 user_group_ids=user_group_ids,
             ),
             include_content=include_content,
+            for_mount=for_mount,
         )
         for skill in visible_skills:
             skill["permission"] = resolve_skill_permission(

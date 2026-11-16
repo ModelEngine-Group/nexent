@@ -410,6 +410,19 @@ def list_skills(
         return results
 
 
+def list_skill_mount_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """Read mount metadata without loading Skill bodies or tool relations."""
+    with get_db_session() as session:
+        skills = (
+            session.query(SkillInfo)
+            .options(defer(SkillInfo.skill_content))
+            .filter(SkillInfo.tenant_id == tenant_id, SkillInfo.delete_flag != "Y")
+            .order_by(SkillInfo.create_time.desc(), SkillInfo.skill_id.desc())
+            .all()
+        )
+        return [_to_dict(skill, include_content=False) for skill in skills]
+
+
 def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:
     """List only the fields required to resolve skill visibility and ownership."""
     with get_db_session() as session:

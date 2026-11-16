@@ -47,6 +47,9 @@ interface ConversationKnowledgeScopeModalProps {
   disabled?: boolean;
   value: ConversationKnowledgeScope | null;
   capabilities: KnowledgeCapabilities | null;
+  onRetryCapabilities?: () => void;
+  capabilitiesPending?: boolean;
+  capabilitiesUnavailable?: boolean;
   onCancel: () => void;
   onConfirm: (
     scope: ConversationKnowledgeScope,
@@ -114,6 +117,9 @@ export const ConversationKnowledgeScopeModal: FC<
   open,
   value,
   capabilities,
+  onRetryCapabilities,
+  capabilitiesPending = false,
+  capabilitiesUnavailable = false,
   onCancel,
   onConfirm,
   presentation = "modal",
@@ -123,7 +129,9 @@ export const ConversationKnowledgeScopeModal: FC<
   const router = useRouter();
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const { user } = useAuthorizationContext();
-  const { data: groupListData } = useGroupList(user?.tenantId ?? null);
+  const { data: groupListData } = useGroupList(
+    open ? (user?.tenantId ?? null) : null
+  );
   const groupNameById = useMemo(
     () =>
       new Map(
@@ -149,6 +157,7 @@ export const ConversationKnowledgeScopeModal: FC<
     []
   );
   const [listError, setListError] = useState(false);
+  const resourceError = listError || capabilitiesUnavailable;
   const [saving, setSaving] = useState(false);
   const [initialSelectedIds, setInitialSelectedIds] = useState<string[]>([]);
   const [initialSelectionWasFiltered, setInitialSelectionWasFiltered] =
@@ -179,8 +188,10 @@ export const ConversationKnowledgeScopeModal: FC<
   >(null);
   const loading =
     open &&
-    Boolean(configuredSource) &&
-    settledCatalogRequest !== catalogLoadRequest;
+    !capabilitiesUnavailable &&
+    (capabilitiesPending ||
+      (Boolean(configuredSource) &&
+        settledCatalogRequest !== catalogLoadRequest));
   const [previousInputs, setPreviousInputs] = useState({
     open,
     search,
@@ -217,7 +228,13 @@ export const ConversationKnowledgeScopeModal: FC<
   useEffect(() => {
     const { catalogRequest } = catalogLoadRequest;
     const configuredSource = catalogRequest.source;
-    if (!open || !configuredSource) return;
+    if (
+      !open ||
+      !configuredSource ||
+      capabilitiesPending ||
+      capabilitiesUnavailable
+    )
+      return;
     const { value, capabilities, t } = catalogRequest;
     const normalized = normalizeScopeForSource(value, configuredSource);
     let cancelled = false;
@@ -316,7 +333,7 @@ export const ConversationKnowledgeScopeModal: FC<
     return () => {
       cancelled = true;
     };
-  }, [open, catalogLoadRequest]);
+  }, [open, catalogLoadRequest, capabilitiesPending, capabilitiesUnavailable]);
 
   const localOptions = useMemo(
     () =>
@@ -472,7 +489,7 @@ export const ConversationKnowledgeScopeModal: FC<
   };
 
   const handleConfirm = async () => {
-    if (!configuredSource || loading || saving || listError) return;
+    if (!configuredSource || loading || saving || resourceError) return;
     const selectedIds =
       configuredSource === "local"
         ? draft.local.knowledge_ids
@@ -708,7 +725,7 @@ export const ConversationKnowledgeScopeModal: FC<
                 pageOnly={false}
                 allSelected={allSelected}
                 hasSelection={values.length > 0}
-                disabled={loading || saving || listError}
+                disabled={loading || saving || resourceError}
                 empty={selectableIds.length === 0}
                 onToggleAll={handleSelectAll}
                 onClear={() => updateSelectedValues(source, [])}
@@ -870,7 +887,7 @@ export const ConversationKnowledgeScopeModal: FC<
   const drawerFooter = (
     <div className="flex items-center gap-3">
       <RestoreDefaultsButton
-        disabled={loading || listError || saving || !configuredSource}
+        disabled={loading || resourceError || saving || !configuredSource}
         onClick={() => {
           if (!configuredSource) return;
           setDraft(
@@ -913,7 +930,7 @@ export const ConversationKnowledgeScopeModal: FC<
       disabled={disabled}
       confirmDisabled={
         loading ||
-        listError ||
+        resourceError ||
         !source ||
         (!!tags.predicates.length && tags.loading)
       }
@@ -962,24 +979,25 @@ export const ConversationKnowledgeScopeModal: FC<
         selectAllDisabled:
           loading ||
           saving ||
-          listError ||
+          resourceError ||
           !drawerSelection?.selectableIds.length,
         onRefresh: () => {
           if (loading || saving) return;
+          if (capabilitiesUnavailable) onRetryCapabilities?.();
           setListError(false);
           tags.retry?.();
           setRefreshRevision((value) => value + 1);
         },
         refreshDisabled: loading || saving || !source,
         controlsContent:
-          listError ||
+          resourceError ||
           capabilities?.legacy_prompt_warning?.detected ||
           (value &&
             ((value.local.mode === "override" && source === "aidp") ||
               (value.aidp.mode === "override" && source === "local"))) ? (
             <>
               {knowledgeWarnings}
-              {listError && (
+              {resourceError && (
                 <Alert
                   type="error"
                   title={t("chat.knowledgeScope.listLoadFailed")}
@@ -1021,7 +1039,7 @@ export const ConversationKnowledgeScopeModal: FC<
           okButtonProps={{
             disabled:
               loading ||
-              listError ||
+              resourceError ||
               !configuredSource ||
               (!!tags.predicates.length && tags.loading),
           }}

@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: WB-SKILL-SUMMARY-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_skill_mount_summary_http_contract
+timeout_seconds: 90
+acceptance_bindings:
+  AC-01: [test_skill_mount_summary_http_contract]
+  AC-02: [test_skill_mount_summary_http_contract]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

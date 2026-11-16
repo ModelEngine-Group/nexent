@@ -20,6 +20,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from local_preflight import env_file
+from recovery_io import protected_write
 from daily_recovery import configuration_paths, current_retry, pending_retry_allowed
 from suite_runtime import deployment_lock, finalize, fingerprint, now, render_report, save
 
@@ -54,11 +55,11 @@ def catalog(repo, records=None):
     value = checked_yaml(path, path.with_suffix(".schema.json"))
     if set(value["cases"].values()) - set(value["profiles"]):
         raise ValueError("Deployment exception references an unknown profile")
-    if set(value["recovery_cases"]) & set(value["cases"]):
-        raise ValueError("Local recovery cannot use deployment exception Cases")
+    # Kept only for readers of older catalog versions; never schedules or gates recovery.
+    value.setdefault("recovery_cases", [])
     if records is not None:
         available = {record["case_id"] for record in records}
-        missing = (set(value["cases"]) | set(value["recovery_cases"])) - available
+        missing = set(value["cases"]) - available
         if missing:
             raise ValueError("Deployment exceptions reference unknown Case IDs: " + ", ".join(sorted(missing)))
     return value
@@ -117,16 +118,6 @@ def patch_env(content, updates):
         else:
             text = text.rstrip("\n") + "\n" + replacement + "\n"
     return text.encode("utf-8")
-
-
-def protected_write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".switch-next")
-    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as output:
-        output.write(content)
-        output.flush()
-        os.fsync(output.fileno())
-    temporary.replace(path)
 
 
 def link_or_copy(source, destination):
@@ -242,7 +233,7 @@ class ModeSwitch:
                 path.unlink(missing_ok=True)
         if self.switched:
             self.hook("deploy", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
-            self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
+        self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
         self.verify(self.baseline_values, "restore-local")
         # Deployment can re-render ignored files; restore their exact saved bytes afterwards.
         for path, content in self.originals.items():
@@ -285,12 +276,12 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
     old_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     print(f"Deployment campaign: {directory}", flush=True)
 
-    def child(label, group, *, recovery=False):
+    def child(label, group):
         child_dir = directory / "profiles" / label
         seen = set()
 
         def record_result(row):
-            if not recovery and row["case_id"] not in seen:
+            if row["case_id"] not in seen:
                 case_id = row["case_id"]
                 for section in ("cases", "logs"):
                     source = child_dir / section / (case_id if section == "cases" else case_id + ".log")
@@ -321,17 +312,10 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         # Finalization can add NOT_EXECUTED rows after an interruption.
         for row in results:
             record_result(row)
-        if not summary["execution_complete"] or (recovery and any(row["result"] != "PASS" for row in results)):
+        if not summary["execution_complete"]:
             raise RuntimeError("Incomplete or unsafe deployment group: " + label)
-        if any(row["result"] in {"TIMEOUT", "CLEANUP_FAILED"} and row["stage"] == "D5" for row in results):
+        if (home / "state/deployment-guard/pending.json").exists():
             raise RuntimeError("Deployment group needs environment safety review")
-
-    def local_recovery_cases():
-        recovery = [r for r in all_records if r["case_id"] in rules["recovery_cases"]]
-        if switch.retry is not None and (not recovery or len(recovery) != len(set(rules["recovery_cases"]))
-                or any(r["status"] != "active" or not r.get("execution") for r in recovery)):
-            raise RuntimeError("Daily recovery requires executable Local recovery Cases")
-        return recovery
 
     try:
         # Also excludes other opted-in test homes operating on this checkout.
@@ -355,7 +339,6 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                     hook("preflight", settings, repo, home, directory, env)
                 switch.verify({}, "local")
                 if switch.retry is not None:
-                    child("recover-previous-local", local_recovery_cases(), recovery=True)
                     switch.retry.record("REDEPLOY_VERIFIED", batch=str(directory))
                 state["stages"]["D0"] = "COMPLETE"
                 for label, group in selected.items():
@@ -373,7 +356,6 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 state["profile"] = "restore-local"
                 save(directory / "status.json", state)
                 switch.restore()
-                child("restore-local", local_recovery_cases(), recovery=True)
                 switch.complete()
                 restoration_ok = True
                 current = fingerprint(repo)
@@ -383,12 +365,12 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         error = "Interrupted" if isinstance(exc, KeyboardInterrupt) else str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
         signal.signal(signal.SIGTERM, old_handler)
-        summary = finalize(directory, report_records, rows, error)
+        summary = finalize(directory, report_records, rows, error, environment=env)
         state.update(status=summary["status"], finished_at=now(), error=error, local_restored_and_verified=restoration_ok)
         state["stages"] = {f"D{i}": "COMPLETE" if summary["execution_complete"] else "INTERRUPTED" for i in range(7)}
         state["stages"]["D6"] = "COMPLETE"
         save(directory / "status.json", state)
-        render_report(directory, report_records, rows, summary)
+        render_report(directory, report_records, rows, summary, environment=env)
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
     if daily and summary["execution_complete"] and restoration_ok:
         if publish_latest:
@@ -402,7 +384,7 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 except OSError:
                     print("Publication failed; could not save local publication receipt", flush=True)
             try:
-                render_report(directory, report_records, rows, summary, sharing=publication)
+                render_report(directory, report_records, rows, summary, sharing=publication, environment=env)
             except OSError:
                 print("Could not refresh publication status in the finalized report", flush=True)
     if daily and settings.get("notify"):

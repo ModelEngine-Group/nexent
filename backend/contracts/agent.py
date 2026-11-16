@@ -20,7 +20,7 @@ from pydantic import (
 
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import ConversationTarget, HistoryItem
+from contracts.conversation import ConversationTarget, HistoryItem, MessageAnnotationItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
@@ -194,6 +194,10 @@ class AgentRequest(BaseModel):
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this turn's user
+    # message; persisted as a structured unit and merged into the model-facing
+    # text at request time.
+    annotations: Optional[List[MessageAnnotationItem]] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
