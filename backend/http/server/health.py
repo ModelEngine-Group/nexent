@@ -14,6 +14,9 @@ def install_health_contract(app: FastAPI) -> None:
 
     @app.get("/health/ready", include_in_schema=False)
     async def health_ready(response: Response) -> dict[str, str | int]:
+        if any(task.done() for task in getattr(app.state, "required_background_tasks", ())):
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not_ready", "background_state": "stopped"}
         manager = getattr(app.state, "thread_manager", None)
         if manager is None:
             return {"status": "ready"}

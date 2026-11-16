@@ -8,7 +8,20 @@ from nexent.storage.models import StorageScope
 from infrastructure.knowledge_objects import bind_knowledge_objects
 from infrastructure.knowledge_vectors import bind_knowledge_vectors
 from infrastructure.rdb.composition import close_owned, record_engine
+from infrastructure.rdb.knowledge_dispatch import bind_knowledge_dispatch
 from infrastructure.rdb.knowledge_jobs import FILES, JOBS, bind_knowledge_jobs
+
+
+@contextmanager
+def knowledge_dispatch_ports(*, context):
+    engine, records = record_engine(context), None
+    try:
+        records = bind_knowledge_dispatch(engine)
+        yield records
+    finally:
+        close_owned(
+            context, ([records.close] if records is not None else []) + [engine.dispose]
+        )
 
 
 @contextmanager

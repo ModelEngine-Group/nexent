@@ -22,14 +22,14 @@ case:
     action: Prepare owned stores, publish a pinned source and cleanse artifact through production ports, and persist resource and cleansing records.
     expected: Source and artifact versions and checksums are confirmed; no data-process endpoint is started.
   - order: 2
-    action: Admit an upload and execute the Runtime worker using signed Management authorization, production composition and ModelService.
+    action: Admit an upload and let Runtime lifespan discover it from the read-only durable queue and execute it using signed Management authorization, production composition and ModelService.
     expected: Confirmed vectors carry the attempt generation and the job/manifest publish the same visible generation.
   - order: 3
     action: Deliver the same completed job again and inspect both the new vector index and a preexisting legacy sentinel index.
     expected: Model invocation and physical chunk counts stay unchanged; the legacy sentinel remains intact.
   - order: 4
-    action: Revoke membership after the controlled embedding returns but before its vector checkpoint.
-    expected: No new vector is written or version published; the failed attempt confirms writer closure without replaying the model.
+    action: Revoke membership after the controlled embedding returns but before its vector checkpoint, then query the running health server.
+    expected: No new vector is written or version published; the failed attempt confirms writer closure without replaying the model. The dispatch task exits once, readiness returns 503 and liveness stays 200.
   - order: 5
     action: Stop the server, drain managed workers, close ports and remove owned containers and anonymous volumes.
     expected: No owned resource remains; application data, unrelated indexes and real model providers were not accessed.
@@ -42,7 +42,7 @@ case:
   - No application storage, external model provider, data-process service, fallback query or automatic retry is used.
   integration_boundary:
   - Actual PostgreSQL, MinIO, Elasticsearch, Management signed HTTP authorization, Runtime job/worker/ingestor and ModelService with controlled parser and embedding adapter.
-  - Queue discovery/lifespan, final images, real provider inference, search/rerank and physical file cleanup are not proved.
+  - Final application images, real provider inference, search/rerank and physical file cleanup are not proved.
   observations:
   - Actual vector keys/count/generation, record visibility, artifact revisions, invocation count and retained legacy sentinel.
   cleanup:
@@ -62,4 +62,9 @@ case:
     description: Revocation blocks vector publication and owned resources close.
     steps: [4, 5]
     expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Lifespan discovers only fresh queued uploads, owns shutdown and exposes dispatch termination through local readiness without retry or restart.
+    steps: [2, 4, 5]
+    expected_results: [2, 4]
     forbidden_side_effects: [1]

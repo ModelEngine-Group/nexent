@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-DISPATCH-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Own Runtime upload discovery and execution in application lifespan
+  description: >-
+    Read fresh durable upload scheduling metadata through a Runtime-only read-only system
+    projection, close discovery ports, and execute with the persisted user and tenant.
+    Lifespan owns shutdown. An error ends dispatch without retry or restart and local
+    readiness reports a terminated required background task.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-HTTP-D3-001, DPR-KB-D3-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Expose only metadata for active fresh queued uploads without system writes or payload reads.
+    - Preserve user and tenant while executing after closing discovery handles.
+    - Bound discovery, stop between jobs, and propagate storage or execution failures once.
+    - Own task cancellation and readiness without automatic retry or restart.
+    reason: >-
+      Add focused scheduling and actual SQLite catalog UT, retain job and upload regressions,
+      and strengthen the existing multi-store D3 with production discovery/lifespan and
+      actual health HTTP requests. No duplicate formal D1 is introduced.
+    test_selectors:
+    - test/backend/services/test_knowledge_dispatch.py
+    - test/backend/infrastructure/test_knowledge_dispatch.py
+    - test/backend/app/test_health_app.py
+  notes: >-
+    The upload table is the durable Runtime dispatch source; no additional broker is created.
+    Running, failed and unknown attempts are never automatically replayed. Physical cleanup,
+    search, image stages, historical data migration and final application images remain pending.

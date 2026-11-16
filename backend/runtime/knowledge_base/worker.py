@@ -92,7 +92,7 @@ class KnowledgeUploadWorker:
     ):
         if (
             type(operation_seconds) not in {int, float}
-            or not 0 < operation_seconds <= 3500
+            or not 0 < operation_seconds <= 3600
             or any(
                 type(value) is not int or value <= 0
                 for value in (max_artifact_bytes, max_source_bytes)

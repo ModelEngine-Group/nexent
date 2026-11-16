@@ -62,3 +62,15 @@ def test_ready_follows_thread_manager_lifecycle():
     stuck = client.get("/health/ready")
     assert stuck.status_code == 503
     assert stuck.json()["stuck_count"] == 1
+
+
+def test_completed_required_background_task_makes_process_not_ready():
+    app = FastAPI()
+    install_health_contract(app)
+    task = SimpleNamespace(done=lambda: False)
+    app.state.required_background_tasks = (task,)
+    client = TestClient(app)
+    assert client.get("/health/ready").status_code == 200
+    task.done = lambda: True
+    assert client.get("/health/ready").status_code == 503
+    assert client.get("/health/live").status_code == 200

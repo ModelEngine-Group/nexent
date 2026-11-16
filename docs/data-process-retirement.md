@@ -37,6 +37,6 @@ Management 与 Runtime 只通过 AgentOS 交换授权请求、产物引用和状
 
 已实现清洗/KB 契约、Management 结构清洗与 scoped ObjectStore、Office 预览转换，以及 Runtime 摄取执行、持久任务与可见清单。2026-11-16 已挂载 AgentOS 文件 upload/inspect/delete 和 Management 资源授权查询，采用当前 DAC 与已完成清洗产物校验，Runtime 不查询 Management 业务表。接纳接口仍返回 queued/cleanup_pending，生产 worker、检索与物理清理和旧消费者尚未全部切换，data-process 镜像仍在。镜像退役及新拓扑的完整验收继续待完成。
 
-Runtime 单次上传 worker 已接通真实 ObjectStore/VectorStore 与版本发布，经过 PostgreSQL、MinIO、Elasticsearch 和签名 Management HTTP 验证。生产发现及生命周期监督还未启用，图片和真实 provider 验证继续待完成。新向量布局使用独立物理索引并保留旧索引，历史数据迁移及核对完成前不能切换旧查询或删除 data-process。
+Runtime 上传 worker 已接通真实 ObjectStore/VectorStore 与版本发布，经过 PostgreSQL、MinIO、Elasticsearch 和签名 Management HTTP 验证。2026-11-17 已接入 Runtime lifespan，通过只读持久任务投影发现新上传；失败后退出并使就绪检查返回 503，不自动重试或重启。图片和真实 provider 验证继续待完成。新向量布局使用独立物理索引并保留旧索引，历史数据迁移及核对完成前不能切换旧查询或删除 data-process。
 
 父 PR 的旧私有入口测试迁移、异步接纳与旧过载 D2 语义，以及既有前端测试绑定缺失继续单独跟踪，不能以本批交付声明已解决。

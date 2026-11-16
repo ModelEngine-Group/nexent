@@ -117,7 +117,7 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ### KnowledgeBase 文件生命周期
 
-Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。单次上传 worker 已接通，队列发现、启动监督、完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
+Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传 worker 已接入 Runtime lifespan，完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |
 | --- | --- | --- |
@@ -131,6 +131,8 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
 
 `KnowledgeUploadWorker.process(lookup, actor, owner_id=...)` 执行已接纳的任务。装配方显式提供源与产物大小上限，并安装 Runtime 的 `ThreadManager`。worker 经 Management 实时授权后领取 attempt，读取固定版本对象，再通过 `ModelService.invoke` 写入显式向量；每批写前复查授权和 owner。只有全部写入确认并仍持有有效 attempt 时才发布可见 generation，已完成任务再次投递不会调用模型。在途或 unknown 写入保留清理义务，不自动重跑。
+
+Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按原用户和租户依次执行。发现端口仅返回调度元数据，只选尚未开始且无未知义务的 `queued`，不扫描 `running` 或失败任务。空闲发现间隔为一秒，异常使调度退出并将 `/health/ready` 标为 503，不自动重试或重启。关闭时先标记取消，再等待 owned task，最后排空现有线程管理器。源和产物上限共用 `MAX_KNOWLEDGE_FILE_SIZE_MB`，单次执行截止采用现有 `DP_SPLIT_WAIT_TIMEOUT_MAX_S`，当前支持至 3600 秒。
 
 新向量句柄把逻辑 collection 映射到固定 `si-kb-` 命名空间。旧索引会保留，历史数据迁移和核对仍是生产切换前置条件，当前不会自动回退查询旧索引。
 
@@ -146,6 +148,6 @@ KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-KnowledgeBase.search、生产队列/lifespan、物理清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，单次上传 worker 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
+KnowledgeBase.search、物理清理、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，上传发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

@@ -23,6 +23,7 @@ from runtime.agentos.prepared_run import create_prepared_run_router
 from runtime.agentos.resume import create_run_lifecycle_router
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
+from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.model.service import ModelService
 from runtime.recovery import recover_streaming_runs, watch_executions
 from runtime.thread_management import (
@@ -70,7 +71,8 @@ async def runtime_lifespan(_app):
         await recover_runtime_state()
         reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
         try:
-            yield
+            async with knowledge_lifespan(_app):
+                yield
         finally:
             reconciler.cancel()
             await asyncio.gather(reconciler, return_exceptions=True)

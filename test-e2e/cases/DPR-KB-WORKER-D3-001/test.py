@@ -51,6 +51,8 @@ def test_runtime_knowledge_upload(record_property):
         "duplicate_no_invoke",
         "legacy_preserved",
         "revocation_before_write",
+        "lifespan_discovery",
+        "failed_readiness",
         "owned_cleanup",
     ):
         assert evidence[name] is True, name

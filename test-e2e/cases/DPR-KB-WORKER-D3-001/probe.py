@@ -47,12 +47,14 @@ from nexent.storage.models import (
     StorageScope,
     VectorKey,
 )
+from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.knowledge_base.jobs import KnowledgeJobs
 from runtime.knowledge_base.service import KnowledgeService
 from runtime.knowledge_base.worker import KnowledgeUploadWorker
 from runtime.model.service import ModelService
 from stores import Stores
 
+from backend.http.server.health import install_health_contract
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.file_processing.objects import bind_cleanse_objects
@@ -289,6 +291,19 @@ def main(run_id):
             )
             server.capture_signals = lambda: nullcontext()
             serving = asyncio.create_task(server.serve(sockets=[listener]))
+            health_app = FastAPI(lifespan=lambda app: knowledge_lifespan(app, worker=worker))
+            install_health_contract(health_app)
+            health_socket = socket.socket()
+            health_socket.bind(("127.0.0.1", 0))
+            health_socket.listen(128)
+            health_socket.setblocking(False)
+            health_url = "http://127.0.0.1:" + str(health_socket.getsockname()[1])
+            health_server = uvicorn.Server(uvicorn.Config(
+                health_app, log_config=None, access_log=False, lifespan="on",
+                timeout_graceful_shutdown=3,
+            ))
+            health_server.capture_signals = lambda: nullcontext()
+            health_serving = asyncio.create_task(health_server.serve(sockets=[health_socket]))
 
             async def db(action, *args, **kwargs):
                 return await manager.run(
@@ -301,10 +316,14 @@ def main(run_id):
 
             try:
                 async with asyncio.timeout(10):
-                    while not server.started:
+                    while not server.started or not health_server.started:
                         if serving.done():
                             await serving
+                        if health_serving.done():
+                            await health_serving
                         await asyncio.sleep(0.01)
+                async with httpx.AsyncClient(trust_env=False) as health:
+                    assert (await health.get(health_url + "/health/ready")).status_code == 200
                 request = KnowledgeFileUpload(
                     knowledge_id=1,
                     file_id="a" * 32,
@@ -316,9 +335,15 @@ def main(run_id):
                     chunking_strategy="none",
                 )
                 admitted = await api.upload(request, actor)
-                completed = await worker.process(
-                    lookup(admitted), actor, owner_id="worker-one"
-                )
+                async with asyncio.timeout(15):
+                    while True:
+                        completed = await api.inspect(lookup(admitted), actor)
+                        if completed.status == "completed":
+                            break
+                        task, = health_app.state.required_background_tasks
+                        if task.done():
+                            raise task.exception() or AssertionError("Dispatch stopped")
+                        await asyncio.sleep(0.02)
                 assert completed.status == "completed"
                 assert (
                     await worker.process(lookup(admitted), actor, owner_id="worker-two")
@@ -349,15 +374,14 @@ def main(run_id):
                 rejected = await api.upload(
                     request.model_copy(update={"file_id": "b" * 32}), actor
                 )
-                try:
-                    await worker.process(
-                        lookup(rejected), actor, owner_id="worker-three"
-                    )
-                    raise AssertionError(
-                        "Revoked checkpoint must refuse the vector write"
-                    )
-                except RuntimeUpstreamError as error:
-                    assert error.status_code == 403
+                task, = health_app.state.required_background_tasks
+                async with asyncio.timeout(15):
+                    await asyncio.wait({task}, return_when=asyncio.ALL_COMPLETED)
+                error = task.exception()
+                assert isinstance(error, RuntimeUpstreamError) and error.status_code == 403
+                async with httpx.AsyncClient(trust_env=False) as health:
+                    assert (await health.get(health_url + "/health/ready")).status_code == 503
+                    assert (await health.get(health_url + "/health/live")).status_code == 200
                 failed = await db(records.get, JOBS, rejected.job_id, context=context())
                 assert (
                     failed["status"] == "failed"
@@ -385,12 +409,16 @@ def main(run_id):
                     visible_generation=True,
                     duplicate_no_invoke=True,
                     revocation_before_write=True,
+                    lifespan_discovery=True,
+                    failed_readiness=True,
                 )
             finally:
                 try:
                     server.should_exit = True
-                    await asyncio.wait_for(serving, timeout=5)
+                    health_server.should_exit = True
+                    await asyncio.wait_for(asyncio.gather(serving, health_serving), timeout=5)
                 finally:
+                    health_socket.close()
                     drained = await manager.shutdown(timeout=5)
                     clear_default_thread_manager(manager)
                     assert not drained.stuck_execution_ids
@@ -409,9 +437,13 @@ def main(run_id):
                 path: hashlib.sha256((root / path).read_bytes()).hexdigest()
                 for path in (
                     "backend/runtime/knowledge_base/worker.py",
+                    "backend/runtime/knowledge_base/dispatch.py",
                     "backend/runtime/knowledge_base/ingestion.py",
+                    "backend/runtime/api/application.py",
+                    "backend/http/server/health.py",
                     "infrastructure/knowledge_objects.py",
                     "infrastructure/knowledge_vectors.py",
+                    "infrastructure/rdb/knowledge_dispatch.py",
                 )
             },
         )
