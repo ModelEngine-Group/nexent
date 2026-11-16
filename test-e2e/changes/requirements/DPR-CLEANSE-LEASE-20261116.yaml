@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-LEASE-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Reauthorize and renew current cleansing attempts from the parent process
+  description: >-
+    Add a bounded lease guard usable by the process executor tick callback.
+    Revalidate resource authorization before transactional renewal and reject
+    cancelled, expired, replaced or foreign-tenant attempts. Production wiring remains pending.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-CLEANSE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Renew current attempts and throttle repeated checks using monotonic time.
+    - Reject cancelled, replaced and foreign-tenant attempts.
+    - Stop on authorization revocation or storage failure without caching success.
+    - Bound renewal intervals below half the lease duration.
+    reason: Existing lease tests exercise direct transitions but not the parent authorization/renewal policy.
+    test_selectors:
+    - test/backend/services/test_cleanse_lease.py

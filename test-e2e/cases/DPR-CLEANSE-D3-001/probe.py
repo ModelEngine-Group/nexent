@@ -21,6 +21,7 @@ from contracts.agentos_knowledge import (
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_consumer import serve
 from management.services.file.cleanse_jobs import CleanseJobs
+from management.services.file.cleanse_lease import CleanseLeaseGuard
 from management.services.file.cleanse_worker import (
     HANDLER,
     CleanseHandler,
@@ -28,7 +29,7 @@ from management.services.file.cleanse_worker import (
     consume_once,
     enqueue_ready,
 )
-from nexent.storage.errors import NotFound, ScopeDenied
+from nexent.storage.errors import NotFound, OperationCancelled, ScopeDenied
 from nexent.storage.models import (
     Comparison,
     OperationContext,
@@ -246,6 +247,42 @@ try:
     assert worker.transition(
         new, status="completed", artifact=published(), context=context()
     )
+    renewal = public.submit(
+        request.model_copy(update={"idempotency_key": "lease-guard"}), context=context()
+    )
+    renewal_handle = worker.claim(
+        "guarded", job_id=renewal.job_id, lease_seconds=60, context=context()
+    )
+    tick_clock, authorization_checks = [0], []
+    guard = CleanseLeaseGuard(
+        worker,
+        lease_seconds=60,
+        clock=lambda: tick_clock[0],
+        authorize_execution=lambda row, request: authorization_checks.append(
+            row["user_id"]
+        ),
+    )
+    clock[0] += timedelta(seconds=30)
+    guard(renewal_handle, context=context())
+    clock[0] += timedelta(seconds=31)
+    assert (
+        worker.claim(
+            "intruder", job_id=renewal.job_id, lease_seconds=60, context=context()
+        )
+        is None
+    )
+    assert authorization_checks == ["user-a"]
+    public.cancel(
+        FileCleanseLookup(run_id=request.run_id, job_id=renewal.job_id),
+        context=context(),
+    )
+    tick_clock[0] = 21
+    try:
+        guard(renewal_handle, context=context())
+    except OperationCancelled:
+        pass
+    else:
+        raise AssertionError("cancelled lease was renewed")
     unknown = public.submit(
         request.model_copy(update={"idempotency_key": "unknown"}), context=context()
     )
@@ -326,6 +363,7 @@ try:
         "knowledge_scope_ownership": True,
         "knowledge_dispatch": True,
         "consumer_stopped_closed": True,
+        "lease_guard_renewal_and_cancel": True,
     }
     print(json.dumps(result))
 finally:
