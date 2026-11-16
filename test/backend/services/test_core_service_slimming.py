@@ -392,7 +392,8 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
     dependency(monkeypatch, "management.db.identity.group", query_group_ids_by_user=lambda user_id: [])
     dependency(monkeypatch, "management.db.identity.user_tenant", get_user_tenant_by_user_id=lambda user_id: {})
     dependency(monkeypatch, "permissions.models", Resource=object)
-    dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object)
+    dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object,
+               resolve_knowledge_permissions=lambda *args, **kwargs: {})
     module = load_source(
         monkeypatch,
         "backend/management/services/knowledge_base/permission.py",
@@ -460,7 +461,8 @@ def test_ac016_management_services_are_grouped_by_business_package():
         if path.is_dir() and not path.name.startswith("__")
     )
 
-    assert root_modules == ["__init__.py"]
+    # Northbound remains a Management ingress facade after its image is retired.
+    assert root_modules == ["__init__.py", "northbound.py"]
     assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 
