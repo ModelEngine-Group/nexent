@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: FILE-CLEANSE
+  name: Management file cleansing
+feature:
+  feature_id: DPR-CLEANSE
+  name: Durable authorized file cleansing jobs
+  status: active
+  description: Authorized admission, lease fencing and durable local dispatch for file cleansing.
+  business_rules:
+  - rule_id: DPR-CLEANSE-RULE-01
+    description: Admission is idempotent and inspection preserves user, tenant and run ownership.
+  - rule_id: DPR-CLEANSE-RULE-02
+    description: Only the current attempt may complete; recorded unknown outcomes block automatic replay.
+  - rule_id: DPR-CLEANSE-RULE-03
+    description: Broker acknowledgement follows durable job policy and duplicates do not reexecute a completed job.
+  required_test_stages: [D3]

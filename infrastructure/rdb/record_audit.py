@@ -7,14 +7,19 @@ from datetime import datetime, timezone
 from nexent.storage.errors import InvalidInput
 
 
-def timestamp(value):
+def timestamp(value, *, naive=False):
     try:
-        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        result = (
+            value
+            if isinstance(value, datetime)
+            else datetime.fromisoformat(value.replace("Z", "+00:00"))
+        )
     except (ValueError, TypeError, AttributeError):
         raise InvalidInput() from None
     if result.tzinfo is None:
         raise InvalidInput()
-    return result.astimezone(timezone.utc)
+    result = result.astimezone(timezone.utc)
+    return result.replace(tzinfo=None) if naive else result
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,12 @@ class RecordAudit:
     created_by: str
     updated_by: str
     inactive_value: str = "Y"
+    extra_dates: frozenset[str] = frozenset()
+
+    def __post_init__(self):
+        object.__setattr__(self, "extra_dates", frozenset(self.extra_dates))
+        if self.fields & self.extra_dates:
+            raise InvalidInput()
 
     @property
     def fields(self):
@@ -33,7 +44,7 @@ class RecordAudit:
 
     @property
     def dates(self):
-        return frozenset({self.created_at, self.updated_at})
+        return frozenset({self.created_at, self.updated_at}) | self.extra_dates
 
     def values(self, actor, *, create=False):
         now = datetime.now(timezone.utc)

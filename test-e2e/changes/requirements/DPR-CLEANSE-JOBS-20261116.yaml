@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-JOBS-20261116
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Durable Management cleansing admission and fenced local dispatch
+  description: >-
+    Add a Management-owned job table with authorized request snapshots, stable
+    admission identity, lease attempt tokens and confirmed artifact references.
+    Add a local handler registry and bounded single-delivery dispatch through
+    storage ports. Public handlers, prefork startup and publication-intent
+    reconciliation are not enabled in this slice.
+  affected_features:
+    existing: [SI-STORAGE, F-101]
+    added: [DPR-CLEANSE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DPR-CLEANSE-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Reuse admission identity across retries and reject conflicting inputs.
+    - Preserve user/tenant/run ownership and authorize before admission.
+    - Fence expired/replaced/cancelled worker attempts before completion.
+    - Block automatic retries after a recorded unknown publication result.
+    - Dispatch only registered handlers and acknowledge after durable outcomes.
+    - Convert declared lease timestamps without weakening protected audit fields.
+    reason: Existing storage and parser tests do not prove durable cleanse-job policy.
+    test_selectors:
+    - test/backend/services/test_cleanse_jobs.py
+    - test/backend/services/test_cleanse_worker.py
+    - test/backend/infrastructure/test_record_audit.py

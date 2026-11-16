@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DPR-CLEANSE-D3-001
+timeout_seconds: 180
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_durable_cleanse_dispatch
+acceptance_bindings:
+  AC-01: [test_durable_cleanse_dispatch]
+  AC-02: [test_durable_cleanse_dispatch]
+  AC-03: [test_durable_cleanse_dispatch]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

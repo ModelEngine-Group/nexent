@@ -1,0 +1,240 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Disposable PostgreSQL/Redis integration; parser output is a controlled fixture."""
+
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[3]
+sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
+import sqlalchemy as sa
+from contracts.agentos_knowledge import (
+    FileCleanseLookup,
+    FileCleanseRequest,
+    ObjectReference,
+)
+from management.services.file.cleanse_jobs import CleanseJobs
+from management.services.file.cleanse_worker import (
+    HANDLER,
+    CleanseHandler,
+    HandlerRegistry,
+    consume_once,
+    enqueue_ready,
+)
+from nexent.storage.errors import NotFound
+from nexent.storage.models import (
+    Comparison,
+    OperationContext,
+    PageRequest,
+    RecordQuery,
+    StorageScope,
+)
+
+from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
+from infrastructure.redis.kv import RedisKeyValueConfig, RedisKeyValueStore
+from infrastructure.storage.work_queue import KombuWorkQueue, QueueBinding
+
+
+def docker(*args):
+    return subprocess.check_output(
+        ["docker", *args], text=True, stderr=subprocess.PIPE, timeout=40
+    ).strip()
+
+
+def context():
+    return OperationContext("cleanse-job-probe", time.monotonic() + 10)
+
+
+def published():
+    return ObjectReference(
+        space="files",
+        key="fixture/artifact.json",
+        version="etag:fixture",
+        sha256="2" * 64,
+    )
+
+
+run_id = sys.argv[1]
+assert len(run_id) == 32 and all(char in "0123456789abcdef" for char in run_id)
+containers = []
+engine = queue = kv = None
+try:
+    pg = docker(
+        "run",
+        "--rm",
+        "-d",
+        "--label",
+        f"nexent.test_run={run_id}",
+        "-e",
+        "POSTGRES_PASSWORD=fixture-password",
+        "-p",
+        "127.0.0.1::5432",
+        "postgres:15-alpine",
+    )
+    containers.append(pg)
+    redis = docker(
+        "run",
+        "--rm",
+        "-d",
+        "--label",
+        f"nexent.test_run={run_id}",
+        "-p",
+        "127.0.0.1::6379",
+        "redis:7-alpine",
+    )
+    containers.append(redis)
+
+    def port(container, key):
+        return json.loads(
+            docker("inspect", "--format", "{{json .NetworkSettings.Ports}}", container)
+        )[key][0]["HostPort"]
+
+    engine = sa.create_engine(
+        f"postgresql+psycopg2://postgres:fixture-password@127.0.0.1:{port(pg, '5432/tcp')}/postgres",
+        connect_args={"connect_timeout": 1, "options": "-c timezone=Asia/Shanghai"},
+        hide_parameters=True,
+    )
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            with engine.connect() as conn:
+                conn.execute(sa.text("SELECT 1"))
+            break
+        except sa.exc.OperationalError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE SCHEMA nexent")
+        cleanse_jobs.create(conn, checkfirst=True)
+
+    def service(user="user-a", tenant="tenant-a"):
+        records = bind_cleanse_jobs(
+            StorageScope("management", tenant, user, {DATASET}), engine
+        )
+        return CleanseJobs(
+            records, authorize=lambda request: None, parser_version="parser-v1"
+        )
+
+    public = service()
+    worker = service("worker")
+    request = FileCleanseRequest(
+        run_id="a" * 32,
+        source=ObjectReference(
+            space="files", key="source.txt", version="etag:s", sha256="1" * 64
+        ),
+        filename="source.txt",
+        idempotency_key="first",
+    )
+    state = public.submit(request, context=context())
+    assert public.submit(request, context=context()).job_id == state.job_id
+    lookup = FileCleanseLookup(run_id=state.run_id, job_id=state.job_id)
+    for foreign in (service("user-b"), service(tenant="tenant-b")):
+        try:
+            foreign.inspect(lookup, context=context())
+        except NotFound:
+            pass
+        else:
+            raise AssertionError("foreign job leaked")
+    scope = StorageScope("management", "tenant-a", "worker", {"cleanse"})
+    url = f"redis://127.0.0.1:{port(redis, '6379/tcp')}/0"
+    kv = RedisKeyValueStore(
+        RedisKeyValueConfig(url, "probe"), scope, namespace="cleanse"
+    )
+    queue = KombuWorkQueue(
+        scope, QueueBinding("cleanse", url, {"management"}, {HANDLER}), kv
+    )
+    executions = []
+
+    def execute(row, request, **kwargs):
+        assert row["user_id"] == "user-a"
+        executions.append(row["job_id"])
+        return published()
+
+    handler = CleanseHandler(
+        worker,
+        owner_id="worker-1",
+        lease_seconds=60,
+        authorize_execution=lambda row, request: None,
+        execute=execute,
+    )
+    registry = HandlerRegistry({HANDLER: handler})
+    assert enqueue_ready(worker, queue, context=context()) == 1
+    assert enqueue_ready(worker, queue, context=context()) == 1
+    for _ in range(2):
+        assert consume_once(queue, registry, max_wait=0.5, context=context())
+    assert len(executions) == 1
+    assert public.inspect(lookup, context=context()).artifact == published()
+    req2 = request.model_copy(update={"idempotency_key": "stale"})
+    second = public.submit(req2, context=context())
+    clock = [datetime.now(timezone.utc)]
+    worker.clock = lambda: clock[0]
+    old = worker.claim("old", job_id=second.job_id, lease_seconds=1, context=context())
+    clock[0] += timedelta(seconds=2)
+    new = worker.claim("new", job_id=second.job_id, lease_seconds=60, context=context())
+    assert new and not worker.transition(
+        old, status="completed", artifact=published(), context=context()
+    )
+    assert worker.transition(
+        new, status="completed", artifact=published(), context=context()
+    )
+    unknown = public.submit(
+        request.model_copy(update={"idempotency_key": "unknown"}), context=context()
+    )
+    handle = worker.claim(
+        "uncertain", job_id=unknown.job_id, lease_seconds=60, context=context()
+    )
+    assert worker.mark_uncertain(handle, context=context())
+    clock[0] += timedelta(seconds=120)
+    assert worker.ready(context=context()) == ()
+    row = public.records.query(
+        DATASET,
+        RecordQuery(where=Comparison("job_id", "eq", state.job_id)),
+        PageRequest(),
+        context=context(),
+    ).items[0]
+    assert (
+        abs(
+            (
+                datetime.fromisoformat(row["create_time"]) - datetime.now(timezone.utc)
+            ).total_seconds()
+        )
+        < 10
+    )
+    dated = public.records.query(
+        DATASET,
+        RecordQuery(where=Comparison("create_time", "gte", row["create_time"])),
+        PageRequest(),
+        context=context(),
+    ).items
+    assert any(item["job_id"] == state.job_id for item in dated)
+    with engine.connect() as conn:
+        comments = conn.execute(
+            sa.text(
+                "SELECT count(*) FROM pg_description d JOIN pg_class c ON c.oid=d.objoid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='nexent' AND c.relname='file_cleanse_job_t' AND d.objsubid>0"
+            )
+        ).scalar_one()
+    assert comments == len(cleanse_jobs.columns)
+    result = {
+        "column_comments": comments,
+        "admission_replay": True,
+        "ownership": True,
+        "redis_dispatch": True,
+        "duplicate_executes_once": True,
+        "lease_takeover_fenced": True,
+        "unknown_outcome_quarantined": True,
+        "utc_audit_with_non_utc_session": True,
+    }
+    print(json.dumps(result))
+finally:
+    if queue:
+        queue.close()
+    if kv:
+        kv.close()
+    if engine is not None:
+        engine.dispose()
+    for container in reversed(containers):
+        docker("rm", "-f", "-v", container)

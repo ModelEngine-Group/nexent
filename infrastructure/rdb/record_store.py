@@ -48,9 +48,11 @@ def _predicate(table, value):
 
         value = replace(
             value,
-            value=[timestamp(item) for item in value.value]
+            value=[
+                timestamp(item, naive=not column.type.timezone) for item in value.value
+            ]
             if value.operator == "in"
-            else timestamp(value.value),
+            else timestamp(value.value, naive=not column.type.timezone),
         )
     operations = {
         "eq": lambda: column == value.value,
@@ -126,7 +128,8 @@ class SQLRecordStore:
             }
             audit = self._audits.get(name)
             if audit is not None and (
-                len(audit.fields) != 4 or not audit.fields <= fields
+                len(audit.fields) != 4
+                or not (audit.fields | audit.extra_dates) <= fields
             ):
                 raise InvalidInput()
             if audit is not None:
@@ -291,7 +294,27 @@ class SQLRecordStore:
             json.dumps(values, allow_nan=False)
         except (ValueError, TypeError):
             raise InvalidInput() from None
-        return dict(values)
+        data = dict(values)
+        audit = self._audits.get(name)
+        if audit is not None:
+            from infrastructure.rdb.record_audit import timestamp
+
+            for field in audit.extra_dates & data.keys():
+                if data[field] is not None:
+                    data[field] = timestamp(
+                        data[field], naive=not self._tables[name].c[field].type.timezone
+                    )
+        return data
+
+    def _audit_values(self, dataset, *, create=False):
+        from infrastructure.rdb.record_audit import timestamp
+
+        values = self._audits[dataset].values(self.scope.actor_id, create=create)
+        for field in self._audits[dataset].fields & values.keys():
+            column = self._tables[dataset].c[field]
+            if isinstance(column.type, sa.DateTime) and not column.type.timezone:
+                values[field] = timestamp(values[field], naive=True)
+        return values
 
     def get(
         self,
@@ -345,7 +368,7 @@ class SQLRecordStore:
             raise InvalidInput()
         data[revision] = 1
         if audit is not None:
-            data.update(audit.values(self.scope.actor_id, create=True))
+            data.update(self._audit_values(dataset, create=True))
         with self._session(context) as connection:
             row = (
                 self._execute(
@@ -389,7 +412,7 @@ class SQLRecordStore:
                 raise InvalidInput()
             data[field] = table.c[field] + delta
         if audit is not None:
-            data.update(audit.values(self.scope.actor_id))
+            data.update(self._audit_values(dataset))
         return definition, table, data
 
     def patch(self, dataset, key, patch: FieldPatch, *, expected=None, context):
@@ -428,7 +451,7 @@ class SQLRecordStore:
             statement = table.delete().where(where)
             if definition.active_field:
                 audit = self._audits[dataset]
-                values = audit.values(self.scope.actor_id)
+                values = self._audit_values(dataset)
                 values[definition.active_field] = audit.inactive_value
                 values[self._revisions[dataset]] = table.c[self._revisions[dataset]] + 1
                 statement = table.update().where(where).values(**values)

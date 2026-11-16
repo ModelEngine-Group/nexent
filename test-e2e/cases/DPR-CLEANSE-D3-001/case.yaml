@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-CLEANSE-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-001]
+  business_rule_ids: [DPR-CLEANSE-RULE-01, DPR-CLEANSE-RULE-02, DPR-CLEANSE-RULE-03]
+  title: Durable cleansing admission and fenced dispatch over PostgreSQL and Redis
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise real Management job policy with real storage ports and broker delivery.
+  preconditions:
+  - Docker and cached postgres:15-alpine and redis:7-alpine images are available.
+  - Backend Python dependencies are installed.
+  test_data:
+    resources: Disposable databases and synthetic user/tenant/object references.
+    execution: Controlled parser-result reference; no model or object provider is invoked.
+  steps:
+  - order: 1
+    action: Submit a request twice, then inspect it as another user or tenant.
+    expected: Submission returns the same job ID; foreign inspection is refused.
+  - order: 2
+    action: Publish the queued job twice through Redis and consume with the local registry.
+    expected: Execution occurs once and the durable completed artifact remains inspectable.
+  - order: 3
+    action: Advance a controlled clock past a lease, take over the job and submit the old completion.
+    expected: The old attempt cannot complete; the new owner can publish its result.
+  - order: 4
+    action: Record an unknown publication outcome and advance beyond its lease.
+    expected: Automatic ready selection excludes the job.
+  - order: 5
+    action: Read audit timestamps under a non-UTC PostgreSQL session and remove owned test resources.
+    expected: UTC values and date filters remain correct; no test containers or anonymous volumes are retained.
+  expected_results:
+  - Idempotent admission preserves user/tenant ownership.
+  - Duplicate broker delivery does not repeat completed execution.
+  - Lease takeover fences the previous attempt.
+  - Recorded unknown outcomes are not blindly requeued.
+  - Audit timestamps retain UTC semantics and disposable resources are reclaimed.
+  forbidden_side_effects:
+  - No application database, broker, credentials or containers are used.
+  integration_boundary:
+  - Real PostgreSQL and Redis, RecordStore and WorkQueue, Management jobs and registry; controlled identity/authorization callbacks, clock and parser result.
+  observations:
+  - Job identity, persisted artifact, execution count, rejected ownership, takeover and quarantine state.
+  cleanup:
+  - Delete only test-owned containers by their returned IDs including anonymous volumes.
+  acceptance:
+  - id: AC-01
+    description: Admission and inspection enforce durable identity and ownership.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Duplicate delivery and lease takeover preserve one current execution result.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Unknown outcomes and UTC audit semantics survive real storage interaction.
+    steps: [4, 5]
+    expected_results: [4, 5]
+    forbidden_side_effects: [1]
