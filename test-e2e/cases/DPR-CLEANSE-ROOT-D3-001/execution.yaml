@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-CLEANSE-ROOT-D3-001
+timeout_seconds: 130
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_owned_cleanse_root
+acceptance_bindings:
+  AC-01: [test_owned_cleanse_root]
+  AC-02: [test_owned_cleanse_root]
+  AC-03: [test_owned_cleanse_root]
+  AC-04: [test_owned_cleanse_root]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

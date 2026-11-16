@@ -24,4 +24,6 @@ feature:
     description: Temporary run artifacts and images belong to the admitted run/job; KB object keys remain unchanged.
   - rule_id: DPR-CLEANSE-RULE-08
     description: Release verifies and exclusively removes only confirmed completed run outputs, retaining source objects and unknown-outcome fencing.
+  - rule_id: DPR-CLEANSE-RULE-09
+    description: Management owns one separate cleansing root, exposes unexpected exit as unhealthy and reclaims its processes without automatic restart.
   required_test_stages: [D3]

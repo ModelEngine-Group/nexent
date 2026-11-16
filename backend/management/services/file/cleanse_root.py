@@ -3,6 +3,7 @@
 
 import math
 import multiprocessing
+import os
 import signal
 from datetime import datetime, timezone
 from threading import Event
@@ -26,6 +27,7 @@ from nexent.storage.models import (
 )
 
 from infrastructure.file_processing.isolated import ensure_isolation_available
+from infrastructure.file_processing.root_process import READY
 from infrastructure.knowledge_cleanse import (
     cleanse_dispatch_ports,
     knowledge_cleanse_queue,
@@ -147,7 +149,7 @@ def serve(
             stop.wait(poll_seconds)
 
 
-def main():
+def main(*, ready_fd=None):
     from contracts.constants.environment import APP_VERSION
     from nexent.storage.errors import CapabilityUnsupported
 
@@ -156,6 +158,15 @@ def main():
     stop = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
+    ensure_isolation_available()
+    context = OperationContext("cleanse-startup-" + uuid4().hex, monotonic() + 10)
+    with cleanse_dispatch_ports(context=context) as records:
+        records.query(CLEANSE_DISPATCH_DATASET, RecordQuery(), PageRequest(limit=1), context=context)
+    if ready_fd is not None:
+        try:
+            os.write(ready_fd, READY)
+        finally:
+            os.close(ready_fd)
     serve(
         stop,
         owner_id="cleanse-root-" + uuid4().hex,
@@ -164,4 +175,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    arguments = argparse.ArgumentParser()
+    arguments.add_argument("--ready-fd", type=int)
+    main(ready_fd=arguments.parse_args().ready_fd)

@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-CLEANSE-LIFESPAN-20261117
+  change_type: requirement
+  requirement_id: DPR-001
+  title: Let Management own the independent cleansing root lifecycle
+  description: >-
+    Start one separate Linux root through a dedicated readiness pipe, expose its
+    unexpected exit through existing readiness health, and stop owned processes.
+    No automatic restart, task retry or legacy service fallback is added.
+  affected_features:
+    existing: [DPR-CLEANSE]
+    added: []
+    modified: [DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: [DPR-CLEANSE-ROOT-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Disabled startup creates no process and unsupported enabled platforms fail explicitly.
+    - Startup waits for the dedicated readiness byte once, closes its descriptors and fails on EOF/deadline.
+    - Unexpected exit ends the required health task without restarting the root.
+    - Normal and failed lifespan exits stop only their owned root and descendants within finite grace periods.
+    - The standalone root installs stop handlers and checks isolation before acknowledging readiness.
+    reason: >-
+      Existing root UT covers dispatch and lease ownership, not API process ownership.
+      Add lifecycle/launcher UT and actual Linux process integration D3; preserve D1.
+    test_selectors:
+    - test/backend/services/test_cleanse_lifespan.py
+    - test/backend/infrastructure/test_cleanse_process.py
+    - test/backend/services/test_cleanse_root.py
+  notes: >-
+    The Case owns exact-label temporary Linux/PG containers. The cached dependency
+    image is not final-image acceptance; source, parser/model assets and tool cutover remain required.

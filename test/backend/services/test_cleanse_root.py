@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Worker roots close discovery before parsing and bound every dispatch attempt."""
 
+import os
 from contextlib import contextmanager
 from threading import Event
 from unittest.mock import Mock
@@ -106,3 +107,22 @@ def test_storage_error_exits_without_retry(mocker):
         root.serve(stop, owner_id="worker", parser_version="v1", poll_seconds=0.1)
     dispatch.assert_called_once()
     wait.assert_not_called()
+
+
+def test_root_acknowledges_only_after_storage_check_and_handler_install(cycle, mocker):
+    records, _, _, _ = cycle
+    mocker.patch.object(root.multiprocessing, "get_all_start_methods", return_value=["fork"])
+    handlers = mocker.patch.object(root.signal, "signal")
+    serve = mocker.patch.object(root, "serve")
+    mocker.patch.object(root, "ensure_isolation_available")
+    read_fd, write_fd = os.pipe()
+    try:
+        root.main(ready_fd=write_fd)
+        assert os.read(read_fd, 1) == b"R"
+        with pytest.raises(OSError):
+            os.fstat(write_fd)
+    finally:
+        os.close(read_fd)
+    assert handlers.call_count == 2
+    records.query.assert_called_once()
+    serve.assert_called_once()

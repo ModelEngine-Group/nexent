@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D3
+module: FILE-CLEANSE
+case:
+  case_id: DPR-CLEANSE-ROOT-D3-001
+  feature_id: DPR-CLEANSE
+  requirement_ids: [DPR-001]
+  business_rule_ids: [DPR-CLEANSE-RULE-09]
+  title: Management owns one real Linux cleansing root and detects its exit
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the actual lifecycle, pipe handshake and separate Python root without a legacy service.
+  preconditions:
+  - Docker has cached postgres:15-alpine and NEXENT_CLEANSE_TEST_IMAGE names a cached Linux backend dependency image with /opt/backend/.venv/bin/python.
+  - The Case owns unique-label containers and temporary PostgreSQL schemas; no application data is used.
+  test_data:
+    resources: An empty private cleansing-job table, controlled removal of that owned table, and real mounted product source.
+    execution: The cached Linux image supplies dependencies only; no old HTTP/Celery service, parser or model is started.
+  steps:
+  - order: 1
+    action: Enter the real enabled Management cleansing lifespan against the empty valid schema.
+    expected: A distinct Python root acknowledges the dedicated pipe; its required monitor remains live and health is ready.
+  - order: 2
+    action: Leave the lifespan and inspect the owned root PID.
+    expected: The root is reaped, the monitor is cancelled and no replacement is spawned.
+  - order: 3
+    action: Enter another enabled lifecycle, remove its owned job table after readiness, and wait for actual discovery failure.
+    expected: The required monitor ends, health becomes not ready and the root is not automatically restarted.
+  - order: 4
+    action: Close database handles and remove only returned unique-label test containers and anonymous volumes.
+    expected: No owned container or server remains.
+  expected_results:
+  - Actual readiness distinguishes a separate live root from the API caller.
+  - Lifespan exit reaps its root and monitor without restarting either.
+  - Actual discovery failure is observable through existing required-background-task readiness.
+  - All test-owned resources are reclaimed.
+  forbidden_side_effects:
+  - No application data, unowned process, parser/model invocation, legacy service, automatic restart or task retry is used.
+  integration_boundary:
+  - Actual Linux subprocess, private readiness pipe, Management lifespan/root, health endpoint and PostgreSQL RecordStore discovery.
+  observations:
+  - Root PID/exit status, required task state, health statuses and exact-label cleanup.
+  cleanup:
+  - Stop the owned lifecycle and remove exact returned container IDs including anonymous volumes on all outcomes.
+  acceptance:
+  - id: AC-01
+    description: The enabled lifecycle starts one separate root and acknowledges readiness through its dedicated pipe.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Normal lifespan exit reaps its root and monitor with no replacement.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Real discovery failure ends the required monitor and makes health not ready without a restart.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: All uniquely owned resources are reclaimed even on assertion failure.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
