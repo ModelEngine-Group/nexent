@@ -460,7 +460,7 @@ class TenantMCPRouter(_TenantMCPRouter):
 
     def __init__(self):
         super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
-                         internal_token=TOKEN, gateway_required=gateway_identity_enabled(),
+                         internal_token=NEXENT_MCP_INTERNAL_TOKEN, gateway_required=gateway_identity_enabled(),
                          legacy_identity=_legacy_mcp_identity)
 
 

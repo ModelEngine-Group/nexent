@@ -36,5 +36,8 @@ async def test_gateway_forwards_original_northbound_and_a2a_paths_to_management(
                         assert card.json()["name"] == "management-owned-agent"
                     denied = await client.get("/api/internal/thread-capacity")
                     assert denied.status_code == 404
+                    # The manifest only declares GET for /nb/v1/health; an
+                    # unlisted method falls back to 404 (AC-R4 404-equivalence
+                    # for capabilities not declared in the manifest).
                     wrong_method = await client.delete("/nb/v1/health")
-                    assert wrong_method.status_code == 405
+                    assert wrong_method.status_code == 404

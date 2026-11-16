@@ -38,7 +38,7 @@ class NorthboundContext:
     token_id: int = 0
 
 
-northbound_service_module = types.ModuleType("management.services.northbound")
+northbound_service_module = types.ModuleType("management.services.northbound.service")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
@@ -51,7 +51,7 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
-sys.modules["management.services.northbound"] = northbound_service_module
+sys.modules["management.services.northbound.service"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_files_impl = AsyncMock()

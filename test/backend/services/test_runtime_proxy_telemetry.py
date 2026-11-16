@@ -62,16 +62,22 @@ def test_nb_ac005_propagator_cannot_inject_authorization_or_baggage(manager, mon
 
 def test_nb_ac004_northbound_enables_existing_monitoring_and_deployment_config():
     root = Path(__file__).resolve().parents[3]
-    tree = ast.parse((root/'backend/gateway/application.py').read_text())
+    # The northbound app moved from gateway/application.py into
+    # management/api/northbound_application.py with the independent
+    # gateway image (business assembled in management, gateway only proxies).
+    tree = ast.parse((root/'backend/management/api/northbound_application.py').read_text())
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and isinstance(node.func, ast.Name) and node.func.id == 'create_app']
     assert len(calls) == 1
     assert any(kw.arg == 'enable_monitoring' and ast.literal_eval(kw.value) is True for kw in calls[0].keywords)
     for name in ['docker-compose.yml', 'docker-compose.prod.yml']:
         services = yaml.safe_load((root/'deploy/docker/compose'/name).read_text())['services']
-        assert '../../env/monitoring.env' in services['nexent-northbound']['env_file']
-    helm = (root/'deploy/k8s/helm/nexent/charts/nexent-northbound/templates/deployment.yaml').read_text()
-    assert 'name: nexent-monitoring-env' in helm.split('envFrom:')[1].split('          env:')[0]
+        # The northbound FastAPI app moved into the management service
+        # (nexent-config) with the independent gateway image; monitoring
+        # env follows the app that serves /nb routes, not the proxy.
+        assert '../../env/monitoring.env' in services['nexent-config']['env_file']
+    helm = (root/'deploy/k8s/helm/nexent/charts/nexent-config/templates/_pod-spec.tpl').read_text()
+    assert 'name: nexent-monitoring-env' in helm
     env = (root/'deploy/env/monitoring.env.example').read_text()
     included = next(line.split('=', 1)[1] for line in env.splitlines() if line.startswith('MONITORING_FASTAPI_INCLUDED_URLS='))
     excluded = monitoring._build_fastapi_excluded_urls(included, '')

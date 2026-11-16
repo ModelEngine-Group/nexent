@@ -44,8 +44,8 @@ class NorthboundContext:
     authorization: str
     token_id: int = 0
 
-# management.services.northbound - provides only NorthboundContext
-northbound_service_module = types.ModuleType("management.services.northbound")
+# management.services.northbound.service - provides only NorthboundContext
+northbound_service_module = types.ModuleType("management.services.northbound.service")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
@@ -58,7 +58,7 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
-sys.modules['management.services.northbound'] = northbound_service_module
+sys.modules['management.services.northbound.service'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
 from unittest.mock import AsyncMock, MagicMock

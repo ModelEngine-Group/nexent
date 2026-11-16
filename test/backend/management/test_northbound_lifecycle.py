@@ -98,7 +98,7 @@ async def test_startup_or_request_failure_always_closes_management_manager(lifec
 def test_business_implementations_have_one_management_owner():
     backend = Path(__file__).resolve().parents[3] / "backend"
     assert (backend / "management/api/northbound.py").is_file()
-    assert (backend / "management/services/northbound.py").is_file()
+    assert (backend / "management/services/northbound/service.py").is_file()
     assert not (backend / "gateway/api/northbound.py").exists()
     assert not (backend / "services/northbound_service.py").exists()
     tree = ast.parse((backend / "gateway/application.py").read_text(encoding="utf-8"))

@@ -38,6 +38,7 @@ from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
 from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
+    CONFIG_SERVICE_NAME,
     NORTHBOUND_SERVICE_NAME,
     RATE_LIMIT_EXCEEDED_DETAIL,
 )

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Tests for management.services.northbound module.
+Tests for management.services.northbound.service module.
 
 This module tests the northbound-facing service layer functions including:
 - Streaming chat (start/stop)
@@ -295,7 +295,7 @@ consts_model_mod.ToolParamsRequest = ToolParamsRequestStub
 install_business_contract_stubs(consts_model_mod)
 
 # Now import the module under test
-from management.services import northbound as ns
+from management.services.northbound import service as ns
 
 
 class MockNorthboundContext:
@@ -1787,7 +1787,7 @@ class TestStopChatErrorHandling:
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
         with patch(
-            "management.services.northbound.forward_agent_stop",
+            "management.services.northbound.service.forward_agent_stop",
             new_callable=AsyncMock,
             return_value={"message": "stopped"},
         ):
@@ -1921,7 +1921,7 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_parse_s3_url_error(self):
         """Test that parse_s3_url ValueError is converted to ValueError."""
-        with patch("management.services.northbound.parse_s3_url", side_effect=ValueError("Parse error")):
+        with patch("management.services.northbound.service.parse_s3_url", side_effect=ValueError("Parse error")):
             with pytest.raises(ValueError) as exc_info:
                 ns._normalize_northbound_attachments(
                     ["s3://bucket/file.txt"],
@@ -1932,8 +1932,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_permission_error_invalid_url(self):
         """Test that PermissionError with invalid URL is converted to ValueError."""
-        with patch("management.services.northbound.parse_s3_url", return_value=("bucket", "path/file.txt")), \
-                patch("management.services.northbound.validate_urls_access",
+        with patch("management.services.northbound.service.parse_s3_url", return_value=("bucket", "path/file.txt")), \
+                patch("management.services.northbound.service.validate_urls_access",
                       side_effect=PermissionError("Invalid S3 URL format: bad")):
             with pytest.raises(ValueError) as exc_info:
                 ns._normalize_northbound_attachments(
@@ -1974,7 +1974,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_permission_denied(self):
         """Test that a generic PermissionError is re-raised as-is."""
         with patch(
-            "management.services.northbound.validate_urls_access",
+            "management.services.northbound.service.validate_urls_access",
             side_effect=PermissionError("Access denied: You don't have permission to access this file")
         ):
             with pytest.raises(PermissionError) as exc_info:
@@ -1983,12 +1983,12 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_s3_url_success(self):
         """Test successful normalization of an s3:// URL with assertions on collaborator calls."""
-        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
+        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.service.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url, \
-                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+                patch("management.services.northbound.service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2016,12 +2016,12 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_no_presigned_url(self):
         """Test that presigned_url is omitted when get_file_url returns no url."""
-        with patch("management.services.northbound.validate_urls_access"), \
-                patch("management.services.northbound.get_file_url", return_value={
+        with patch("management.services.northbound.service.validate_urls_access"), \
+                patch("management.services.northbound.service.get_file_url", return_value={
                     "success": True,
                     "url": None
                 }), \
-                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+                patch("management.services.northbound.service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2031,8 +2031,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_relative_path(self):
         """Test support for attachments/xxx.md relative path format."""
-        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
+        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.service.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2063,8 +2063,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_nexent_path(self):
         """Test support for nexent/xxx.md path format."""
-        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
+        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.service.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2095,8 +2095,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_absolute_path(self):
         """Test support for /nexent/xxx.md absolute path format."""
-        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
+        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.service.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2207,10 +2207,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file.filename = "report.pdf"
 
         with patch(
-            "management.services.northbound.resolve_minio_upload_folder",
+            "management.services.northbound.service.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.upload_to_minio",
+            "management.services.northbound.service.upload_to_minio",
             AsyncMock(return_value=[{
                 "success": True,
                 "file_name": "report.pdf",
@@ -2257,10 +2257,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file.filename = "report.pdf"
 
         with patch(
-            "management.services.northbound.resolve_minio_upload_folder",
+            "management.services.northbound.service.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.upload_to_minio",
+            "management.services.northbound.service.upload_to_minio",
             AsyncMock(return_value=[{
                 "success": False,
                 "file_name": "report.pdf",
@@ -2286,10 +2286,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file2.filename = "image.png"
 
         with patch(
-            "management.services.northbound.resolve_minio_upload_folder",
+            "management.services.northbound.service.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.upload_to_minio",
+            "management.services.northbound.service.upload_to_minio",
             AsyncMock(return_value=[
                 {
                     "success": True,

@@ -17,9 +17,12 @@ def test_api_key_authentication_queries_credential_and_account_once(monkeypatch)
         calls.append(("account", user))
         return {"account_status": "active"}
 
+    membership = {"tenant_id": "t1", "role": "DEV"}
+
     monkeypatch.setattr(northbound_auth, "get_token_by_access_key", key_record)
     monkeypatch.setattr(northbound_auth, "require_active_account", account)
-    monkeypatch.setattr(northbound_auth, "get_user_tenant_by_user_id", lambda user: {"tenant_id": "t1"})
+    monkeypatch.setattr(northbound_auth, "get_user_tenant_by_user_id", lambda user: membership)
+    monkeypatch.setattr(northbound_auth, "roles_from_record", lambda record: [record.get("role", "DEV")])
     token = identity_context.set(None)
     try:
         principal = northbound_auth.authenticate_api_key("Bearer fixture-key")
