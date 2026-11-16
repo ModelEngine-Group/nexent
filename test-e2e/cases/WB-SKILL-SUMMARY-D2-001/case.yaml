@@ -23,9 +23,12 @@ case:
     profile: mock
   steps:
   - order: 1
-    action: GET /skills and /skills?view=mount as the fixture user.
+    action: GET /skills with default parameters, include_content=true, and view=mount
+      with and without include_content=true as the fixture user.
     expected: Both return the same visible skill IDs, ordering, permissions and configuration.
-      Only full mode returns content and tool_ids; mount payload is smaller.
+      Default full mode omits content and retains tool_ids; explicit include_content=true
+      returns content in full mode only. Mount mode omits both fields and all tool
+      relation queries, regardless of include_content; its payload is smaller.
   - order: 2
     action: Request mount mode without authentication, with an invalid view, and with
       empty storage.
@@ -43,7 +46,7 @@ case:
     method: GET
     endpoint: /skills?view=mount
     request_expectations:
-    - Optional view=full|mount, authorized fixture identity.
+    - Optional view=full|mount and include_content=false|true, authorized fixture identity.
     response_expectations:
     - 200 skills metadata envelope; 401 for absent authorization and 422 for invalid
       view.
