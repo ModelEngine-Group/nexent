@@ -17,6 +17,9 @@ from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
 def resources(monkeypatch):
     metadata, tables = sa.MetaData(), {}
     for name, original in cleanse_resources.TABLES.items():
+        if name == "knowledge_file_history":
+            tables[name] = tables["cleanse_files"]
+            continue
         columns = []
         for field in cleanse_resources.FIELDS[name].split():
             column = original.c[field]

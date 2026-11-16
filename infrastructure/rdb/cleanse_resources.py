@@ -24,6 +24,7 @@ group_links = TenantGroupUser.__table__
 groups = TenantGroupInfo.__table__
 TABLES = {
     "cleanse_files": KnowledgeFileLifecycle.__table__,
+    "knowledge_file_history": KnowledgeFileLifecycle.__table__,
     "cleanse_knowledge": KnowledgeRecord.__table__,
     "cleanse_memberships": UserTenant.__table__,
     "cleanse_accounts": select(
@@ -50,13 +51,15 @@ TABLES = {
 }
 FIELDS = {
     "cleanse_files": "file_id tenant_id knowledge_id original_filename status source_generation source_space source_key source_revision source_sha256 delete_flag",
-    "cleanse_knowledge": "knowledge_id tenant_id index_name created_by group_ids ingroup_permission knowledge_sources delete_flag",
+    "cleanse_knowledge": "knowledge_id tenant_id index_name embedding_model_id created_by group_ids ingroup_permission knowledge_sources delete_flag",
     "cleanse_memberships": "user_tenant_id user_id tenant_id delete_flag",
     "cleanse_accounts": "account_id tenant_id user_id user_roles delete_flag",
     "cleanse_group_memberships": "group_user_id tenant_id user_id group_id delete_flag",
     "cleanse_groups": "group_id tenant_id delete_flag",
 }
+FIELDS["knowledge_file_history"] = FIELDS["cleanse_files"]
 INTEGER_FIELDS = {
+    "embedding_model_id",
     "knowledge_id",
     "source_generation",
     "user_tenant_id",
@@ -94,7 +97,7 @@ def bind_cleanse_resources(scope, engine):
                 fields,
                 frozenset({"management"}),
                 tenant_field="tenant_id" if "tenant_id" in table.c else None,
-                active_field="delete_flag",
+                active_field=None if name == "knowledge_file_history" else "delete_flag",
             )
         )
     return SQLRecordStore(

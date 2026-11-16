@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-KB-HTTP-D3-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-002, DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02, DPR-KNOWLEDGE-RULE-03]
+  title: Signed KB admission through Runtime and Management HTTP with PostgreSQL
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify real bidirectional signed AgentOS calls, live Management authorization and durable Runtime admission without data-process.
+  preconditions:
+  - Docker, cached postgres:15-alpine and the configured Python test dependencies are available.
+  test_data:
+    resources: One owned database and two loopback ASGI HTTP servers with separate production routers and a managed thread pool.
+    fixtures: Synthetic account, membership, file and completed cleansing records; model metadata is controlled and provider invocation is forbidden.
+  steps:
+  - order: 1
+    action: Prepare the owned database, exact source and completed artifact fixtures, configure the production record compositions, and start both HTTP servers.
+    expected: Only owned fixtures and ports are used; neither server starts a data-process service.
+  - order: 2
+    action: Submit and replay a signed upload, then inspect through the typed AgentOS client.
+    expected: Runtime calls Management authorization over signed HTTP and returns the same durable queued job with no provider invocation.
+  - order: 3
+    action: Send a changed body under the original signature, another tenant, an unconfirmed artifact and a mismatched model revision.
+    expected: Requests fail with 401, 403, 403 and 409 respectively, and no extra Runtime job is admitted.
+  - order: 4
+    action: Mark the Management file DELETE_REQUESTED, submit a signed delete and inspect its job.
+    expected: History authorization succeeds, Runtime returns cleanup_pending and the covered queued upload is cancelled; physical completion is not claimed.
+  - order: 5
+    action: Hold a manifest row lock, submit another delete, let the actual HTTP client deadline expire, release the lock and replay the exact request.
+    expected: The timed out sender closes; the accepted request commits after release and replay returns one stable cleanup_pending job without another logical admission.
+  - order: 6
+    action: Revoke the actor membership, attempt inspection, then close both servers, managed workers, engine and owned container.
+    expected: Inspection is denied without falling back to a database read in Runtime; owned resources are reclaimed.
+  expected_results:
+  - Bidirectional AgentOS requests bind operation, exact body, tenant and user.
+  - Current authorization and confirmed cleansing artifacts gate durable admission before model or vector side effects.
+  - Deletion remains logically pending and preserves lifecycle ownership.
+  - Resource closure and revocation are observable without data-process or retry paths.
+  - A lost HTTP admission response remains confirmable by the same idempotent request without false physical completion.
+  forbidden_side_effects:
+  - No application data, model provider, actual vector write, parser process or data-process endpoint is accessed.
+  integration_boundary:
+  - Actual HTTP servers, production routers, signature verification, typed client, Management resource policy and Runtime RecordStore policy against owned PostgreSQL.
+  - Model lookup metadata and completed cleansing publication are controlled fixtures; application lifespans, two final images, worker execution and physical cleanup are not proved.
+  observations:
+  - HTTP statuses, stable job IDs, actual Runtime job counts, cancellation state and managed resource closure.
+  cleanup:
+  - Stop both owned servers and close listening sockets, drain the managed pool, dispose the engine and remove only the uniquely named test container and anonymous volumes.
+  acceptance:
+  - id: AC-01
+    description: Real signed bidirectional HTTP admits and inspects one durable request.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Invalid identity, artifact or model revision cannot admit another job.
+    steps: [3]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Deletion and queued cancellation use authorized history without claiming physical completion.
+    steps: [4]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Revocation stops access and owned resources close.
+    steps: [6]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: An actual request deadline and lost response preserve durable idempotent admission.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]

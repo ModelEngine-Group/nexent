@@ -100,6 +100,30 @@ class KnowledgeFileDelete(KnowledgeFileReference):
     idempotency_key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
+class KnowledgeAuthorizationRequest(KnowledgeFileReference):
+    action: Literal["upload", "execute", "inspect", "delete"]
+    artifact: ObjectReference | None = None
+    parser_version: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def artifact_scope(self):
+        execution = self.action in {"upload", "execute"}
+        if execution and (self.artifact is None or self.parser_version is None):
+            raise ValueError("Execution authorization requires a cleansing artifact")
+        if not execution and (
+            self.artifact is not None or self.parser_version is not None
+        ):
+            raise ValueError("Lookup authorization cannot carry execution artifacts")
+        return self
+
+
+class KnowledgeFileGrant(KnowledgeAuthorizationRequest):
+    source: ObjectReference | None
+    filename: str = Field(min_length=1, max_length=1024)
+    collection: str = Field(min_length=1, max_length=100)
+    embedding_model_id: int | None = Field(default=None, gt=0)
+
+
 class KnowledgeJobLookup(KnowledgeFileReference):
     job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 

@@ -5,27 +5,23 @@ import asyncio
 import logging
 
 import httpx
-from pydantic import ValidationError
-from starlette.background import BackgroundTask
-from starlette.responses import StreamingResponse
-
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
-    ManagementOperation,
     AgentActiveRun,
+    AgentLegacyResume,
     AgentMemoryReceipt,
     AgentMemoryStore,
     AgentMessageRunLookup,
     AgentOperation,
+    AgentResume,
     AgentRunLookup,
     AgentRunReference,
-    AgentStop,
-    BackgroundRun,
-    DebugRunReference,
-    AgentLegacyResume, AgentResume,
     AgentRunState,
+    AgentStop,
     CompatibilityStop,
+    DebugRunReference,
     EvaluationAgentResult,
+    ManagementOperation,
     MemoryOperation,
     ModelInvocation,
     ModelMetadata,
@@ -37,15 +33,33 @@ from contracts.agentos import (
     PreparedEphemeralRun,
     PreparedEvaluationRun,
     PreparedSkillCreatorRun,
-    TrackedBackgroundResult,
 )
-from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.agentos_knowledge import (
+    KnowledgeFileGrant,
+    KnowledgeJobState,
+    KnowledgeOperation,
+)
 from contracts.constants import environment
-from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
+from contracts.errors.exceptions import (
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+)
+from pydantic import ValidationError
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
+
+from infrastructure.agentos_identity import (
+    AgentOSIdentityError,
+    ServicePrincipal,
+    sign_call,
+)
 
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _MODEL_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+_KNOWLEDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+_KNOWLEDGE_DEADLINE_SECONDS = 10.0
 logger = logging.getLogger(__name__)
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -62,6 +76,30 @@ class AgentOSClient:
     def __init__(self, runtime_url, create_client):
         self.runtime_url = runtime_url.rstrip("/")
         self.create_client = create_client
+
+    async def authorize_knowledge(self, payload, user_id, tenant_id):
+        return await self._knowledge_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
+
+    async def upload_knowledge_file(self, payload, user_id, tenant_id):
+        return await self._knowledge_json(KnowledgeOperation.UPLOAD, payload, user_id, tenant_id, KnowledgeJobState)
+
+    async def inspect_knowledge_file(self, payload, user_id, tenant_id):
+        return await self._knowledge_json(KnowledgeOperation.INSPECT, payload, user_id, tenant_id, KnowledgeJobState)
+
+    async def delete_knowledge_file(self, payload, user_id, tenant_id):
+        return await self._knowledge_json(KnowledgeOperation.DELETE, payload, user_id, tenant_id, KnowledgeJobState)
+
+    async def _knowledge_json(self, operation, payload, user_id, tenant_id, schema):
+        try:
+            async with asyncio.timeout(_KNOWLEDGE_DEADLINE_SECONDS):
+                result = await self._post_json(operation, payload, user_id, tenant_id, timeout=_KNOWLEDGE_TIMEOUT)
+                return self._validate_result(schema, result)
+        except (TimeoutError, RuntimeServiceTimeoutError) as exc:
+            logger.warning(
+                "agentos_knowledge_timeout operation=%s phase=request threshold_seconds=%s exception_type=%s",
+                operation.name, _KNOWLEDGE_DEADLINE_SECONDS, type(exc).__name__,
+            )
+            raise RuntimeServiceTimeoutError("AgentOS knowledge request timed out") from exc
 
     def _request(self, operation, payload, user_id, tenant_id):
         body = payload.model_dump_json().encode("utf-8")

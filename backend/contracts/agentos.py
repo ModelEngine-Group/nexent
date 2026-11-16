@@ -4,11 +4,20 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
-
-from contracts.model import WorkbenchGenerationConfig
 from contracts.agentos_knowledge import KnowledgeOperation
+from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    PositiveInt,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 NAMESPACE = "/internal/agentos/"
 AGENTOS_PREPARATION_STOP = "agentos preparation stop"
@@ -764,6 +773,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
+    KNOWLEDGE_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize"
     FILE_CLEANSE = NAMESPACE + "v1/file/cleanse"
     FILE_CLEANSE_STATUS = NAMESPACE + "v1/file/cleanse-status"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"

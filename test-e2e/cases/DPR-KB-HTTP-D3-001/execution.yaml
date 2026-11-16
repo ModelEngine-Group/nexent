@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: DPR-KB-HTTP-D3-001
+timeout_seconds: 150
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_signed_knowledge_lifecycle
+acceptance_bindings:
+  AC-01: [test_signed_knowledge_lifecycle]
+  AC-02: [test_signed_knowledge_lifecycle]
+  AC-03: [test_signed_knowledge_lifecycle]
+  AC-04: [test_signed_knowledge_lifecycle]
+  AC-05: [test_signed_knowledge_lifecycle]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

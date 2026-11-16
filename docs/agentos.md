@@ -115,6 +115,21 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ## 鉴权、错误与超时
 
+### KnowledgeBase 文件生命周期
+
+Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`；执行 worker、完整检索及物理清理仍在迁移，当前公开入库流程尚未切换。
+
+| 用途 | AgentOS 路径 | 客户端方法及契约 |
+| --- | --- | --- |
+| 接纳已完成清洗的文件 | `/internal/agentos/v1/knowledge/files/upload` | `upload_knowledge_file(KnowledgeFileUpload, user_id, tenant_id)`，返回 `KnowledgeJobState`，HTTP 202 |
+| 查询原用户、租户及文件版本的任务 | `/internal/agentos/v1/knowledge/files/inspect` | `inspect_knowledge_file(KnowledgeJobLookup, user_id, tenant_id)`，HTTP 200 |
+| 提交逻辑删除及清理义务 | `/internal/agentos/v1/knowledge/files/delete` | `delete_knowledge_file(KnowledgeFileDelete, user_id, tenant_id)`，HTTP 202 |
+| Runtime 查询 Management 的实时资源授权 | `/internal/agentos/v1/knowledge/authorize` | `authorize_knowledge(KnowledgeAuthorizationRequest, user_id, tenant_id)`，返回 `KnowledgeFileGrant` |
+
+前三项发往 Runtime，最后一项发往 Management，均复用 `AgentOSClient` 的方向隔离签名。Management 校验当前 DAC、源代次与已完成清洗任务，返回固定对象引用、文件名、逻辑集合及 KB 模型 ID。Runtime 校验 grant 和实际模型 revision 后接纳，不读取 Management 业务表。上传要求已有确认产物；新建幂等键不能绕过版本或删除墓碑。
+
+KB 客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
+
 `AgentOSClient` 对 JSON body、operation、user_id、tenant_id 生成服务签名。双方用 JWT_SECRET 派生不同方向的 HMAC 密钥，token 有效期为 30 秒，绑定 issuer、audience、operation 和 body hash。客户端自动签名，业务代码不应自己拼 token。Gateway 外部用户 token 不直接替代 AgentOS 服务身份。
 
 客户端禁用重定向，请求体上限为 8 MiB。没有签名或签名不匹配返回 401，结构错误通常返回 422，归属不匹配按具体公开合同返回 403 或 404。资源版本冲突、运行冲突和过期游标按接口各自的 409、410 合同处理；不要统一吞成 500。
@@ -127,6 +142,6 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
-KnowledgeBase.search、KnowledgeBase.File.upload/delete 在架构 SPEC 中有目标抽象，目前尚未形成完整独立 AgentOS HTTP 接口。data-process 仍单独运行，它的拆分将在后续规格中完成，不能把当前 Model.invoke 的 embedding 支持等同于整个知识入库流水线已迁移。
+KnowledgeBase.search、执行 worker、图片处理及消费者切换仍待完成。文件 upload/inspect/delete 已有内部接纳接口，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

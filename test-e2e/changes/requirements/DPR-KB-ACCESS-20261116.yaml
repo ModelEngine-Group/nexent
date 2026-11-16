@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-ACCESS-20261116
+  change_type: requirement
+  requirement_id: DPR-002
+  title: Connect signed KB lifecycle calls with Management resource authorization
+  description: >-
+    Runtime obtains a fresh signed Management grant rather than reading Management business tables.
+    Management reuses its DAC and completed cleansing records. Runtime validates the grant and model
+    revision before durable upload admission; inspect and delete preserve ownership and history.
+    New calls have finite total deadlines with no retries or alternate database path.
+  affected_features:
+    existing: [DPR-KNOWLEDGE, DPR-CLEANSE]
+    added: []
+    modified: [DPR-KNOWLEDGE, DPR-CLEANSE]
+    retired: []
+  affected_cases:
+    existing: [DPR-CLEANSE-D3-001]
+    added: [DPR-KB-HTTP-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve existing cleansing permissions while sharing live DAC and adding explicit read-only file history.
+    - Bind granted artifacts to completed user/tenant/file/version cleansing records.
+    - Check grant and model revisions before opening Runtime job ports.
+    - Keep signatures, safe HTTP statuses, ownership and total timeout cancellation without retry.
+    reason: >-
+      Existing cleansing UT remains. New unit assertions cover the added contract and error paths;
+      actual bidirectional HTTP and PostgreSQL D3 adds runtime protocol proof beyond ASGI unit tests.
+      No duplicate D1 and no claim of worker, provider or complete image retirement is added.
+    test_selectors:
+    - test/backend/services/test_cleanse_authorization.py
+    - test/backend/services/test_knowledge_authorization.py
+    - test/backend/services/test_runtime_knowledge_service.py
+    - test/backend/app/test_agentos_knowledge_api.py
+  notes: >-
+    The added Case inherits Runtime responsibility and owns all database, socket and task cleanup.
+    Completed artifact bytes and model metadata are controlled; real parsing/provider/vector proof remains separate.

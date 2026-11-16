@@ -5,30 +5,37 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from backend.http.server.app_factory import create_app
-from runtime.agentos.memory import create_memory_store_router
-from runtime.agentos.middleware import AgentOSMiddleware
-from runtime.agentos.model import create_model_router
-from runtime.agentos.model_administration import create_model_administration_router
-from runtime.agentos.prepared_run import create_prepared_run_router
-from runtime.agentos.resume import create_run_lifecycle_router
-from runtime.model.service import ModelService
-from runtime.recovery import recover_streaming_runs, watch_executions
-from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
-from infrastructure.model_adapter import get_adapter_from_config
-from runtime.agentos.debug import stop_agentos_debug
-from runtime.agentos.ephemeral import create_ephemeral_run_router
-from runtime.agentos.evaluation import create_evaluation_router
-from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
+from runtime.agentos.ephemeral import create_ephemeral_run_router
+from runtime.agentos.evaluation import create_evaluation_router
+from runtime.agentos.knowledge import create_knowledge_router
+from runtime.agentos.memory import create_memory_store_router
+from runtime.agentos.middleware import AgentOSMiddleware
+from runtime.agentos.model import create_model_router
+from runtime.agentos.model_administration import create_model_administration_router
+from runtime.agentos.prepared_run import create_prepared_run_router
+from runtime.agentos.resume import create_run_lifecycle_router
+from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.voice.streaming import voice_runtime_router as voice_router
+from runtime.model.service import ModelService
+from runtime.recovery import recover_streaming_runs, watch_executions
+from runtime.thread_management import (
+    runtime_thread_manager,
+    shutdown_agent_stream_tasks,
+)
+
+from backend.http.server.app_factory import create_app
+from infrastructure.model_adapter import get_adapter_from_config
+from infrastructure.rdb.model_records import (
+    fail_detecting_models_on_startup,
+    get_model_by_model_id,
+)
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
@@ -108,6 +115,7 @@ app.add_middleware(AgentOSMiddleware)
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_memory_store_router())
+app.include_router(create_knowledge_router())
 app.include_router(create_model_administration_router())
 app.include_router(create_evaluation_router())
 app.include_router(create_run_lifecycle_router())

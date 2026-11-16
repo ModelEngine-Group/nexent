@@ -1,74 +1,93 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from management.api.northbound_application import northbound_lifespan
-from management.api.northbound import router as northbound_router, a2a_router
-from management.api.identity.gateway_identity import router as gateway_identity_router
 import logging
 from contextlib import asynccontextmanager
 
-from backend.http.server.app_factory import create_app
-from management.api.agent.agent import agent_config_router as agent_router
-from management.api.agent.conversation_run import router as conversation_run_router
-from management.api.automation.agent_automation import (
-    conversation_automation_router,
-    router as agent_automation_router,
+from contracts.constants.environment import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    ENABLE_AIDP_KNOWLEDGE,
 )
-from management.api.skill.creation import skill_creator_router
+from management.api.a2a.a2a_client import router as a2a_client_router
+from management.api.a2a.a2a_server import router as a2a_server_router
+from management.api.agent.agent import agent_config_router as agent_router
+from management.api.agent.agent_repository import agent_repository_router
+from management.api.agent.conversation_run import router as conversation_run_router
 from management.api.agent.creator import router as agent_creator_router
 from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
 from management.api.agent.workbench_callback import router as workbench_callback_router
-from management.api.automation.agentos_callback import router as automation_callback_router
-from management.api.memory.agentos_callback import router as memory_callback_router
-from management.api.conversation.conversation_management import router as conversation_router
-from management.api.conversation.workbench_pins import router as workbench_pins_router
-from management.api.conversation.conversation_share import router as conversation_share_router
-from management.api.agent.agent_repository import agent_repository_router
-from management.api.skill.skill_repository import skill_repository_router
+from management.api.automation.agent_automation import (
+    conversation_automation_router,
+)
+from management.api.automation.agent_automation import (
+    router as agent_automation_router,
+)
+from management.api.automation.agentos_callback import (
+    router as automation_callback_router,
+)
 from management.api.configuration.config_sync import router as config_sync_router
-from management.api.knowledge_base.datamate import router as datamate_router
-from management.api.knowledge_base.vectordatabase import router as vectordatabase_router
-from management.api.knowledge_base.dify import router as dify_router
-from management.api.knowledge_base.idata import router as idata_router
-from management.api.knowledge_base.ragflow import router as ragflow_router
-from management.api.file.file_management import file_management_config_router as file_manager_router
+from management.api.configuration.tenant_config import router as tenant_config_router
+from management.api.conversation.conversation_management import (
+    router as conversation_router,
+)
+from management.api.conversation.conversation_share import (
+    router as conversation_share_router,
+)
+from management.api.conversation.workbench_pins import router as workbench_pins_router
+from management.api.evaluation.agent_evaluation import router as agent_evaluation_router
+from management.api.evaluation.evaluation_annotation import (
+    router as evaluation_annotation_router,
+)
+from management.api.evaluation.evaluation_set import router as evaluation_set_router
+from management.api.evaluation.evaluator import router as evaluator_router
+from management.api.file.file_management import (
+    file_management_config_router as file_manager_router,
+)
 from management.api.file.image import router as proxy_router
 from management.api.file.storage import router as file_storage_router
-from management.api.knowledge_base.knowledge_summary import router as summary_router
-from management.api.model.model_managment import router as model_manager_router
+from management.api.identity.api_key import router as api_key_router
+from management.api.identity.cas import router as cas_router
+from management.api.identity.gateway_identity import router as gateway_identity_router
+from management.api.identity.group import router as group_router
+from management.api.identity.invitation import router as invitation_router
 from management.api.identity.oauth import router as oauth_router
+from management.api.identity.tenant import router as tenant_router
+from management.api.identity.user import router as user_router
+from management.api.identity.user_management import router as user_management_router
+from management.api.knowledge_base.agentos_authorization import (
+    create_knowledge_authorization_router,
+)
+from management.api.knowledge_base.datamate import router as datamate_router
+from management.api.knowledge_base.dify import router as dify_router
+from management.api.knowledge_base.haotian import router as haotian_router
+from management.api.knowledge_base.idata import router as idata_router
+from management.api.knowledge_base.ind_aidp import router as ind_aidp_router
+from management.api.knowledge_base.knowledge_summary import router as summary_router
+from management.api.knowledge_base.quota import (
+    personal_quota_router,
+    platform_quota_router,
+    tenant_quota_router,
+)
+from management.api.knowledge_base.ragflow import router as ragflow_router
+from management.api.knowledge_base.vectordatabase import router as vectordatabase_router
 from management.api.mcp.mcp_management import router as mcp_management_router
 from management.api.mcp.remote_mcp import router as remote_mcp_router
-from management.api.skill.skill import router as skill_router
-from management.api.configuration.tenant_config import router as tenant_config_router
-from management.api.tool.tool_config import router as tool_config_router
-from management.api.identity.user_management import router as user_management_router
-from management.api.identity.tenant import router as tenant_router
-from management.api.identity.group import router as group_router
-from management.api.identity.user import router as user_router
-from management.api.identity.api_key import router as api_key_router
-from management.api.identity.invitation import router as invitation_router
-from management.api.notification.notification import router as notification_router
-from management.api.a2a.a2a_client import router as a2a_client_router
-from management.api.monitoring.monitoring import router as monitoring_router
-from management.api.a2a.a2a_server import router as a2a_server_router
-from management.api.knowledge_base.haotian import router as haotian_router
-from management.api.knowledge_base.ind_aidp import router as ind_aidp_router
-from management.api.evaluation.evaluation_set import router as evaluation_set_router
-from management.api.evaluation.agent_evaluation import router as agent_evaluation_router
-from management.api.evaluation.evaluator import router as evaluator_router
-from management.api.evaluation.evaluation_annotation import router as evaluation_annotation_router
-from management.api.identity.cas import router as cas_router
+from management.api.memory.agentos_callback import router as memory_callback_router
 from management.api.memory.memory_config import router as memory_config_router
-from management.api.memory.memory_record import router as memory_record_router
-from management.api.memory.memory_long_term import router as memory_long_term_router
 from management.api.memory.memory_dreaming import router as memory_dreaming_router
+from management.api.memory.memory_long_term import router as memory_long_term_router
 from management.api.memory.memory_provider import router as memory_provider_router
+from management.api.memory.memory_record import router as memory_record_router
+from management.api.model.model_managment import router as model_manager_router
+from management.api.monitoring.monitoring import router as monitoring_router
+from management.api.northbound import a2a_router
+from management.api.northbound import router as northbound_router
+from management.api.northbound_application import northbound_lifespan
+from management.api.notification.notification import router as notification_router
+from management.api.skill.creation import skill_creator_router
+from management.api.skill.skill import router as skill_router
+from management.api.skill.skill_repository import skill_repository_router
 from management.api.tag.tag_management import router as tag_management_router
-from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE
-from nexent.core.concurrency import (
-    ManagedTaskSpec,
-)
-from management.thread_management import config_thread_manager
+from management.api.tool.tool_config import router as tool_config_router
 from management.recovery import (
     recover_config_tasks,
 )
@@ -77,10 +96,14 @@ from management.services.evaluation.maintenance import (
 )
 from management.services.memory.dreaming.scheduler import dreaming_scheduler
 from management.services.model.outlet_migration import migrate_legacy_outlets
+from management.thread_management import config_thread_manager
 from nexent.core.concurrency import (
+    ManagedTaskSpec,
     run_blocking,
 )
 from ops.api.access import router as ops_access_router
+
+from backend.http.server.app_factory import create_app
 
 logger = logging.getLogger("base_app")
 
@@ -116,7 +139,10 @@ async def stop_dreaming_scheduler():
 
 @asynccontextmanager
 async def automation_lifespan():
-    from management.services.automation.scheduler import agent_automation_scheduler, recover_automation_runs
+    from management.services.automation.scheduler import (
+        agent_automation_scheduler,
+        recover_automation_runs,
+    )
 
     await config_thread_manager.run(
         "control-io",
@@ -154,7 +180,9 @@ async def config_lifespan(_app):
                     await stop_dreaming_scheduler()
             finally:
                 if maintenance_started:
-                    from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+                    from management.services.evaluation.maintenance import (
+                        stop as stop_eval_maintenance,
+                    )
 
                     stop_eval_maintenance()
 
@@ -186,6 +214,7 @@ app.include_router(automation_callback_router)
 app.include_router(nl2agent_callback_router)
 app.include_router(workbench_callback_router)
 app.include_router(memory_callback_router)
+app.include_router(create_knowledge_authorization_router())
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
 app.include_router(conversation_share_router)
