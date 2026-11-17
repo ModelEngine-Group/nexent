@@ -10,6 +10,8 @@ from contextlib import suppress
 from threading import Event
 from types import SimpleNamespace
 
+from redis.exceptions import RedisError
+
 from contracts.errors.exceptions import (
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
@@ -17,6 +19,8 @@ from contracts.errors.exceptions import (
 from infrastructure.concurrency import runtime_thread_manager
 from infrastructure.streaming.channels import streaming_channel_manager
 from infrastructure.runtime_output import is_runtime_event
+from infrastructure.creator_events import unit_event
+from management.services.conversation.creator_replay import creator_checkpoint_stream
 from management.db.conversation.repository import (
     checkpoint_creator_message,
     get_conversation_history,
@@ -283,40 +287,11 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     # Enter the checkpoint generator before accepting the request, so even an
     # immediate shutdown executes its terminal persistence and ownership cleanup.
     await started.wait()
-    return channel.subscribe_with_history(0)
-
-
-def unit_event(unit):
-    kind = unit["unit_type"]
-    content = unit.get("unit_content") or ""
-    envelope_types = {
-        "model_attempt_control",
-        "agent_new_run",
-        "skill_body",
-        "file_content",
-        "target_files",
-        "done",
-    }
-    try:
-        event = json.loads(content)
-        if isinstance(event, dict) and (
-            kind in envelope_types
-            or is_runtime_event(event) and event.get("type") == kind
-        ):
-            return {**event, "unit_index": unit["unit_index"]}
-    except (TypeError, json.JSONDecodeError):
-        pass
-    return {
-        "type": kind,
-        "content": content,
-        "unit_index": unit["unit_index"],
-        "tool_call_id": unit.get("tool_call_id"),
-        "invocation_id": unit.get("invocation_id"),
-    }
+    return channel.subscribe_with_history(0, include_replay_checkpoint=True)
 
 
 async def resume_creator(conversation_id, user_id):
-    """Replay durable units then tail the current generation without starting it."""
+    """Replay complete local/shared events, using durable units as the fallback."""
     history = await run_blocking(
         "creator-resume-history", get_conversation_history, conversation_id, user_id
     )
@@ -330,15 +305,31 @@ async def resume_creator(conversation_id, user_id):
     state = await runtime_state_service.get_run_state_async(user_id, conversation_id)
     generation = state.get("generation")
     channel = streaming_channel_manager.get_channel(conversation_id, user_id)
-    # Capture the local cursor before the history read so concurrent events are retained.
-    cursor = channel.history_start_index if channel is not None else 0
-    units = await run_blocking("creator-resume-units", get_message_units, message_id)
+    preferred = await creator_checkpoint_stream(
+        runtime_state_service, channel, generation, user_id, conversation_id
+    )
 
     async def replay():
         last_index = -1
+        if preferred is not None:
+            try:
+                async for frame in preferred:
+                    for line in frame.splitlines():
+                        if line.startswith("data: "):
+                            last_index = max(last_index, json.loads(line[6:]).get("unit_index", -1))
+                    yield frame
+                return
+            except (RedisError, RuntimeError):
+                logger.warning("Creator replay checkpoint unavailable conversation_id=%s", conversation_id)
+        units = await run_blocking("creator-resume-units", get_message_units, message_id)
+        context = {}
         for unit in units:
-            last_index = max(last_index, unit["unit_index"])
-            yield "data: " + json.dumps(unit_event(unit), ensure_ascii=False) + "\n\n"
+            event = unit_event(unit, context)
+            if unit["unit_index"] > last_index:
+                if unit["unit_index"] != last_index + 1:
+                    raise RuntimeError("Creator replay checkpoint has a gap")
+                last_index = unit["unit_index"]
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
         if message.get("status") != "streaming":
             return
 
@@ -347,7 +338,9 @@ async def resume_creator(conversation_id, user_id):
             latest = await run_blocking(
                 "creator-replay-checkpoint", get_message_units, message_id
             )
+            context.clear()
             for unit in latest:
+                event = unit_event(unit, context)
                 index = unit["unit_index"]
                 if index > last_index and (until is None or index < until):
                     if index != last_index + 1:
@@ -355,7 +348,7 @@ async def resume_creator(conversation_id, user_id):
                     last_index = index
                     yield (
                         "data: "
-                        + json.dumps(unit_event(unit), ensure_ascii=False)
+                        + json.dumps(event, ensure_ascii=False)
                         + "\n\n"
                     )
 
@@ -411,13 +404,6 @@ async def resume_creator(conversation_id, user_id):
             )
             yield "data: " + json.dumps(unit_event(error), ensure_ascii=False) + "\n\n"
 
-        if channel is not None:
-            async for event in channel.subscribe_with_history(cursor):
-                async for chunk in fresh(event):
-                    yield chunk
-            async for saved in persisted():
-                yield saved
-            return
         if state.get("status") in {"completed", "failed", "stopped"}:
             async for saved in persisted():
                 yield saved

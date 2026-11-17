@@ -25,6 +25,9 @@ case:
   - order: 3
     action: Leave a running creator, return while it is active and retry a failed turn before leaving again.
     expected: The page reconnects to the owned run without replaying generation and restores the retry result under the original user turn.
+  - order: 4
+    action: Reconnect a creator answer containing multiple delta fragments and an explicit complete confirmation, then refresh its history.
+    expected: The entire answer remains identical before and after refresh, with no fragment-only replacement or duplicate body.
   expected_results:
   - Unsent drafts survive re-entry and delayed flow initialization.
   - Consecutive clarification cards remain independently rendered and submitted history is readonly.
@@ -48,4 +51,9 @@ case:
     description: Consecutive cards and retry reconnect preserve their identities.
     steps: [2, 3]
     expected_results: [2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Creator answer replay equals refreshed history without truncation or duplication.
+    steps: [4]
+    expected_results: [3]
     forbidden_side_effects: [1]

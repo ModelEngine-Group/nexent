@@ -120,10 +120,14 @@ async def test_creator_http_reconnect_ownership_and_retry(monkeypatch, kind):
         runs.append(kwargs)
 
         async def output():
-            yield 'data: {"type":"final_answer","content":"first"}\n\n'
+            yield 'data: {"type":"model_attempt_control","content":"","phase":"begin","step_id":"creator-step","attempt_id":"creator-attempt"}\n\n'
+            yield 'data: {"type":"final_answer","content":"first","answer_phase":"delta","step_id":"creator-step","attempt_id":"creator-attempt"}\n\n'
             await gate.wait()
             if len(runs) == 1:
                 yield 'data: {"type":"error","content":"controlled failure"}\n\n'
+            elif len(runs) == 4:
+                yield 'data: {"type":"final_answer","content":"second","answer_phase":"delta","step_id":"creator-step","attempt_id":"creator-attempt"}\n\n'
+                yield 'data: {"type":"final_answer","content":"","answer_phase":"complete","step_id":"creator-step","attempt_id":"creator-attempt"}\n\n'
             else:
                 yield (
                     "data: "
@@ -288,6 +292,27 @@ async def test_creator_http_reconnect_ownership_and_retry(monkeypatch, kind):
         assert rows[-1]["status"] == "completed" and rows[-1]["message_index"] == 1
         assert len([r for r in rows if r["role"] == "user"]) == 1
         assert len(runs) == 3
+        # Exercise the actual endpoint decoder, not only stored event counts.
+        status, output, _ = await http(
+            app, path, {**request, "query": "continue with text", "conversation_id": 91, "request_id": f"{kind}-text"}
+        )
+        assert status == 200 and rows[-1]["message_content"] == "firstsecond"
+        status, replayed, _ = await http(app, path + "?resume=true", {**request, "conversation_id": 91})
+        events = [json.loads(line[6:]) for line in replayed.decode().splitlines() if line.startswith("data: ")]
+        answers = [event for event in events if event.get("type") == "final_answer"]
+        assert status == 200 and [event["answer_phase"] for event in answers] == ["delta", "delta", "complete"]
+        assert [event["content"] for event in answers] == ["first", "second", ""]
+        assert all(event["step_id"] == "creator-step" and event["attempt_id"] == "creator-attempt" for event in answers)
+        # An existing unversioned conversation must retain append semantics too.
+        for unit in rows[-1]["units"]:
+            if unit["unit_type"] == "final_answer":
+                unit["unit_content"] = creator_runtime.unit_event(unit)["content"]
+        status, legacy, _ = await http(app, path + "?resume=true", {**request, "conversation_id": 91})
+        old = [json.loads(line[6:]) for line in legacy.decode().splitlines() if line.startswith("data: ")]
+        old_answers = [event for event in old if event.get("type") == "final_answer"]
+        assert status == 200 and "".join(event["content"] for event in old_answers) == "firstsecond"
+        assert all(event["answer_phase"] == "delta" and event["step_id"] == "creator-step" for event in old_answers)
+        assert len(runs) == 4
     finally:
         gate.set()
         await creator_runtime.shutdown_creator_streams(2)

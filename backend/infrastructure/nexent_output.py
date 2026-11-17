@@ -3,6 +3,8 @@
 
 import json
 
+from infrastructure.creator_events import unpack_creator_event
+
 
 def _native(event):
     return (event.get("schema_version") == 1 and event.get("runtime_mode") == "native_agent"
@@ -187,6 +189,9 @@ def normalize_nexent_history(events, status=None):
     output = []
     for event in events:
         event = dict(event)
+        creator = unpack_creator_event(event.get("content", ""), event.get("type"))
+        if creator is not None:
+            event = {**event, **creator, "unit_index": event.get("unit_index", creator.get("unit_index"))}
         try:
             nested = json.loads(event.get("content", ""))
         except (ValueError, TypeError):

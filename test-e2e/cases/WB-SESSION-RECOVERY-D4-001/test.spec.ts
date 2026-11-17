@@ -52,8 +52,12 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
       expect(body.conversation_id).toBe(91);
       const running = messages.findLast((message) => message.status === "streaming")!;
       running.status = "completed";
-      running.message = [{ type: "final_answer", content: "Retry recovered successfully" }];
-      events = [{ type: "final_answer", content: "Retry recovered successfully" }];
+      events = [
+        { type: "final_answer", content: "Retry recovered ", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
+        { type: "final_answer", content: "successfully", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
+        { type: "final_answer", content: "", answer_phase: "complete", step_id: "retry-step", attempt_id: "retry-attempt" },
+      ];
+      running.message = events;
     } else if (body.retry_message_index !== undefined) {
       expect(body.retry_message_index).toBe(4);
       expect(body.retry_user_message_id).toBe(13);
@@ -116,6 +120,13 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
     expect(requests.filter((request) => !request.resume)).toHaveLength(3);
     expect(messages.filter((message) => message.role === "user")).toHaveLength(3);
     await page.screenshot({ path: join(contract.caseDir, "recovered-creator.png") });
+  });
+  await contract.step(contract.expectedIds("steps")[3], async () => {
+    await expect(page.getByText("Retry recovered successfully", { exact: true })).toHaveCount(1);
+    await page.reload();
+    await expect(page.getByText("Retry recovered successfully", { exact: true })).toBeVisible();
+    await expect(page.getByText("Retry recovered successfully", { exact: true })).toHaveCount(1);
+    expect(requests.filter((request) => !request.resume)).toHaveLength(3);
   });
   for (const id of contract.expectedIds("assertions")) await contract.assertion(id, async () => {
     await expect(cards).toHaveCount(2);

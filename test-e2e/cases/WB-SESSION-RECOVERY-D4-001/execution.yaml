@@ -10,3 +10,4 @@ implementations:
 acceptance_bindings:
   AC-01: [WB-SESSION-RECOVERY-D4-001]
   AC-02: [WB-SESSION-RECOVERY-D4-001]
+  AC-03: [WB-SESSION-RECOVERY-D4-001]

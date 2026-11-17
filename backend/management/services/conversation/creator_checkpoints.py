@@ -6,6 +6,7 @@ import json
 import time
 
 from infrastructure.runtime_output import is_runtime_event
+from infrastructure.creator_events import CreatorAnswer, creator_event_content
 from management.db.conversation.repository import checkpoint_creator_message
 from nexent.core.concurrency import run_blocking
 
@@ -13,7 +14,7 @@ from nexent.core.concurrency import run_blocking
 async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user_id):
     pending = []
     index = 0
-    answer = []
+    answer = CreatorAnswer()
     status = "completed"
     last_flush = time.monotonic()
 
@@ -27,7 +28,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                 conversation_id,
                 user_id,
                 list(pending),
-                "".join(answer),
+                answer.content,
                 state,
             )
         )
@@ -71,15 +72,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                     chunk["content"] = content
                 if not isinstance(content, str):
                     content = json.dumps(content, ensure_ascii=False)
-                if is_runtime_event(chunk) or kind in {
-                    "skill_body",
-                    "file_content",
-                    "agent_new_run",
-                    "target_files",
-                    "model_attempt_control",
-                    "done",
-                }:
-                    content = json.dumps(chunk, ensure_ascii=False)
+                content = creator_event_content(chunk, content)
                 pending.append(
                     {
                         "unit_index": index,
@@ -90,8 +83,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                     }
                 )
                 index += 1
-                if kind == "final_answer":
-                    answer.append(str(chunk.get("content") or ""))
+                answer.push(chunk)
                 if kind == "error":
                     status = "failed"
                 if is_runtime_event(chunk) and kind == "run_terminal" and not chunk.get("invocation_id"):
@@ -99,7 +91,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                     if outcome in {"completed", "failed", "stopped"}:
                         status = outcome
                     if outcome == "completed":
-                        answer[:] = [str(chunk.get("final_content") or "")]
+                        answer.content = str(chunk.get("final_content") or "")
                 chunks.append(chunk)
             # Persist boundaries before publishing; token-only checkpoints are batched.
             if (

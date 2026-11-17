@@ -93,6 +93,7 @@ def store(monkeypatch):
         creator_lease_async=AsyncMock(return_value=True),
         is_cancelled_async=AsyncMock(return_value=False),
         get_run_state_async=AsyncMock(return_value={}),
+        read_replay_checkpoint_async=AsyncMock(return_value=None),
         mark_stream_completed_async=AsyncMock(),
         _run_managed=AsyncMock(),
     )
@@ -408,7 +409,7 @@ async def test_duplicate_request_id_does_not_create_another_conversation(store):
 
 
 @pytest.mark.asyncio
-async def test_truncated_local_buffer_fills_gap_from_durable_units(store, monkeypatch):
+async def test_truncated_local_buffer_recovers_from_the_complete_memory_checkpoint(store, monkeypatch):
     from infrastructure.streaming import channels
 
     saved = [
@@ -425,10 +426,9 @@ async def test_truncated_local_buffer_fills_gap_from_durable_units(store, monkey
             "units": saved,
         }
     )
-    # The initial database snapshot predates tokens 1 and 2; the buffer retains only 2.
-    monkeypatch.setattr(
-        runtime, "get_message_units", MagicMock(side_effect=[[saved[0]], saved, saved])
-    )
+    # The raw tail retains only the last token; the complete checkpoint owns recovery.
+    database = MagicMock(side_effect=AssertionError("Local recovery must not read database units"))
+    monkeypatch.setattr(runtime, "get_message_units", database)
     monkeypatch.setattr(
         channels,
         "runtime_state_service",
@@ -449,3 +449,4 @@ async def test_truncated_local_buffer_fills_gap_from_durable_units(store, monkey
     events = [json.loads(event[6:]) async for event in resumed]
     assert [event["unit_index"] for event in events] == [0, 1, 2]
     assert [event["content"] for event in events] == ["0", "1", "2"]
+    database.assert_not_called()

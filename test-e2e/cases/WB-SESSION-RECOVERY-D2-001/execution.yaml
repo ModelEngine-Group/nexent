@@ -10,3 +10,4 @@ implementations:
 acceptance_bindings:
   AC-01: [test_creator_http_reconnect_ownership_and_retry]
   AC-02: [test_creator_http_reconnect_ownership_and_retry]
+  AC-03: [test_creator_http_reconnect_ownership_and_retry]
