@@ -4,7 +4,7 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TOP_P_STEP, validTopP } from "@/lib/modelSamplingParameters";
+import { TOP_P_STEP, samplingErrorKey, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
 import { Minus, Plus } from "lucide-react";
 
 const clamp = (value: number, min: number, max: number): number =>
@@ -26,7 +26,7 @@ interface SliderStepperProps {
   disabled?: boolean;
   compact?: boolean;
   showFallbackValue?: boolean;
-  topP?: boolean;
+  samplingField?: SamplingField;
   onChange: (next: number | undefined) => void;
 }
 
@@ -43,17 +43,18 @@ export function SliderStepper({
   disabled = false,
   compact = false,
   showFallbackValue = true,
-  topP = false,
+  samplingField,
   onChange,
 }: SliderStepperProps) {
   const { t } = useTranslation();
+  const topP = samplingField === "top_p";
   const min = topP
     ? Math.min(max, Math.max(TOP_P_STEP, configuredMin))
     : configuredMin;
   const step = topP ? TOP_P_STEP : configuredStep;
   const invalid =
-    topP &&
-    !validTopP(value ?? (showFallbackValue ? fallback : undefined), {
+    samplingField !== undefined &&
+    !validSampling(samplingField, value ?? (showFallbackValue ? fallback : undefined), {
       minimum: configuredMin,
       maximum: max,
     });
@@ -166,9 +167,9 @@ export function SliderStepper({
         <input
           type="number"
           aria-label={label}
-          min={topP ? undefined : min}
-          max={topP ? undefined : max}
-          step={topP ? "any" : step}
+          min={samplingField ? undefined : min}
+          max={samplingField ? undefined : max}
+          step={samplingField ? "any" : step}
           aria-invalid={invalid}
           value={value ?? (showFallbackValue ? fallback : "")}
           disabled={disabled}
@@ -176,7 +177,7 @@ export function SliderStepper({
             const raw = e.target.value;
             if (raw === "") {
               onChange(undefined);
-            } else if (topP) {
+            } else if (samplingField) {
               onChange(Number(raw));
             } else {
               set(Number(raw));
@@ -211,7 +212,7 @@ export function SliderStepper({
     <>
       {controls}
       <p role="alert" className="text-xs text-destructive">
-        {t("modelParams.topPInvalid")}
+        {samplingField && t(samplingErrorKey(samplingField))}
       </p>
     </>
   ) : controls;

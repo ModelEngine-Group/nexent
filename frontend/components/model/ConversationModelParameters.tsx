@@ -399,9 +399,11 @@ function PreferenceEditor({
             !rule?.editable || !rule.allowed_scopes.includes("conversation")
           );
         })}
-        topPSchema={
-          saved.field_specs.find((rule) => rule.key === "top_p")?.schema
-        }
+        schemas={Object.fromEntries(
+          saved.field_specs
+            .filter((rule) => samplingKeys.includes(rule.key))
+            .map((rule) => [rule.key, rule.schema])
+        )}
         bounds={Object.fromEntries(
           saved.field_specs
             .filter((rule) => samplingKeys.includes(rule.key))

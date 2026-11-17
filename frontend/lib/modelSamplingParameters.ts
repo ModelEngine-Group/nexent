@@ -4,15 +4,26 @@ import type { ModelParameterRule } from "@/types/modelProfile";
 
 export const TOP_P_STEP = 0.01;
 
-export function validTopP(
+export const SAMPLING_FIELDS = ["temperature", "top_p"] as const;
+export type SamplingField = (typeof SAMPLING_FIELDS)[number];
+
+export function isSamplingField(key: string): key is SamplingField {
+  return key === "temperature" || key === "top_p";
+}
+
+export function samplingErrorKey(field: SamplingField) {
+  return field === "temperature" ? "modelParams.temperatureInvalid" : "modelParams.topPInvalid";
+}
+
+export function validSampling(
+  field: SamplingField,
   value: unknown,
   schema: Record<string, unknown> = {}
 ) {
   if (value == null) return true;
   return (
     typeof value === "number" &&
-    value > 0 &&
-    value <= 1 &&
+    (field === "temperature" ? value >= 0 && value <= 2 : value > 0 && value <= 1) &&
     (typeof schema.minimum !== "number" || value >= schema.minimum) &&
     (typeof schema.maximum !== "number" || value <= schema.maximum) &&
     (!Array.isArray(schema.enum) || schema.enum.includes(value)) &&
@@ -60,10 +71,7 @@ export function samplingComplete(
   values: Record<string, unknown>,
   rules: ModelParameterRule[] = []
 ) {
-  return (
-    (values.temperature == null ||
-      (typeof values.temperature === "number" &&
-        Number.isFinite(values.temperature))) &&
-    validTopP(values.top_p, rules.find((rule) => rule.key === "top_p")?.schema)
+  return SAMPLING_FIELDS.every((field) =>
+    validSampling(field, values[field], rules.find((rule) => rule.key === field)?.schema)
   );
 }

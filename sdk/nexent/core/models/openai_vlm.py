@@ -19,7 +19,7 @@ class OpenAIVLModel(OpenAIModel):
     def __init__(
         self,
         observer: MessageObserver,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         top_p: float | None = None,
         frequency_penalty: float = 0.5,
         max_tokens: int = 512,

@@ -2,7 +2,7 @@
 
 "use client";
 
-import { validTopP } from "@/lib/modelSamplingParameters";
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModelHttpConnectionSettings } from "@/components/model/ModelHttpConnectionSettings";
@@ -1949,7 +1949,7 @@ function RowSettingsDialog({
   const isEmbedding = isEmbeddingModelType(row.model_type);
 
   function handleSave() {
-    if (!validTopP(settings.top_p)) return;
+    if (!samplingComplete(settings)) return;
     onSave({
       displayName: displayName.trim() || undefined,
       settings: Object.keys(settings).length > 0 ? settings : undefined,
@@ -2008,7 +2008,7 @@ function RowSettingsDialog({
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel", { defaultValue: "取消" })}
           </Button>
-          <Button onClick={handleSave} disabled={!validTopP(settings.top_p)}>
+          <Button onClick={handleSave} disabled={!samplingComplete(settings)}>
             {t("common.save", { defaultValue: "保存" })}
           </Button>
         </div>

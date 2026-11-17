@@ -15,8 +15,8 @@ from nexent.core.models.openai_long_context_model import OpenAILongContextModel
 def test_config_and_openai_constructor_share_sampling_defaults(sampling, model_type):
     config = ModelConfig(cite_name="fixture", model_name="fixture", url="http://fixture.invalid", **sampling)
     model = model_type(observer=MagicMock(), model_id="fixture", api_key="fixture", **sampling)
-    assert (config.temperature, config.top_p) == (1.0, None)
-    assert (model.temperature, model.top_p) == (1.0, None)
+    assert (config.temperature, config.top_p) == (None, None)
+    assert (model.temperature, model.top_p) == (None, None)
 
 
 @pytest.mark.parametrize("temperature,top_p", [(0, 0.005), (2, 1), (0.3, 0.995)])
@@ -34,4 +34,4 @@ def test_partial_null_only_inherits_missing_field():
                          temperature=0, top_p=None)
     model = OpenAIModel(observer=MagicMock(), model_id="fixture", api_key="fixture", temperature=None, top_p=0.995)
     assert (config.temperature, config.top_p) == (0, None)
-    assert (model.temperature, model.top_p) == (1.0, 0.995)
+    assert (model.temperature, model.top_p) == (None, 0.995)

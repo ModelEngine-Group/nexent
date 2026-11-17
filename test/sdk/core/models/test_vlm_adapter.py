@@ -301,7 +301,7 @@ def test_build_model_does_not_send_frequency_penalty():
     assert "frequency_penalty" not in getattr(inner, "kwargs", {}), inner.kwargs
     # the dead instance attribute is still set for getattr parity.
     assert inner.frequency_penalty == 0.5
-    assert inner.temperature == 0.7
+    assert inner.temperature is None
     assert inner.top_p is None
     assert inner.max_tokens == 512
 

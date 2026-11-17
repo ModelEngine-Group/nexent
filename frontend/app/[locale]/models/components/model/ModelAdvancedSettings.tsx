@@ -2,7 +2,8 @@
 
 "use client";
 
-import { TopPInput } from "@/components/model/TopPInput";
+import { SamplingInput } from "@/components/model/SamplingInput";
+import { isSamplingField } from "@/lib/modelSamplingParameters";
 import { t as translate } from "i18next";
 
 import { Fragment, useEffect } from "react";
@@ -835,9 +836,10 @@ const renderFieldControl = (
   disabled: boolean,
   placeholder?: string
 ) => {
-  if (spec.key === "top_p") {
+  if (isSamplingField(spec.key)) {
     return (
-      <TopPInput
+      <SamplingInput
+        field={spec.key}
         label={spec.label}
         value={value}
         inherited={placeholder === undefined ? undefined : Number(placeholder)}

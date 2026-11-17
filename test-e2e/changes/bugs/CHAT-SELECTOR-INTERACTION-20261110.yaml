@@ -19,6 +19,7 @@ change:
     - Reset with no inherited degree displays service default without creating an override; summary and picker agree.
     - Quick controls recover after nested panel dismissal and save failure or refetch.
     - Temperature preserves explicit zero. Top P excludes zero at save and dispatch, keeps valid typed precision, and clears to inheritance or request omission.
+    - Explicit Temperature 0 is retained. An empty Temperature inherits, or is omitted when the outlet is unset.
     - Missing sampling values show Service default with an operable neutral slider, without filling saved values.
     test_selectors:
     - frontend/tests/component/modelSelectorPreferences.test.tsx

@@ -2,7 +2,7 @@
 
 "use client";
 
-import { validTopP } from "@/lib/modelSamplingParameters";
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, App, Tag } from "antd";
@@ -114,7 +114,6 @@ export const ModelOverrideModal = ({
         const formRecord = hasOverride
           ? { ...entry, reasoning_capability: model.reasoningCapability }
           : {
-              temperature: model.temperature,
               extra_params: model.extraParams,
               reasoning_capability: model.reasoningCapability,
             };
@@ -145,7 +144,7 @@ export const ModelOverrideModal = ({
       okButtonProps={{
         disabled:
           disabled ||
-          Object.values(value).some((entry) => !validTopP(entry.top_p)),
+          Object.values(value).some((entry) => !samplingComplete(entry)),
       }}
       cancelButtonProps={{ disabled }}
       width={760}
@@ -207,7 +206,7 @@ export const ModelOverrideModal = ({
                 value={formValue}
                 onChange={(next) => handleFieldChange(model.id, next)}
                 mode="override"
-                inheritedDefaults={{ top_p: model.topP }}
+                inheritedDefaults={{ temperature: model.temperature, top_p: model.topP }}
                 disabled={disabled}
                 reasoningCapability={model.reasoningCapability}
               />

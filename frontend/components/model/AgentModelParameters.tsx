@@ -22,7 +22,7 @@ import type {
   ThinkingDegreeMode,
 } from "@/types/modelProfile";
 
-import { validTopP } from "@/lib/modelSamplingParameters";
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { ModelParameterField } from "./ModelParameterField";
 
 interface Props {
@@ -101,15 +101,12 @@ function Editor({
     });
   };
   const effective = { ...defaults, ...parameters };
-  const topPValid = validTopP(
-    parameters.top_p,
-    rules.find((rule) => rule.key === "top_p")?.schema
-  );
+  const samplingValid = samplingComplete(parameters, rules);
   return (
     <Form
       layout="vertical"
       onFinish={() => {
-        if (!topPValid) return;
+        if (!samplingValid) return;
         const next = edited
           ? withAgentParameterValues(value, parameters)
           : { ...value };
@@ -196,7 +193,7 @@ function Editor({
       <Button
         type="primary"
         htmlType="submit"
-        disabled={disabled || !topPValid}
+        disabled={disabled || !samplingValid}
       >
         {t("common.confirm")}
       </Button>

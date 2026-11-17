@@ -123,7 +123,7 @@ const firstDefined = <T>(...values: (T | undefined)[]): T | undefined => {
 };
 
 const buildInferenceParamsRequestBody = (model: {
-  temperature?: number;
+  temperature?: number | null;
   topP?: number | null;
   top_p?: number | null;
   extraParams?: Record<string, unknown>;
@@ -419,7 +419,7 @@ export const modelService = {
     // to not_detected (backend: connect_status = payload or NOT_DETECTED).
     connectStatus?: ModelConnectStatus;
     // v2.6.0 inference params
-    temperature?: number;
+    temperature?: number | null;
     topP?: number | null;
     extraParams?: Record<string, unknown>;
     // Batch-import flow control: rows marked here leave default-model slots
@@ -705,7 +705,7 @@ export const modelService = {
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
     // v2.6.0 inference params
-    temperature?: number;
+    temperature?: number | null;
     topP?: number | null;
     extraParams?: Record<string, unknown>;
     // Type change: sent only when the operator re-typed the model. The
@@ -794,7 +794,7 @@ export const modelService = {
       tokenizerFamily?: string;
       capacitySource?: string;
       // v2.6.0 inference params
-      temperature?: number;
+      temperature?: number | null;
       topP?: number | null;
       extraParams?: Record<string, unknown>;
     }[],
@@ -1027,7 +1027,7 @@ export const modelService = {
       modelAppid?: string;
       accessToken?: string;
       // v2.6.0 inference params (passed through; do not affect connectivity)
-      temperature?: number;
+      temperature?: number | null;
       topP?: number | null;
       extraParams?: Record<string, unknown>;
       // Edit-dialog probes: when set, the backend falls back to the stored
@@ -1319,7 +1319,7 @@ export const modelService = {
     // addCustomModel.connectStatus).
     connectStatus?: ModelConnectStatus;
     // v2.6.0 inference params
-    temperature?: number;
+    temperature?: number | null;
     topP?: number | null;
     extraParams?: Record<string, unknown>;
   }): Promise<any> => {
@@ -1413,7 +1413,7 @@ export const modelService = {
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
     // v2.6.0 inference params
-    temperature?: number;
+    temperature?: number | null;
     topP?: number | null;
     extraParams?: Record<string, unknown>;
     // Type change: sent only when the operator re-typed the model. The

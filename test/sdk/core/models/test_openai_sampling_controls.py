@@ -61,3 +61,22 @@ def test_typed_top_p_reaches_provider_at_full_precision(model):
     model.client.chat.completions.create = create
     model._dispatch_chat_completion(messages=[], top_p=0.995)
     assert create.call_args.kwargs["top_p"] == 0.995
+
+
+def test_legacy_wire_sends_explicit_temperature_zero_and_omits_defaults(model):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    model._dispatch_chat_completion(messages=[], temperature=0)
+    assert create.call_args.kwargs["temperature"] == 0
+    model._dispatch_chat_completion(messages=[], temperature=None, extra_body={"temperature": None})
+    assert "temperature" not in create.call_args.kwargs
+    assert "temperature" not in create.call_args.kwargs["extra_body"]
+
+
+@pytest.mark.parametrize("temperature", [-0.01, 2.01, True])
+def test_invalid_temperature_never_reaches_provider(model, temperature):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    with pytest.raises(ValueError, match="Temperature must be between 0 and 2"):
+        model._dispatch_chat_completion(messages=[], temperature=temperature)
+    create.assert_not_called()

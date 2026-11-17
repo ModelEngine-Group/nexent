@@ -88,6 +88,8 @@ journey("CHAT-MODEL-CONTROLS-D4-004", async ({ page, contract }) => {
     const topPTrack = panel.getByRole("slider", { name: "Top P slider" });
     await topPTrack.focus();
     await topPTrack.press("End");
+    await expect(topP).toHaveValue("1");
+    await expect(topP).toBeEnabled();
     await topPTrack.press("Home");
     await expect(topP).toHaveValue("0.01");
     await topP.fill("0.995");
@@ -97,6 +99,17 @@ journey("CHAT-MODEL-CONTROLS-D4-004", async ({ page, contract }) => {
     await topP.press("Enter");
     await expect(topP).toHaveValue("");
     await expectReadablePlaceholder(topP, "Service default");
+    await temperature.fill("0");
+    await temperature.press("Enter");
+    await expect(temperature).toHaveValue("0");
+    await expect(temperature).toHaveAttribute("aria-invalid", "false");
+    await expect(temperature).toBeEnabled();
+    await temperature.press("Control+a");
+    await temperature.press("Backspace");
+    await expect(temperature).toHaveValue("");
+    await temperature.press("Tab");
+    await expect(temperature).toBeEnabled();
+    await expect(temperature).toHaveValue("");
     const track = temperature.locator("..").locator(".ant-slider");
     const box = (await track.boundingBox())!;
     await track.click({ position: { x: box.width / 4, y: box.height / 2 } });

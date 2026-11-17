@@ -6,8 +6,8 @@ import { RotateCcw } from "lucide-react";
 import { Form, Input, InputNumber, Select, Switch, Button } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { TopPInput } from "./TopPInput";
-import { validTopP } from "@/lib/modelSamplingParameters";
+import { SamplingInput } from "./SamplingInput";
+import { isSamplingField, validSampling } from "@/lib/modelSamplingParameters";
 import type { ModelParameterRule } from "@/types/modelProfile";
 
 interface ModelParameterFieldProps {
@@ -41,9 +41,10 @@ export function ModelParameterField({
   const value = Object.hasOwn(values, rule.key)
     ? values[rule.key]
     : fallbackValues[rule.key];
+  const samplingField = isSamplingField(rule.key) ? rule.key : undefined;
   const optionalSampling =
     scope === "outlet" &&
-    ["temperature", "top_p"].includes(rule.key) &&
+    samplingField !== undefined &&
     !rule.required;
   const disabled =
     !rule.editable || !rule.allowed_scopes.includes(scope) || pending;
@@ -87,9 +88,9 @@ export function ModelParameterField({
             : undefined
         }
         aria-label={label ?? rule.key}
-        allowClear={rule.key === "top_p" && !rule.required}
+        allowClear={samplingField !== undefined && !rule.required}
         status={
-          rule.key === "top_p" && !validTopP(value, rule.schema)
+          samplingField !== undefined && !validSampling(samplingField, value, rule.schema)
             ? "error"
             : undefined
         }
@@ -98,8 +99,8 @@ export function ModelParameterField({
         options={options
           .filter(
             (option) =>
-              rule.key !== "top_p" ||
-              (option != null && validTopP(option, rule.schema))
+              samplingField === undefined ||
+              (option != null && validSampling(samplingField, option, rule.schema))
           )
           .map((option) => ({
             value: JSON.stringify(option),
@@ -117,9 +118,10 @@ export function ModelParameterField({
         }}
       />
     );
-  else if (rule.key === "top_p")
+  else if (samplingField !== undefined)
     control = (
-      <TopPInput
+      <SamplingInput
+        field={samplingField}
         label={label ?? rule.key}
         value={scope === "outlet" ? value : values[rule.key]}
         inherited={

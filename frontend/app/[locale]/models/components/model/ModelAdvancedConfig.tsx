@@ -189,12 +189,12 @@ export function ModelAdvancedConfig({
                 <Label className="text-sm">{label}</Label>
                 <SliderStepper
                   compact
-                  topP={key === "top_p"}
+                  samplingField={key}
                   label={label}
                   value={
                     typeof value[key] === "number" ? value[key] : undefined
                   }
-                  fallback={1}
+                  fallback={key === "top_p" ? 0.01 : 0}
                   showFallbackValue={false}
                   min={0}
                   max={key === "temperature" ? 2 : 1}

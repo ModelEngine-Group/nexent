@@ -64,9 +64,9 @@ describe("model sampling controls", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "温度" }), {
       target: { value: "3" },
     });
-    expect(screen.getByRole("slider", { name: "温度" })).toHaveAttribute(
-      "aria-valuenow",
-      "2"
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveAttribute(
+      "aria-invalid",
+      "true"
     );
     const input = screen.getByRole("spinbutton", { name: "Top P" });
     const slider = screen.getByRole("slider", { name: "Top P" });

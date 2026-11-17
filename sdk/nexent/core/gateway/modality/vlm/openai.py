@@ -60,7 +60,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             model_factory=self.factory,
             flatten_messages_as_text=False,
             display_name=ctx.display_name,
-            temperature=ctx.temperature if ctx.temperature is not None else 0.7,
+            temperature=ctx.temperature,
             top_p=ctx.top_p,
             max_tokens=ctx.max_tokens if ctx.max_tokens is not None else 512,
         )

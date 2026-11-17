@@ -3,11 +3,12 @@
 """Conversation-only parameter patches validated against frozen outlet rules."""
 
 from contracts.errors.exceptions import ModelOutletValidationError
+from nexent.core.models.sampling import without_unset_sampling
 from nexent.core.model_service.profiles.parameter_rules import (
     overlay_profile_parameters,
     patch_parameter_values,
 )
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_top_p_parameter
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
 from nexent.core.model_service.profiles.protocol_parameters import (
     OUTLET_TOKEN_LIMIT_KEYS, without_outlet_token_limits,
 )
@@ -21,10 +22,8 @@ def merge_model_preferences(profile, preferences):
         raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
     profile = ensure_outlet_parameter_rules(profile)
     try:
-        submitted = without_outlet_token_limits(preferences)
-        validate_top_p_parameter(submitted.get("top_p"))
-        if submitted.get("top_p") is None:
-            submitted.pop("top_p", None)
+        submitted = without_unset_sampling(without_outlet_token_limits(preferences))
+        validate_sampling_parameters(submitted)
         resolved = overlay_profile_parameters(profile, submitted, scope="conversation")
         values = resolved.parameter_values
         output = values.get("max_output_tokens", values.get("max_tokens"))
@@ -42,7 +41,7 @@ def read_model_preferences(conversation_id, user_id):
 
     saved = model_preferences(conversation_id, user_id)
     return {**saved, "model_parameter_preferences": {
-        key: without_outlet_token_limits(values) if isinstance(values, dict) else values
+        key: without_unset_sampling(without_outlet_token_limits(values)) if isinstance(values, dict) else values
         for key, values in saved["model_parameter_preferences"].items()
     }}
 
@@ -102,9 +101,9 @@ def patch_model_preferences(conversation_id, outlet_id, request, user_id, tenant
     def resolve(saved):
         if not isinstance(saved, dict):
             raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-        updated = patch_parameter_values(without_outlet_token_limits(saved), request.parameter_values, deleted)
-        if updated.get("top_p") is None:
-            updated.pop("top_p", None)
+        updated = without_unset_sampling(
+            patch_parameter_values(without_outlet_token_limits(saved), request.parameter_values, deleted)
+        )
         _merge_conversation_preferences(profile, entry, updated)
         return updated
 

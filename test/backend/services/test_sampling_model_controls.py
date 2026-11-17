@@ -20,10 +20,7 @@ def test_su_ac_05_sampling_presence_bounds_zero_and_explicit_null(field, maximum
     for value in valid_values:
         assert merge_model_preferences(profile, {field: value}).parameter_values[field] == value
     cleared = merge_model_preferences(profile, {field: None}).parameter_values
-    if field == "top_p":
-        assert cleared == profile.parameter_values
-    else:
-        assert cleared[field] is None
+    assert cleared == profile.parameter_values
     invalid_values = [-0.1, maximum + 0.1, True, "0.7", float("nan"), float("inf")]
     if field == "top_p":
         invalid_values.append(0)

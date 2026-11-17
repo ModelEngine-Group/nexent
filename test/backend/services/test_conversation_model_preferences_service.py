@@ -28,7 +28,8 @@ def test_zero_false_and_explicit_null_are_not_defaulted(profile):
     assert merged.parameter_values["temperature"] == 0
     assert merged.parameter_values["reasoning_budget_tokens"] == 64
     assert profile.model_dump() == original
-    assert service.merge_model_preferences(profile, {"temperature": None}).parameter_values["temperature"] is None
+    inherited = profile.model_copy(update={"parameter_values": {**original["parameter_values"], "temperature": 0.7}})
+    assert service.merge_model_preferences(inherited, {"temperature": None}).parameter_values["temperature"] == 0.7
 
 
 def test_thinking_off_excludes_inherited_budget_but_rejects_explicit_conflict(profile):

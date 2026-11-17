@@ -50,7 +50,7 @@ from .context_overflow import (
     is_provider_context_overflow,
 )
 from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
-from .sampling import DEFAULT_TEMPERATURE, resolve_sampling, validate_top_p
+from .sampling import DEFAULT_TEMPERATURE, SAMPLING_FIELDS, validate_sampling_value, without_unset_sampling
 from .retry import (
     DEFAULT_MODEL_RETRY,
     ModelRetryConfig,
@@ -257,8 +257,7 @@ class OpenAIModel(OpenAIServerModel):
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
         self.observer = observer
-        sampling = resolve_sampling(temperature, top_p)
-        self.temperature = sampling["temperature"]
+        self.temperature = temperature
         self.top_p = top_p
         self.explicit_sampling = tuple(explicit_sampling or ())
         self.reasoning_effort = reasoning_effort
@@ -1132,10 +1131,11 @@ class OpenAIModel(OpenAIServerModel):
                 key: value for key, value in completion_kwargs["extra_body"].items()
                 if key not in self.explicit_sampling
             }
+        if completion_kwargs.get("extra_body"):
+            completion_kwargs["extra_body"] = without_unset_sampling(completion_kwargs["extra_body"])
         extra_body = completion_kwargs.get("extra_body") or {}
-        validate_top_p(extra_body.get("top_p", completion_kwargs.get("top_p")))
-        if "top_p" in extra_body and extra_body["top_p"] is None:
-            completion_kwargs["extra_body"] = {key: value for key, value in extra_body.items() if key != "top_p"}
+        for field in SAMPLING_FIELDS:
+            validate_sampling_value(field, extra_body.get(field, completion_kwargs.get(field)))
         snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(

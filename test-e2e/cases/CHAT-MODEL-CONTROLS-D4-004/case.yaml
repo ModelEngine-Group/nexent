@@ -25,7 +25,7 @@ case:
     expected: The long choice is readable in the popup and selected field, and the selected control is at most 128 CSS pixels wide. The field and trigger agree after selecting and resetting. The dropdown remains operable after reset.
   - order: 2
     action: Open Advanced settings, try zero, the minimum slider position, and 0.995 in Top P, then clear it. Change temperature, reset and dismiss the panel with Escape.
-    expected: The temperature and Top P inputs and reset button fit in the viewport. Both missing values start empty with readable Service default placeholders. Top P rejects zero, the slider minimum is 0.01, and 0.995 survives confirmation. Clearing restores the empty input. The temperature slider creates an explicit temperature, reset returns it to empty, and Escape leaves the parent menu's quick controls usable.
+    expected: The temperature and Top P inputs and reset button fit in the viewport. Both missing values start empty with readable Service default placeholders. Top P rejects zero, the slider minimum is 0.01, and 0.995 survives confirmation. Clearing restores the empty input. Temperature accepts and clears an explicit zero. The temperature slider creates an explicit temperature, reset returns it to empty, and Escape leaves the parent menu's quick controls usable.
   expected_results:
   - Reasoning selection and reset remain readable and consistent in the shared model menu.
   - The narrow sampling panel accepts and clears an explicit value, then returns control to the model menu.

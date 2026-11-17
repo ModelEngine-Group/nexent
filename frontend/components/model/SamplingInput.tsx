@@ -4,9 +4,10 @@
 
 import { Button, InputNumber } from "antd";
 import { useTranslation } from "react-i18next";
-import { TOP_P_STEP, validTopP } from "@/lib/modelSamplingParameters";
+import { TOP_P_STEP, samplingErrorKey, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
 
-export function TopPInput({
+export function SamplingInput({
+  field,
   label,
   value,
   inherited,
@@ -14,6 +15,7 @@ export function TopPInput({
   disabled,
   onChange,
 }: {
+  field: SamplingField;
   label: string;
   value: unknown;
   inherited?: unknown;
@@ -23,14 +25,15 @@ export function TopPInput({
 }) {
   const { t } = useTranslation();
   const display = value ?? inherited;
-  const invalid = !validTopP(display, schema);
+  const invalid = !validSampling(field, display, schema);
+  const step = field === "top_p" ? TOP_P_STEP : 0.1;
   const min = Math.max(
-    TOP_P_STEP,
+    field === "top_p" ? TOP_P_STEP : 0,
     typeof schema.minimum === "number" ? schema.minimum : 0
   );
   const max = Math.min(
-    1,
-    typeof schema.maximum === "number" ? schema.maximum : 1
+    field === "top_p" ? 1 : 2,
+    typeof schema.maximum === "number" ? schema.maximum : Infinity
   );
   const stepValue = (direction: number) =>
     Math.min(
@@ -40,14 +43,14 @@ export function TopPInput({
         Number(
           (
             (typeof display === "number" ? display : 0) +
-            direction * TOP_P_STEP
+            direction * step
           ).toPrecision(15)
         )
       )
     );
   const canStep = (direction: number) =>
     !disabled &&
-    validTopP(stepValue(direction), schema) &&
+    validSampling(field, stepValue(direction), schema) &&
     stepValue(direction) !== display;
 
   return (
@@ -86,7 +89,7 @@ export function TopPInput({
       </div>
       {invalid && (
         <p role="alert" className="text-xs text-destructive">
-          {t("modelParams.topPInvalid")}
+          {t(samplingErrorKey(field))}
         </p>
       )}
     </div>

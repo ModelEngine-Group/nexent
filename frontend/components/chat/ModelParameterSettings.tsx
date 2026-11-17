@@ -14,7 +14,7 @@ import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
-import { TOP_P_STEP, validTopP } from "@/lib/modelSamplingParameters";
+import { TOP_P_STEP, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
 
 function configuredValue(value: number | undefined, max: number) {
   return value != null && Number.isFinite(value) && value >= 0 && value <= max
@@ -29,7 +29,8 @@ export function ParameterLevel({
   max,
   min = 0,
   disabled,
-  topPSchema,
+  field,
+  schema,
   onClear,
   onChange,
 }: {
@@ -39,20 +40,19 @@ export function ParameterLevel({
   max: number;
   min?: number;
   disabled?: boolean;
-  topPSchema?: Record<string, unknown>;
+  field?: SamplingField;
+  schema?: Record<string, unknown>;
   onClear?: () => void;
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
-  const topP = topPSchema !== undefined;
+  const topP = field === "top_p";
   const step = topP ? TOP_P_STEP : 0.1;
   const sliderMin = topP ? Math.min(max, Math.max(min, TOP_P_STEP)) : min;
-  const displayValue = topP
-    ? (value ?? inheritedValue)
-    : configuredValue(value ?? inheritedValue, max);
+  const displayValue = value ?? inheritedValue;
   const isValid = (next: number) =>
-    topP
-      ? validTopP(next, topPSchema)
+    field
+      ? validSampling(field, next, { minimum: min, maximum: max, ...schema })
       : Number.isFinite(next) && next >= min && next <= max;
   const sliderDisabled =
     disabled || (topP && sliderMin === max && !isValid(max));
@@ -73,8 +73,8 @@ export function ParameterLevel({
     if (!text.trim() && onClear) {
       setError(false);
       setDirty(false);
+      setText(inheritedValue == null ? "" : String(inheritedValue));
       if (value !== undefined) onClear();
-      else setText(displayValue == null ? "" : String(displayValue));
       return;
     }
     const next = Number(text);
@@ -90,7 +90,7 @@ export function ParameterLevel({
   const draftNumber = text.trim() ? Number(text) : displayValue;
   const sliderValue =
     draftNumber != null && isValid(draftNumber) ? draftNumber : null;
-  const invalid = error || (topP && !!text.trim() && !isValid(Number(text)));
+  const invalid = error || (field !== undefined && !!text.trim() && !isValid(Number(text)));
   return (
     <div className="space-y-1">
       <label className="text-sm">{label}</label>
@@ -292,7 +292,7 @@ export function ModelSamplingFields(
   control: ModelParameterSettingsControl & {
     disabledFields?: string[];
     bounds?: Record<string, { min?: number; max?: number }>;
-    topPSchema?: Record<string, unknown>;
+    schemas?: Partial<Record<SamplingField, Record<string, unknown>>>;
   }
 ) {
   const { t } = useTranslation();
@@ -304,8 +304,15 @@ export function ModelSamplingFields(
         label={t("workbench.controls.temperature", "温度")}
         value={control.value.temperature}
         inheritedValue={control.inheritedValue?.temperature}
-        min={control.bounds?.temperature?.min}
-        max={control.bounds?.temperature?.max ?? 2}
+        min={Math.max(0, control.bounds?.temperature?.min ?? 0)}
+        max={Math.min(2, control.bounds?.temperature?.max ?? 2)}
+        field="temperature"
+        schema={control.schemas?.temperature}
+        onClear={() => {
+          const next = { ...control.value };
+          delete next.temperature;
+          control.onChange(next);
+        }}
         disabled={
           control.disabled || control.disabledFields?.includes("temperature")
         }
@@ -320,7 +327,8 @@ export function ModelSamplingFields(
         inheritedValue={control.inheritedValue?.top_p}
         min={control.bounds?.top_p?.min}
         max={Math.min(control.bounds?.top_p?.max ?? 1, 1)}
-        topPSchema={control.topPSchema ?? {}}
+        field="top_p"
+        schema={control.schemas?.top_p}
         onClear={() => {
           const next = { ...control.value };
           delete next.top_p;

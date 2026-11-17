@@ -249,8 +249,8 @@ def _connectivity_changed(current, proposed, row, *, api_key, http_headers):
     try:
         current_request = _connectivity_request(current)
     except ModelAdapterError as error:
-        # Historical zero must not prevent clearing or correcting the outlet.
-        if error.category != "TOP_P_OUT_OF_RANGE":
+        # Repairing an invalid historical value requires a new connectivity check.
+        if error.category not in {"TEMPERATURE_OUT_OF_RANGE", "TOP_P_OUT_OF_RANGE"}:
             raise
         return True
     return not json_values_equal(current_request, proposed_request)

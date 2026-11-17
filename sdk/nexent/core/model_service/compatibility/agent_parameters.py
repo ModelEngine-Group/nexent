@@ -4,6 +4,8 @@
 
 from copy import deepcopy
 
+from nexent.core.models.sampling import without_unset_sampling
+
 from nexent.core.model_service.profiles.protocol_parameters import OUTLET_TOKEN_LIMIT_KEYS, without_outlet_token_limits
 
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
@@ -24,9 +26,7 @@ def read_agent_parameter_entry(entry):
         if any(key in entry for key in (*AGENT_PARAMETER_KEYS, "extra_params")):
             raise ParameterValidationError("PARAMETER_UPDATE_CONFLICT", "/model_params_override")
         result = deepcopy(entry)
-        result["parameter_values"] = without_outlet_token_limits(result["parameter_values"])
-        if result["parameter_values"].get("top_p") is None:
-            result["parameter_values"].pop("top_p", None)
+        result["parameter_values"] = without_unset_sampling(without_outlet_token_limits(result["parameter_values"]))
         for key in OUTLET_TOKEN_LIMIT_KEYS:
             result.pop(key, None)
         if isinstance(result.get("custom_overrides"), dict):

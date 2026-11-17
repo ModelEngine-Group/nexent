@@ -132,9 +132,12 @@ def snapshot_agent_reasoning_config(
 
         if normalize_profiles and entry:
             from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-            from nexent.core.model_service.profiles.parameter_schema import validate_top_p_parameter
+            from nexent.core.model_service.profiles.parameter_schema import validate_sampling_parameters
 
-            validate_top_p_parameter(read_agent_parameter_entry(entry)["parameter_values"].get("top_p"))
+            sampling_entry = read_agent_parameter_entry(entry)
+            validate_sampling_parameters(sampling_entry["parameter_values"])
+            if isinstance(sampling_entry.get("custom_overrides"), dict):
+                validate_sampling_parameters(sampling_entry["custom_overrides"])
 
         model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
         if ((model_info or {}).get("profile_schema_version") is not None

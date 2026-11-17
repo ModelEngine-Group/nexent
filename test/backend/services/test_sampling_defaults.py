@@ -10,8 +10,8 @@ from management.services.model import management
 
 
 @pytest.mark.parametrize("sampling,expected", [
-    ({}, {"temperature": 1.0, "top_p": None}),
-    ({"temperature": None, "top_p": None}, {"temperature": 1.0, "top_p": None}),
+    ({}, {"temperature": None, "top_p": None}),
+    ({"temperature": None, "top_p": None}, {"temperature": None, "top_p": None}),
     ({"temperature": 0, "top_p": None}, {"temperature": 0, "top_p": None}),
     ({"temperature": 0.3, "top_p": 0.87}, {"temperature": 0.3, "top_p": 0.87}),
 ])

@@ -355,7 +355,7 @@ class TestModelConfig:
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == ""
-        assert config.temperature == 1.0
+        assert config.temperature is None
         assert config.top_p is None
         assert config.ssl_verify is True
         assert config.model_factory is None
@@ -372,7 +372,7 @@ class TestModelConfig:
             url="https://example.com"
         )
         assert config.api_key == ""
-        assert config.temperature == 1.0
+        assert config.temperature is None
         assert config.top_p is None
         assert config.ssl_verify is True
         assert config.model_factory is None

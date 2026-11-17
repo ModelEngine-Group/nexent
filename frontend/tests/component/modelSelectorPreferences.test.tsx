@@ -152,6 +152,11 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
   await waitFor(() => expect(thinking).toHaveAttribute("aria-checked", "true"));
   expect(await openAdvanced()).toHaveValue(0.5);
   expect(screen.getAllByRole("slider")).toHaveLength(2);
+  await changeSampling(temperatureName, "0");
+  await waitFor(() => expect(saved.parameter_values.temperature).toBe(0));
+  await changeSampling(temperatureName, "");
+  await waitFor(() => expect(saved.parameter_values.temperature).toBeUndefined());
+  expect(screen.getByRole("spinbutton", { name: temperatureName })).toHaveValue(0.5);
   await changeSampling(temperatureName, "0.31");
   await waitFor(() => expect(saved.parameter_values.temperature).toBe(0.31));
   await changeSampling("Top P", "0.72");

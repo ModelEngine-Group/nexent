@@ -99,21 +99,21 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     model_data["max_tokens"] = max_output
 
 
-def _validate_configured_top_p(model_data):
-    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_top_p_parameter
+def _validate_configured_sampling(model_data):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
 
     try:
-        validate_top_p_parameter(model_data.get("top_p"))
+        validate_sampling_parameters(model_data)
         custom = (model_data.get("extra_params") or {}).get("__custom__")
         if isinstance(custom, dict):
-            validate_top_p_parameter(custom.get("top_p"))
+            validate_sampling_parameters(custom)
     except ParameterValidationError as error:
         raise ModelOutletValidationError(error.category, error.path) from None
 
 
 def _create_model_configuration(model_data, user_id, tenant_id):
     """All LLM configuration writers persist the same resolved format."""
-    _validate_configured_top_p(model_data)
+    _validate_configured_sampling(model_data)
     if model_data.get("model_type") in {"llm", "chat"}:
         from management.services.model.outlet_legacy import create_legacy_llm_outlet
 
@@ -123,7 +123,7 @@ def _create_model_configuration(model_data, user_id, tenant_id):
 
 def _update_model_configuration(record, changes, user_id, tenant_id, *, scope_update=False):
     """Do not allow legacy configuration writes to replace resolved JSON."""
-    _validate_configured_top_p(changes)
+    _validate_configured_sampling(changes)
     if record is None:
         raise LookupError("MODEL_OUTLET_NOT_FOUND")
     if record.get("model_type") in {"llm", "chat"}:

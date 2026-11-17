@@ -96,4 +96,4 @@ def test_http_budget_boundaries_and_partial_values(api, path):
     body = api.payload(path, model_id=identifier, model_parameter_preferences={str(identifier): {"temperature": None}})
     response = api.post(path, body)
     assert response.status_code == 200, response.text
-    assert json.loads(response.text.removeprefix("data: ").strip())["temperature"] is None
+    assert json.loads(response.text.removeprefix("data: ").strip())["temperature"] == api.records["budget"]["temperature"]

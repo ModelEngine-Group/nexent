@@ -15,7 +15,7 @@ from nexent.core.model_service.profiles.parameter_schema import (
     compile_parameter_schema,
     json_values_equal,
     validate_parameter_value,
-    validate_top_p_parameter,
+    validate_sampling_parameters,
 )
 
 
@@ -155,6 +155,7 @@ def apply_parameter_values(
     object_schema = compile_parameter_schema({"type": "object"})
     validate_parameter_value(object_schema, submitted)
     validate_parameter_value(object_schema, saved_values)
+    validate_sampling_parameters(submitted)
     submitted = json.loads(json.dumps(dict(submitted)))
     saved_values = json.loads(json.dumps(dict(saved_values)))
     rules = {rule["key"]: rule for rule in compiled.declarations}
@@ -173,8 +174,6 @@ def apply_parameter_values(
         elif "default_value" in rule:
             values[key] = rule["default_value"]
         if key in submitted:
-            if key == "top_p":
-                validate_top_p_parameter(submitted[key])
             if "fixed_value" in rule:
                 if not json_values_equal(submitted[key], values[key]):
                     raise ParameterValidationError("FIXED_PARAMETER", _pointer(key))
