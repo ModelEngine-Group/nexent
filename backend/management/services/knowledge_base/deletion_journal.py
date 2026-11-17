@@ -130,11 +130,12 @@ class DeletionJournal:
                         or not re.fullmatch(r'[0-9a-f]{64}', row['source_upload_sha256'])):
                     raise Conflict()
                 # Keep the existing source owner eligible to confirm and account its write.
-                return self._patch(row, {'deletion_request': intent.model_dump(mode='json')}, context)
+                return self._patch(row, {'deletion_request': intent.model_dump(mode='json'), 'deleted_vector_count': None}, context)
             if row['stage'] != 'UPLOAD' or intent.source is not None:
                 raise Conflict()
         return self._patch(row, {
             "deletion_request": intent.model_dump(mode="json"),
+            'deleted_vector_count': None,
             "status": "DELETE_REQUESTED" if intent.scope == "full" else "COMPLETED",
             "stage": "DELETE_ACCEPTED",
         }, context)
@@ -180,6 +181,10 @@ class DeletionJournal:
             raise InvalidInput()
         stage = ("DELETE_CLEANSE_PENDING" if state.status == "deleted" and state.physical_cleanup_complete
                  else "DELETE_RUNTIME_PENDING")
+        if stage == 'DELETE_CLEANSE_PENDING':
+            if state.processed_chunks is None or state.total_chunks is None or state.processed_chunks != state.total_chunks:
+                raise InvalidInput()
+            return self._patch(row, {'stage': stage, 'deleted_vector_count': state.processed_chunks}, context)
         return row if row["stage"] == stage else self._patch(row, {"stage": stage}, context)
 
     def confirm_cleanse_drained(self, row, *, physical_completion_confirmed, context):
@@ -198,6 +203,8 @@ class DeletionJournal:
         if physical_absence_confirmed is not True:
             raise Conflict()
         if intent.scope == "full":
+            if row['deleted_vector_count'] is None:
+                raise Conflict()
             values = {"status": "DELETED", "stage": "DELETE_DONE", "deleted_at": datetime.now(UTC).isoformat()}
         else:
             values = {"stage": "SOURCE_DELETED", **{name: None for name in (

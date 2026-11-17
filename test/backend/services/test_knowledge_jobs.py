@@ -204,7 +204,7 @@ def test_delete_hides_visibility_and_fences_late_completion(setup):
     assert (
         service.finish_delete(
             service.begin_delete(lookup(state), owner_id="cleaner", context=context),
-            physical_absence_confirmed=True, context=context
+            physical_absence_confirmed=True, deleted_count=0, context=context
         ).status
         == "deleted"
     )
@@ -252,11 +252,11 @@ def test_cleanup_requires_explicit_absence_and_keeps_unknown_writer_blocked(setu
     assert not service.cleanup_ready(lookup(state), context=context)
     with pytest.raises(Conflict):
         service.finish_delete(
-            lookup(state), physical_absence_confirmed=True, context=context
+            lookup(state), physical_absence_confirmed=True, deleted_count=0, context=context
         )
     with pytest.raises(InvalidInput):
         service.finish_delete(
-            lookup(state), physical_absence_confirmed=False, context=context
+            lookup(state), physical_absence_confirmed=False, deleted_count=0, context=context
         )
 
 

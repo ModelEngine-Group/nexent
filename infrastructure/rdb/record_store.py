@@ -37,8 +37,9 @@ def _predicate(table, value):
         operation = sa.and_ if value.operator == "and" else sa.or_
         return operation(*(_predicate(table, term) for term in value.terms))
     column = table.c[value.field]
+    storage_type = column.type.impl if isinstance(column.type, sa.TypeDecorator) else column.type
     if (
-        isinstance(column.type, sa.DateTime)
+        isinstance(storage_type, sa.DateTime)
         and value.value is not None
         and value.operator != "is_null"
     ):
@@ -49,10 +50,10 @@ def _predicate(table, value):
         value = replace(
             value,
             value=[
-                timestamp(item, naive=not column.type.timezone) for item in value.value
+                timestamp(item, naive=not storage_type.timezone) for item in value.value
             ]
             if value.operator == "in"
-            else timestamp(value.value, naive=not column.type.timezone),
+            else timestamp(value.value, naive=not storage_type.timezone),
         )
     operations = {
         "eq": lambda: column == value.value,
@@ -165,6 +166,8 @@ class SQLRecordStore:
                         ),
                     )
             for field in definition.fields:
+                column_type = table.c[field.name].type
+                storage_type = column_type.impl if isinstance(column_type, sa.TypeDecorator) else column_type
                 if (
                     audit is not None
                     and field.name in audit.fields - audit.dates
@@ -173,7 +176,7 @@ class SQLRecordStore:
                     raise CapabilityUnsupported()
                 if audit is not None and field.name in audit.dates:
                     if field.kind != "string" or not isinstance(
-                        table.c[field.name].type, sa.DateTime
+                        storage_type, sa.DateTime
                     ):
                         raise CapabilityUnsupported()
                     continue

@@ -54,6 +54,7 @@ async def test_delete_confirms_absence_and_duplicate_never_calls_storage(deletio
     s, _, state, lookup, worker = deletion
     final = await worker.process(lookup, s.actor, owner_id="owner", context=s.context)
     assert final.status == "deleted" and final.physical_cleanup_complete
+    assert final.processed_chunks == final.total_chunks == 1
     row = await s.db(s.records.get, JOBS, state.job_id, context=s.context)
     assert row["write_started"] and row["writer_ended"] and not row["reconcile_required"]
     assert row["owner_id"] == "owner" and row["attempt_id"]
@@ -74,7 +75,8 @@ async def test_explicit_empty_or_absent_collection_needs_no_delete(deletion, res
     s, _, _, lookup, worker = deletion
     s.vectors.count.side_effect = result if isinstance(result, Exception) else None
     s.vectors.count.return_value = result
-    assert (await worker.process(lookup, s.actor, owner_id="owner", context=s.context)).status == "deleted"
+    final = await worker.process(lookup, s.actor, owner_id="owner", context=s.context)
+    assert final.status == 'deleted' and final.processed_chunks == final.total_chunks == 0
     s.vectors.delete.assert_not_called()
 
 

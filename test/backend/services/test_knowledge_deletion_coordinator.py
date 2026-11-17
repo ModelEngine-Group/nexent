@@ -74,6 +74,8 @@ async def setup(sqlite_threads, journal_setup, resources):  # noqa: F811
             return dict(connection.execute(sa.select(s.table)).mappings().one())
 
     def child(status='cleanup_pending', **kwargs):
+        if status == 'deleted' and kwargs.get('physical_cleanup_complete'):
+            kwargs.update(processed_chunks=0, total_chunks=0)
         return KnowledgeJobState(**s.intent.runtime_lookup(actor.tenant_id).model_dump(), status=status, **kwargs)
 
     try:
@@ -191,7 +193,10 @@ async def test_default_source_path_finishes_real_journal_and_ledger_after_both_d
         STORAGE_LEDGER_DATASET,
         STORAGE_LEDGER_HISTORY_DATASET,
     )
-    from contracts.knowledge_deletion import DELETION_DATASET
+    from contracts.knowledge_deletion import (
+        DELETION_DATASET,
+        DELETION_KNOWLEDGE_DATASET,
+    )
     from nexent.storage.models import DeleteReceipt
 
     from infrastructure import knowledge_deletion
@@ -205,7 +210,7 @@ async def test_default_source_path_finishes_real_journal_and_ledger_after_both_d
     def ports(actor, *, context):
         with s.ports(actor, context=context) as (_, authorized):
             records = bind_deletion_records(StorageScope('management', actor.tenant_id, actor.user_id,
-                                            {DELETION_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}), s.s.engine)
+                                            {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}), s.s.engine)
             try:
                 yield records, authorized
             finally:

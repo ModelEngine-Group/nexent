@@ -1,15 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Delete one fenced source once, then atomically release its charge and lifecycle."""
+"""Delete one fenced source once, then commit its charge, file and KB metadata together."""
+
+from datetime import UTC, datetime
 
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
+from contracts.knowledge_deletion import DELETION_KNOWLEDGE_DATASET
 from management.services.file.source_publish import validate_scope
 from management.services.knowledge_base.deletion_journal import (
     DeletionJournal,
     DeletionPhaseChanged,
 )
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
-from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown
+from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import (
     Comparison,
     FieldPatch,
@@ -62,6 +65,17 @@ class SourceDeletion:
                     raise DeletionPhaseChanged()
                 intent = journal.request(current)
                 ledger = self._ledger(tx, current, intent, context)
+                if intent.scope == 'full' and (intent.object_name is not None or current['deleted_vector_count'] > 0):
+                    knowledge = tx.get(DELETION_KNOWLEDGE_DATASET, current['knowledge_id'], context=context)
+                    if knowledge is None or knowledge['tenant_id'] != current['tenant_id'] or knowledge['index_name'] != current['index_name']:
+                        raise ScopeDenied()
+                    receipt = tx.patch(DELETION_KNOWLEDGE_DATASET, current['knowledge_id'],
+                                       FieldPatch(set_values={'last_doc_update_time': datetime.now(UTC).isoformat()}),
+                                       expected=Revision(str(knowledge['version'])), context=context)
+                    if receipt.outcome is not WriteOutcome.CONFIRMED:
+                        raise OutcomeUnknown(operation_id=context.operation_id)
+                    if not receipt.matched:
+                        raise DeletionPhaseChanged()
                 if ledger is not None and ledger['status'] == 'COMMITTED':
                     receipt = tx.patch(LEDGER, ledger['storage_object_id'], FieldPatch(set_values={'status': 'DELETED'}),
                                        expected=Revision(str(ledger['version'])), context=context)
@@ -93,6 +107,8 @@ class SourceDeletion:
     def advance(self, row, *, context):
         context.remaining()
         intent = self.journal.request(row)
+        if intent.scope == 'full' and row['deleted_vector_count'] is None:
+            raise Conflict()
         allowed = {'DELETE_ACCEPTED'} if intent.scope == 'source_only' else {'DELETE_SOURCE_PENDING'}
         self.journal._phase(row, allowed | {'DELETE_SOURCE_DELETING'})
         self._ledger(self.records, row, intent, context)

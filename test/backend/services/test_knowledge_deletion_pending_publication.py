@@ -7,13 +7,18 @@ import pytest
 from contracts.agentos_knowledge import KnowledgeJobState, ObjectReference
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
-from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
+from contracts.knowledge_deletion import (
+    DELETION_DATASET,
+    DELETION_KNOWLEDGE_DATASET,
+    KnowledgeDeletionIntent,
+)
 from management.services.knowledge_base.deletion_journal import DeletionJournal
 from management.services.knowledge_base.source_deletion import SourceDeletion
 from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import DeleteReceipt, RecordQuery, StorageScope
 
 from infrastructure.rdb.knowledge_deletion import bind_deletion_records
+from infrastructure.rdb.knowledge_deletion_metadata import metadata_catalog
 from infrastructure.rdb.source_binding import DATASET as SOURCE
 from test.backend.services.test_cleanse_jobs import context
 from test.backend.services.test_knowledge_deletion_contract import intent
@@ -144,7 +149,11 @@ def test_original_finalizer_finishes_with_waiting_intent_then_charge_is_released
     finish, upload, objects, _, configure = finalization
     if quota is not None:
         configure(quota)
-    records = bind_deletion_records(StorageScope('management', 'tenant-a', 'user-a', {DELETION_DATASET, LEDGER, HISTORY}), upload._engine)
+    _, knowledge, _ = metadata_catalog()
+    knowledge.create(upload._engine)
+    with upload._engine.begin() as connection:
+        connection.execute(knowledge.insert(), {'knowledge_id': 1, 'tenant_id': 'tenant-a', 'index_name': 'kb', 'delete_flag': 'N'})
+    records = bind_deletion_records(StorageScope('management', 'tenant-a', 'user-a', {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, LEDGER, HISTORY}), upload._engine)
     try:
         journal = DeletionJournal(records)
         original = journal.record(FILE_ID, context=context())
@@ -163,7 +172,7 @@ def test_original_finalizer_finishes_with_waiting_intent_then_charge_is_released
         row = journal.activate(published, context=context())
         row, _ = journal.begin_runtime(row, context=context())
         row = journal.observe_runtime(row, KnowledgeJobState(**value.runtime_lookup('tenant-a').model_dump(),
-                                      status='deleted', physical_cleanup_complete=True), context=context())
+                                      status='deleted', physical_cleanup_complete=True, processed_chunks=0, total_chunks=0), context=context())
         row = journal.confirm_cleanse_drained(row, physical_completion_confirmed=True, context=context())
         objects.scope = StorageScope('management', 'tenant-a', 'user-a', {'files'})
         objects.stat.side_effect = [objects.stat.return_value, NotFound()]

@@ -13,6 +13,7 @@ from contracts.agentos_knowledge import (
 from pydantic import Field, model_validator
 
 DELETION_DATASET = "management_knowledge_deletions"
+DELETION_KNOWLEDGE_DATASET = 'management_knowledge_deletion_metadata'
 
 
 class KnowledgeDeletionIntent(KnowledgeFileReference):

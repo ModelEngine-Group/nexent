@@ -76,12 +76,13 @@ class KnowledgeDeleteWorker:
             except NotFound:
                 # A count on this exact collection confirms that it does not exist.
                 return 0
-            if type(value) is not int or value < 0:
+            if type(value) is not int or not 0 <= value <= 2**31 - 1:
                 raise OutcomeUnknown(operation_id=context.operation_id)
             return value
 
-        if count() == 0:
-            return
+        deleted_count = count()
+        if deleted_count == 0:
+            return 0
         receipts = vectors.delete(grant.collection, where, context=context)
         if not isinstance(receipts, tuple) or any(
             not isinstance(r, DeleteReceipt) or r.outcome is not WriteOutcome.CONFIRMED
@@ -90,6 +91,7 @@ class KnowledgeDeleteWorker:
             raise OutcomeUnknown(operation_id=context.operation_id)
         if count() != 0:
             raise Conflict(operation_id=context.operation_id)
+        return deleted_count
 
     async def process(self, lookup, actor, *, owner_id, context=None):
         context = context or OperationContext("knowledge-delete-" + uuid4().hex,
@@ -107,11 +109,11 @@ class KnowledgeDeleteWorker:
                 if handle is None:
                     return await self._job(actor, grant, "inspect", lookup, context=context)
                 with self.ports(actor, grant, context=context) as vectors:
-                    await self._blocking(self._remove, vectors, grant, request, context)
+                    deleted_count = await self._blocking(self._remove, vectors, grant, request, context)
                 if await self._grant(request, actor) != grant:
                     raise Conflict()
                 return await self._job(actor, grant, "finish_delete", handle,
-                                       physical_absence_confirmed=True, context=context)
+                                       physical_absence_confirmed=True, deleted_count=deleted_count, context=context)
         except BaseException as error:
             cancelled.set()
             if isinstance(error, TimeoutError):

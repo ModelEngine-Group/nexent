@@ -9,7 +9,7 @@ import pytest
 import sqlalchemy as sa
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
-from contracts.knowledge_deletion import DELETION_DATASET
+from contracts.knowledge_deletion import DELETION_DATASET, DELETION_KNOWLEDGE_DATASET
 from management.services.knowledge_base.deletion_journal import DeletionJournal
 from management.services.knowledge_base.source_deletion import SourceDeletion
 from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown, ScopeDenied
@@ -40,8 +40,16 @@ def setup(journal_setup, monkeypatch):  # noqa: F811
     ])
     ledger.create(s.engine)
     monkeypatch.setattr(module, 'ledger_catalog', lambda: (definition, ledger, audit))
+    knowledge_definition, original_knowledge, knowledge_audit = module.metadata_catalog()
+    knowledge = sa.Table('deletion_knowledge', sa.MetaData(), *[
+        sa.Column(c.name, c.type, primary_key=c.primary_key, nullable=c.nullable) for c in original_knowledge.c
+    ])
+    knowledge.create(s.engine)
+    monkeypatch.setattr(module, 'metadata_catalog', lambda: (knowledge_definition, knowledge, knowledge_audit))
     value = intent(source={'space': 'files', 'key': 'source.txt', 'version': 'etag:one', 'sha256': 'a' * 64})
     with s.engine.begin() as c:
+        c.execute(knowledge.insert(), {'knowledge_id': 1, 'tenant_id': 'tenant-a', 'index_name': 'kb-one',
+                                      'last_doc_update_time': datetime(2026, 1, 1, tzinfo=UTC), 'delete_flag': 'N', 'created_by': 'uploader-a', 'version': 0})
         c.execute(s.table.update().values(file_size=11, bucket_name='bucket', storage_object_id=17,
                                          source_revision=value.source.version, source_upload_sha256=value.source.sha256,
                                          upload_owner_service='management', uploaded_at=datetime(2026, 11, 17, tzinfo=UTC)))
@@ -49,11 +57,11 @@ def setup(journal_setup, monkeypatch):  # noqa: F811
                                    'index_name': 'kb-one', 'bucket_name': 'bucket', 'object_name': 'source.txt',
                                    'raw_bytes': 11, 'status': 'COMMITTED', 'version': 0, 'delete_flag': 'N',
                                    'create_time': datetime(2026, 11, 17, tzinfo=UTC), 'update_time': datetime(2026, 11, 17, tzinfo=UTC)})
-    records = module.bind_deletion_records(StorageScope('management', 'tenant-a', 'user-a', {DELETION_DATASET, LEDGER, HISTORY}), s.engine)
+    records = module.bind_deletion_records(StorageScope('management', 'tenant-a', 'user-a', {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, LEDGER, HISTORY}), s.engine)
     journal = DeletionJournal(records)
     admitted = journal.admit(value, journal.record(value.file_id, context=context()), context=context())
     with s.engine.begin() as c:
-        c.execute(s.table.update().values(stage='DELETE_SOURCE_PENDING'))
+        c.execute(s.table.update().values(stage='DELETE_SOURCE_PENDING', deleted_vector_count=0))
     row = lambda: journal.record(value.file_id, context=context())
     target = ObjectRef('files', 'source.txt', Revision(value.source.version))
     metadata = ObjectMetadata(target, 11, 'text/plain', 'one', value.source.sha256)
@@ -187,7 +195,7 @@ def test_full_delete_after_source_only_reuses_released_history_without_double_ch
     full = s.value.model_copy(update={'source': None})
     s.journal.admit(full, done, context=context())
     with s.s.engine.begin() as c:
-        c.execute(s.s.table.update().values(stage='DELETE_SOURCE_PENDING'))
+        c.execute(s.s.table.update().values(stage='DELETE_SOURCE_PENDING', deleted_vector_count=0))
     s.objects.stat.side_effect = NotFound()
     revision = s.records.get(HISTORY, 17, context=context())['version']
     assert s.deletion.advance(s.row(), context=context())['status'] == 'DELETED'

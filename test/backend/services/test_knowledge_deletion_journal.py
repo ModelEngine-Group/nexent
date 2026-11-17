@@ -98,7 +98,8 @@ def test_runtime_submission_and_source_cleanup_each_have_one_cas_owner(setup):
         s.journal.observe_runtime(observed, child.model_copy(update={"job_id": "f" * 32}), context=context())
     incomplete = child.model_copy(update={"status": "deleted"})
     assert s.journal.observe_runtime(observed, incomplete, context=context()) == observed
-    runtime_done = s.journal.observe_runtime(observed, incomplete.model_copy(update={"physical_cleanup_complete": True}), context=context())
+    runtime_done = s.journal.observe_runtime(observed, incomplete.model_copy(update={"physical_cleanup_complete": True,
+                                                                                'processed_chunks': 0, 'total_chunks': 0}), context=context())
     assert runtime_done["stage"] == "DELETE_CLEANSE_PENDING"
     with pytest.raises(Conflict):
         s.journal.begin_source(runtime_done, context=context())

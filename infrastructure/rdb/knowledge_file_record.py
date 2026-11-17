@@ -200,6 +200,11 @@ class KnowledgeFileLifecycle(TableBase):
     runtime_status = Column(String(30), nullable=True, comment="Last confirmed AgentOS Runtime child state; NULL before observation or for legacy rows.")
     processed_chunks = Column(Integer, nullable=True, comment="Last confirmed Runtime vector-write count for the current file attempt; NULL when unknown.")
     total_chunks = Column(Integer, nullable=True, comment="Fixed Runtime chunk total for the current file attempt; NULL when unknown.")
+    deleted_vector_count = Column(
+        Integer, CheckConstraint('deleted_vector_count >= 0', name='ck_knowledge_file_deleted_vector_count'),
+        nullable=True,
+        comment='Runtime-confirmed removed vector records for full deletion; NULL for unconfirmed or source-only operations.',
+    )
 
 
 _source = KnowledgeFileLifecycle.__table__.c

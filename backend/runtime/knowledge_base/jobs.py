@@ -523,8 +523,9 @@ class KnowledgeJobs:
                 "write_started": True, "writer_ended": False, "reconcile_required": True,
             }, context)
 
-    def finish_delete(self, handle, *, physical_absence_confirmed, context):
-        if physical_absence_confirmed is not True:
+    def finish_delete(self, handle, *, physical_absence_confirmed, deleted_count, context):
+        if (physical_absence_confirmed is not True or type(deleted_count) is not int
+                or not 0 <= deleted_count <= 2**31 - 1):
             raise InvalidInput()
         if not isinstance(handle, dict):
             raise Conflict()
@@ -544,13 +545,16 @@ class KnowledgeJobs:
                 raise Conflict()
             if self._writers_active(tx, lookup, context):
                 raise Conflict()
+            if row['status'] == 'deleted' and (row['processed_chunks'], row['total_chunks']) != (deleted_count, deleted_count):
+                raise Conflict()
             if row["status"] != "deleted":
                 row = self._patch(
                     tx,
                     JOBS,
                     row,
                     {"status": "deleted", "physical_cleanup_complete": True,
-                     "writer_ended": True, "reconcile_required": False},
+                     "writer_ended": True, "reconcile_required": False,
+                     'processed_chunks': deleted_count, 'total_chunks': deleted_count},
                     context,
                 )
         return job_state(row)

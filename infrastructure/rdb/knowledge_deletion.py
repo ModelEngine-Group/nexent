@@ -7,6 +7,7 @@ from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
 from contracts.knowledge_deletion import DELETION_DATASET
 from nexent.storage.errors import ScopeDenied
 
+from infrastructure.rdb.knowledge_deletion_metadata import metadata_catalog
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
@@ -27,9 +28,11 @@ def deletion_catalog():
         "source_key", "source_revision", "source_sha256", "deletion_request",
         "version", "deleted_at", "created_by", "updated_by", "create_time", "update_time",
         "delete_flag", "bucket_name", "file_size", "storage_object_id", "uploaded_at",
-        "upload_owner_service", "source_upload_sha256", "error_code",
+        "upload_owner_service", "source_upload_sha256", "error_code", 'deleted_vector_count',
+        'processed_chunks', 'total_chunks',
     )
-    integers = {"knowledge_id", "source_generation", "version", "file_size", "storage_object_id"}
+    integers = {"knowledge_id", "source_generation", "version", "file_size", "storage_object_id",
+                'deleted_vector_count', 'processed_chunks', 'total_chunks'}
     definition = DatasetDefinition(
         DELETION_DATASET,
         "file_id",
@@ -45,16 +48,17 @@ def deletion_catalog():
 def bind_deletion_records(scope, engine):
     definition, table = deletion_catalog()
     ledger, ledger_table, ledger_audit = ledger_catalog()
+    metadata, knowledge, metadata_audit = metadata_catalog()
     history = replace(ledger, name=HISTORY, write_roles=frozenset(), active_field=None)
-    tables = {DELETION_DATASET: table, ledger.name: ledger_table, HISTORY: ledger_table}
+    tables = {DELETION_DATASET: table, ledger.name: ledger_table, HISTORY: ledger_table, metadata.name: knowledge}
     if not scope.namespaces <= tables.keys():
         raise ScopeDenied()
     return SQLRecordStore(
-        scope, DatasetCatalog((definition, ledger, history)),
+        scope, DatasetCatalog((definition, ledger, history, metadata)),
         {name: tables[name] for name in scope.namespaces}, engine,
-        revision_fields={DELETION_DATASET: "version", ledger.name: "version"},
+        revision_fields={DELETION_DATASET: "version", ledger.name: "version", metadata.name: 'version'},
         audit_mappings={DELETION_DATASET: RecordAudit(
             "create_time", "update_time", "created_by", "updated_by",
             extra_dates=frozenset({"deleted_at", "uploaded_at"}),
-        ), ledger.name: ledger_audit, HISTORY: ledger_audit},
+        ), ledger.name: ledger_audit, HISTORY: ledger_audit, metadata.name: metadata_audit},
     )

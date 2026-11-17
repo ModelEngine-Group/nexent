@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from contracts.knowledge import STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET
-from contracts.knowledge_deletion import DELETION_DATASET
+from contracts.knowledge_deletion import DELETION_DATASET, DELETION_KNOWLEDGE_DATASET
 from nexent.storage.errors import ScopeDenied
 
 from infrastructure import knowledge_deletion as module
@@ -33,7 +33,7 @@ def test_records_grant_only_management_current_actor_and_owned_ports_are_closed(
         scope = module.bind_deletion_records.call_args.args[0]
         assert scope.service_role == 'management' and scope.actor_id == 'editor-b'
         assert scope.tenant_id == 'tenant-a' and scope.system is False
-        assert scope.namespaces == {DELETION_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}
+        assert scope.namespaces == {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}
     s.records.close.assert_called_once()
     s.resources.close.assert_called_once()
     s.engine.dispose.assert_called_once()

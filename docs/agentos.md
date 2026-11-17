@@ -190,6 +190,8 @@ KB 文件生命周期及授权客户端有十秒总截止，connect/read/write/p
 
 `File.inspect` 返回可空的 `processed_chunks` 和 `total_chunks`。Runtime 准备好切片后固定总量，每批向量写入确认后更新数量；未知写入不增加计数。数量达到总量仍须检查任务 `status`，它不表示文件已发布或物理清理完成。inspect 保留原用户、租户及资源授权校验。Management 的原用户协调任务保存这些观测，公开列表读取投影的接线仍在退役计划中，不能改用其他知识库读者身份查询原任务。
 
+对 `File.delete` 产生的任务，只有 `status=deleted` 且 `physical_cleanup_complete=true` 时，两个计数才表示本次确认移除的覆盖版本向量数，此时二者相同。Runtime 先确认覆盖写入方已结束，再计数、执行一次删除并确认剩余为零，计数与删除终态一起持久化；重复 inspect 返回同一结果。未知结果不补零，也不重发删除。Management 将确认数单独保存为 `deleted_vector_count`，保留原文件的上传进度；`source_only` 不调用 Runtime 删除。
+
 部署该状态快照前执行 SQL 022，再升级 Management，最后升级 Runtime。新列允许空值，历史行保持未知；回滚先 Runtime、后 Management，保留新增列。
 
 文本 search 的客户端与 Runtime 各有 180 秒总截止，包含授权、embedding、存储、rerank 和最终可见性检查。`search_mode` 支持 accurate、semantic、hybrid，默认 semantic；指定 `rerank_model` 才执行重排，使用既有十倍候选常量。accurate/hybrid 的文本分支沿用原分词加权、短语/模糊匹配及同次查询高亮，失败不回退普通 text。所有模型调用进入 `ModelService.invoke`，非法重排结果直接报错。Runtime 在重排前及返回前核对权威 generation，不能返回已删除或未发布的向量。结果 `score_details` 包含适用的 accurate/semantic 归一化分量和 retrieval_highlight_terms，重排后仍保留这些检索信息。
