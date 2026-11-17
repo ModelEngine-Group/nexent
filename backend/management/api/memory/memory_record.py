@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from contracts.memory import (
     CreateMemoryRequest,
@@ -141,17 +143,28 @@ def list_records(
             detail="Tenant and user memory use /memory/long-term/{scope}",
         )
     service = get_memory_record_service()
-    rows = service.list_memories(
-        tenant_id,
-        user_id=None if normalized_layer == "tenant" else user_id,
-        agent_id=agent_id,
-        conversation_id=conversation_id,
-        layer=normalized_layer,
-        memory_type=memory_type,
-        status=status,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        rows = service.list_memories(
+            tenant_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            conversation_id=conversation_id,
+            layer=normalized_layer,
+            memory_type=memory_type,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except (OperationalError, InterfaceError, SQLAlchemyTimeoutError) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Failed to load memory records",
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to load memory records",
+        ) from exc
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"items": rows, "count": len(rows)},

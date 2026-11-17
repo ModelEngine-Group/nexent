@@ -160,7 +160,8 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     assert "result_json" not in finish_payload
 
 
-def test_ac008_failure_is_audited(monkeypatch):
+@pytest.mark.parametrize("failing_read", ["list_memory_records", "aggregate_dreaming_stats"])
+def test_ac008_failure_is_audited(monkeypatch, failing_read):
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_dreaming_db.create_audit",
         lambda *_: 43,
@@ -169,23 +170,28 @@ def test_ac008_failure_is_audited(monkeypatch):
         "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(True),
     )
+    storage_error = RuntimeError("database unavailable")
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_record_db.list_memory_records",
-        lambda *args, **kwargs: [],
+        MagicMock(return_value=[], side_effect=storage_error if failing_read == "list_memory_records" else None),
     )
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
-        MagicMock(side_effect=ValueError("bad data")),
+        MagicMock(return_value=[], side_effect=storage_error if failing_read == "aggregate_dreaming_stats" else None),
     )
     finish = MagicMock()
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit", finish
     )
     service = MemoryDreamingService(record_service=MagicMock())
-    with pytest.raises(DreamingRunError):
+    publish = MagicMock()
+    monkeypatch.setattr(service, "_build_version", publish)
+    with pytest.raises(DreamingRunError) as exc_info:
         service.run(tenant_id="t", user_id="u", agent_id="a")
+    assert exc_info.value.__cause__ is storage_error
     assert finish.call_args.kwargs["status"] == "failed"
-    assert "ValueError" in finish.call_args.kwargs["error"]
+    assert "RuntimeError" in finish.call_args.kwargs["error"]
+    publish.assert_not_called()
 
 
 

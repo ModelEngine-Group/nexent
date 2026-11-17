@@ -248,7 +248,6 @@ def list_memory_records(
     limit: int = 100,
     offset: int = 0,
     include_deleted: bool = False,
-    strict: bool = False,
 ) -> List[Dict[str, Any]]:
     """List memory records with the standard isolation filters.
 
@@ -266,6 +265,8 @@ def list_memory_records(
 
     Returns:
         A list of records serialized as plain dicts.
+
+    Database read failures propagate to the caller.
     """
     # Normalize empty-string filters to ``None`` so that empty query params
     # (e.g. ``?status=``) do not translate into ``WHERE status = ''`` filters
@@ -285,70 +286,63 @@ def list_memory_records(
         status = None
 
     with get_db_session() as session:
-        try:
-            query = (
-                session.query(
-                    MemoryRecord,
-                    AgentInfo.display_name.label("agent_display_name"),
-                    AgentInfo.name.label("agent_name"),
-                    ConversationRecord.conversation_title,
-                )
-                .outerjoin(
-                    AgentInfo,
-                    and_(
-                        cast(AgentInfo.agent_id, String) == MemoryRecord.agent_id,
-                        AgentInfo.version_no == 0,
-                        AgentInfo.delete_flag != "Y",
-                    ),
-                )
-                .outerjoin(
-                    ConversationRecord,
-                    and_(
-                        cast(ConversationRecord.conversation_id, String) == MemoryRecord.conversation_id,
-                        ConversationRecord.delete_flag != "Y",
-                    ),
-                )
-                .filter(MemoryRecord.tenant_id == tenant_id)
+        query = (
+            session.query(
+                MemoryRecord,
+                AgentInfo.display_name.label("agent_display_name"),
+                AgentInfo.name.label("agent_name"),
+                ConversationRecord.conversation_title,
             )
-            if user_id is not None:
-                query = query.filter(MemoryRecord.user_id == user_id)
-            if agent_id is not None:
-                query = query.filter(MemoryRecord.agent_id == agent_id)
-            if conversation_id is not None:
-                query = query.filter(MemoryRecord.conversation_id == conversation_id)
-            if layer is not None:
-                query = query.filter(MemoryRecord.layer == layer)
-            if memory_type is not None:
-                query = query.filter(MemoryRecord.memory_type == memory_type)
-            if status is not None:
-                query = query.filter(MemoryRecord.status == status)
-            elif not include_deleted and not all_statuses:
-                query = query.filter(MemoryRecord.status == "active")
-            if not include_deleted:
-                query = query.filter(MemoryRecord.delete_flag == "N")
+            .outerjoin(
+                AgentInfo,
+                and_(
+                    cast(AgentInfo.agent_id, String) == MemoryRecord.agent_id,
+                    AgentInfo.version_no == 0,
+                    AgentInfo.delete_flag != "Y",
+                ),
+            )
+            .outerjoin(
+                ConversationRecord,
+                and_(
+                    cast(ConversationRecord.conversation_id, String) == MemoryRecord.conversation_id,
+                    ConversationRecord.delete_flag != "Y",
+                ),
+            )
+            .filter(MemoryRecord.tenant_id == tenant_id)
+        )
+        if user_id is not None:
+            query = query.filter(MemoryRecord.user_id == user_id)
+        if agent_id is not None:
+            query = query.filter(MemoryRecord.agent_id == agent_id)
+        if conversation_id is not None:
+            query = query.filter(MemoryRecord.conversation_id == conversation_id)
+        if layer is not None:
+            query = query.filter(MemoryRecord.layer == layer)
+        if memory_type is not None:
+            query = query.filter(MemoryRecord.memory_type == memory_type)
+        if status is not None:
+            query = query.filter(MemoryRecord.status == status)
+        elif not include_deleted and not all_statuses:
+            query = query.filter(MemoryRecord.status == "active")
+        if not include_deleted:
+            query = query.filter(MemoryRecord.delete_flag == "N")
 
-            query = query.order_by(MemoryRecord.update_time.desc())
-            if limit is not None:
-                query = query.limit(limit)
-            query = query.offset(offset)
-            result = []
-            for (
-                record,
-                agent_display_name,
-                agent_name,
-                conversation_title,
-            ) in query.all():
-                item = _record_to_dict(record)
-                item["agent_name"] = agent_display_name or agent_name
-                item["conversation_title"] = conversation_title
-                result.append(item)
-            return result
-        except Exception:
-            if strict:
-                raise
-            session.rollback()
-            logger.exception("list_memory_records failed")
-            return []
+        query = query.order_by(MemoryRecord.update_time.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        query = query.offset(offset)
+        result = []
+        for (
+            record,
+            agent_display_name,
+            agent_name,
+            conversation_title,
+        ) in query.all():
+            item = _record_to_dict(record)
+            item["agent_name"] = agent_display_name or agent_name
+            item["conversation_title"] = conversation_title
+            result.append(item)
+        return result
 
 
 def list_active_memory_ids_by_layer(

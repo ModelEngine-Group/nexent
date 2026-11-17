@@ -113,25 +113,17 @@ def list_hits_for_user(
     *,
     since: Optional[datetime] = None,
     limit: int = 5000,
-    strict: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Return hit rows for a user (used by Dreaming aggregation)."""
+    """Return hit rows for a user, propagating database read failures."""
     with get_db_session() as session:
-        try:
-            query = session.query(MemoryRetrievalHit).filter(
-                MemoryRetrievalHit.tenant_id == tenant_id,
-                MemoryRetrievalHit.user_id == user_id,
-            )
-            if since is not None:
-                query = query.filter(MemoryRetrievalHit.occurred_at >= since)
-            query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
-            return [_hit_to_dict(row) for row in query.all()]
-        except Exception:
-            if strict:
-                raise
-            session.rollback()
-            logger.exception("list_hits_for_user failed")
-            return []
+        query = session.query(MemoryRetrievalHit).filter(
+            MemoryRetrievalHit.tenant_id == tenant_id,
+            MemoryRetrievalHit.user_id == user_id,
+        )
+        if since is not None:
+            query = query.filter(MemoryRetrievalHit.occurred_at >= since)
+        query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
+        return [_hit_to_dict(row) for row in query.all()]
 
 
 def aggregate_memory_stats(
@@ -192,7 +184,7 @@ def aggregate_dreaming_stats(
     since: datetime,
 ) -> List[Dict[str, Any]]:
     """Return complete Light/Deep evidence for one isolation scope."""
-    hits = list_hits_for_user(tenant_id, user_id, since=since, limit=10000, strict=True)
+    hits = list_hits_for_user(tenant_id, user_id, since=since, limit=10000)
     grouped: Dict[int, Dict[str, Any]] = {}
     for hit in hits:
         if (agent_id is not None and str(hit.get("agent_id")) != str(agent_id)) or hit.get("memory_id") is None:
