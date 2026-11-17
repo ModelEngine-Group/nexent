@@ -117,6 +117,20 @@ export default function AgentRunPolicy({
           </Checkbox>
         </AgentSettingHint>
         <AgentProtocolRepairOption />
+        <AgentSettingHint
+          label={t("memory.manager.agentAutomaticMemory")}
+          hint={t("memory.manager.agentAutomaticMemoryHint")}
+        >
+          <Checkbox
+            checked={editedAgent.enable_memory ?? true}
+            disabled={isReadOnly}
+            onChange={(event) =>
+              updateAgent({ enable_memory: event.target.checked })
+            }
+          >
+            {t("memory.manager.agentAutomaticMemory")}
+          </Checkbox>
+        </AgentSettingHint>
         <AgentDeploymentOptions highFidelity />
       </div>
     );
@@ -147,6 +161,17 @@ export default function AgentRunPolicy({
         </Col>
       </Row>
 
+      <Form.Item
+        label={t("memory.manager.agentAutomaticMemory")}
+        tooltip={t("memory.manager.agentAutomaticMemoryHint")}
+      >
+        <Switch
+          aria-label={t("memory.manager.agentAutomaticMemory")}
+          checked={editedAgent.enable_memory ?? true}
+          disabled={isReadOnly}
+          onChange={(checked) => updateAgent({ enable_memory: checked })}
+        />
+      </Form.Item>
       {/* Self Validation */}
       <Row gutter={[16, 0]}>
         {/* Provide Run Summary */}

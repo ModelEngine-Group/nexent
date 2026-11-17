@@ -6819,5 +6819,13 @@
   "ops.readOnly": "Read-only mode",
   "dreaming.reason.no_candidates": "No recent Agent memories were available.",
   "dreaming.reason.no_eligible_candidates": "No memories reached the promotion thresholds.",
-  "dreaming.reason.no_new_evidence": "The current version already contains the available evidence."
+  "dreaming.reason.no_new_evidence": "The current version already contains the available evidence.",
+  "memory.manager.agentAutomaticMemory": "Automatic memory for this Agent",
+  "memory.manager.agentAutomaticMemoryHint": "This setting applies to the saved Agent version. Tenant and personal settings also apply.",
+  "memory.manager.tenantAutomaticMemory": "Tenant automatic memory",
+  "memory.manager.tenantAutomaticMemoryHint": "Controls automatic memory for all conversations in this tenant.",
+  "memory.manager.tenantMemoryLoadError": "Could not load the tenant memory setting.",
+  "memory.manager.personalAgentMemory": "My automatic memory by Agent",
+  "memory.manager.personalAgentPlaceholder": "Select an Agent",
+  "dreaming.reason.memory_disabled": "Automatic memory is off."
 }

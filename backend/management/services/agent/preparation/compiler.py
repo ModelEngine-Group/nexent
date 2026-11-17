@@ -41,6 +41,7 @@ from management.services.agent.prompt import (
 from management.services.agent.resource_resolver import _get_skills_for_template
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.configuration.user.memory import build_memory_context
+from management.services.memory.access import tenant_memory_enabled
 from management.services.memory.runtime_io import memory_deadline, optional_memory_io
 from management.services.memory.providers.service import (
     get_memory_external_provider_service,
@@ -102,7 +103,7 @@ async def create_agent_config(
     if memory_query_deadline is None:
         memory_query_deadline = memory_deadline()
     memory_context = None
-    if allow_memory_search:
+    if allow_memory_search and agent_info.get("enable_memory") is not False:
         memory_context = await optional_memory_io(
             "memory-policy", _load_authorized_memory_context, user_id, tenant_id, agent_id,
             deadline=memory_query_deadline,
@@ -542,6 +543,7 @@ def _load_authorized_memory_context(user_id, tenant_id, agent_id):
         not settings.memory_switch
         or str(agent_id) in settings.disable_agent_ids
         or str(agent_id) in settings.disable_user_agent_ids
+        or not tenant_memory_enabled(tenant_id)
     ):
         return None
     return context

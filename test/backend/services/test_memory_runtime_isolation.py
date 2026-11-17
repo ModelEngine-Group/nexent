@@ -130,17 +130,25 @@ async def test_presearch_returns_long_term_without_waiting_for_slow_vector(monke
 
 
 @pytest.mark.parametrize(
-    ("settings", "expected"),
+    "tenant_value, user_settings, agent_setting, expected",
     [
-        ({"MEMORY_SWITCH": "Y"}, True),
-        ({"MEMORY_SWITCH": "N"}, False),
-        ({"MEMORY_SWITCH": "Y", "DISABLE_AGENT_ID": ["12"]}, False),
-        ({"MEMORY_SWITCH": "Y", "DISABLE_USERAGENT_ID": ["12"]}, False),
+        (None, {"MEMORY_SWITCH": "Y"}, None, True),
+        ("N", {"MEMORY_SWITCH": "Y"}, True, False),
+        ("Y", {"MEMORY_SWITCH": "N"}, True, False),
+        ("Y", {"MEMORY_SWITCH": "Y", "DISABLE_AGENT_ID": ["12"]}, True, False),
+        ("Y", {"MEMORY_SWITCH": "Y", "DISABLE_USERAGENT_ID": ["12"]}, True, False),
+        ("Y", {"MEMORY_SWITCH": "Y"}, False, False),
     ],
 )
-def test_automatic_write_enforces_personal_policy(monkeypatch, settings, expected):
-    monkeypatch.setattr(access, "get_user_configs", lambda _: settings)
+def test_automatic_write_enforces_persisted_policy(monkeypatch, tenant_value, user_settings, agent_setting, expected):
+    from_db = {"config_value": tenant_value} if tenant_value is not None else {}
+    monkeypatch.setattr(access, "get_single_config_info", lambda *_: from_db)
+    monkeypatch.setattr(access, "get_user_configs", lambda *_: user_settings)
+    lookup = Mock(return_value={"enable_memory": agent_setting})
+    monkeypatch.setattr(access, "search_agent_info_by_agent_id", lookup)
     assert access.can_write_automatic_memory("t", "u", "12", 3) is expected
+    if lookup.called:
+        lookup.assert_called_once_with(12, "t", 3)
 
 
 def test_automatic_store_with_no_vector_does_not_persist(monkeypatch):
@@ -443,6 +451,18 @@ def test_shared_probe_release_error_leaves_local_state_recoverable(cache, monkey
     embedding_health.record_embedding_success("model", token)
     assert "model" not in embedding_health._local
     shared.eval.assert_called_once()
+
+
+def test_source_agent_policy_uses_released_version_and_denies_missing_agent(monkeypatch):
+    query_version = Mock(return_value=7)
+    lookup = Mock(side_effect=[{"enable_memory": False}, access.AgentNotFoundError("missing")])
+    monkeypatch.setattr(access, "query_current_version_no", query_version)
+    monkeypatch.setattr(access, "search_agent_info_by_agent_id", lookup)
+    assert access.source_agent_allows_memory("tenant", "1") is False
+    lookup.assert_called_once_with(1, "tenant", 7)
+    assert access.source_agent_allows_memory("tenant", 2, 99) is False
+    assert access.source_agent_allows_memory("tenant", "unknown") is False
+    query_version.assert_called_once_with(1, "tenant")
 
 
 def test_automatic_write_fails_closed_when_policy_storage_fails(monkeypatch):

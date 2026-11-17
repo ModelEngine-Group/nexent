@@ -6816,5 +6816,13 @@
   "ops.readOnly": "当前为只读模式",
   "dreaming.reason.no_candidates": "近期没有可用于整理的智能体记忆。",
   "dreaming.reason.no_eligible_candidates": "没有记忆达到晋升门槛。",
-  "dreaming.reason.no_new_evidence": "现有版本已包含可用证据。"
+  "dreaming.reason.no_new_evidence": "现有版本已包含可用证据。",
+  "memory.manager.agentAutomaticMemory": "此智能体的自动记忆",
+  "memory.manager.agentAutomaticMemoryHint": "设置对保存的智能体版本生效，同时受租户和个人设置约束。",
+  "memory.manager.tenantAutomaticMemory": "租户自动记忆",
+  "memory.manager.tenantAutomaticMemoryHint": "控制此租户所有会话的自动记忆。",
+  "memory.manager.tenantMemoryLoadError": "无法加载租户记忆设置。",
+  "memory.manager.personalAgentMemory": "我的智能体记忆偏好",
+  "memory.manager.personalAgentPlaceholder": "选择智能体",
+  "dreaming.reason.memory_disabled": "自动记忆已关闭。"
 }

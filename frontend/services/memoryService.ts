@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18next from "i18next";
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
@@ -134,6 +136,25 @@ export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus
   return requestJson(API_ENDPOINTS.memory.config.embeddingStatus, {
     method: "GET",
     headers: getAuthHeaders(),
+  });
+}
+
+export type TenantMemorySettings = { enabled: boolean; can_edit: boolean };
+
+export async function loadTenantMemorySettings(): Promise<TenantMemorySettings> {
+  return requestJson(API_ENDPOINTS.memory.config.tenantSwitch, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function setTenantMemoryEnabled(
+  enabled: boolean
+): Promise<TenantMemorySettings> {
+  return requestJson(API_ENDPOINTS.memory.config.tenantSwitch, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ enabled }),
   });
 }
 

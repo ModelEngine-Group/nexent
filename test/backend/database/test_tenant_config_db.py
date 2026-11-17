@@ -668,3 +668,30 @@ def test_create_tenant_with_default_group_rejects_platform_tenant_limit(monkeypa
         create_tenant_with_default_group("tenant-101", "Tenant 101", "admin-1")
 
     session.add.assert_not_called()
+
+
+@pytest.mark.parametrize("already_saved", [False, True])
+def test_update_tenant_memory_setting_serializes_and_preserves_existing_row(monkeypatch, mock_session, already_saved):
+    from management.db.configuration import tenant
+
+    session, query = mock_session
+    saved = MockTenantConfig(config_value="N", created_by="original") if already_saved else None
+    query.filter_by.return_value.first.return_value = saved
+    manager = MagicMock()
+    manager.__enter__.return_value = session
+    monkeypatch.setattr(tenant, "get_db_session", lambda: manager)
+    monkeypatch.setattr(tenant, "TenantConfig", MockTenantConfig)
+
+    tenant.upsert_single_tenant_setting("tenant-1", "TENANT_MEMORY_SWITCH", "Y", "current-admin")
+
+    assert session.execute.call_args.args[1] == {"setting": "tenant-config:tenant-1:TENANT_MEMORY_SWITCH"}
+    query.filter_by.assert_called_once_with(tenant_id="tenant-1", config_key="TENANT_MEMORY_SWITCH", delete_flag="N")
+    if saved is None:
+        row = session.add.call_args.args[0]
+        assert row.created_by == "current-admin"
+    else:
+        row = saved
+        session.add.assert_not_called()
+        assert row.created_by == "original"
+    assert row.config_value == "Y"
+    assert row.user_id == row.updated_by == "current-admin"
