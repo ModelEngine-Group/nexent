@@ -32,6 +32,7 @@ MIGRATED_MODULES = {
     'agent/tool_identity.py',
     'model/run_bindings.py',
     'model/run_budget.py',
+    'model/routing.py',
     'skill/creation.py',
 
     'agent/a2a/adapter.py',

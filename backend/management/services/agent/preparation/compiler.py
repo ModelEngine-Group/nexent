@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
+    MODEL_ROUTING_ENABLED,
     NEXENT_SANDBOX_DEFAULT_LEVEL,
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
@@ -92,6 +93,8 @@ async def create_agent_config(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
+    run_history_length: int = 0,
+    run_has_attachments: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -146,6 +149,8 @@ async def create_agent_config(
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
             runtime_model_records=runtime_model_records,
+            run_history_length=run_history_length,
+            run_has_attachments=run_has_attachments,
         )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
@@ -183,6 +188,8 @@ async def create_agent_config(
             runtime_model_records=runtime_model_records,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
+            run_history_length=run_history_length,
+            run_has_attachments=run_has_attachments,
         )
         invocation_name = str(
             mount.get("invocation_name")
@@ -595,15 +602,38 @@ async def create_agent_config(
 
     prompt_bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
     prompt_composer = AgentPromptComposer(prompt_bundle)
-    # AgentInfo stores model_ids (a list); pick the first available model.
+    # AgentInfo stores model_ids (a list); pick the request override, or
+    # (when MODEL_ROUTING_ENABLED) route by task tier across the agent's
+    # configured pool.  Explicit request-level selection always wins over
+    # routing; with routing disabled the pre-routing behavior is kept.
     agent_model_ids = agent_info.get("model_ids") or []
     model_id_to_use = _select_agent_model_id(
         agent_model_ids, override_model_id, tenant_id
     )
+    routed_model_info = None
+    if (
+        MODEL_ROUTING_ENABLED
+        and override_model_id is None
+        and model_id_to_use is not None
+    ):
+        routed_model_info = _route_agent_model(
+            agent_model_ids=agent_model_ids,
+            tenant_id=tenant_id,
+            last_user_query=last_user_query,
+            history_length=run_history_length,
+            has_attachments=run_has_attachments,
+            runtime_model_records=runtime_model_records,
+            agent_id=agent_id,
+        )
+        if routed_model_info is not None:
+            model_id_to_use = routed_model_info.get("model_id") or model_id_to_use
     model_info = None
     if model_id_to_use is not None:
-        model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
-                      else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
+        if routed_model_info is not None and routed_model_info.get("model_id") == model_id_to_use:
+            model_info = routed_model_info
+        else:
+            model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
+                          else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
         if model_info is None:
             raise RunModelControlsError("model_not_available")
         model_name = model_info["display_name"] if model_info is not None else "main_model"
@@ -765,6 +795,45 @@ def _select_agent_model_id(
         return override_model_id
     return select_configured_model_id(agent_model_ids,
         lambda model_id: is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)))
+
+
+def _route_agent_model(
+    agent_model_ids: List[int],
+    tenant_id: str,
+    last_user_query: Optional[str],
+    history_length: int,
+    has_attachments: bool,
+    runtime_model_records: Optional[Dict[int, Dict[str, Any]]],
+    agent_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Route the run to the best-matching model in the agent's own pool.
+
+    Routing stays inside the agent's configured ``model_ids`` so existing
+    permission and validation boundaries are preserved.  Only available
+    records participate.  Returns the chosen record (capacity snapshot
+    fields intact) or None when routing has no signal; the structured
+    decision is logged by the routing service.  Domain vocabularies and
+    task tags come from the routing rules file, not from agent rows.
+    """
+
+    from management.services.model.routing import route_model_selection
+
+    candidates = []
+    for model_id in agent_model_ids:
+        record = (runtime_model_records.get(model_id) if runtime_model_records is not None
+                  else get_model_by_model_id(model_id, tenant_id=tenant_id))
+        if record is not None and is_model_available(record):
+            candidates.append(record)
+    if not candidates:
+        return None
+    selection = route_model_selection(
+        records=candidates,
+        query=last_user_query or "",
+        history_length=history_length,
+        has_attachments=has_attachments,
+        agent_id=agent_id,
+    )
+    return selection[0] if selection else None
 
 
 def _resolve_prompt_runtime_flags(

@@ -338,6 +338,10 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
+    # Inputs for multi-model task routing (model routing is opt-in; these
+    # are ignored otherwise). History turns count completed messages.
+    create_config_kwargs["run_history_length"] = len(history or [])
+    create_config_kwargs["run_has_attachments"] = bool(minio_files)
     from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     captured_records = {}

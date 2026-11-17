@@ -1,0 +1,30 @@
+{
+  "long_context": {
+    "token_threshold": 24000,
+    "char_threshold": 8000,
+    "terms": ["病历", "出院小结", "检查报告", "文献", "全文", "长文", "总结归纳", "medical record", "discharge summary", "full text"]
+  },
+  "quick_qa": {
+    "char_limit": 120,
+    "terms": ["是什么", "什么是", "正常值", "参考范围", "翻译", "缩写", "定义", "查一下", "简述", "what is", "define", "abbreviation", "normal range", "reference range", "translate"]
+  },
+  "deep_reasoning": {
+    "terms": ["鉴别诊断", "会诊", "mdt", "多学科", "分析", "评估", "推理", "为什么", "机制", "步骤", "方案比较", "鉴别", "病因", "differential", "diagnosis", "workup", "analyze", "why ", "compare", "root cause", "root-cause"]
+  },
+  "risk": {
+    "high_terms": ["手术", "麻醉", "化疗", "放疗", "处方", "剂量", "用药", "透析", "输血", "surgery", "anesthesia", "chemotherapy", "dosage", "prescription", "transfusion", "intubat", "surgical"],
+    "review_terms": ["确诊", "诊断", "出院", "医嘱", "diagnos", "discharge", "clinical decision"]
+  },
+  "task_tags": {
+    "quick_qa": "quick_qa",
+    "long_context": "long_context",
+    "deep_reasoning": "deep_reasoning",
+    "summary": "long_context",
+    "report": "long_context",
+    "mdt": "deep_reasoning",
+    "analyze": "deep_reasoning",
+    "quality_check": "quick_qa"
+  },
+  "history_tokens_per_turn": 200,
+  "attachment_tokens": 800
+}
