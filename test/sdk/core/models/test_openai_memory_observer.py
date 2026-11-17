@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import pytest
+
 from nexent.core.models.openai_llm import OpenAIModel
 from nexent.core.utils.observer import MessageObserver
 
@@ -15,3 +17,13 @@ def test_openai_model_preserves_supplied_observer():
     observer = MessageObserver()
     model = OpenAIModel(observer=observer, model_id="test", api_base="http://localhost", api_key="test")
     assert model.observer is observer
+
+
+def test_openai_model_creates_default_for_explicit_none():
+    model = OpenAIModel(observer=None, model_id="test", api_base="http://localhost", api_key="test")
+    assert isinstance(model.observer, MessageObserver)
+
+
+def test_openai_model_rejects_observer_class_during_construction():
+    with pytest.raises(TypeError, match="observer must be an instance"):
+        OpenAIModel(observer=MessageObserver, model_id="test", api_base="http://localhost", api_key="test")

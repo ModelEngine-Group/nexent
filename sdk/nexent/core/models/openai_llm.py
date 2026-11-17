@@ -218,7 +218,8 @@ class OpenAIModel(OpenAIServerModel):
         Initialize OpenAI Model with observer and SSL verification option.
 
         Args:
-            observer: MessageObserver instance for tracking model output
+            observer: Observer instance for tracking model output. None creates
+                      a default MessageObserver for this client.
             temperature: Sampling temperature (default: 1.0; None inherits this default)
             top_p: Top-p sampling parameter (default: 1.0; None inherits this default)
             reasoning_effort: Optional canonical reasoning effort level declared
@@ -253,10 +254,13 @@ class OpenAIModel(OpenAIServerModel):
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
+        if isinstance(observer, type):
+            raise TypeError("observer must be an instance or None")
+        self.observer = MessageObserver() if observer is None else observer
+
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
-        self.observer = MessageObserver() if observer is None or observer is MessageObserver else observer
         sampling = resolve_sampling(temperature, top_p)
         self.temperature = sampling["temperature"]
         self.top_p = sampling["top_p"]
