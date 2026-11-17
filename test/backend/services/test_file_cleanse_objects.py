@@ -61,6 +61,19 @@ def source():
     )
 
 
+def test_duplicate_images_keep_both_positions_but_publish_one_immutable_key():
+    store = Store()
+    parser = SimpleNamespace(file_structure=Mock(return_value=([], [
+        {'image_bytes': b'same-image', 'image_format': 'png', 'position': {'page_number': 1}},
+        {'image_bytes': b'same-image', 'image_format': 'png', 'position': {'page_number': 2}},
+    ])))
+    reference = run(store, parser)
+    artifact = CleanseArtifact.model_validate_json(store.data[reference.key])
+    assert len(artifact.blocks) == 2 and artifact.blocks[0].object_ref == artifact.blocks[1].object_ref
+    assert [block.location for block in artifact.blocks] == [{'page_number': 1}, {'page_number': 2}]
+    assert store.writes.count(artifact.blocks[0].object_ref.key) == 1 and len(store.writes) == 2
+
+
 def run(store, parser):
     return cleanse_object(
         source(),

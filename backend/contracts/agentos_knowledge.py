@@ -303,7 +303,7 @@ def cleanse_output_prefix(run: FileCleanseLookup | KnowledgeCleanseLookup | None
 
 
 class CleanseResult(Contract):
-    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    status: Literal["queued", "running", "completed", "failed", "cancelled", "released"]
     artifact: ObjectReference | None = None
     error_code: str | None = Field(default=None, max_length=128)
 
@@ -315,7 +315,7 @@ class CleanseResult(Contract):
 
 
 class FileCleanseState(FileCleanseLookup, CleanseResult):
-    status: Literal["queued", "running", "completed", "failed", "cancelled", "released"]
+    pass
 
 
 class FileCleanseReleased(FileCleanseLookup):

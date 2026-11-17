@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from contracts.agentos_knowledge import KnowledgeFileReference
 from contracts.knowledge_deletion import KnowledgeDeletionIntent
+from management.services.file.cleanse_cancellation import cancel_knowledge_executions
 from management.services.file.knowledge_cleanse_service import KnowledgeCleanseService
 from nexent.storage.errors import NotFound, ScopeDenied
 from nexent.storage.models import PageRequest, RecordQuery, StorageScope
@@ -53,7 +54,9 @@ def prepared(setup, resources, monkeypatch):
 
 
 def cancel(p, **changes):
-    return p.service.cancel_file(p.reference, tenant_id="tenant-a", user_id="user-b", context=context(), **changes)
+    tenant, user = changes.get('tenant_id', 'tenant-a'), changes.get('user_id', 'user-b')
+    with p.service._records(tenant, user, context()) as (jobs, resources):
+        return cancel_knowledge_executions(jobs, resources, p.reference, user_id=user, context=context())
 
 
 def test_current_group_editor_cancels_other_uploaders_resource_without_private_task_access(prepared):
@@ -164,5 +167,5 @@ def test_cancellation_cannot_cross_the_authenticated_tenant(prepared):
     public = p.make()
     state = public.submit(knowledge_request(), context=context())
     with pytest.raises(ScopeDenied):
-        p.service.cancel_file(p.reference, user_id="user-b", tenant_id="tenant-b", context=context())
+        cancel(p, user_id='user-b', tenant_id='tenant-b')
     assert public.inspect(lookup(state), context=context()).status == "queued"

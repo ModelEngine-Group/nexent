@@ -146,7 +146,9 @@ FileCleanse 的 submit、inspect、cancel、release 分别位于 `/internal/agen
 
 KB 搜索图片由 Runtime 注入本地 image_filterer，并传入当前运行的取消 scope。筛选只接受 KnowledgeContentRequest，经 AgentOS authorize-content 获取实时授权，再通过单键、单版本只读 ObjectStore 读取。旧 KB URL/inline 读取和对象 ACL 直查已经移除，网页工具仍使用自己的网页图片读取能力。每张图沿用两秒总预算及原尺寸/CLIP 判定；取消会终止活动请求并向本次拥有的存储 worker 发出取消信号。
 
-新 KB 清洗产物保存在 `knowledge-cleanse/{knowledge_id}/{file_id}/{file_version}/{job_id}/` 专属目录，目录内继续使用 artifacts/images 与内容哈希。Management 的执行器和隔离工厂共用 `cleanse_lookup(row, request)`，在解析前核对完整接纳快照；`KnowledgeCleanseLookup` 与 run lookup 共用严格的 `cleanse_output_prefix`。Runtime 依据可信 manifest 读取精确图片，Management 核对当前 DAC、文件版本、清洗 job 和 manifest 成员。相同源在其他文件或任务中使用不同对象键。已有共享产物按固定引用继续读取，清理归 P4 历史维护；当前变化未授予单文件删除共享对象的权限，专属 KB 目录回收仍待接入删除生命周期。
+新 KB 清洗产物保存在 `knowledge-cleanse/{knowledge_id}/{file_id}/{file_version}/{job_id}/` 专属目录，目录内继续使用 artifacts/images 与内容哈希。Management 的执行器和隔离工厂共用 `cleanse_lookup(row, request)`，在解析前核对完整接纳快照；`KnowledgeCleanseLookup` 与 run lookup 共用严格的 `cleanse_output_prefix`。Runtime 依据可信 manifest 读取精确图片，Management 核对当前 DAC、文件版本、清洗 job 和 manifest 成员。相同源在其他文件或任务中使用不同对象键。已有共享产物按固定引用继续读取，清理归 P4 历史维护，单文件删除没有共享对象删除权限。
+
+KB 专属目录回收已接入 `DELETE_CLEANSE_PENDING`，必须先确认 Runtime 删除完成、解析执行结束，再在当前资源权限下校验完整对象清单，以任务 revision 保留一次物理删除。结果未知后仅查询目录，确认不存在才标记 `released` 并允许源文件清理。原任务 user_id 保持不变，审计记录实际编辑者。重复图片保留所有位置块，只上传一次固定版本。部署本批前由 Management 应用 SQL 028，任务表的 artifact_prefix 保存执行前固定的目录，旧行保持 NULL；Runtime 继续 off。历史共享对象、未知原写入或未确认执行结束的任务保持 pending，由 P4 核对，不自动重发或清除未知标记。
 
 KB 的 PICTURE_WEB 返回 images_url 空数组及 images_ref 列表，每项保存 file_ref、image_ref、cite_index 和 tool_sign。原先筛选全空时展示原图的行为仅应用于本次成功授权并解码的图片，撤权/超时引用不能被恢复。前端与历史来源记录仍需接入新字段，本轮不能视作完整图片展示迁移。
 

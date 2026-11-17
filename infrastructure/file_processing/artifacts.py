@@ -1,9 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Closed-writer run artifacts: private pinned reads and exact-key cleanup only."""
+"""Closed-writer cleansing artifacts: private pinned reads and exact-key cleanup only."""
 
 import re
 
-from contracts.agentos_knowledge import FileCleanseLookup, cleanse_output_prefix
+from contracts.agentos_knowledge import (
+    FileCleanseLookup,
+    KnowledgeCleanseLookup,
+    cleanse_output_prefix,
+)
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import ObjectRef, StorageScope
 
@@ -14,14 +18,15 @@ from infrastructure.object_storage.composition import (
 from infrastructure.object_storage.port import ObjectBinding, S3ObjectStore
 
 
-class RunCleanseArtifacts:
-    """Issued by release composition only after reserving a completed run job."""
+class CleanseArtifacts:
+    """Issued after reserving cleanup for one closed-writer private job directory."""
 
     def __init__(self, objects, lookup, source):
-        if not isinstance(lookup, FileCleanseLookup):
+        if not isinstance(lookup, (FileCleanseLookup, KnowledgeCleanseLookup)):
             raise ScopeDenied()
         self._objects = objects
         self._space = source.space
+        self._prefix = cleanse_output_prefix(lookup)
         prefix = re.escape(cleanse_output_prefix(lookup))
         self._keys = re.compile(
             rf"{prefix}(?:artifacts/{source.sha256}/[0-9a-f]{{64}}\.json|"
@@ -59,6 +64,14 @@ class RunCleanseArtifacts:
         # Unversioned MinIO has no atomic ETag delete. Do not attempt then downgrade.
         return self._objects.delete(ObjectRef(ref.space, ref.key), context=context)
 
+    def list(self, prefix, page, *, context):
+        if self._closed or prefix != self._prefix:
+            raise ScopeDenied()
+        result = self._objects.list(prefix, page, context=context)
+        for item in result.items:
+            self._check(item.ref)
+        return result
+
     def close(self):
         if not self._closed:
             self._closed = True
@@ -66,6 +79,18 @@ class RunCleanseArtifacts:
 
 
 def bind_run_cleanse_artifacts(tenant_id, user_id, lookup, source, *, context):
+    if not isinstance(lookup, FileCleanseLookup):
+        raise ScopeDenied()
+    return _bind_artifacts(tenant_id, user_id, lookup, source, context=context)
+
+
+def bind_knowledge_cleanse_artifacts(tenant_id, user_id, lookup, source, *, context):
+    if not isinstance(lookup, KnowledgeCleanseLookup):
+        raise ScopeDenied()
+    return _bind_artifacts(tenant_id, user_id, lookup, source, context=context)
+
+
+def _bind_artifacts(tenant_id, user_id, lookup, source, *, context):
     context.remaining()
     cleanse_output_prefix(lookup)
     if lookup is None or source.space != "files":
@@ -79,7 +104,7 @@ def bind_run_cleanse_artifacts(tenant_id, user_id, lookup, source, *, context):
         _configured_client,
     )
     try:
-        return RunCleanseArtifacts(store, lookup, source)
+        return CleanseArtifacts(store, lookup, source)
     except BaseException:
         store.close()
         raise

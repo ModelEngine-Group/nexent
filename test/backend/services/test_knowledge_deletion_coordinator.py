@@ -64,7 +64,7 @@ async def setup(sqlite_threads, journal_setup, resources):  # noqa: F811
             counters['close'] += 1
 
     cleanse = Mock()
-    cleanse.cancel_file.return_value = {'execution_drained': True, 'task_ids': [], 'cancelled_count': 0}
+    cleanse.cleanup_file.return_value = {'execution_drained': True, 'artifacts_released': True, 'task_ids': [], 'cancelled_count': 0}
     client = SimpleNamespace(delete_knowledge_file=AsyncMock(), inspect_knowledge_file=AsyncMock())
     source = Mock()
     coordinator = DeletionCoordinator(cleanse, client, ports=ports, source=source)
@@ -93,14 +93,19 @@ async def test_submit_once_then_inspect_until_runtime_and_cleanse_are_physically
     state = await s.coordinator.advance(s.s.intent.file_id, s.actor, context=context())
     assert state['stage'] == 'DELETE_RUNTIME_PENDING'
     s.client.delete_knowledge_file.assert_awaited_once_with(s.s.intent.runtime_request(), user_id='user-a', tenant_id='tenant-a')
-    s.cleanse.cancel_file.assert_not_called()
+    s.cleanse.cleanup_file.assert_not_called()
     s.source.assert_not_called()
     s.client.inspect_knowledge_file.return_value = s.child('deleted', physical_cleanup_complete=True)
-    s.cleanse.cancel_file.return_value['execution_drained'] = False
+    s.cleanse.cleanup_file.return_value['execution_drained'] = False
     state = await s.coordinator.advance(s.s.intent.file_id, s.actor, context=context())
     assert state['stage'] == 'DELETE_CLEANSE_PENDING'
     s.source.assert_not_called()
-    s.cleanse.cancel_file.return_value['execution_drained'] = True
+    s.cleanse.cleanup_file.return_value['execution_drained'] = True
+    s.cleanse.cleanup_file.return_value['artifacts_released'] = False
+    state = await s.coordinator.advance(s.s.intent.file_id, s.actor, context=context())
+    assert state['stage'] == 'DELETE_CLEANSE_PENDING'
+    s.source.assert_not_called()
+    s.cleanse.cleanup_file.return_value['artifacts_released'] = True
     s.source.return_value = {'stage': 'DELETE_DONE', 'status': 'DELETED'}
     result = await s.coordinator.advance(s.s.intent.file_id, s.actor, context=context())
     assert result == s.source.return_value
@@ -133,7 +138,7 @@ async def test_source_only_does_not_access_runtime_or_cancel_cleanse(setup):
     assert await s.coordinator.advance(value.file_id, s.actor, context=context()) == s.source.return_value
     s.client.delete_knowledge_file.assert_not_called()
     s.client.inspect_knowledge_file.assert_not_called()
-    s.cleanse.cancel_file.assert_not_called()
+    s.cleanse.cleanup_file.assert_not_called()
 
 
 async def test_current_permissions_and_original_request_identity_are_checked_each_time(setup):
@@ -235,7 +240,7 @@ async def test_default_source_path_finishes_real_journal_and_ledger_after_both_d
     done = await s.coordinator.advance(storage.value.file_id, s.actor, context=context())
     assert done['stage'] == 'DELETE_DONE' and done['status'] == 'DELETED'
     assert (await s.coordinator.advance(storage.value.file_id, s.actor, context=context()))['version'] == done['version']
-    assert storage.objects.delete.call_count == 1 and s.cleanse.cancel_file.call_count == 1
+    assert storage.objects.delete.call_count == 1 and s.cleanse.cleanup_file.call_count == 1
     assert s.client.delete_knowledge_file.await_count == 1
 
 

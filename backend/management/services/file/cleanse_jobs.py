@@ -10,12 +10,15 @@ from contracts.agentos_knowledge import (
     FileCleanseLookup,
     FileCleanseRequest,
     ObjectReference,
+    cleanse_output_prefix,
 )
 from contracts.knowledge_cleanse import (
     KnowledgeCleanseLookup,
     KnowledgeCleanseRequest,
     cleanse_job_id,
+    cleanse_lookup,
     cleanse_state,
+    parse_cleanse_request,
 )
 from nexent.storage.errors import Conflict, InvalidInput, NotFound
 from nexent.storage.models import (
@@ -130,6 +133,7 @@ class CleanseJobs:
                         "owner_id": None,
                         "lease_until": None,
                         "artifact": None,
+                        'artifact_prefix': cleanse_output_prefix(lookup),
                         "error_code": None,
                         "execution_ended": True,
                     },
@@ -328,11 +332,16 @@ class CleanseJobs:
 
     def begin_execution(self, handle, *, context):
         # Persist uncertainty before any parser side effect, including process death.
+        prefix = cleanse_output_prefix(cleanse_lookup(handle, parse_cleanse_request(handle)))
+        if handle.get('artifact_prefix') not in {None, prefix}:
+            raise Conflict()
         with self.records.transaction(context=context) as tx:
             rows = tx.claim(
                 DATASET,
-                RecordQuery(where=self._attempt_where(handle, now=self.clock())),
-                FieldPatch(set_values={"reconcile_required": True, "execution_ended": False}),
+                RecordQuery(where=both(self._attempt_where(handle, now=self.clock()), Junction('or', (
+                    Comparison('artifact_prefix', 'is_null', True), Comparison('artifact_prefix', 'eq', prefix),
+                )))),
+                FieldPatch(set_values={"reconcile_required": True, "execution_ended": False, 'artifact_prefix': prefix}),
                 limit=1,
                 context=context,
             )

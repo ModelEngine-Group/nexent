@@ -7,6 +7,7 @@ from time import monotonic
 
 import pytest
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from management.services.tag.library import TagManagementService
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 
 from test.backend.services.test_cleanse_authorization import resources  # noqa: F401
@@ -96,10 +97,20 @@ async def test_current_permission_denial_is_never_returned_as_pending(ready):
     s.client.delete_knowledge_file.assert_not_called()
 
 
+async def test_artifact_cleanup_revision_race_keeps_the_admitted_public_request_pending(ready):
+    from management.services.knowledge_base.deletion_journal import DeletionPhaseChanged
+
+    s = ready
+    s.client.delete_knowledge_file.return_value = s.child('deleted', physical_cleanup_complete=True)
+    s.cleanse.cleanup_file.side_effect = DeletionPhaseChanged()
+    row = await s.coordinator.request('kb-one', 'source.txt', 'full', s.actor)
+    assert row['deletion_request'] and s.row()['stage'] == 'DELETE_CLEANSE_PENDING'
+    s.source.assert_not_called()
+    s.cleanse.cleanup_file.assert_called_once()
+
+
 async def test_ordinary_full_uses_canonical_record_key_for_tag_cleanup(ready, monkeypatch):
     from unittest.mock import Mock
-
-    from management.services.tag.library import TagManagementService
 
     s = ready
     cleanup = Mock()
@@ -113,8 +124,6 @@ async def test_ordinary_full_uses_canonical_record_key_for_tag_cleanup(ready, mo
 async def test_northbound_and_source_only_do_not_remove_tags(ready, monkeypatch):
     from unittest.mock import Mock
 
-    from management.services.tag.library import TagManagementService
-
     s = ready
     cleanup = Mock(side_effect=AssertionError('Unexpected tag mutation'))
     monkeypatch.setattr(TagManagementService, 'cleanup_document_assignments', cleanup)
@@ -126,8 +135,6 @@ async def test_northbound_and_source_only_do_not_remove_tags(ready, monkeypatch)
 async def test_other_editor_acknowledges_pending_without_borrowing_runtime_identity(ready, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
-
-    from management.services.tag.library import TagManagementService
 
     s = ready
     s.client.delete_knowledge_file.return_value = s.child()

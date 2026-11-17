@@ -48,6 +48,7 @@ def prepare_artifact(
                 location=location,
             )
         )
+    published_images = {}
     for image in images:
         content = image.get("image_bytes")
         image_format = image.get("image_format", "png").lower()
@@ -59,15 +60,14 @@ def prepare_artifact(
             raise ValueError("Invalid extracted image")
         digest = hashlib.sha256(content).hexdigest()
         mime = "image/jpeg" if image_format == "jpg" else "image/" + image_format
-        metadata = objects.put(
-            ObjectRef(
-                source.space, f"{prefix}images/{source.sha256}/{digest}.{image_format}"
-            ),
-            io.BytesIO(content),
-            content_type=mime,
-            size=len(content),
-            context=context,
-        )
+        key = f"{prefix}images/{source.sha256}/{digest}.{image_format}"
+        metadata = published_images.get(key)
+        if metadata is None:
+            metadata = objects.put(
+                ObjectRef(source.space, key), io.BytesIO(content),
+                content_type=mime, size=len(content), context=context,
+            )
+            published_images[key] = metadata
         if metadata.sha256 != digest or metadata.ref.version is None:
             raise ValueError("Image publication was not confirmed")
         blocks.append(

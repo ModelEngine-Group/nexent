@@ -8,7 +8,7 @@ from contracts.agentos_knowledge import FileCleanseLookup
 from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import ObjectMetadata, ObjectRef, Revision
 
-from infrastructure.file_processing.artifacts import RunCleanseArtifacts
+from infrastructure.file_processing.artifacts import CleanseArtifacts
 from test.backend.services.test_cleanse_jobs import context, request
 
 
@@ -21,7 +21,7 @@ def make():
         f"run-cleanse/{lookup.run_id}/{lookup.job_id}/artifacts/{source.sha256}/{'c' * 64}.json",
         Revision("etag:1"),
     )
-    return RunCleanseArtifacts(port, lookup, source), port, ref
+    return CleanseArtifacts(port, lookup, source), port, ref
 
 
 @pytest.mark.parametrize("version", ["etag:1", "version:1"])
@@ -89,4 +89,19 @@ def test_closed_capability_cannot_be_reused():
     port.close.assert_called_once()
     with pytest.raises(ScopeDenied):
         objects.delete(ref, context=context())
+    port.delete.assert_not_called()
+
+
+def test_listing_never_expands_the_private_directory_grant():
+    from nexent.storage.models import Page, PageRequest
+
+    objects, port, ref = make()
+    prefix = ref.key.split('artifacts/', 1)[0]
+    for unauthorized in ('', prefix + '../', prefix.replace('b' * 32, 'c' * 32)):
+        with pytest.raises(ScopeDenied):
+            objects.list(unauthorized, PageRequest(limit=1), context=context())
+    port.list.assert_not_called()
+    port.list.return_value = Page((ObjectMetadata(ObjectRef('files', 'images/foreign.png', Revision('etag:x')), 1, 'image/png'),))
+    with pytest.raises(ScopeDenied):
+        objects.list(prefix, PageRequest(limit=1), context=context())
     port.delete.assert_not_called()

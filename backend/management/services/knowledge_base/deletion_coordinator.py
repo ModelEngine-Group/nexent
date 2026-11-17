@@ -228,9 +228,9 @@ class DeletionCoordinator:
                 if row['stage'] in {'DELETE_RUNTIME_SUBMITTING', 'DELETE_RUNTIME_PENDING'}:
                     return row
                 if row['stage'] == 'DELETE_CLEANSE_PENDING':
-                    result = await self._blocking('cancel-cleanse', self.cleanse.cancel_file, intent,
+                    result = await self._blocking('cleanup-cleanse', self.cleanse.cleanup_file, intent,
                                                   tenant_id=actor.tenant_id, user_id=actor.user_id, context=operation)
-                    if result['execution_drained'] is not True:
+                    if result['execution_drained'] is not True or result['artifacts_released'] is not True:
                         return row
                     row = await self._blocking('confirm-cleanse', self._change, row, actor, operation,
                                                'confirm_cleanse_drained', physical_completion_confirmed=True)

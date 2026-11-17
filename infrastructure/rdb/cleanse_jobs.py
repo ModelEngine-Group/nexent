@@ -99,7 +99,7 @@ class FileCleanseJob(TableBase):
     status = column(
         "status",
         sa.String(30),
-        "queued/running/completed/failed/cancelled lifecycle state.",
+        "queued/running/completed/failed/cancelled/released lifecycle state.",
         nullable=False,
     )
     reconcile_required = column(
@@ -135,6 +135,11 @@ class FileCleanseJob(TableBase):
         "artifact",
         sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
         "Confirmed ObjectReference only after successful publication.",
+        nullable=True,
+    )
+    artifact_prefix = column(
+        'artifact_prefix', sa.String(128),
+        'Attested private output directory fixed before parser side effects; NULL means historical ownership is unknown.',
         nullable=True,
     )
     error_code = column(

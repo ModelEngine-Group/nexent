@@ -18,7 +18,7 @@ from nexent.storage.models import (
 )
 
 
-def cancel_knowledge_executions(jobs, resources, reference, *, user_id, context):
+def require_knowledge_cleanup(jobs, resources, reference, *, user_id, context, releasing=False):
     if not isinstance(reference, KnowledgeFileReference) or any(
         port.scope.system or port.scope.service_role != "management" or port.scope.actor_id != user_id
         or port.scope.tenant_id != resources.scope.tenant_id for port in (jobs, resources)
@@ -34,12 +34,18 @@ def cancel_knowledge_executions(jobs, resources, reference, *, user_id, context)
         "knowledge_id", "file_id", "file_version",
     )):
         raise ScopeDenied()
-    scope = (
+    if releasing and file['stage'] != 'DELETE_CLEANSE_PENDING':
+        raise ScopeDenied()
+    return (
         Comparison("scope_kind", "eq", "knowledge"),
         Comparison("knowledge_id", "eq", reference.knowledge_id),
         Comparison("file_id", "eq", reference.file_id),
         Comparison("file_version", "lte", reference.file_version),
     )
+
+
+def cancel_knowledge_executions(jobs, resources, reference, *, user_id, context):
+    scope = require_knowledge_cleanup(jobs, resources, reference, user_id=user_id, context=context)
     query = RecordQuery(
         where=Junction("and", scope), order_by=(Sort("job_id"),),
         fields=("id", "job_id", "status", "execution_ended"),
