@@ -12,10 +12,19 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchAuthorization,
 )
 from contracts.constants import environment
+from management.clients.model import worker_model_cancellation
 from management.services.knowledge_base.search_authorization import (
     KnowledgeSearchAuthorizationPolicy,
 )
-from nexent.core.concurrency import run_blocking
+from nexent.core.concurrency import (
+    ManagedTaskSpec,
+    RunCancellationScope,
+    ThreadManagerNotRunning,
+    get_current_thread_manager,
+    get_default_thread_manager,
+    run_blocking,
+)
+from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.storage.errors import (
     Conflict,
     DeadlineExceeded,
@@ -30,6 +39,7 @@ from infrastructure.agentos_client import AgentOSClient
 from infrastructure.knowledge_cleanse import knowledge_resource_ports
 
 logger = logging.getLogger(__name__)
+_MODEL_CLOSE_GRACE_SECONDS = 5
 
 
 class KnowledgeSummaryService:
@@ -122,10 +132,51 @@ class KnowledgeSummaryService:
             doc_max_words=100, cluster_max_words=150, model_id=model_id, user_id=user_id, tenant_id=tenant_id)
         return merge_cluster_summaries(summaries)
 
+    async def summarize_sample(self, sample, *, user_id, tenant_id, language='zh', model_id=None):
+        """Consume an already authorized sample; the caller owns final publication checks."""
+        if not user_id or not tenant_id:
+            raise ScopeDenied()
+        manager = get_current_thread_manager() or get_default_thread_manager()
+        if manager is None:
+            raise ThreadManagerNotRunning('Summary execution requires a lifespan-owned manager')
+        scope = RunCancellationScope()
+
+        def summarize():
+            with worker_model_cancellation(scope):
+                value = self._summarize(sample, language, model_id, user_id, tenant_id)
+                if scope.cancelled:
+                    raise RunTerminated()
+                return value
+
+        execution = manager.submit('model-tool-io', ManagedTaskSpec(
+            task_name='knowledge-summary', owner='management.knowledge.summary', close_hook=scope.cancel,
+            deadline_monotonic=monotonic() + self.operation_seconds), summarize)
+        future = asyncio.wrap_future(execution.future)
+        try:
+            async with asyncio.timeout(self.operation_seconds):
+                return await asyncio.shield(future)
+        except TimeoutError as error:
+            logger.warning('knowledge_summary_model_timeout operation_id=%s phase=model threshold_seconds=%s exception_type=%s',
+                           execution.execution_id, self.operation_seconds, type(error).__name__)
+            raise DeadlineExceeded(operation_id=execution.execution_id) from error
+        finally:
+            scope.cancel()
+            try:
+                if not future.done():
+                    manager.cancel(execution.execution_id, reason='summary caller ended', wait_timeout=0,
+                                   mark_stuck_on_timeout=False)
+                    try:
+                        await asyncio.wait({future}, timeout=_MODEL_CLOSE_GRACE_SECONDS)
+                    finally:
+                        if not future.done():
+                            manager.cancel(execution.execution_id, reason='summary close grace exceeded', wait_timeout=0)
+            finally:
+                # Observe exceptions even if cancellation interrupts the close grace.
+                future.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
     async def generate(self, *, index_name, batch_size=1000, user_id, tenant_id, language='zh', model_id=None):
         sample = await self.sample(index_name, batch_size=batch_size, user_id=user_id, tenant_id=tenant_id)
-        summary = await run_blocking('knowledge-summary', self._summarize, sample, language, model_id, user_id, tenant_id,
-                                    lane='model-tool-io', owner='management.knowledge.summary')
+        summary = await self.summarize_sample(sample, language=language, model_id=model_id, user_id=user_id, tenant_id=tenant_id)
         context = OperationContext('knowledge-summary-final-' + uuid4().hex, monotonic() + 10)
         resource = await self._resource(index_name, user_id, tenant_id, context=context)
         self._validate(sample, resource, min(batch_size // 5, 200))

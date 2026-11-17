@@ -196,7 +196,7 @@ async def test_revocation_during_model_work_prevents_returning_summary(setup, mo
     s.client.sample_knowledge.assert_awaited_once()
 
 
-async def test_model_work_runs_once_in_managed_model_lane(setup, monkeypatch):
+async def test_model_work_runs_once_in_managed_model_lane(setup, manager, monkeypatch):
     from management.services.knowledge_base import summary_service as module
     original = module.run_blocking
     calls = []
@@ -204,9 +204,15 @@ async def test_model_work_runs_once_in_managed_model_lane(setup, monkeypatch):
         calls.append((name, kwargs.get('lane'), kwargs.get('owner')))
         return await original(name, function, *args, **kwargs)
     monkeypatch.setattr(module, 'run_blocking', observed)
+    submit = Mock(wraps=manager.submit)
+    monkeypatch.setattr(manager, 'submit', submit)
     monkeypatch.setattr('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker', lambda **kwargs: 'summary')
     await setup.service.generate(index_name='kb-one', user_id='user-a', tenant_id='tenant-a', model_id=5)
-    assert calls.count(('knowledge-summary', 'model-tool-io', 'management.knowledge.summary')) == 1
+    model_calls = [call for call in submit.call_args_list if call.args[0] == 'model-tool-io']
+    assert len(model_calls) == 1
+    spec = model_calls[0].args[1]
+    assert spec.task_name == 'knowledge-summary' and spec.owner == 'management.knowledge.summary'
+    assert callable(spec.close_hook) and spec.deadline_monotonic is not None
     assert sum(name == 'knowledge-summary-authorize' and lane == 'control-io' for name, lane, owner in calls) == 3
 
 

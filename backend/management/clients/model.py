@@ -3,13 +3,36 @@
 
 import asyncio
 import math
+from contextlib import contextmanager
+from contextvars import ContextVar
 
-from backend.http.client import create_httpx_client
-from contracts.agentos import ChatInvocation, ChatMessage, ChatOptions, EmbeddingInvocation
+from contracts.agentos import (
+    ChatInvocation,
+    ChatMessage,
+    ChatOptions,
+    EmbeddingInvocation,
+)
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceUnavailableError
 from management.clients.agentos import AgentOSClient
 from management.services.model.text import remove_think_blocks
+from nexent.core.concurrency.cancellation import RunTerminated
+
+from backend.http.client import create_httpx_client
+
+_worker_cancellation = ContextVar('management_model_worker_cancellation', default=None)
+
+
+@contextmanager
+def worker_model_cancellation(scope):
+    """Bind synchronous model calls to their owning managed worker's cancellation."""
+    token = _worker_cancellation.set(scope)
+    try:
+        if scope.cancelled:
+            raise RunTerminated()
+        yield
+    finally:
+        _worker_cancellation.reset(token)
 
 
 def _model_client():
@@ -55,14 +78,27 @@ def invoke_chat_prompt_in_worker(
     *, model_id: int, system_prompt: str, user_prompt: str, user_id: str, tenant_id: str,
 ) -> str:
     """Invoke AgentOS from an existing synchronous job worker."""
-    output = asyncio.run(invoke_chat_prompt(
-        model_id=model_id,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        options=ChatOptions(temperature=0.3, top_p=0.95),
-    ))
+    async def execute():
+        scope = _worker_cancellation.get()
+        token = None
+        if scope is not None:
+            if scope.cancelled:
+                raise RunTerminated()
+            loop, task = asyncio.get_running_loop(), asyncio.current_task()
+            token = scope.register_closer(lambda: loop.call_soon_threadsafe(task.cancel))
+        try:
+            return await invoke_chat_prompt(
+                model_id=model_id, system_prompt=system_prompt, user_prompt=user_prompt,
+                user_id=user_id, tenant_id=tenant_id, options=ChatOptions(temperature=0.3, top_p=0.95),
+            )
+        except asyncio.CancelledError:
+            if scope is not None and scope.cancelled:
+                raise RunTerminated() from None
+            raise
+        finally:
+            if token is not None:
+                scope.unregister_closer(token)
+    output = asyncio.run(execute())
     return remove_think_blocks(output).strip()
 
 
