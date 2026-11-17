@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-INGESTION-JOURNAL-D3-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-07]
+  title: Persistent Management ingestion intent fences concurrent and late transitions
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Apply the actual nullable intent migration and exercise the domain journal through the real PostgreSQL RecordStore.
+  preconditions:
+  - Docker and a cached PostgreSQL 15 image are available; only uniquely labelled disposable resources are used.
+  test_data:
+    resources: One UUID-labelled PostgreSQL container with an ephemeral loopback port.
+    fixtures: A legacy null-snapshot file, a pinned upload, two concurrent actors of the same identity and a foreign tenant.
+  steps:
+  - order: 1
+    action: Create the old lifecycle schema, apply migration 019 twice and inspect the column, comment, index and legacy row.
+    expected: The column is nullable JSONB with the documented comment, the dispatch index exists and the legacy row retains a null snapshot.
+  - order: 2
+    action: Race two independent RecordStore connections admitting the same pinned intent from the same lifecycle revision.
+    expected: Exactly one CAS succeeds, one conflicts and a fresh replay returns the stored snapshot and stable child identity without another write.
+  - order: 3
+    action: Reserve cleansing, observe its fixed completed child, reserve Runtime submission and project its completion.
+    expected: Phase and child IDs are durable; duplicate reservations conflict and complete retains the original request and audit ownership.
+  - order: 4
+    action: Race a deletion transition with a stale reservation, query through a foreign tenant and attempt malformed or oversized JSON writes.
+    expected: The stale writer cannot overwrite deletion, foreign reads/writes match nothing and database constraints reject invalid snapshots atomically.
+  - order: 5
+    action: Close all owned connections and remove the unique-label container and its anonymous volumes.
+    expected: No owned resource remains and no application database or provider was accessed.
+  expected_results:
+  - The real migration preserves legacy data and enforces bounded object snapshots.
+  - Actual PostgreSQL CAS admits once and preserves immutable child identities across phases.
+  - Tenant scope and deletion fencing reject foreign or stale writes.
+  - Owned resources are reclaimed.
+  forbidden_side_effects:
+  - No real application database, model, parser, old data-process service, retry or extra child submission is used.
+  integration_boundary:
+  - Management domain journal, strict contracts, Infrastructure RecordStore and actual PostgreSQL transactions.
+  - Child responses are controlled DTOs; public HTTP, actual child execution, lifespan and final images are not proved here.
+  observations: [Migration metadata, Exact JSONB snapshot, CAS winner count, Fixed child IDs, Audit fields, Rejected writes, Cleanup receipt]
+  cleanup: [Close engines and remove only the unique-label container and its anonymous volumes, including on failure.]
+  acceptance:
+  - id: AC-01
+    description: The migration preserves the legacy row and enforces the nullable bounded JSONB snapshot.
+    steps: [1, 4]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Real CAS admits one owner and retains fixed child identities through phase transitions.
+    steps: [2, 3]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Deletion and tenant scope reject stale and foreign writes and all owned resources are cleaned.
+    steps: [4, 5]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1]

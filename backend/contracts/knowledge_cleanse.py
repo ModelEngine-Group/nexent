@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-local KB cleansing context, separate from Runtime run callbacks."""
 
+import json
+from uuid import NAMESPACE_URL, uuid5
+
 from contracts.agentos_knowledge import (
     CleanseResult,
     FileCleanseRequest,
@@ -31,6 +34,20 @@ class KnowledgeCleanseLookup(KnowledgeFileReference):
 
 class KnowledgeCleanseState(KnowledgeCleanseLookup, CleanseResult):
     pass
+
+
+def cleanse_job_id(request, tenant_id, user_id):
+    """Preserve run and KB job identities while making lost responses queryable."""
+    if not isinstance(request, (FileCleanseRequest, KnowledgeCleanseRequest)):
+        raise TypeError("Expected a cleansing request")
+    if any(not isinstance(value, str) or not value for value in (tenant_id, user_id)):
+        raise ValueError("Expected trusted tenant and actor identities")
+    scope = request.run_id if isinstance(request, FileCleanseRequest) else [
+        "knowledge", request.knowledge_id, request.file_id, request.file_version,
+    ]
+    return uuid5(NAMESPACE_URL, json.dumps([
+        tenant_id, user_id, scope, request.idempotency_key,
+    ], separators=(",", ":"))).hex
 
 
 def parse_cleanse_request(row):

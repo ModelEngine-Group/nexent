@@ -2,8 +2,10 @@
 """AgentOS v1 cleansing artifacts and KnowledgeBase transport contracts."""
 
 import hashlib
+import json
 from enum import Enum
 from typing import Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import (
     BaseModel,
@@ -129,6 +131,19 @@ class KnowledgeFileUpload(KnowledgeFileReference):
 
 class KnowledgeFileDelete(KnowledgeFileReference):
     idempotency_key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def knowledge_job_id(request, tenant_id, user_id):
+    """Compute the existing Runtime admission identity before an HTTP side effect."""
+    if not isinstance(request, (KnowledgeFileUpload, KnowledgeFileDelete)):
+        raise TypeError("Expected a knowledge upload or delete request")
+    if any(not isinstance(value, str) or not value for value in (tenant_id, user_id)):
+        raise ValueError("Expected trusted tenant and actor identities")
+    return uuid5(NAMESPACE_URL, json.dumps([
+        "runtime-kb-job", tenant_id, user_id, request.knowledge_id, request.file_id,
+        request.file_version, "upload" if isinstance(request, KnowledgeFileUpload) else "delete",
+        request.idempotency_key,
+    ], separators=(",", ":"))).hex
 
 
 class KnowledgeAuthorizationRequest(KnowledgeFileReference):

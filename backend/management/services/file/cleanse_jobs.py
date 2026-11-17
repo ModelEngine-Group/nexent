@@ -4,7 +4,7 @@
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 from contracts.agentos_knowledge import (
     FileCleanseLookup,
@@ -14,6 +14,7 @@ from contracts.agentos_knowledge import (
 from contracts.knowledge_cleanse import (
     KnowledgeCleanseLookup,
     KnowledgeCleanseRequest,
+    cleanse_job_id,
     cleanse_state,
 )
 from nexent.storage.errors import Conflict, InvalidInput, NotFound
@@ -84,23 +85,7 @@ class CleanseJobs:
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        identity = json.dumps(
-            [
-                self.records.scope.tenant_id,
-                self.records.scope.actor_id,
-                request.run_id
-                if isinstance(request, FileCleanseRequest)
-                else [
-                    "knowledge",
-                    request.knowledge_id,
-                    request.file_id,
-                    request.file_version,
-                ],
-                request.idempotency_key,
-            ],
-            separators=(",", ":"),
-        )
-        job_id = uuid5(NAMESPACE_URL, identity).hex
+        job_id = cleanse_job_id(request, self.records.scope.tenant_id, self.records.scope.actor_id)
         if isinstance(request, FileCleanseRequest):
             lookup = FileCleanseLookup(run_id=request.run_id, job_id=job_id)
             scope = {

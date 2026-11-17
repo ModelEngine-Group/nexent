@@ -11,6 +11,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileUpload,
     KnowledgeJobLookup,
     KnowledgeJobState,
+    knowledge_job_id,
 )
 from nexent.storage.errors import (
     Conflict,
@@ -190,22 +191,7 @@ class KnowledgeJobs:
         if len(encoded) > 16384:
             raise InvalidInput()
         digest = hashlib.sha256(encoded).hexdigest()
-        job_id = uuid5(
-            NAMESPACE_URL,
-            json.dumps(
-                [
-                    "runtime-kb-job",
-                    self.records.scope.tenant_id,
-                    self.records.scope.actor_id,
-                    request.knowledge_id,
-                    request.file_id,
-                    request.file_version,
-                    operation,
-                    request.idempotency_key,
-                ],
-                separators=(",", ":"),
-            ),
-        ).hex
+        job_id = knowledge_job_id(request, self.records.scope.tenant_id, self.records.scope.actor_id)
         lookup = KnowledgeJobLookup(
             knowledge_id=request.knowledge_id,
             file_id=request.file_id,

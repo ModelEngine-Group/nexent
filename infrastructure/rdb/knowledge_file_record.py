@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from infrastructure.rdb.base import SCHEMA, TableBase
 
@@ -179,9 +180,29 @@ class KnowledgeFileLifecycle(TableBase):
         nullable=True,
         comment="Independent SHA256 of source bytes; null until source is pinned.",
     )
+    ingestion_request = Column(
+        sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="Validated Management ingestion intent snapshot, at most 16 KiB; NULL for legacy or unadmitted files.",
+    )
 
 
 _source = KnowledgeFileLifecycle.__table__.c
+sa.CheckConstraint(
+    sa.or_(
+        _source.ingestion_request.is_(None),
+        sa.and_(sa.func.jsonb_typeof(_source.ingestion_request) == "object",
+                sa.func.octet_length(sa.cast(_source.ingestion_request, sa.Text)) <= 16384),
+    ),
+    name="ck_knowledge_ingestion_request", table=KnowledgeFileLifecycle.__table__,
+).ddl_if(dialect="postgresql")
+sa.Index(
+    "idx_knowledge_ingestion_pending", _source.update_time, _source.file_id,
+    postgresql_where=sa.and_(
+        _source.delete_flag == "N", _source.ingestion_request.is_not(None),
+        _source.status.in_(("UPLOADED", "PROCESSING", "FORWARDING")),
+    ),
+)
 _source_fields = (
     _source.source_space,
     _source.source_key,

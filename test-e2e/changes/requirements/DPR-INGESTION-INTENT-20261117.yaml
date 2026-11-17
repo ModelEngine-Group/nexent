@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-INGESTION-INTENT-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Persist and fence Management ingestion intent before child submission
+  description: Add one bounded nullable intent snapshot and a domain CAS journal, reusing existing lifecycle versions and task IDs. Public ingress and dispatch remain the next implementation steps.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-FILE-CLEANSE-D3-001]
+    added: [DPR-INGESTION-JOURNAL-D3-001]
+    modified: [DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Freeze authorized file, actor, source, parser and model identities without credentials.
+    - Preserve both existing UUID5 layouts and enforce stable child identity across tenants and actors.
+    - Persist the snapshot through scoped RecordStore CAS and audit without stale or foreign writes.
+    - Reserve child submission once and fence deleted, replaced or mismatched results without replaying unknown writes.
+    reason: Existing Runtime and cleanse job UT cover their admission implementations; new UT adds Management intent and journal rules. The new D3 supplies actual PG migration, independent-connection CAS, JSONB constraints and tenant/deletion evidence missing from SQLite UT. It owns and reclaims one UUID-labelled PG container; child DTOs remain controlled and no public-pipeline or image acceptance is claimed. No duplicate D1 is added.
+    test_selectors:
+    - test/backend/services/test_knowledge_ingestion_contract.py
+    - test/backend/infrastructure/test_knowledge_ingestion_records.py
+    - test/backend/services/test_knowledge_ingestion_journal.py
+    - test/backend/services/test_cleanse_jobs.py
+    - test/backend/services/test_knowledge_cleanse_jobs.py
+    - test/backend/services/test_knowledge_jobs.py

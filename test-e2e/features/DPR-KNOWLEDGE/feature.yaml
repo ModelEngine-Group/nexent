@@ -20,4 +20,6 @@ feature:
     description: Bound knowledge tool retrieval groups immutable model versions, fixes file scope, rechecks resource revisions and invokes one optional final rerank without replay.
   - rule_id: DPR-KNOWLEDGE-RULE-06
     description: Bounded typed file/image source identities survive message persistence and history without URL guessing; deployment preserves legacy rows and invalid snapshots roll back atomically.
+  - rule_id: DPR-KNOWLEDGE-RULE-07
+    description: Management persists a credential-free source/model/chunking intent and reserves each deterministic child identity through lifecycle CAS before submitting; late or unknown outcomes do not trigger replay.
   required_test_stages: [D3, D4, D5]
