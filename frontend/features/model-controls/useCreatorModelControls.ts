@@ -13,8 +13,7 @@ import { useConversationModelControls } from "./useConversationModelControls";
 export function useCreatorModelControls(
   agent: Agent,
   sessionId: string,
-  permission: "agent:create" | "skill:create",
-  conversationId?: number
+  permission: "agent:create" | "skill:create"
 ) {
   const { models } = useModelList();
   const { defaultLlmModelConfig } = useConfig();
@@ -26,9 +25,7 @@ export function useCreatorModelControls(
   const controls = useConversationModelControls(
     options,
     `${user?.tenantId ?? ""}:${user?.id ?? ""}:${sessionId}`,
-    defaultLlmModelConfig?.id?.toString(),
-    undefined,
-    conversationId
+    defaultLlmModelConfig?.id?.toString()
   );
   return {
     ...controls,

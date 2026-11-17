@@ -59,7 +59,7 @@ case:
     action: Load an existing Workbench creation snapshot, reset an independent Agent creation session, close/reopen a fresh
       Skill creation modal and resolve an asynchronously delayed default after a user has selected a model.
     expected: Workbench restores and validates controls from the shared conversation API; new independent sessions follow existing reset rules; delayed
-      default does not overwrite explicit user choice. Both chat modes restore model selection and per-model preferences from the common conversation API after refresh; unsent creators bind their own persisted conversation after the first response, and later edits/history restore use that conversation’s selection and preferences.
+      default does not overwrite explicit user choice. Both chat modes restore model selection and per-model preferences from the common conversation API after refresh; independent ephemeral creators remain draft-only.
   - order: 3
     action: Start a delayed run on each applicable entry, attempt to change model, reasoning and advanced settings, cancel,
       then select another model and explicitly send again.

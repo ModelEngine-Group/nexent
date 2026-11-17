@@ -44,7 +44,6 @@ const state = vi.hoisted(() => {
     onId: vi.fn(),
     events: vi.fn(),
     chat: vi.fn(),
-    creatorControls: vi.fn(),
     draft: vi.fn(() => ({
       skill_name: "sample",
       files: [{ path: "SKILL.md", content: "draft" }],
@@ -81,10 +80,7 @@ vi.mock("@assistant-ui/react", () => ({
   },
 }));
 vi.mock("@/features/model-controls/useCreatorModelControls", () => ({
-  useCreatorModelControls: (...args: unknown[]) => {
-    state.creatorControls(...args);
-    return state.controls;
-  },
+  useCreatorModelControls: () => state.controls,
 }));
 vi.mock("@/hooks/chat/useCreatorHistories", () => ({
   useCreatorHistories: (...args: unknown[]) => {
@@ -230,8 +226,6 @@ it("remembers server conversation IDs and refreshes the shared history list", as
     onId?.("23");
   });
   expect(state.onId).toHaveBeenLastCalledWith("23");
-  expect(state.chat.mock.calls.at(-1)![0].conversationId).toBe(23);
-  expect(state.creatorControls.mock.calls.at(-1)![3]).toBe(23);
   await act(send);
   expect(state.run.mock.calls.at(-1)?.[0].runConfig?.custom?.threadId).toBe(
     "23"

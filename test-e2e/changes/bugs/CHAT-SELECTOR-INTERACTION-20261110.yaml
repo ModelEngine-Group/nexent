@@ -22,9 +22,6 @@ change:
     test_selectors:
     - frontend/tests/component/modelSelectorPreferences.test.tsx
     - frontend/tests/component/modelParameterLayers.test.tsx
-    - frontend/tests/workbench/ConversationModelControls.test.tsx
-    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
-    - frontend/tests/workbench/Nl2SkillPanelControls.test.tsx
   affected_features:
     existing: []
     added: []

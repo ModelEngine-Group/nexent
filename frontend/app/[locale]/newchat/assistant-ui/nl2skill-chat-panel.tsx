@@ -76,12 +76,10 @@ const Nl2SkillChatSession: FC<Nl2SkillChatPanelProps> = ({
       generation.value++;
     };
   }, []);
-  const conversationId = selectedId ? Number(selectedId) : undefined;
   const modelControls = useCreatorModelControls(
     NL2SKILL_DISPLAY_BASE,
     "nl2skill",
-    "skill:create",
-    conversationId
+    "skill:create"
   );
 
   const adapter = useMemo<ChatModelAdapter>(
@@ -215,7 +213,6 @@ const Nl2SkillChatSession: FC<Nl2SkillChatPanelProps> = ({
           />
           <div className="min-h-0 flex-1">
             <Chat
-              conversationId={conversationId}
               selectedAgent={displayAgent}
               generatedTitle={assistantTitle}
               welcomeTitle={t("skillManagement.chat.createWelcomeTitle")}
