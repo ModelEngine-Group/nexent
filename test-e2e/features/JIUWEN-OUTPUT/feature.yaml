@@ -9,6 +9,8 @@ feature:
   description: Ordered public observations, explicit terminal results and identical
     live/history display.
   business_rules:
+  - rule_id: JIUWEN-OUTPUT-RULE-006
+    description: Model, MCP and resource failures retain their safe localized origin and stable error codes through existing streaming and historical output. Lifecycle wrapping must not replace a specific cause with generic execution failure. Recoverable tool errors, cancellation and awaiting-input results retain their existing semantics; public diagnostics do not expose raw exceptions or credentials.
   - rule_id: JIUWEN-OUTPUT-RULE-001
     description: Content, reasoning, tools and exact results retain ordered blocks
       and call/invocation identities through public StepObservation and RunResult.
