@@ -14,7 +14,7 @@ import sys
 import types
 import unittest
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
@@ -58,10 +58,10 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
+northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
 sys.modules['management.services.northbound'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
-from unittest.mock import AsyncMock, MagicMock
 
 a2a_service_module = types.ModuleType("management.services.agent.a2a.service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})

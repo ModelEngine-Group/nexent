@@ -1,13 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
-from contracts.knowledge import ProcessParams
-from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.api.file.http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
 import base64
 import logging
 import re
-from datetime import datetime
 from http import HTTPStatus
 from typing import Annotated, List, Literal, Optional
 from urllib.parse import unquote, urlparse
@@ -18,7 +15,6 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
-from contracts.knowledge import ProcessParams
 from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.services.file.service import (
     check_file_access,
@@ -32,8 +28,7 @@ from management.services.file.service import (
 )
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
-from management.services.knowledge_base.ingestion import trigger_data_process
-from contracts.errors.ingestion import classify_ingestion_exception
+from management.services.knowledge_base.ingestion import submit_knowledge_files
 
 
 logger = logging.getLogger("file_management_app")
@@ -163,165 +158,25 @@ async def process_files(
     chunking_strategy: Annotated[Optional[str], Body(...)] = "basic",
     authorization: Annotated[Optional[str], Header()] = None,
 ):
-    """
-    Trigger data processing for a list of uploaded files.
-    files: List of dicts, each with "path_or_url" and "filename"
-    chunking_strategy: chunking strategy, could be chosen from basic/by_title/none
-    index_name: index name in elasticsearch
-    destination: 'local' or 'minio'
-    """
+    """Admit uploaded files through Management's persistent ingestion pipeline."""
+    from infrastructure.agentos_identity import ServicePrincipal
+
     user_id, tenant_id = get_current_user_id(authorization)
     require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-
-    process_params = ProcessParams(
-        chunking_strategy=chunking_strategy,
-        source_type=destination,
-        index_name=index_name,
-        authorization=authorization,
+    process_result = await submit_knowledge_files(
+        files, index_name, ServicePrincipal(user_id, tenant_id),
+        destination=destination, chunking_strategy=chunking_strategy,
     )
-
-    process_result = await trigger_data_process(files, process_params, tenant_id=tenant_id)
-
-    def persist_submit_failure(file_details: dict, error: object):
-        """Persist a durable task-submit failure without hiding other batch results."""
-        try:
-            from management.db.knowledge_base.file_lifecycle import get_file_record, transition_file_record
-
-            record = get_file_record(
-                file_id=file_details.get("file_id"),
-                tenant_id=tenant_id,
-                index_name=index_name,
-                object_name=file_details.get("path_or_url"),
-                include_hidden=True,
-            )
-            if record:
-                classified = classify_ingestion_exception(error, "TASK_SUBMIT")
-                transition_file_record(
-                    record["file_id"],
-                    status="FAILED",
-                    stage="TASK_SUBMIT",
-                    expected_statuses=("UPLOADED", "UPLOADING", "PROCESSING", "FORWARDING"),
-                    error_code=classified.error_code,
-                    error_message=classified.error_message,
-                    error_stage="TASK_SUBMIT",
-                    failed_at=datetime.utcnow(),
-                    updated_by=user_id,
-                )
-        except Exception as lifecycle_exc:
-            logger.warning("Failed to persist process-submit error: %s", lifecycle_exc)
-
-    def persist_submit_task(file_details: dict, task_id: Optional[str]):
-        """Persist the parent chain ID so deletion can revoke a queued chain."""
-        if not task_id:
-            return
-        try:
-            from management.db.knowledge_base.file_lifecycle import get_file_record, transition_file_record
-
-            record = get_file_record(
-                file_id=file_details.get("file_id"),
-                tenant_id=tenant_id,
-                index_name=index_name,
-                object_name=file_details.get("path_or_url"),
-                include_hidden=True,
-            )
-            if record and file_details.get("file_id") and record.get("file_id") != file_details.get("file_id"):
-                logger.warning(
-                    "Ignoring mismatched lifecycle row while persisting task ID %s: expected=%s actual=%s",
-                    task_id,
-                    file_details.get("file_id"),
-                    record.get("file_id"),
-                )
-                return
-            if record:
-                transition_file_record(
-                    record["file_id"],
-                    parent_task_id=task_id,
-                    expected_statuses=("UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING"),
-                    updated_by=user_id,
-                )
-        except Exception as lifecycle_exc:
-            logger.warning("Failed to persist process task ID %s: %s", task_id, lifecycle_exc)
-
-    if process_result is None or (isinstance(process_result, dict) and process_result.get("status") == "error"):
-        error_message = "Data process service failed"
-        if isinstance(process_result, dict) and "message" in process_result:
-            error_message = process_result["message"]
-        for file_details in files:
-            persist_submit_failure(file_details, process_result or error_message)
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
-
-    # New batch responses identify every submitted file. Persist only the failed items,
-    # allowing successful files to continue through their Celery chains.
-    if isinstance(process_result, dict) and isinstance(process_result.get("results"), list):
-        files_by_id = {
-            file_details.get("file_id"): file_details for file_details in files if file_details.get("file_id")
-        }
-        files_by_source = {
-            file_details.get("path_or_url"): file_details for file_details in files if file_details.get("path_or_url")
-        }
-        for submitted_result in process_result["results"]:
-            if not isinstance(submitted_result, dict) or submitted_result.get("status") != "SUBMITTED":
-                continue
-            file_details = files_by_id.get(submitted_result.get("file_id"))
-            if file_details is None:
-                file_details = files_by_source.get(submitted_result.get("source"))
-            if file_details is not None:
-                persist_submit_task(file_details, submitted_result.get("task_id"))
-
-        failed_results = [
-            result
-            for result in process_result["results"]
-            if isinstance(result, dict) and result.get("status") == "FAILED"
-        ]
-        for failed_result in failed_results:
-            file_details = files_by_id.get(failed_result.get("file_id"))
-            if file_details is None:
-                file_details = files_by_source.get(failed_result.get("source"))
-            if file_details is not None:
-                persist_submit_failure(
-                    file_details,
-                    failed_result,
-                )
-
-        submitted_count = process_result.get("submitted_count")
-        if submitted_count is None:
-            submitted_count = sum(
-                1
-                for result in process_result["results"]
-                if isinstance(result, dict) and result.get("status") == "SUBMITTED"
-            )
-        if failed_results and not submitted_count:
-            error_message = failed_results[0].get("error_message") or "Data process service failed"
-            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
-
-        if failed_results:
-            return JSONResponse(
-                status_code=HTTPStatus.CREATED,
-                content={
-                    "message": "Files processing partially triggered",
-                    "process_tasks": process_result,
-                    "failed_files": failed_results,
-                },
-            )
-
-    elif isinstance(process_result, dict) and process_result.get("task_id"):
-        # Single-file / legacy data-process responses expose one parent chain ID.
-        if len(files) == 1:
-            persist_submit_task(files[0], process_result["task_id"])
-
-    # A legacy batch service may only return task_ids. An explicit empty list means
-    # no file was submitted; mark every file failed instead of leaving UPLOADED rows.
-    if (
-        isinstance(process_result, dict)
-        and "results" not in process_result
-        and "task_ids" in process_result
-        and not process_result.get("task_ids")
-    ):
-        error_message = process_result.get("message") or "No processing tasks were submitted"
-        for file_details in files:
-            persist_submit_failure(file_details, process_result)
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
-
+    if not process_result or process_result.get("status") in {"error", "failed"}:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=(process_result or {}).get("message") or "Data process service failed")
+    failed_results = [row for row in process_result.get("results", []) if row["status"] == "FAILED"]
+    if failed_results:
+        return JSONResponse(
+            status_code=HTTPStatus.CREATED,
+            content={"message": "Files processing partially triggered", "process_tasks": process_result,
+                     "failed_files": failed_results},
+        )
     return JSONResponse(
         status_code=HTTPStatus.CREATED,
         content={"message": "Files processing triggered successfully", "process_tasks": process_result},

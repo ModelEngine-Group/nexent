@@ -1,17 +1,40 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Knowledge ingestion submission and upstream error compatibility."""
+"""Management-owned ingestion admission and established public result projection."""
 
+import asyncio
 import logging
-from typing import List
+from dataclasses import replace
+from threading import Event
+from time import monotonic
+from uuid import uuid4
 
-import httpx
-from contracts.constants.environment import DATA_PROCESS_SERVICE
-from contracts.knowledge import ProcessParams
-from management.db.knowledge_base.repository import get_knowledge_record
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import (
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+)
 from contracts.errors.ingestion import classify_ingestion_exception
+from management.services.knowledge_base.ingestion_coordinator import (
+    IngestionCancellation,
+)
+from management.services.knowledge_base.ingestion_dispatch import default_coordinator
+from management.services.knowledge_base.ingestion_selection import (
+    resolve_ingestion_file,
+)
+from nexent.core.concurrency import run_blocking
+from nexent.storage.errors import (
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    OutcomeUnknown,
+    ScopeDenied,
+    Unavailable,
+)
+from nexent.storage.models import OperationContext
+
+from infrastructure.knowledge_cleanse import knowledge_resource_ports
 from infrastructure.trace.knowledge import (
-    inject_trace_context,
     set_span_attributes,
     trace_knowledge_operation,
 )
@@ -19,162 +42,154 @@ from infrastructure.trace.knowledge import (
 logger = logging.getLogger(__name__)
 
 
-def _data_process_error_result(
-    error: object,
-    stage: str = "TASK_SUBMIT",
-    legacy_code: object = None,
-) -> dict:
-    """Keep an upstream stable code when data-process rejects a request."""
-    classified = classify_ingestion_exception(error, stage)
-    if legacy_code is not None:
-        compatibility_code = legacy_code
-    elif isinstance(error, httpx.RequestError):
-        # Preserve the pre-lifecycle response contract for callers that still
-        # branch on CONNECTION_ERROR while exposing the new error_code too.
-        compatibility_code = "CONNECTION_ERROR"
+def _submission_failure(details, error):
+    if isinstance(error, OutcomeUnknown):
+        code = "KNOWLEDGE_OUTCOME_UNKNOWN"
+    elif isinstance(
+        error, (TimeoutError, DeadlineExceeded, RuntimeServiceTimeoutError)
+    ):
+        code = ErrorCode.SYSTEM_TIMEOUT.value
+    elif isinstance(error, (Unavailable, RuntimeServiceUnavailableError)):
+        code = ErrorCode.SYSTEM_SERVICE_UNAVAILABLE.value
+    elif isinstance(error, ScopeDenied):
+        code = ErrorCode.COMMON_FORBIDDEN.value
+    elif isinstance(error, NotFound):
+        code = ErrorCode.FILE_NOT_FOUND.value
     else:
-        compatibility_code = "INTERNAL_ERROR"
+        code = classify_ingestion_exception(error, "TASK_SUBMIT").error_code
+    details = details if isinstance(details, dict) else {}
     return {
-        "status": "error",
-        "code": compatibility_code,
-        "error_code": classified.error_code,
-        "message": classified.error_message or "Data process service failed",
+        "file_id": details.get("file_id"),
+        "source": details.get("path_or_url"),
+        "original_filename": details.get("filename"),
+        "status": "FAILED",
+        "error_code": code,
+        "error_message": None,
     }
 
 
 @trace_knowledge_operation("knowledge.process.submit", "process.submit")
-async def trigger_data_process(files: List[dict], process_params: ProcessParams, tenant_id: str):
-    """Trigger data processing service to handle uploaded files"""
+async def submit_knowledge_files(
+    files,
+    index_name,
+    actor,
+    *,
+    destination="minio",
+    chunking_strategy="basic",
+    coordinator=None,
+    context=None,
+):
+    """Admit authorized source identities and project the established public task envelope."""
+    if not files:
+        return None
+    if (
+        not isinstance(index_name, str)
+        or not index_name.strip()
+        or len(index_name) > 100
+    ):
+        raise InvalidInput()
+    coordinator = coordinator if coordinator is not None else default_coordinator()
+    context = context or OperationContext(
+        "ingestion-submit-" + uuid4().hex, monotonic() + 30
+    )
+    owned = Event()
+    operation = replace(
+        context,
+        deadline=min(context.deadline, monotonic() + 30),
+        cancelled=IngestionCancellation(owned, context.cancelled),
+    )
+    results, task_ids = [], []
+    timeout_logged = False
+
+    def resolve(details, bound):
+        bound.remaining()
+        with knowledge_resource_ports(
+            actor.tenant_id, actor.user_id, context=bound, include_files=True
+        ) as records:
+            return resolve_ingestion_file(
+                records,
+                actor,
+                index_name,
+                details,
+                destination=destination,
+                context=bound,
+            )
+
     try:
-        if not files:
-            return None
-
-        if not tenant_id:
-            raise ValueError("Authenticated tenant is required")
-
-        # Resolve embedding model from the knowledge base record (not request model_id)
-        embedding_model_id = None
         try:
-            knowledge_record = get_knowledge_record(
-                {
-                    "index_name": process_params.index_name,
-                    "tenant_id": tenant_id,
-                }
-            )
-            embedding_model_id = (
-                knowledge_record.get("embedding_model_id") if knowledge_record else None
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to resolve embedding_model_id from knowledge_record: %s", e
-            )
-
-        # Build headers with authorization
-        headers = {"Authorization": process_params.authorization}
-        telemetry_context = inject_trace_context()
-        headers.update(telemetry_context)
-
-        # Build source data list
-        if len(files) == 1:
-            # Single file request
-            file_details = files[0]
-            payload = {
-                "source": file_details.get("path_or_url"),
-                "source_type": process_params.source_type,
-                "chunking_strategy": process_params.chunking_strategy,
-                "index_name": process_params.index_name,
-                "original_filename": file_details.get("filename"),
-                "file_id": file_details.get("file_id"),
-                "embedding_model_id": embedding_model_id,
-                "tenant_id": tenant_id,
-            }
-            payload["telemetry_context"] = telemetry_context
-
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{DATA_PROCESS_SERVICE}/tasks",
-                        headers=headers,
-                        json=payload,
-                        timeout=30.0,
-                    )
-
-                if response.status_code == 201:
-                    return response.json()
-                else:
-                    logger.error(
-                        "Error from data process service: %s - %s",
-                        response,
-                        response.text
-                        if hasattr(response, "text")
-                        else "No response text",
+            async with asyncio.timeout(operation.remaining()):
+                for details in files:
+                    operation.remaining()
+                    timeout_logged, phase = False, "select"
+                    bound = replace(
+                        operation, deadline=min(operation.deadline, monotonic() + 10)
                     )
                     try:
-                        error_payload = response.json()
-                    except ValueError:
-                        error_payload = (
-                            response.text
-                            or f"Data process service error: {response.status_code}"
+                        async with asyncio.timeout(bound.remaining()):
+                            selected = await run_blocking(
+                                "ingestion-select-source",
+                                resolve,
+                                details,
+                                bound,
+                                lane="control-io",
+                                owner="management.knowledge_base",
+                            )
+                            phase = "admit"
+                            row = await coordinator.accept(
+                                selected["file_id"],
+                                actor,
+                                chunking_strategy=chunking_strategy or "basic",
+                                context=bound,
+                            )
+                            task_id = row["process_task_id"]
+                            if not isinstance(task_id, str) or not task_id:
+                                raise OutcomeUnknown(operation_id=bound.operation_id)
+                        task_ids.append(task_id)
+                        results.append(
+                            {
+                                "file_id": selected["file_id"],
+                                "source": details.get("path_or_url"),
+                                "original_filename": selected["original_filename"],
+                                "status": "SUBMITTED",
+                                "task_id": task_id,
+                            }
                         )
-                    return _data_process_error_result(
-                        error_payload, legacy_code=response.status_code
-                    )
-            except httpx.RequestError as e:
-                logger.error("Failed to connect to data process service: %s", str(e))
-                return _data_process_error_result(e)
-
-        else:
-            # Batch file request
-            sources = []
-            for file_details in files:
-                source = {
-                    "source": file_details.get("path_or_url"),
-                    "source_type": process_params.source_type,
-                    "chunking_strategy": process_params.chunking_strategy,
-                    "index_name": process_params.index_name,
-                    "original_filename": file_details.get("filename"),
-                    "file_id": file_details.get("file_id"),
-                    "embedding_model_id": embedding_model_id,
-                    "tenant_id": tenant_id,
-                }
-                source["telemetry_context"] = telemetry_context
-                sources.append(source)
-
-            payload = {"sources": sources}
-
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{DATA_PROCESS_SERVICE}/tasks/batch",
-                        headers=headers,
-                        json=payload,
-                        timeout=30.0,
-                    )
-
-                if response.status_code == 201:
-                    set_span_attributes(stage="process.submitted")
-                    return response.json()
-                else:
-                    logger.error(
-                        "Error from data process service: %s - %s",
-                        response,
-                        response.text
-                        if hasattr(response, "text")
-                        else "No response text",
-                    )
-                    try:
-                        error_payload = response.json()
-                    except ValueError:
-                        error_payload = (
-                            response.text
-                            or f"Data process service error: {response.status_code}"
-                        )
-                    return _data_process_error_result(
-                        error_payload, legacy_code=response.status_code
-                    )
-            except httpx.RequestError as e:
-                logger.error("Failed to connect to data process service: %s", str(e))
-                return _data_process_error_result(e)
-    except Exception as e:
-        logger.error("Error triggering data process: %s", str(e))
-        return _data_process_error_result(e)
+                    except Exception as error:  # noqa: BLE001 - Preserve independent batch outcomes without replay.
+                        if (
+                            isinstance(error, TimeoutError)
+                            or isinstance(error, DeadlineExceeded)
+                            and phase == "select"
+                        ):
+                            logger.warning(
+                                "knowledge_ingestion_submit_timeout operation_id=%s phase=%s threshold_seconds=10",
+                                operation.operation_id,
+                                phase,
+                            )
+                            timeout_logged = True
+                        results.append(_submission_failure(details, error))
+        except (TimeoutError, DeadlineExceeded) as error:
+            if not timeout_logged:
+                logger.warning(
+                    "knowledge_ingestion_submit_timeout operation_id=%s phase=batch threshold_seconds=30",
+                    operation.operation_id,
+                )
+            results.extend(
+                _submission_failure(details, error) for details in files[len(results) :]
+            )
+    finally:
+        owned.set()
+    if len(files) == 1 and task_ids:
+        return {"task_id": task_ids[0]}
+    failed = len(results) - len(task_ids)
+    set_span_attributes(stage="process.submitted")
+    return {
+        "status": "success"
+        if not failed
+        else "partial_success"
+        if task_ids
+        else "failed",
+        "task_ids": task_ids,
+        "results": results,
+        "submitted_count": len(task_ids),
+        "failed_count": failed,
+    }

@@ -221,7 +221,9 @@ if role == "management":
                     "management.api.file.knowledge_content", "management.services.file.cleanse_jobs",
                     "management.services.knowledge_base.ingestion_journal", "management.services.knowledge_base.ingestion_coordinator", "infrastructure.rdb.knowledge_ingestion",
                     "infrastructure.knowledge_ingestion", "management.services.knowledge_base.ingestion_dispatch",
-                    "infrastructure.rdb.knowledge_ingestion_dispatch"])
+                    "infrastructure.rdb.knowledge_ingestion_dispatch", "management.services.knowledge_base.ingestion",
+                    "management.services.knowledge_base.ingestion_selection", "management.services.knowledge_base.file_selection",
+                    "management.services.file.local_knowledge_source", "infrastructure.file_processing.local_source"])
 
 modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge", "contracts.knowledge_tool",
                 "infrastructure.knowledge_content", "contracts.knowledge_cleanse", "contracts.knowledge_ingestion",

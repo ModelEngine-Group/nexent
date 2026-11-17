@@ -8,4 +8,5 @@
 - D3 [DPR-KB-MULTIMODAL-D3-001](../../cases/DPR-KB-MULTIMODAL-D3-001/case.yaml) · active
 - D3 [DPR-KB-WORKER-D3-001](../../cases/DPR-KB-WORKER-D3-001/case.yaml) · active
 - D4 [DPR-SOURCE-CONSUMER-D4-001](../../cases/DPR-SOURCE-CONSUMER-D4-001/case.yaml) · active
+- D5 [DPR-LOCAL-SOURCE-D5-001](../../cases/DPR-LOCAL-SOURCE-D5-001/case.yaml) · active
 - D5 [DPR-SOURCE-HISTORY-D5-001](../../cases/DPR-SOURCE-HISTORY-D5-001/case.yaml) · active

@@ -64,6 +64,39 @@ _RUNTIME_METADATA_ERROR_CODE_MAP = {
 
 
 
+async def process_uploaded_knowledge_for_northbound(*, ctx, index_name, upload_result):
+    """Adapt standard ingestion to the existing northbound upload response contract."""
+    from management.services.knowledge_base.ingestion import submit_knowledge_files
+
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    _, paths, names = upload_result
+    identities = {row["object_name"]: row.get("file_id") for row in getattr(upload_result, "file_records", [])}
+    files = [{"path_or_url": path, "filename": name, "file_id": identities.get(path)}
+             for path, name in zip(paths, names)]
+    result = await submit_knowledge_files(files, index_name, ServicePrincipal(ctx.user_id, ctx.tenant_id),
+                                          destination="minio", chunking_strategy="basic")
+    if len(paths) == 1:
+        if result and result.get("task_id"):
+            return {"task_id": result["task_id"]}
+        failures = (result or {}).get("results") or [{}]
+        return {"status": "error", "code": "INTERNAL_ERROR", "error_code": failures[0].get("error_code"),
+                "message": "Data process service failed"}
+    if result is None:
+        return None
+    # Northbound upload has never exposed lifecycle file IDs in its batch task results.
+    projected = []
+    for row, submitted in zip(result["results"], files):
+        item = {"file_id": None, "source": submitted["path_or_url"], "original_filename": submitted["filename"], "status": row["status"]}
+        if row["status"] == "SUBMITTED":
+            item["task_id"] = row["task_id"]
+        else:
+            item.update(error_code=row["error_code"], error_message=row.get("error_message"))
+        projected.append(item)
+    return {"status": result["status"], "task_ids": result["task_ids"], "results": projected,
+            "submitted_count": result["submitted_count"], "failed_count": result["failed_count"]}
+
+
 def _build_northbound_file_descriptor(
     upload_result: Dict[str, Any],
     original_file_name: str = "",

@@ -25,7 +25,7 @@ from infrastructure.rdb.knowledge_jobs import jobs
 
 
 async def check_management_coordinator(
-    api, engine, source, artifact, context, requests
+    api, engine, source, artifact, context, requests, public_url
 ):
     files = KnowledgeFileLifecycle.__table__
     value = KnowledgeIngestionIntent(
@@ -95,10 +95,14 @@ async def check_management_coordinator(
     cleanse = KnowledgeCleanseService(parser_version="v2")
     transport = LoseReply()
     coordinator = IngestionCoordinator(cleanse, transport)
+    from public_probe import admit_through_public_interfaces
+
+    public_task = await admit_through_public_interfaces(public_url, value)
     assert (await coordinator.accept(value.file_id, actor, context=context()))[
         "stage"
     ] == "INGEST_ACCEPTED"
     assert row()["ingestion_request"] == value.model_dump(mode="json")
+    assert public_task == row()["process_task_id"]
     assert (await coordinator.advance(value.file_id, actor, context=context()))[
         "stage"
     ] == "CLEANSE_PENDING"

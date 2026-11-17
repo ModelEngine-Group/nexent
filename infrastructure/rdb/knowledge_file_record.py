@@ -23,6 +23,8 @@ class KnowledgeFileLifecycle(TableBase):
 
     __tablename__ = "knowledge_file_lifecycle_t"
     __table_args__ = (
+        Index("idx_knowledge_file_local_source", "tenant_id", "knowledge_id", "local_source_path",
+              postgresql_where=text("delete_flag = 'N' AND local_source_path IS NOT NULL")),
         CheckConstraint(
             "status IN ('UPLOADING', 'UPLOADED', 'PROCESSING', 'FORWARDING', "
             "'FAILED', 'COMPLETED', 'DELETE_REQUESTED', 'DELETED')",
@@ -83,6 +85,10 @@ class KnowledgeFileLifecycle(TableBase):
     index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index")
     bucket_name = Column(String(255), nullable=True, doc="MinIO bucket")
     object_name = Column(String(1024), nullable=True, doc="MinIO object name")
+    local_source_path = Column(
+        String(2048), nullable=True,
+        comment="Management-owned local upload alias; never forwarded to Runtime.",
+    )
     original_filename = Column(
         String(1024),
         nullable=False,

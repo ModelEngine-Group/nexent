@@ -37,7 +37,7 @@ from infrastructure.knowledge_ingestion import knowledge_ingestion_ports
 logger = logging.getLogger(__name__)
 
 
-class _Cancellation:
+class IngestionCancellation:
     def __init__(self, owned, parent):
         self.owned, self.parent = owned, parent
 
@@ -55,7 +55,7 @@ class IngestionCoordinator:
             "kb-ingest-" + uuid4().hex, monotonic() + 10
         )
         owned = Event()
-        context = replace(context, cancelled=_Cancellation(owned, context.cancelled))
+        context = replace(context, cancelled=IngestionCancellation(owned, context.cancelled))
         seconds = max(0, context.deadline - monotonic())
         try:
             async with asyncio.timeout(context.remaining()):

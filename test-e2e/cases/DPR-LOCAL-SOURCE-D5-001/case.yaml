@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-LOCAL-SOURCE-D5-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-001, DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-07]
+  title: Local source alias migration preserves pinned source identity and tenant isolation
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the actual PostgreSQL migration and default scoped local publication without a shared Runtime filesystem.
+  preconditions:
+  - Docker has cached postgres:15-alpine and the configured Python dependencies are available.
+  test_data:
+    resources: An owned PostgreSQL database, a predecessor lifecycle table, controlled account and source metadata, and a temporary local directory.
+    boundaries: Source object publication is a confirmed fixture; no MinIO, provider, parser or Runtime execution is performed.
+  steps:
+  - order: 1
+    action: Create the predecessor table without a local alias and apply the shipped migration twice.
+    expected: The nullable bounded column, comment and scoped index exist and an independent legacy row remains NULL.
+  - order: 2
+    action: Register a hash-verified local mirror through production default StorageInterface ports and current DAC, then resolve its exact local alias.
+    expected: The file bytes match, the alias points to one current file, and source key, revision and hash remain unchanged.
+  - order: 3
+    action: Attempt a foreign-tenant record read and an overlong alias write, then close and reclaim owned resources.
+    expected: The foreign tenant sees no row, PostgreSQL rejects the oversized alias atomically, and owned connections, files and containers are reclaimed.
+  expected_results:
+  - Migration is repeatable and preserves legacy rows without guessed local ownership.
+  - Current Management authority registers a local alias while retaining the pinned object identity used by Runtime.
+  - Tenant scope and bounded storage reject invalid access without altering the valid alias.
+  forbidden_side_effects:
+  - No user application data, source object, model provider, data-process endpoint or Runtime shared volume is accessed.
+  risk_type: DEPLOYMENT
+  risk: A missing alias migration or incorrect scope can break local uploads or expose another tenant's source mapping.
+  condition:
+  - Use the shipped migration, production default record composition and one uniquely owned PostgreSQL database.
+  metrics:
+  - Column nullability, comment and index; local byte hash, exact resolved file ID and unchanged source reference.
+  - Foreign read result, valid alias after rejected overlong write and owned container count after cleanup.
+  thresholds:
+  - Two migration applications succeed, the legacy alias stays NULL and the new alias resolves exactly one authorized file.
+  - Foreign reads return no row, a 2049-character alias is rejected and zero owned containers remain.
+  recovery_expectations:
+  - Roll back invalid writes, close owned ports and engines, and remove only the uniquely named test container and anonymous volumes.
+  cleanup:
+  - Dispose owned engines and ports and remove only the unique-label PostgreSQL container and its anonymous volumes; pytest owns the temporary directory.
+  acceptance:
+  - id: AC-01
+    description: Actual migration is idempotent and preserves nullable legacy state.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Default scoped publication preserves source identity and exact authorized alias resolution.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Foreign tenant and oversized writes cannot change the valid published alias.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

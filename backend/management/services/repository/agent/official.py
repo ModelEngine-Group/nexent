@@ -693,8 +693,6 @@ async def _create_knowledge_bases(
                     file_docs,
                     tenant_id=tenant_id,
                     user_id=user_id,
-                    embedding_model_id=embedding_model_id,
-                    authorization=authorization,
                 )
                 logger.info(
                     "Uploaded %d file seed document(s) for processing into "
@@ -713,8 +711,6 @@ async def _index_binary_docs(
     *,
     tenant_id: str,
     user_id: str,
-    embedding_model_id: int,
-    authorization: str,
 ) -> None:
     """Upload binary seed docs (docx/pdf/...) and trigger the platform pipeline.
 
@@ -727,9 +723,9 @@ async def _index_binary_docs(
 
     from starlette.datastructures import UploadFile
 
-    from contracts.knowledge import ProcessParams
     from management.services.file.service import upload_files_impl
-    from management.services.knowledge_base.ingestion import trigger_data_process
+    from management.services.knowledge_base.ingestion import submit_knowledge_files
+    from infrastructure.agentos_identity import ServicePrincipal
 
     files_to_process: List[Dict[str, str]] = []
     for doc in docs:
@@ -739,7 +735,7 @@ async def _index_binary_docs(
             filename=os.path.basename(doc.file_path),
             file=BytesIO(file_bytes),
         )
-        _, uploaded_file_paths, _ = await upload_files_impl(
+        upload_result = await upload_files_impl(
             destination="minio",
             file=[upload_file],
             folder="knowledge_base",
@@ -747,6 +743,7 @@ async def _index_binary_docs(
             user_id=user_id,
             uploader_tenant_id=tenant_id,
         )
+        _, uploaded_file_paths, _ = upload_result
         if not uploaded_file_paths:
             logger.warning(
                 "Failed to upload KB seed file '%s' for index %s",
@@ -758,20 +755,15 @@ async def _index_binary_docs(
             {
                 "path_or_url": uploaded_file_paths[0],
                 "filename": doc.file_name,
+                "file_id": next((row["file_id"] for row in getattr(upload_result, "file_records", [])
+                                 if row["object_name"] == uploaded_file_paths[0]), None),
             }
         )
 
     if files_to_process:
-        await trigger_data_process(
-            files_to_process,
-            ProcessParams(
-                chunking_strategy="basic",
-                source_type="minio",
-                index_name=index_name,
-                model_id=embedding_model_id,
-                authorization=authorization,
-            ),
-            tenant_id=tenant_id,
+        await submit_knowledge_files(
+            files_to_process, index_name, ServicePrincipal(user_id, tenant_id),
+            destination="minio", chunking_strategy="basic",
         )
 
 

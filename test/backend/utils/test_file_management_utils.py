@@ -6,19 +6,11 @@ from test.backend.management.import_patching import set_import_attribute
 import sys
 import types
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pytest
 
 
-class _ProcessParams:
-    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str],
-        tenant_id: Optional[str] = "tenant-1"):
-        self.authorization = authorization
-        self.source_type = source_type
-        self.chunking_strategy = chunking_strategy
-        self.index_name = index_name
-        self.tenant_id = tenant_id
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +24,6 @@ def stub_project_modules(monkeypatch, tmp_path):
 
     # contracts.agent
     model_mod = types.ModuleType("contracts.agent")
-    setattr(model_mod, "ProcessParams", _ProcessParams)
     install_business_contract_stubs(model_mod)
 
     # management.db.file.attachment
@@ -76,9 +67,7 @@ def stub_project_modules(monkeypatch, tmp_path):
 def fmu(monkeypatch, request):
     # Import after stubbing collaborators
     names = request.function.__code__.co_names
-    if "trigger_data_process" in names or "_data_process_error_result" in names:
-        from management.services.knowledge_base import ingestion as fmu
-    elif "get_all_files_status" in names or "_convert_to_custom_state_local" in names:
+    if "get_all_files_status" in names or "_convert_to_custom_state_local" in names:
         from management.services.knowledge_base import status as fmu
     else:
         from management.services.file import upload as fmu
@@ -142,15 +131,6 @@ async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
     assert ok is False
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_rejects_missing_tenant_without_submission(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    result = await fmu.trigger_data_process([{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}], _ProcessParams('Bearer tok', 'local', 'basic', 'idx'), tenant_id=None)
-    assert result['status'] == 'error'
-    assert result['code'] == 'INTERNAL_ERROR'
-    assert fake_client.last_post == {}
 
 
 # -------------------- trigger_data_process --------------------
@@ -166,13 +146,8 @@ class _Resp:
         return self._body
 
 
-class _InvalidJsonResp(_Resp):
-    def json(self):
-        raise ValueError("not json")
 
 
-class _FakeRequestError(Exception):
-    pass
 
 
 class _FakeAsyncClient:
@@ -200,187 +175,31 @@ class _FakeAsyncClient:
         return self._resp
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_empty_files_returns_none(fmu):
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    out = await fmu.trigger_data_process([], params, tenant_id='tenant-1')
-    assert out is None
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', lambda query=None: {'embedding_model_id': 42, 'index_name': 'idx'})
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_id': 't1'}
-    assert fake_client.last_post['url'].endswith('/tasks')
-    assert fake_client.last_post['headers']['Authorization'] == 'Bearer tok'
-    assert fake_client.last_post['json']['embedding_model_id'] == 42
-    assert fake_client.last_post['json']['tenant_id'] == 'tenant-1'
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_propagates_file_id(fmu, monkeypatch):
-    """New clients must carry the durable lifecycle ID into the task request."""
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't-file'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', lambda query=None: {})
-    params = _ProcessParams('Bearer tok', 'minio', 'basic', 'idx')
-    result = await fmu.trigger_data_process([{'path_or_url': 'knowledge_base/a.txt', 'filename': 'a.txt', 'file_id': 'fid-1'}], params, tenant_id='tenant-1')
-    assert result == {'task_id': 't-file'}
-    assert fake_client.last_post['json']['file_id'] == 'fid-1'
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_queries_knowledge_record_by_index(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    captured_query: Dict[str, Any] = {}
-
-    def _fake_get_knowledge_record(query=None):
-        captured_query.update(query or {})
-        return {'embedding_model_id': 77, 'index_name': 'idx'}
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', _fake_get_knowledge_record)
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_id': 't1'}
-    assert captured_query.get('index_name') == 'idx'
-    assert captured_query.get('tenant_id') == 'tenant-1'
-    assert fake_client.last_post['json']['embedding_model_id'] == 77
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_missing_embedding_model_id_sends_none(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', lambda query=None: {})
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_id': 't1'}
-    assert fake_client.last_post['json']['embedding_model_id'] is None
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_knowledge_record_none_sends_none(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', lambda query=None: None)
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_id': 't1'}
-    assert fake_client.last_post['json']['embedding_model_id'] is None
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_knowledge_record_raises_sends_none(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_id': 't1'}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-
-    def _raise_get_knowledge_record(query=None):
-        raise RuntimeError('db unavailable')
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', _raise_get_knowledge_record)
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_id': 't1'}
-    assert fake_client.last_post['json']['embedding_model_id'] is None
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_single_non201_error(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(400, None, text='boom'))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out['status'] == 'error' and out['code'] == 400
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_single_request_error(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_FakeRequestError('net'))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out['status'] == 'error' and out['code'] == 'CONNECTION_ERROR'
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_batch_success(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_Resp(201, {'task_ids': ['t1', 't2']}))
-    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx)
-    set_import_attribute(monkeypatch, fmu, 'get_knowledge_record', lambda query=None: {'embedding_model_id': 42, 'index_name': 'idx'})
-    params = _ProcessParams('Bearer tok', 'minio', 'basic', 'idx')
-    files = [{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}, {'path_or_url': '/data/b.txt', 'filename': 'b.txt'}]
-    out = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out == {'task_ids': ['t1', 't2']}
-    assert fake_client.last_post['url'].endswith('/tasks/batch')
-    assert len(fake_client.last_post['json']['sources']) == 2
-    assert all((s['embedding_model_id'] == 42 for s in fake_client.last_post['json']['sources']))
-
-@pytest.mark.asyncio
-async def test_trigger_data_process_batch_non201_and_request_error(fmu, monkeypatch):
-    fake_client1 = _FakeAsyncClient(_Resp(500, None, text='bad'))
-    fake_httpx1 = types.SimpleNamespace(AsyncClient=lambda: fake_client1, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx1)
-    params = _ProcessParams('Bearer tok', 'minio', 'basic', 'idx')
-    files = [{'path_or_url': '/a', 'filename': 'a'}, {'path_or_url': '/b', 'filename': 'b'}]
-    out1 = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out1['status'] == 'error' and out1['code'] == 500
-    fake_client2 = _FakeAsyncClient(_FakeRequestError('down'))
-    fake_httpx2 = types.SimpleNamespace(AsyncClient=lambda: fake_client2, RequestError=_FakeRequestError)
-    set_import_attribute(monkeypatch, fmu, 'httpx', fake_httpx2)
-    out2 = await fmu.trigger_data_process(files, params, tenant_id='tenant-1')
-    assert out2['status'] == 'error' and out2['code'] == 'CONNECTION_ERROR'
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_InvalidJsonResp(502, text='gateway unavailable'))
-    set_import_attribute(monkeypatch, fmu, 'httpx', types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError))
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    out = await fmu.trigger_data_process([{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}], params, tenant_id='tenant-1')
-    assert out['status'] == 'error'
-    assert out['code'] == 502
-    assert out['error_code']
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_batch_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(_InvalidJsonResp(503, text='service unavailable'))
-    set_import_attribute(monkeypatch, fmu, 'httpx', types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError))
-    params = _ProcessParams('Bearer tok', 'minio', 'basic', 'idx')
-    out = await fmu.trigger_data_process([{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}, {'path_or_url': '/data/b.txt', 'filename': 'b.txt'}], params, tenant_id='tenant-1')
-    assert out['status'] == 'error'
-    assert out['code'] == 503
-    assert out['error_code']
 
 
-@pytest.mark.asyncio
-async def test_trigger_data_process_unexpected_client_error_uses_internal_code(fmu, monkeypatch):
-    fake_client = _FakeAsyncClient(RuntimeError('unexpected client failure'))
-    set_import_attribute(monkeypatch, fmu, 'httpx', types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError))
-    params = _ProcessParams('Bearer tok', 'local', 'basic', 'idx')
-    out = await fmu.trigger_data_process([{'path_or_url': '/data/a.txt', 'filename': 'a.txt'}], params, tenant_id='tenant-1')
-    assert out['status'] == 'error'
-    assert out['code'] == 'INTERNAL_ERROR'
-    assert out['error_code']
+
 
 
 # -------------------- get_all_files_status --------------------
@@ -860,7 +679,7 @@ class TestConvertOfficeToPdf:
         set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
         set_import_attribute(monkeypatch, fmu, "LIBREOFFICE_PROFILE_DIR", str(profile_dir))
         set_import_attribute(monkeypatch, fmu.os, "chmod", lambda path, mode: chmod_calls.append((Path(path), mode)))
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", fake_run)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", fake_run)
 
         result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
 
@@ -882,7 +701,7 @@ class TestConvertOfficeToPdf:
 
         set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
         set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", lambda *a, **k: mock_result)
 
         result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
 
@@ -908,7 +727,7 @@ class TestConvertOfficeToPdf:
         output_dir = tmp_path / "output"
 
         set_import_attribute(monkeypatch, fmu.os.path, "exists", lambda p: True)
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", lambda *a, **k: mock_result)
 
         with pytest.raises(RuntimeError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
@@ -927,7 +746,7 @@ class TestConvertOfficeToPdf:
         def raise_timeout(*a, **k):
             raise subprocess.TimeoutExpired(cmd='libreoffice', timeout=30)
 
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", raise_timeout)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", raise_timeout)
 
         with pytest.raises(TimeoutError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir), timeout=30)
@@ -944,7 +763,7 @@ class TestConvertOfficeToPdf:
         def raise_file_not_found(*a, **k):
             raise FileNotFoundError("[Errno 2] No such file or directory: 'libreoffice'")
 
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", raise_file_not_found)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", raise_file_not_found)
 
         with pytest.raises(FileNotFoundError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
@@ -967,7 +786,7 @@ class TestConvertOfficeToPdf:
 
         set_import_attribute(monkeypatch, fmu.os.path, "exists", exists_side_effect)
         set_import_attribute(monkeypatch, fmu.os.path, "basename", lambda p: "document.docx")
-        set_import_attribute(monkeypatch, fmu.subprocess, "run", lambda *a, **k: mock_result)
+        monkeypatch.setattr("infrastructure.file_processing.conversion.run_conversion_process", lambda *a, **k: mock_result)
 
         with pytest.raises(RuntimeError) as exc_info:
             await fmu.convert_office_to_pdf(str(input_path), str(output_dir))

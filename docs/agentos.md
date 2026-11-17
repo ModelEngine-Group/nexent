@@ -138,7 +138,9 @@ FileCleanse 的 submit、inspect、cancel、release 分别位于 `/internal/agen
 
 新镜像部署需要设置 `MANAGEMENT_FILE_CLEANSE_ENABLED=true`。新 `.env.example` 和 Helm `nexent-common.config.fileCleanse.enabled` 均已默认启用，升级已有 `.env` 时需同步该值；通过 `nexent-env` Secret注入同名变量时也需同步。本地backend未配置时仍默认关闭。维护窗口内先确认Management迁移与清洗root就绪，再部署Runtime并恢复流量。
 
-该开关同时启用 Management 的持久 KB 摄取协调任务。发现端口只返回原用户、租户和文件 ID，每轮最多 100 项，保存分页游标直到末页再回绕；业务推进重新读取当前资源授权。未知提交结果只查询原清洗/Runtime job ID，不补投。后台任务退出后 ready 返回 503，live 保持 200，应用不会自动重启任务。公开上传入口、历史维护和正式读写切换仍按 data-process 退役 SPEC 分批完成，不能仅凭打开开关认定退役完成。
+该开关同时启用 Management 的持久 KB 摄取协调任务。发现端口只返回原用户、租户和文件 ID，每轮最多 100 项，保存分页游标直到末页再回绕；业务推进重新读取当前资源授权。未知提交结果只查询原清洗/Runtime job ID，不补投。后台任务退出后 ready 返回 503，live 保持 200，应用不会自动重启任务。
+
+普通文件处理、北向上传和官方二进制资源导入通过 Management 接纳服务进入同一协调器。北向响应由现有 Northbound 服务适配，公开接口保持原格式。部署前执行 SQL 020；其中 local_source_path 仅用于 Management 核对已绑定 KB 的本地源别名，Runtime 接收固定对象引用。未绑定 KB 的本地暂存归属、状态和删除切换、历史维护及完整服务验收仍按退役 SPEC 完成，当前不能据此删除 data-process。
 
 文本清洗执行链已经迁移。通用SDK加载器原有MinIO调用、历史附件及共享知识库的旧URL权限策略仍需后续整改；当前没有扩大读取范围，不能据此声称StorageInterface全覆盖或data-process完整退役。
 

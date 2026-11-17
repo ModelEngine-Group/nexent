@@ -258,6 +258,21 @@ async def upload_files_impl(
     errors = []
     quota_status = None
     lifecycle_records = []
+    if destination == "local" and index_name:
+        await _validate_knowledge_file_sizes(file)
+        from functools import partial
+
+        from management.services.file.local_knowledge_source import (
+            upload_local_knowledge_files,
+        )
+
+        from infrastructure.agentos_identity import ServicePrincipal
+
+        return await upload_local_knowledge_files(
+            file, actor=ServicePrincipal(user_id, uploader_tenant_id), root=upload_dir,
+            uploader=partial(upload_files_impl, destination="minio", folder=folder, index_name=index_name,
+                             user_id=user_id, uploader_tenant_id=uploader_tenant_id, upload_owner_service=upload_owner_service),
+        )
     if destination == "local":
         if _is_knowledge_base_upload(folder, index_name):
             await _validate_knowledge_file_sizes(file)

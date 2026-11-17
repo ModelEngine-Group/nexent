@@ -226,13 +226,6 @@ class HybridSearchRequest(BaseModel):
 
 
 # Request models
-class ProcessParams(BaseModel):
-    chunking_strategy: Optional[str] = "basic"
-    source_type: str
-    index_name: str
-    authorization: Optional[str] = None
-
-
 # used in Knowledge Summary request
 class ChangeSummaryRequest(BaseModel):
     summary_result: str

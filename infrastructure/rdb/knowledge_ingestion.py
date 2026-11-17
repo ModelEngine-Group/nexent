@@ -22,8 +22,10 @@ def ingestion_catalog():
         "knowledge_id",
         "index_name",
         "original_filename",
+        "file_size",
         "bucket_name",
         "object_name",
+        "local_source_path",
         "status",
         "stage",
         "source_generation",
@@ -48,7 +50,7 @@ def ingestion_catalog():
         "update_time",
         "delete_flag",
     )
-    integers = {"knowledge_id", "source_generation", "processing_attempt", "version"}
+    integers = {"knowledge_id", "source_generation", "processing_attempt", "version", "file_size"}
     fields = tuple(
         FieldDefinition(
             name,

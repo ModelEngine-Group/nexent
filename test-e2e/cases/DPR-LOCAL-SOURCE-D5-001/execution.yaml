@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DPR-LOCAL-SOURCE-D5-001
+timeout_seconds: 100
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_local_source_alias_deployment
+acceptance_bindings:
+  AC-01: [test_local_source_alias_deployment]
+  AC-02: [test_local_source_alias_deployment]
+  AC-03: [test_local_source_alias_deployment]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

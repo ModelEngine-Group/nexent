@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-PUBLIC-INGESTION-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Admit public knowledge uploads through Management while preserving northbound contracts
+  description: Replace all three old DP submit callers with scoped persistent ingestion; adapt northbound results inside its service without changing public forms, paths or envelopes. Pin local KB uploads as objects and register exclusive local mirrors through scoped records. Full parser/vector public flow and final deployment remain pending.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-INGESTION-JOURNAL-D3-001, DPR-KB-WORKER-D3-001]
+    added: [DPR-LOCAL-SOURCE-D5-001]
+    modified: [DPR-KB-HTTP-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Resolve exact authorized source IDs and object or registered local aliases without guessing filenames or replacing mismatched IDs.
+    - Preserve public single and partial-batch task envelopes, actor scope and uncertain outcomes without old chain writes or retries.
+    - Adapt northbound results in its service and retain public response fields and errors without exposing internal resource snapshots.
+    - Publish hash-verified exclusive local mirrors and CAS aliases while retaining pinned object identity, quota ownership and unknown receipts.
+    - Remove unused old DP submit functions and ProcessParams; migrate meaningful old assertions to current boundaries without retaining obsolete HTTP mocks.
+    reason: New UT cover source selection, batch admission, local registration/filesystem behavior and northbound projection. Existing API, upload and official-import suites retain public and quota assertions. Obsolete traditional DP HTTP adapter tests are replaced by actual current entry/identity/deadline assertions; no formal D1 is removed. D3 adds real ordinary/northbound public requests to existing signed PG coordination proof; D5 adds actual shipped nullable migration and default scoped local registration beyond SQLite UT.
+    test_selectors:
+    - test/backend/services/test_knowledge_ingestion_selection.py
+    - test/backend/services/test_knowledge_ingestion_submission.py
+    - test/backend/services/test_local_knowledge_registration.py
+    - test/backend/services/test_local_knowledge_source.py
+    - test/backend/services/test_northbound_knowledge_ingestion.py
+    - test/backend/app/test_file_management_app.py
+    - test/backend/app/test_northbound_base_app.py
+    - test/backend/services/test_file_management_service.py
+    - test/backend/services/test_official_agent_service.py

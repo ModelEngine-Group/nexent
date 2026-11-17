@@ -1390,7 +1390,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
         return_value=([], ["minio/a.docx"], ["a.docx"])
     )
     fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
-    fake_utils.trigger_data_process = AsyncMock()
+    fake_utils.submit_knowledge_files = AsyncMock()
 
     with patch.dict(
         sys.modules,
@@ -1421,13 +1421,12 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
     assert upload_kwargs["user_id"] == "u"
     assert upload_kwargs["uploader_tenant_id"] == "tenant-1"
 
-    fake_utils.trigger_data_process.assert_awaited_once()
-    files, process_params = fake_utils.trigger_data_process.await_args.args
-    assert files == [{"path_or_url": "minio/a.docx", "filename": "a.docx"}]
-    assert process_params.index_name == "42-abc"
-    assert process_params.source_type == "minio"
-    assert process_params.model_id == 5
-    assert process_params.authorization == "auth"
+    fake_utils.submit_knowledge_files.assert_awaited_once()
+    files, index_name, actor = fake_utils.submit_knowledge_files.await_args.args
+    assert files == [{"path_or_url": "minio/a.docx", "filename": "a.docx", "file_id": None}]
+    assert index_name == "42-abc"
+    assert actor.user_id == "u" and actor.tenant_id == "tenant-1"
+    assert "authorization" not in fake_utils.submit_knowledge_files.await_args.kwargs
 
 
 async def test_install_bundle_records_steps():
@@ -1702,7 +1701,7 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
     fake_file_svc = types.ModuleType("management.services.file.service")
     fake_file_svc.upload_files_impl = AsyncMock(return_value=([], [], []))
     fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
-    fake_utils.trigger_data_process = AsyncMock()
+    fake_utils.submit_knowledge_files = AsyncMock()
     doc = _KnowledgeBaseSeedDoc(file_name="guide.pdf", file_path=str(binary_file))
 
     with patch.dict(
@@ -1717,12 +1716,10 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
             [doc],
             tenant_id="tenant-1",
             user_id="u",
-            embedding_model_id=5,
-            authorization="auth",
         )
 
     fake_file_svc.upload_files_impl.assert_awaited_once()
-    fake_utils.trigger_data_process.assert_not_awaited()
+    fake_utils.submit_knowledge_files.assert_not_awaited()
 
 
 def test_update_existing_agent_kb_refs_updates_matching_tool_instance():

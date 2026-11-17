@@ -17,7 +17,7 @@ from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
-from contracts.knowledge import VectorDatabaseType, HybridSearchRequest, ProcessParams
+from contracts.knowledge import VectorDatabaseType, HybridSearchRequest
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
@@ -41,7 +41,7 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from management.services.permission.identity.session import generate_session_jwt, get_user_language
+from management.services.permission.identity.session import get_user_language
 from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
 from pydantic import ValidationError as PydanticValidationError
 from contracts.a2a import JSONRPCRequest
@@ -52,7 +52,7 @@ from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
-from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
+from contracts.knowledge import HybridSearchRequest, VectorDatabaseType
 from contracts.tool import ToolParamsRequest
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
@@ -70,7 +70,6 @@ from management.services.file.service import (
     get_file_url_impl,
     upload_files_impl,
 )
-from management.services.knowledge_base.ingestion import trigger_data_process
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
@@ -97,6 +96,7 @@ from management.services.northbound import (
     stop_chat,
     update_conversation_title,
     upload_files_for_northbound,
+    process_uploaded_knowledge_for_northbound,
 )
 
 logger = logging.getLogger(__name__)
@@ -1076,7 +1076,7 @@ async def upload_files(
                 detail="No files in the request",
             )
 
-        errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
+        upload_result = await upload_files_impl(
             destination,
             file,
             None,
@@ -1085,20 +1085,12 @@ async def upload_files(
             uploader_tenant_id=ctx.tenant_id,
             upload_owner_service=CONFIG_SERVICE_NAME,
         )
+        errors, uploaded_file_paths, uploaded_filenames = upload_result
 
         if uploaded_file_paths:
-            files = [
-                {"path_or_url": path, "filename": name} for path, name in zip(uploaded_file_paths, uploaded_filenames)
-            ]
-            # Internal data-process / ES indexing expects JWT, not northbound API key
-            internal_jwt = generate_session_jwt(ctx.user_id)
-            process_params = ProcessParams(
-                chunking_strategy="basic",
-                source_type="minio",
-                index_name=index_name,
-                authorization=internal_jwt,
+            process_result = await process_uploaded_knowledge_for_northbound(
+                ctx=ctx, index_name=index_name, upload_result=upload_result,
             )
-            process_result = await trigger_data_process(files, process_params, tenant_id=ctx.tenant_id)
 
             if process_result is None or (
                 isinstance(process_result, dict) and process_result.get("status") == "error"
