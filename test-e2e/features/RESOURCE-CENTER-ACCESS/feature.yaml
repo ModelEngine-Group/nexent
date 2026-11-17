@@ -11,7 +11,7 @@ feature:
   - rule_id: RESOURCE-CENTER-ACCESS-RULE-001
     description: AC-001：新/resource-space URL注册到对应角色，默认角色范围与原三个仓库一致；前端复用现有身份/角色/URL权限判断，有入口即显示四Tab，无入口拒绝；不新增capabilities接口或页面能力字段。
   - rule_id: RESOURCE-CENTER-ACCESS-RULE-002
-    description: AC-002：新增/resource-space与旧仓库页面及别名并行；保留旧页面、旧链接和旧URL角色登记，新页面内的导航、通知和返回链接生成新URL并保留语言、Tab/视图及资源身份；旧页面继续可访问；支持外部直接打开四个Tab的新深链，URL显式tab优先于本地状态；首次加载、刷新、前进后退及登录后返回保持目标；所有原入口按业务目的映射具体Tab/view及正确类型ID，不统一丢回默认Tab。
+    description: AC-002：资源仓库/resource-space为唯一仓库菜单入口；旧仓库首页及别名跳转到对应Tab，旧审核页跳转到统一审核中心；保留旧URL角色登记和共享组件，新页面内的导航、通知和返回链接生成新URL并保留语言、Tab/视图及资源身份；旧MCP/Skill的mine链接保留视图、筛选和详情参数；旧Agent的mine链接仅保留个人管理组件以兼容发布后使用指引，不展示旧仓库Tab外壳；支持外部直接打开四个Tab的新深链，URL显式tab优先于本地状态；首次加载、刷新、前进后退及登录后返回保持目标；所有原入口按业务目的映射具体Tab/view及正确类型ID，不统一丢回默认Tab。
   required_test_stages:
   - D2
   - D4

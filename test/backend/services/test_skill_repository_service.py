@@ -220,7 +220,9 @@ from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, 
 
 
 @pytest.fixture(autouse=True)
-def reset_notification_mocks():
+def reset_notification_mocks(monkeypatch):
+    monkeypatch.setattr(srs, "enrich_cas_usernames", MagicMock())
+    _user_tenant_db_mock.get_user_email_map.return_value = {}
     srs.create_repository_review_notification.reset_mock()
     srs.create_repository_pending_review_notification.reset_mock()
     srs.deactivate_notifications.reset_mock()

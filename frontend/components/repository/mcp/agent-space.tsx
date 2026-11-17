@@ -2,6 +2,7 @@
 "use client";
 import { hasRole } from "@/lib/roles";
 
+import { isCommunityMcpInstalled } from "@/lib/mcpRepositoryInstallation";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -71,17 +72,8 @@ export function McpSpace({
       (item) => matchesNameOrTag(item, browser.filters.search)
     );
   }, [browser.services, browser.filters.search, deploymentType, presentation]);
-  const isInstalled = (service: CommunityMcpCard) => {
-    return localServices.some((localService) => {
-      if (localService.permission !== "EDIT") return false;
-      if (
-        service.communityId &&
-        localService.communityId === service.communityId
-      )
-        return true;
-      return localService.name === service.name;
-    });
-  };
+  const isInstalled = (service: CommunityMcpCard) =>
+    isCommunityMcpInstalled(service, localServices);
 
   return (
     <div
@@ -246,17 +238,8 @@ export function useMcpSpaceController(sortByPublished = false) {
     onSuccess: () => setShowAddModal(false),
   });
   const isRepositoryInstalled = useCallback(
-    (service: CommunityMcpCard) => {
-      return localList.services.some((localService) => {
-        if (localService.permission !== "EDIT") return false;
-        if (
-          service.communityId &&
-          localService.communityId === service.communityId
-        )
-          return true;
-        return localService.name === service.name;
-      });
-    },
+    (service: CommunityMcpCard) =>
+      isCommunityMcpInstalled(service, localList.services),
     [localList.services]
   );
   const detailMcpIdRef = useRef<number | null>(null);

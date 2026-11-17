@@ -1,17 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import LegacyRepositoryEntry from "@/components/repository/LegacyRepositoryEntry";
 
-/**
- * Legacy Agent Repository route — redirects to Agent Space.
- */
-export default function AgentRepositoryRedirectPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/agent-space");
-  }, [router]);
-
-  return null;
+export default function Page() {
+  return <LegacyRepositoryEntry resourceType="agent" />;
 }

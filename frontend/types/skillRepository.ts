@@ -82,6 +82,8 @@ export interface MySkillRepositoryInfoItem {
 }
 
 export interface MyEditableSkillItem {
+  author?: string | null;
+  author_cas_username?: string | null;
   latest_review?: {
     review_id: string;
     status: "pending_review" | "approved" | "rejected";

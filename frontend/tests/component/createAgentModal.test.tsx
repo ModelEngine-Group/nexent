@@ -1,4 +1,6 @@
-import { App } from "antd";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { App, ConfigProvider } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@/types/agentConfig";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -74,13 +76,15 @@ function mount(open = true) {
   });
   const tree = (isOpen: boolean) => (
     <QueryClientProvider client={client}>
-      <App>
-        <CreateAgentModal
-          open={isOpen}
-          onCancel={vi.fn()}
-          onCreated={onCreated}
-        />
-      </App>
+      <ConfigProvider button={{ autoInsertSpace: false }}>
+        <App>
+          <CreateAgentModal
+            open={isOpen}
+            onCancel={vi.fn()}
+            onCreated={onCreated}
+          />
+        </App>
+      </ConfigProvider>
     </QueryClientProvider>
   );
   const view = render(tree(open));
@@ -134,7 +138,7 @@ describe("CreateAgentModal", () => {
     );
     expect(screen.getByRole("link", { name: /智能体仓库/ })).toHaveAttribute(
       "href",
-      "/zh/agent-space"
+      "/zh/resource-space?tab=agent"
     );
   });
 

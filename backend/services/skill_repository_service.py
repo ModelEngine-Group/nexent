@@ -29,7 +29,7 @@ from contracts.errors.exceptions import (
     SkillException,
 )
 from contracts.roles import has_any_role, roles_from_record
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id
 from management.db.skill.catalog import (
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
@@ -50,6 +50,7 @@ from management.services.notification.service import (
     deactivate_notifications,
 )
 from management.services.permission.identity.display import (
+    enrich_cas_usernames,
     enrich_repository_identities,
     repository_identity_fields,
 )
@@ -941,6 +942,28 @@ def _to_mine_skill_item(
     }
 
 
+def _enrich_mine_skill_authors(items: List[Dict[str, Any]]) -> None:
+    """Resolve display-only creators for the current page without changing IDs."""
+    creator_ids = sorted({str(item["created_by"]) for item in items if item.get("created_by")})
+    if not creator_ids:
+        return
+    try:
+        emails = get_user_email_map(creator_ids)
+    except Exception:
+        logger.warning("Skill author display lookup failed", exc_info=True)
+        emails = {}
+    for item in items:
+        if item.get("new_skill_padding"):
+            continue
+        email = emails.get(str(item.get("created_by") or ""))
+        item["author"] = email.strip() if isinstance(email, str) and email.strip() else None
+    enrich_cas_usernames(
+        items,
+        {"author_cas_username": "created_by"},
+        email_fields={"author_cas_username": "author"},
+    )
+
+
 def list_my_editable_skills_impl(
     tenant_id: str,
     user_id: str,
@@ -1032,6 +1055,7 @@ def list_my_editable_skills_impl(
         )
         for skill in paged_skills
     ]
+    _enrich_mine_skill_authors(items)
 
     return {
         "items": items,

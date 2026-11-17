@@ -199,7 +199,7 @@ export default function CreateAgentModal({
           {t("agentConfig.createModal.template.create")}
         </span>
         <Link
-          href={`/${locale}/agent-space`}
+          href={`/${locale}/resource-space?tab=agent`}
           className="inline-flex items-center gap-1 ![letter-spacing:0px] text-[#2673e5]"
         >
           {t("agentConfig.createModal.template.repository")}

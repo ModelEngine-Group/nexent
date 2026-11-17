@@ -7,6 +7,7 @@ import SkillTypeIcon from "./SkillTypeIcon";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import RepositoryDisplayControls from "@/components/repository/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { App, Button, Dropdown, Input, Popover, Select } from "antd";
@@ -677,7 +678,7 @@ function getMineSkillMenuItems({
   return items;
 }
 
-function MineSkillCard({
+export function MineSkillCard({
   skill,
   selection,
   managing = false,
@@ -698,6 +699,11 @@ function MineSkillCard({
 }) {
   const { t } = useTranslation("common");
   const presentation = useRepositoryPresentation();
+  const displayName = useUserDisplayName();
+  const author = displayName(
+    skill.author_cas_username,
+    skill.author?.trim() || t("skillRepository.detail.unknownAuthor"),
+  );
   const latestRepository = pickReviewDisplayRepositoryInfo(
     (skill.repository_info ?? []).filter((item) => item.status === "shared")
   );
@@ -765,9 +771,9 @@ function MineSkillCard({
           <>
             <span
               className="min-w-0 truncate"
-              title={skill.created_by || undefined}
+              title={author}
             >
-              {t("skillRepository.detail.author")}: {skill.created_by || "—"}
+              {t("skillRepository.detail.author")}: {author}
             </span>
             <span className="shrink-0">
               {t("resourceCenter.skillInstalls", {

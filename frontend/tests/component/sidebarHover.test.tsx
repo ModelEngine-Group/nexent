@@ -6,7 +6,11 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { useGlobalConfigStore } from "@/stores/global";
 
-const state = vi.hoisted(() => ({ speed: true, push: vi.fn() }));
+const state = vi.hoisted(() => ({
+  speed: true,
+  push: vi.fn(),
+  routes: ["/agents", "/models"],
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -24,7 +28,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
-  useAuthorizationContext: () => ({ accessibleRoutes: ["/agents", "/models"] }),
+  useAuthorizationContext: () => ({ accessibleRoutes: state.routes }),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
   useAuthenticationContext: () => ({
@@ -45,6 +49,10 @@ vi.mock("@/hooks/useNotifications", () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+}));
+vi.mock("@/lib/auth", () => ({
+  getEffectiveRoutePath: (path: string) =>
+    path.replace(/^\/(zh|en)(?=\/|$)/, "") || "/",
 }));
 vi.mock("@/lib/authEvents", () => ({ authEvents: { on: () => () => {} } }));
 vi.mock("@/components/auth/avatarDropdown", () => ({
@@ -75,6 +83,7 @@ vi.mock("@/components/navigation/NotificationBell", () => ({
 beforeEach(() => {
   vi.useFakeTimers();
   state.speed = true;
+  state.routes = ["/agents", "/models"];
   useGlobalConfigStore.getState().setConfig({});
 });
 
@@ -270,4 +279,24 @@ test("unmount releases the pinned layout reservation for standalone pages", () =
   expect(onPinnedChange).toHaveBeenLastCalledWith(true);
   unmount();
   expect(onPinnedChange).toHaveBeenLastCalledWith(false);
+});
+
+test("shows only the unified repository even when legacy routes are authorized", () => {
+  state.routes = [
+    "/resource-space",
+    "/agent-space",
+    "/mcp-space",
+    "/skill-space",
+  ];
+  setup();
+  expect(
+    screen.getByRole("button", { name: "sidebar.resourceSpace" })
+  ).toBeInTheDocument();
+  for (const name of [
+    "sidebar.agentSpace",
+    "sidebar.mcpSpace",
+    "sidebar.skillSpace",
+  ]) {
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  }
 });
