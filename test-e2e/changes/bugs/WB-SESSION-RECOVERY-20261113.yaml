@@ -39,6 +39,7 @@ change:
     - frontend/tests/workbench/Nl2AgentRequirementHistory.test.tsx
     - frontend/tests/workbench/CreatorConversationRuntime.test.tsx
     - frontend/tests/workbench/ConversationResume.test.tsx
+    - frontend/tests/workbench/ConversationRunIndicators.test.tsx
   notes: >-
     Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/session-recovery/design.md.
     D2 verifies the actual creator HTTP/lifecycle contract with controlled external boundaries;
@@ -48,3 +49,7 @@ change:
     checkpoints and adapts both initial and resumed subscriptions to the public wire
     protocol. Native completed, failed and stopped outcomes have independent replay UT;
     the existing D2/D4 Cases remain the controlled creator lifecycle and UI proofs.
+    Browser regression also detects a document-capture acknowledgement resetting
+    controlled radio inputs before React processes their change. Acknowledge
+    content interactions during bubbling so the first selection persists; reuse
+    indicator UT and the unchanged D4 first-selection/consecutive-card assertions.

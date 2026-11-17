@@ -84,7 +84,7 @@ journey("WB-EXECUTION-RECOVERY-D4-001", async ({ page, contract }) => {
   const open = async (title: string) => {
     await page.getByRole("button", { name: "工作台", exact: true }).click();
     await page.mouse.move(800, 500);
-    await page.getByRole("button", { name: new RegExp(`^${title} (刚刚|\\d+分钟前)$`) }).click();
+    await page.getByRole("button").filter({ has: page.getByText(title, { exact: true }) }).click();
   };
   await contract.step(contract.expectedIds("steps")[0], async () => {
     await input().fill("UNSENT-EXECUTION-DRAFT");

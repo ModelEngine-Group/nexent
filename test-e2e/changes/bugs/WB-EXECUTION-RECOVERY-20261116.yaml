@@ -35,4 +35,11 @@ change:
     - test/backend/services/test_streaming_channel.py
     - frontend/tests/workbench/ExecutionStreamState.test.ts
     - frontend/tests/workbench/WorkbenchComposerDraft.test.tsx
-  notes: 'Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/execution-recovery/design.md. Preserve prior creator repairs and keep planning-only rollback. D3/D4 own isolated fixture resources and cleanup, with no shared asset families or deployment changes.'
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/execution-recovery/design.md.
+    Preserve prior creator repairs and keep planning-only rollback. D3/D4 own
+    isolated fixture resources and cleanup, with no shared asset families or
+    deployment changes. After the engine integration, reuse the existing pending
+    history UT to keep queued turns reconnectable rather than failed. D4 selects
+    histories by their title independently of the running indicator or timestamp;
+    execution-record, retry and navigation assertions remain unchanged.
