@@ -133,6 +133,8 @@ async function changeSampling(name: string, value: string) {
   fireEvent.blur(field);
 }
 it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by deletion", async () => {
+  // The saved view already includes the Agent sampling default.
+  saved.defaults.temperature = 0.5;
   setup(11);
   expect(
     screen.queryByRole("button", { name: "modelProfile.parameters" })
