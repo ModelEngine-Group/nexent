@@ -31,6 +31,7 @@ and call `forward('DeepSeek site:github.com after:2025')`. The SDK never reads e
 - **ExaSearchTool**: Web search tool based on EXA API
 - **TavilySearchTool**: Web search tool based on Tavily API  
 - **LinkupSearchTool**: Search tool based on Linkup API
+- **OutcrawlSearchTool**: Web search tool based on Outcrawl API
 - **KnowledgeBaseSearchTool**: Local knowledge base search tool
 
 ### Communication Tools

@@ -29,6 +29,7 @@ SDK 示例配置为 `DeepSeekSearchTool(deepseek_api_key=key, only_high_quality=
 - **EXASearchTool**: 基于 EXA API 的网络搜索工具
 - **TavilySearchTool**: 基于 Tavily API 的网络搜索工具  
 - **LinkupSearchTool**: 基于 Linkup API 的网络搜索工具
+- **OutcrawlSearchTool**: 基于 Outcrawl API 的网络搜索工具
 - **KnowledgeBaseSearchTool**: 本地知识库搜索工具
 
 ### 通信工具

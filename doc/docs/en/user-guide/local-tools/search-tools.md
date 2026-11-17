@@ -17,6 +17,7 @@ Search tools cover internet search plus local, AIDP, DataMate, and Dify knowledg
   - `exa_search`: Web and image search via Exa
   - `tavily_search`: Web and image search via Tavily
   - `linkup_search`: Mixed text/image search via Linkup
+  - `outcrawl_search`: Web search via Outcrawl, optionally with page content as markdown
 
 ## 🧰 Example Use Cases
 
@@ -95,6 +96,16 @@ Search tools cover internet search plus local, AIDP, DataMate, and Dify knowledg
   - Tavily: Register at [tavily.com](https://www.tavily.com/) and get a Tavily API Key from the dashboard
   - Linkup: Sign up at [linkup.so](https://www.linkup.so/) and create a Linkup API Key in your account
 - Returns title, URL, summary, and optional image URLs (deduped).
+
+### outcrawl_search
+- **Configuration Parameters**:
+  - `outcrawl_api_key`: Outcrawl API key
+  - `max_results`: Number of results to return (1 to 20), default 5
+  - `scrape_content`: Return each result page as markdown instead of the search snippet, default False
+- **Search Parameters**:
+  - `query`: Required.
+- Getting API Keys: Sign up at [outcrawl.ai](https://outcrawl.ai/) and create an Outcrawl API Key in the dashboard
+- Returns title, URL, and the snippet (or page markdown when `scrape_content` is enabled).
 
 ## 🛠️ How to Use
 

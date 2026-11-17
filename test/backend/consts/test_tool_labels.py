@@ -34,6 +34,7 @@ class TestBuiltinLabelMap:
         assert m["mysql_database"] == ["database"]
         assert m["read_file"] == ["file"]
         assert m["tavily_search"] == ["search"]
+        assert m["outcrawl_search"] == ["search"]
         assert m["send_email"] == ["email"]
         assert m["terminal"] == ["terminal"]
 
