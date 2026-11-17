@@ -376,8 +376,10 @@ def test_dreaming_source_queries_only_eligible_agent_memories(monkeypatch):
 
     assert MemoryDreamingService._eligible_source_records("t", "u", "__user__") == [active[0], active[2]]
     assert source_allowed.call_count == 2
-    assert read.call_args.kwargs["strict"] is True
-    assert read.call_args.kwargs["agent_id"] is None
+    read.assert_called_once_with(
+        "t", user_id="u", agent_id=None, layer="agent", memory_type="short_term",
+        status="active", limit=None,
+    )
 
 
 @pytest.mark.parametrize(
