@@ -24,6 +24,13 @@ change:
     - test/backend/configuration/test_database.py
     - test/backend/configuration/test_runtime.py
     - test/backend/configuration/test_consumers.py
+    - test/backend/app/test_config_app.py
+    - test/backend/database/test_conversation_activity.py
+    - test/backend/database/test_conversation_branch_db.py
+    - test/backend/database/test_conversation_branch_selection.py
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/services/test_native_authentication_flows.py
     - test/backend/ops/test_system_configurations.py
     - test/backend/ops/test_system_configuration_service.py
     - test/backend/ops/test_bootstrap.py

@@ -239,6 +239,12 @@ class TestConfigAppRouterConfiguration:
             "infrastructure.concurrency",
             thread_lifecycle_module,
         )
+        configuration_runtime = types.ModuleType("configuration.runtime")
+        configuration_runtime.start_system_configuration = AsyncMock()
+        configuration_runtime.stop_system_configuration = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules, "configuration.runtime", configuration_runtime
+        )
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
@@ -330,6 +336,8 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
+        assert configuration_runtime.start_system_configuration.await_count == 1
+        configuration_runtime.stop_system_configuration.assert_awaited_once_with()
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""

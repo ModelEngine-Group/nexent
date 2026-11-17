@@ -31,7 +31,13 @@ def session(monkeypatch):
         yield value
 
     monkeypatch.setattr(db, "get_db_session", sessions)
-    monkeypatch.setattr(db, "MAX_CONVERSATION_TURNS", 100)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        db,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(MAX_CONVERSATION_TURNS=100),
+    )
     return value
 
 

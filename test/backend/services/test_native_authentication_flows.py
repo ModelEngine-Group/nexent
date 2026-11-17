@@ -168,6 +168,13 @@ def test_pending_token_verification_requires_signing_key(mocker):
 
 @pytest.mark.parametrize("exists", [False, True])
 def test_membership_upsert_writes_profile_and_refreshes_read_projection(mocker, exists):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    mocker.patch.object(
+        user_tenant,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
     session = MagicMock()
     row = (
         SimpleNamespace(tenant_id="tenant", user_role="USER", user_id="native", updated_by="before")
