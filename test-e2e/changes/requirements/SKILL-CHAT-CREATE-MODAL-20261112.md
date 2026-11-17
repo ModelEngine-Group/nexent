@@ -33,7 +33,9 @@ repository layout, form creation, details and batch management work is preserved
   remain available as the next conversation snapshot.
 - Confirm uses existing create/update/tag services. Existing resource ACLs are
   preserved unless edited. Partial creation retains its ID for retries. Success
-  refreshes Mine; opening the saved artifact filters the current repository.
+  closes the creation drawer and refreshes Mine. A refresh failure is logged
+  without keeping the already saved creation drawer open. Save failures retain
+  the draft for retry; only the successful save callback dismisses the drawer.
 - Closing unsaved work requires confirmation; generation and saving block
   dismissal. Saving also makes the conversation inert to avoid concurrent
   generation. No demonstration conversations or generated artifacts are seeded.
@@ -52,6 +54,10 @@ the combined repository drawer journey still needs real-browser/D4 execution.
 The final two-step editor/drawer rerun passed 19 targeted tests (11 editor,
 8 drawer), including no persistence on Next, draft retention on Previous,
 required-field failures and blocked final saving when group loading fails.
+The save-dismissal regression rerun passed 20 tests (11 editor, 9 drawer),
+including dismissal after successful manual/generated saves, no discard prompt
+after saving, refresh failure isolation, and retained drafts after save errors.
+This component evidence does not constitute a deployed-browser/D4 run.
 No backend/Python behavior or HTTP contract changed. The sibling SPEC repository
 is absent, so SPEC ownership integration remains blocked.
 

@@ -167,11 +167,23 @@ test("refreshes Mine after saving and opens the result without leaving for the w
   const { props } = show();
   fireEvent.click(screen.getByText("Generate skill"));
   fireEvent.click(screen.getByText("Save skill"));
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("skillChat.discardTitle")).not.toBeInTheDocument();
   await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
   fireEvent.click(
     screen.getByRole("button", { name: "skillChat.openRepository" })
   );
   expect(props.onOpenSkill).toHaveBeenCalledWith("generated-skill");
+});
+
+test("closes after saving even when refreshing the repository fails", async () => {
+  const { props } = show();
+  props.onSuccess.mockRejectedValueOnce(new Error("Refresh failed"));
+  fireEvent.click(screen.getByText("Edit draft"));
+  fireEvent.click(screen.getByText("Save skill"));
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
+  expect(screen.queryByText("skillChat.discardTitle")).not.toBeInTheDocument();
 });
 test("closing an empty dialog returns directly to the repository", () => {
   const { props } = show();

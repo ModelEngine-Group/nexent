@@ -253,6 +253,8 @@ export default function SkillChatCreateModal({
             setEdited(payload);
             setSavedName(payload.name);
             setDirty(false);
+            clearCache();
+            onClose();
             void Promise.resolve()
               .then(onSuccess)
               .catch((error) =>
