@@ -15,7 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.models.capacity_budget import (
     CONTEXT_BUDGET_RESOLVER_VERSION,
     CallerMaxTokensOverrideForbidden,

@@ -5,7 +5,7 @@
 import re
 from typing import Annotated, Literal
 
-from nexent.core.agents.agent_model import GuardrailRule
+from nexent.core.agents.contracts.config import GuardrailRule
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 ConfigurationSection = Literal["model", "collaborators", "permissions", "tags", "guardrails", "advanced"]

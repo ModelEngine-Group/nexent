@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-ROW-SELECT-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-ROW-SELECT-20261117
+  title: 轨迹节点整行点击切换详情
+  description: 将节点选择事件统一放在行容器，空白、子项数量与耗时区域同样切换右侧指标。
+  observed_behavior: 仅节点名称和时间条可选中，名称后空白、数量和耗时区域点击无反应。
+  expected_behavior: 点击节点行的任意非折叠区域仅选择一次原始节点并切换详情，箭头只展开收起，键盘选择保持。
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: 现有组件及浏览器脚本仅点击名称，没有验证名称后空白区域的节点选择。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 点击名称后空白、子项数量、耗时、名称、时间条及行间隙各选中原始节点一次。
+    - 展开收起不触发选择；Enter和Space保持节点选择。
+    reason: 前端事件边界由组件回归证明；复用既有D4的节点选择和详情联动证明，无Python产品变更。
+    test_selectors:
+    - frontend/tests/component/trajectoryRowSelection.test.tsx
+    - frontend/tests/component/trajectoryPhases.test.tsx
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: 基线824348864，保留未提交清理交互改动；SPEC interaction-design.md执行详情。runtime责任域、D4独占路由和上下文及其清理保持，无新增共享资源。
+    完整浏览器、真实PG与部署验收沿用用户暂缓安排，局部组件通过不等于完整正式Case验收。

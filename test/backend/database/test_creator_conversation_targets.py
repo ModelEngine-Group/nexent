@@ -76,7 +76,7 @@ def test_creation_copies_target_before_insert_and_returns_it(session):
         workbench_config=None, workbench_config_version=0, create_time=1000, update_time=1000,
     )
     result = db.create_conversation("Create", agent_id=77, target=target)
-    values = session.execute.call_args.args[0].compile(dialect=postgresql.dialect()).params
+    values = session.execute.call_args_list[0].args[0].compile(dialect=postgresql.dialect()).params
     assert values["target"] == target and values["target"] is not target
     target["id"] = 999
     assert values["target"]["id"] == 201

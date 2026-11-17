@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastmcp.server.dependencies import get_http_request
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.agent_names import validate_agent_name
 from pydantic import (
     BaseModel, ConfigDict, Field, StrictBool, StringConstraints,

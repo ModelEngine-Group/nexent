@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-PR-UT-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-PR-UT-20261117
+  title: 修复轨迹PR合并后的单元测试回归
+  description: 修复创建流提前关闭、沙箱依赖方向及环境声明规范，更新重构后的测试路径、协作者和表结构断言。
+  observed_behavior: PR的Python单元测试失败，创建流首次读取前关闭未释放运行资源，通用沙箱依赖具体Core，部分测试沿用旧模块和接口。
+  expected_behavior: 创建流各退出路径释放资源一次；代码执行独立计时且沙箱不依赖具体Core；配置校验及现有API、权限和采集合同保持一致。
+  escaped_stage: unknown
+  coverage_gap:
+    type: no_gap
+    description: 现有UT已复现关闭和依赖问题；沿用现有CAPTURE-D3验证创建编排及代码采集。其余失败来自重构后测试替身和断言未同步。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-CAPTURE-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 创建流首次读取前及读取后关闭、正常结束、异常和取消均恢复上下文并释放资源一次。
+    - 延迟执行器代码耗时排除初始化与迁移，普通执行器返回值、错误、取消及输出采集保持不变。
+    - 环境配置保持原有效值、默认值及错误校验，身份迁移仍在同一事务撤销旧归属摘要。
+    - 重构后的模块归属、摘要表登记、删除顺序和代理转发由原UT继续验证。
+    reason: 复用已失败的断言并修正旧测试边界，保持独立逐文件执行；不增加重复D1或修改正式Case合同。
+    test_selectors:
+    - test/backend/services/test_creator_trajectory_capture.py
+    - test/backend/services/test_native_authentication_flows.py
+    - test/backend/management/test_identity_import_architecture.py
+    - test/backend/management/test_contracts_directory_architecture.py
+    - test/backend/utils/test_trajectory_deployment_options.py
+    - test/backend/utils/test_trajectory_storage_mode.py
+    - test/sdk/core/agents/test_sandbox_directory_boundaries.py
+    - test/sdk/core/agents/observability/test_code_execution_phase.py
+  notes: 基线dev/trace 824348864；来源为PR4348失败检查44041303912，保留前序未提交修改。沿用主design.md创建智能体时的采集身份与task.md本轮验证记录。D3责任域runtime，复用独占HTTP服务、文件目录、模型客户端及ThreadManager，preparation families为空，原teardown负责关闭并核验资源；本次仅定向执行既有创建、代码结果及准备阶段脚本。完整真实PG和部署验收沿用用户暂缓安排。

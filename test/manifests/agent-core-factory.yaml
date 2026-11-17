@@ -1,0 +1,68 @@
+schema_version: '1.0'
+cases:
+- case_id: AGENT-CORE-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:dfbad2a7f97856e2eb424ad5f18e37f9c031ae5748062fb5553fe54e9b207170
+  implementation_hash: sha256:e208ca0bce39e0eb17abde67711a4e95d354fa09e5ae9fe1da38ac6857be6602
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_agent_core_factory.py
+    selector: test_AGENT_CORE_D1_001_factory_dispatch_and_extensions
+    profiles:
+    - mock
+- case_id: AGENT-CORE-D1-002
+  stage: D1
+  status: implemented
+  contract_hash: sha256:6badcde4e7c6f3d9617e9da687e03a0fb44a4047f4bba8c654dc46648c69c33f
+  implementation_hash: sha256:e208ca0bce39e0eb17abde67711a4e95d354fa09e5ae9fe1da38ac6857be6602
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_agent_core_factory.py
+    selector: test_AGENT_CORE_D1_002_native_config_and_fail_closed
+    profiles:
+    - mock
+- case_id: AGENT-CORE-D1-003
+  stage: D1
+  status: implemented
+  contract_hash: sha256:c106f421ee0bba1054e2ff5c3d807ad6710caaba16b2ac2d4c9a709b198af163
+  implementation_hash: sha256:e208ca0bce39e0eb17abde67711a4e95d354fa09e5ae9fe1da38ac6857be6602
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_agent_core_factory.py
+    selector: test_AGENT_CORE_D1_003_stream_and_terminal_errors
+    profiles:
+    - mock
+- case_id: AGENT-CORE-D2-001
+  stage: D2
+  status: implemented
+  contract_hash: sha256:8c5b02fdcf6eb181dc0ae27ad8854c60319cc3a70467a64987067f04a4868933
+  implementation_hash: sha256:52f8c50e3325e360a0f83cea2cf7d8ed2e710456395579c8c9e48eff4ac1e13f
+  implementation:
+  - framework: pytest
+    file: test/automation/d2/test_agent_core_factory_contract.py
+    selector: test_AGENT_CORE_D2_001_config_route_and_version
+    profiles:
+    - mock
+- case_id: AGENT-CORE-D3-001
+  stage: D3
+  status: implemented
+  contract_hash: sha256:3828bf865ffc8f943aa7f5d171c653c47cffbac51daf9364520cf5a894c5f1b2
+  implementation_hash: sha256:ac778b2d01a31c2e4b6e3781f5d6c4153dfa3283b0fb17cdecabb9f639e36f1c
+  implementation:
+  - framework: pytest
+    file: test/automation/d3/test_agent_core_factory_native.py
+    selector: test_AGENT_CORE_D3_001_native_worker
+    profiles:
+    - mock
+- case_id: AGENT-CORE-D5-001
+  stage: D5
+  status: implemented
+  contract_hash: sha256:48c65f8c2decbee4d2965dae575b044dac258970e3b81353fc6ab7cd54a99ec7
+  implementation_hash: sha256:d47350a8eaae3127f7bab09ab38013536580b911a5a656133fa5320924feddcc
+  implementation:
+  - framework: pytest
+    file: test/automation/d5/test_agent_core_factory_reliability.py
+    selector: test_AGENT_CORE_D5_001_cancellation_deadline_and_isolation
+    profiles:
+    - mock

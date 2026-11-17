@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-DAILY-CLEANUP-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-DAILY-CLEANUP-20261116
+  title: 按租户配置每日零点清理开关和1至30天天数
+  description: 定时每天北京时间零点，开关与天数保存至现有租户配置表；主动清理天数同步限制1至30。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 严格布尔开关、1至30整数天数、租户授权、JSON持久化与失败传播。
+    - 北京时间零点、跨日、独立租户、固定截止时间、失败保留、分批与关闭不影响恢复巡检。
+    - 开关与天数保存重开、取消和重试，主动清理1至30范围。
+    reason: 现有UT覆盖启动配置与手动清理，新增动态配置边界；复用D2/D4，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_cleanup_schedule.py
+    - test/backend/services/trajectory/test_cleanup_schedule_repository.py
+    - test/backend/utils/test_trajectory_cleanup_schedule.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - frontend/tests/component/trajectorySchedule.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+  notes: SPEC chat-local-file-trajectory/changes/chat-trajectory-daily-cleanup; runtime
+    responsibility, existing private preparation and cleanup retained. D2/D4/D5 integration
+    acceptance remains deferred.

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """AIDP factory fixture with controlled HTTP transport and resource cleanup."""
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
 from nexent.core.utils.observer import MessageObserver
 from shared.tool_fastpath import FinalEnvelopeModel, OrdinaryExecutor
 
@@ -20,7 +21,7 @@ from shared.tool_fastpath import FinalEnvelopeModel, OrdinaryExecutor
 @pytest.fixture
 def aidp_runtime(monkeypatch):
     """Use a real factory/tool with a controlled HTTP transport and no provider I/O."""
-    import nexent.core.agents.sandbox as sandbox_module
+    import nexent.core.agents.sandbox.execution as sandbox_module
     import nexent.core.ext_components.aidp.aidp_search_tool as aidp_module
 
     requests, events, acquisitions, releases = [], [], [], []

@@ -4,7 +4,7 @@
 
 import threading
 
-from nexent.core.agents.agent_model import AgentRunInfo
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.utils.observer import MessageObserver
 
 

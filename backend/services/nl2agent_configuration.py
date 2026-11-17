@@ -2,7 +2,7 @@
 
 """Read and update the explicitly supported NL2Agent configuration sections."""
 
-from nexent.core.agents.agent_model import AgentVerificationConfig, GuardrailConfig
+from nexent.core.agents.contracts.config import AgentVerificationConfig, GuardrailConfig
 from nexent.core.concurrency import run_blocking
 
 from contracts.agent import AgentInfoRequest

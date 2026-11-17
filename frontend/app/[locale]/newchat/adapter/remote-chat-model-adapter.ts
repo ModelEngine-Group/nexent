@@ -25,6 +25,7 @@ import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDra
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
+import { acknowledgeConversationUser } from "@/lib/conversationRetry";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
@@ -81,6 +82,9 @@ interface SseChunk {
   unit_index?: number;
   // Unique ID shared by a tool call and its side-channel output.
   tool_call_id?: string;
+  provider_call_id?: string | null;
+  is_error?: boolean;
+  execution_status?: "completed" | "failed" | "stopped";
   role?: string;
   tool_name?: string;
   tool_arguments?: string | Record<string, unknown>;
@@ -98,6 +102,7 @@ interface SseChunk {
   attempt_id?: string;
   step_id?: string;
   answer_phase?: "delta" | "complete";
+  answer_preview?: boolean;
   reclassify_step?: boolean;
   phase?: "begin" | "rollback" | "commit";
   attempt?: number;
@@ -484,6 +489,7 @@ interface SubAgentStartPayload {
 }
 
 interface SubAgentEndPayload {
+  status?: "completed" | "failed" | "stopped";
   agent_id?: number | string | null;
   agent_name?: string;
   invocation_id?: string;
@@ -521,6 +527,8 @@ function parseSubAgentEnd(content: string): SubAgentEndPayload {
 export interface StepTokenCount {
   stepNumber: number;
   duration: number;
+  inputKnown?: boolean;
+  outputKnown?: boolean;
   stepInputTokens: number;
   stepOutputTokens: number;
   totalOutputTokens: number;
@@ -553,7 +561,6 @@ export interface VerificationPanelPart {
 }
 
 // Accumulated total duration across all steps
-let accumulatedDuration = 0;
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -574,6 +581,8 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
     return {
       stepNumber: data.step_number ?? 0,
       duration: data.duration ?? 0,
+      inputKnown: typeof data.step_input_tokens === "number",
+      outputKnown: typeof data.step_output_tokens === "number",
       stepInputTokens: data.step_input_tokens ?? 0,
       stepOutputTokens: data.step_output_tokens ?? 0,
       totalOutputTokens: data.total_output_tokens ?? 0,
@@ -732,6 +741,14 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
       });
     }
     if (typeof parsed.type === "string") {
+      // Preview and confirmation share one answer slot, separate from reasoning.
+      if (
+        parsed.type === "model_output_thinking" &&
+        parsed.answer_preview === true &&
+        parsed.answer_phase === "delta"
+      ) {
+        parsed.type = "final_answer";
+      }
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
       }
@@ -863,6 +880,7 @@ export function buildToolCallPart(chunk: SseChunk): any {
     argsText,
     unit_index: chunk.unit_index,
     tool_call_id: chunk.tool_call_id,
+    provider_call_id: chunk.provider_call_id,
   };
 }
 
@@ -1120,6 +1138,14 @@ export function attachExecutionLogsToTool(
   }
 
   targetToolCall.result = (targetToolCall.result ?? "") + chunk.content;
+  if (chunk.is_error) {
+    targetToolCall.isError = true;
+    targetToolCall.status = {
+      type: "incomplete",
+      reason: "error",
+      error: chunk.content,
+    };
+  }
   return true;
 }
 
@@ -1387,10 +1413,15 @@ export function parseVerification(chunk: {
  * collapsible card flips from its running indicator to a finished state
  * without needing a separate per-message registry.
  */
-export function markSubAgentRunFinished(parts: any[], runId: string): void {
+export function markSubAgentRunFinished(
+  parts: any[],
+  runId: string,
+  executionStatus?: "completed" | "failed" | "stopped"
+): void {
   for (const part of parts) {
     if (part && part.metadata && part.metadata.runId === runId) {
       part.metadata.isRunning = false;
+      if (executionStatus) part.metadata.executionStatus = executionStatus;
     }
   }
 }
@@ -1467,7 +1498,6 @@ export function pushStepTokenCount(step: StepTokenCount): void {
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
-  accumulatedDuration = 0;
 }
 
 /**
@@ -1475,10 +1505,11 @@ export function clearStepTokenCounts(): void {
 
 /**
  * Parse and build timing metadata from backend token_count chunk.
- * Also stores step data in the global registry for SingleTurnTokenUsage.
+ * Stores usage in the owning message and preserves the compatibility registry.
  */
 function buildTimingFromTokenCount(
-  content: string
+  content: string,
+  runSteps: StepTokenCount[]
 ): ReturnType<typeof buildTimingResult> | null {
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
@@ -1486,16 +1517,12 @@ function buildTimingFromTokenCount(
     return null;
   }
 
-  // Store step data in global registry so the currently-streaming message's
-  // `SingleTurnTokenUsage` can render it without subscribing to per-message
-  // metadata updates.
+  runSteps.push(parsed);
   pushStepTokenCount(parsed);
-
-  // Accumulate duration across all steps
-  accumulatedDuration += parsed.duration;
-
-  // Use accumulated duration for total stream time
-  const totalDuration = accumulatedDuration;
+  const totalDuration = runSteps.reduce(
+    (total, step) => total + step.duration,
+    0
+  );
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
@@ -1828,12 +1855,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               ? "nl2skill"
               : undefined,
           persist_history: isNl2Agent || isNl2Skill,
-          retry_message_index: isEphemeralRuntime
-            ? custom?.retry_message_index
-            : undefined,
-          retry_user_message_id: isEphemeralRuntime
-            ? custom?.retry_user_message_id
-            : undefined,
+          retry_message_index: custom?.retry_message_index,
+          retry_user_message_id: custom?.retry_user_message_id,
           workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill
             ? (custom?.getDraftSnapshot?.() ?? custom?.draftSnapshot)
@@ -1880,6 +1903,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
         (version) => {
           if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        },
+        (id, index) => {
+          if (
+            !userAborted &&
+            !isResume &&
+            !isEphemeralRuntime &&
+            lastUserIndex >= 0
+          ) {
+            acknowledgeConversationUser(messages[lastUserIndex].id, id, index);
+          }
         }
       );
       if (userAborted) {
@@ -1950,6 +1983,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const runStepTokenCounts: StepTokenCount[] = [];
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
@@ -2350,7 +2384,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     let workflowStates: Nl2AgentStateEvent[] = [];
-    const upsertCreatedAgentPart = (completed: boolean) => {
+    const upsertCreatedAgentPart = () => {
       if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
@@ -2358,12 +2392,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (part) => part.type === "data" && part.name === "nl2agent-created"
       );
       if (existing) {
-        existing.data.completed ||= completed;
+        existing.data.completed = true;
       } else {
         contentParts.push({
           type: "data",
           name: "nl2agent-created",
-          data: { agentId, completed },
+          data: { agentId, completed: true },
         });
       }
     };
@@ -2381,8 +2415,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         if (deliveredNl2AgentStates.has(eventKey)) return;
         deliveredNl2AgentStates.add(eventKey);
       }
-      if (event.event === "agent_generation_completed")
-        upsertCreatedAgentPart(true);
+      if (
+        event.event === "agent_generation_completed" &&
+        event.agent_id === Number(nl2AgentId)
+      )
+        upsertCreatedAgentPart();
       custom?.onNl2AgentState?.(event);
     };
     let verificationPanel: VerificationPanelPart | null = null;
@@ -2465,7 +2502,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let streamFinished = false;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
+      status: userAborted
+        ? { type: "incomplete", reason: "cancelled" }
+        : content.some((part) => part.isError)
+          ? { type: "incomplete", reason: "error" }
+          : streamFinished
+            ? { type: "complete", reason: "stop" }
+            : { type: "running" },
       content: collapseSubAgentParts(
         content.map((part) =>
           part.type === "data" &&
@@ -2475,9 +2520,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      metadata: nl2a || workflowStates.length ? { custom: {
-        ...(nl2a ? { nl2a } : {}), ...(workflowStates.length ? { nl2agentStates: workflowStates } : {}),
-      } } : undefined,
+      metadata: {
+        custom: {
+          ...(nl2a ? { nl2a } : {}),
+          ...(workflowStates.length ? { nl2agentStates: workflowStates } : {}),
+          stepTokenCounts: [...runStepTokenCounts],
+        },
+      },
     });
 
     const streamStartTime = Date.now();
@@ -2580,7 +2629,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
-            storedTiming = buildTimingFromTokenCount(chunk.content);
+            storedTiming = buildTimingFromTokenCount(
+              chunk.content,
+              runStepTokenCounts
+            );
             continue; // Don't yield for internal data chunks
           }
 
@@ -2738,7 +2790,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning(chunk.invocation_id);
             if (!chunk.invocation_id && chunk.answer_phase !== "delta")
               completeVerificationPanel();
-            upsertCreatedAgentPart(false);
             yield buildStreamResult(contentParts);
             continue;
           }
@@ -2825,7 +2876,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 flushOpenReasoning(closing.invocationId);
               }
               activeSubAgents.delete(invocationId!);
-              markSubAgentRunFinished(contentParts, closing.runId);
+              markSubAgentRunFinished(
+                contentParts,
+                closing.runId,
+                payload.status
+              );
             }
             // Pick the next active invocation id so subsequent reasoning /
             // tool parts default to a still-open sibling when present.
@@ -3179,7 +3234,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning(chunk.invocation_id);
               if (!chunk.invocation_id && chunk.answer_phase !== "delta")
                 completeVerificationPanel();
-              upsertCreatedAgentPart(false);
               yield buildStreamResult(contentParts);
             } else if (chunk.type === "warning") {
               flushOpenReasoning();
@@ -3506,6 +3560,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
+      streamFinished = true;
       const finalResult = buildStreamResult(
         collapseSubAgentParts(contentParts)
       );
@@ -3528,6 +3583,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           content: "",
         });
       }
+      // Cleanup must not replace an already reported transport failure.
+      await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   },

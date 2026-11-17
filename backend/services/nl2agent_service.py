@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
@@ -1719,6 +1719,10 @@ async def build_nl2agent_run_info(
         sandbox_config=None,
         redis_client=None,
     )
+    from management.services.agent.core_policy import prepare_creator_core
+
+    prepare_creator_core(run_info, tenant_id=tenant_id, user_id=user_id,
+                         user_context={"tenant_id": tenant_id, "user_id": user_id})
     run_info.context_input = build_authorized_context_input(run_info)
     return run_info
 
@@ -1880,10 +1884,15 @@ async def create_nl2agent_stream(
                     break
                 pending_chunk = None
                 if boundary_delivered:
-                    continue
+                    try:
+                        kind = json.loads(chunk).get("type")
+                    except (AttributeError, TypeError, json.JSONDecodeError):
+                        continue
+                    if kind not in {"tool_result", "run_terminal", "done", "error"}:
+                        continue
                 yield f"data: {chunk}\n\n"
                 try:
-                    boundary_delivered = (
+                    boundary_delivered = boundary_delivered or (
                         json.loads(chunk).get("type") == ProcessType.NL2A.value
                     )
                 except (AttributeError, TypeError, json.JSONDecodeError):
