@@ -212,3 +212,42 @@ def test_builtin_identity_lookup_rejects_unbounded_results(catalog, mocker):
     mocker.patch("sqlalchemy.orm.Query.all", return_value=[("t", 7)] * 10001)
     with pytest.raises(QueryError, match="agent_budget_exceeded"):
         service.builtin_agent_ids(["t"], {"7"})
+
+
+def test_su_tenant_scope_filters_empty_ids_before_distinct_and_budget(catalog):
+    from ops.services.trajectory.access import Actor
+
+    service, statements = catalog
+    assert service.tenants(Actor("su", "", "SU")) == []
+    sql = statements[-1]
+    assert "user_tenant_t.delete_flag = 'N'" in sql
+    assert "user_tenant_t.tenant_id IS NOT NULL" in sql
+    assert "trim(nexent.user_tenant_t.tenant_id) != ''" in sql
+    assert sql.index("trim(") < sql.index("ORDER BY") < sql.index("LIMIT 1001")
+    assert "SELECT DISTINCT" in sql
+
+
+def test_su_tenant_scope_preserves_ids_and_budget(catalog, mocker):
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.primitives import QueryError
+
+    service, _ = catalog
+    rows = [(f"tenant-{index}",) for index in range(1000)]
+    mocker.patch("sqlalchemy.orm.Query.all", return_value=rows)
+    actor = Actor("su", "", "SU")
+    assert service.tenants(actor) == [row[0] for row in rows]
+    rows.append(("over-budget",))
+    with pytest.raises(QueryError, match="tenant_scope_budget_exceeded") as error:
+        service.tenants(actor)
+    assert error.value.status == 503 and error.value.retry_after == 2
+
+
+def test_su_tenant_scope_database_error_remains_visible(catalog, mocker):
+    from ops.services.trajectory.access import Actor
+
+    service, _ = catalog
+    mocker.patch(
+        "sqlalchemy.orm.Query.all", side_effect=RuntimeError("database unavailable")
+    )
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.tenants(Actor("su", "", "SU"))

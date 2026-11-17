@@ -14,7 +14,8 @@ notes: 'The fixed journey uses the product frontend from the configured base URL
   unregisters routes and clears cookies; Playwright releases the context even on failure.
   It provisions no shared tenant, Agent, model, file or backend resource. Version
   assertions cover the historical root, child, draft and unknown nodes, plus hiding
-  Agent versions on model/tool selection. This binding records the existing partial
+  Agent versions on model/tool selection. Code-tree fixtures use the simplified Ops DTO; the journey checks
+  code groups, Python-call timing, named tools and navigation to the retained parent. This binding records the existing partial
   journey, not complete acceptance: delayed-response, complete availability, SU/locale/keyboard
   and resource-volume variants remain pending. The Case stays blocked and formal execution
   is deferred by the user. Preparation, execution and cleanup receipts have not been

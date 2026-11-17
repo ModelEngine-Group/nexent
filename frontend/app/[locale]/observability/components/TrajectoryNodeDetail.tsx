@@ -70,7 +70,7 @@ export function TrajectoryNodeDetail({
     <div className="trajectory-node-detail" ref={container}>
       <header className="trajectory-node-heading">
         <div className="trajectory-node-title">
-          <NodeIcon kind={node.kind} large />
+          <NodeIcon kind={node.kind} name={node.name} large />
           <div className="min-w-0 flex-1">
             <div className="trajectory-node-title-row">
               <h2>{trajectoryNodeName(node, t)}</h2>

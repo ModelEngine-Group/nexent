@@ -30,7 +30,11 @@ class TrajectoryCatalog:
         with _session() as session:
             rows = (
                 session.query(UserTenant.tenant_id)
-                .filter(UserTenant.delete_flag == "N")
+                .filter(
+                    UserTenant.delete_flag == "N",
+                    UserTenant.tenant_id.isnot(None),
+                    func.trim(UserTenant.tenant_id) != "",
+                )
                 .distinct()
                 .order_by(UserTenant.tenant_id)
                 .limit(1001)

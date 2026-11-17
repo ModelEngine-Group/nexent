@@ -81,8 +81,10 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       )
       .toBeNull();
     expect(
-      state.records.filter((url) => !url.searchParams.has("facet"))
-        .at(-1)?.searchParams.get("page"),
+      state.records
+        .filter((url) => !url.searchParams.has("facet"))
+        .at(-1)
+        ?.searchParams.get("page"),
     ).toBe("1");
   });
   await contract.step(steps[1], async () => {
@@ -137,20 +139,60 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await page.getByRole("combobox", { name: "节点类型" }).click();
     await page.getByRole("option", { name: "阶段", exact: true }).click();
     await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
-    await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(0);
+    await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(
+      0,
+    );
     await page.getByRole("treeitem", { name: /记忆预检索/ }).click();
     const phaseDetail = page.locator(".trajectory-node-detail");
-    await expect(phaseDetail.getByRole("heading", { name: "记忆预检索" })).toBeVisible();
-    await expect(phaseDetail.locator(".trajectory-node-times")).toContainText("结束时间");
-    await expect(phaseDetail.locator(".trajectory-node-metrics")).toContainText("耗时");
-    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("Token");
-    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("吞吐量");
-    await expect(phaseDetail.locator(".trajectory-node-metrics")).not.toContainText("TTFT");
+    await expect(
+      phaseDetail.getByRole("heading", { name: "记忆预检索" }),
+    ).toBeVisible();
+    await expect(phaseDetail.locator(".trajectory-node-times")).toContainText(
+      "结束时间",
+    );
+    await expect(phaseDetail.locator(".trajectory-node-metrics")).toContainText(
+      "耗时",
+    );
+    await expect(
+      phaseDetail.locator(".trajectory-node-metrics"),
+    ).not.toContainText("Token");
+    await expect(
+      phaseDetail.locator(".trajectory-node-metrics"),
+    ).not.toContainText("吞吐量");
+    await expect(
+      phaseDetail.locator(".trajectory-node-metrics"),
+    ).not.toContainText("TTFT");
     await expect(phaseDetail).not.toContainText("智能体版本");
     await page.getByRole("treeitem", { name: /沙箱初始化/ }).click();
-    await expect(phaseDetail.getByRole("heading", { name: "沙箱初始化" })).toBeVisible();
+    await expect(
+      phaseDetail.getByRole("heading", { name: "沙箱初始化" }),
+    ).toBeVisible();
     await page.getByRole("combobox", { name: "节点类型" }).click();
     await page.getByRole("option", { name: "全部类型", exact: true }).click();
+    await page.getByRole("treeitem", { name: "代码执行", exact: true }).click();
+    await expect(
+      phaseDetail.getByRole("heading", { name: "代码执行", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("treeitem", { name: "Python 调用", exact: true })
+      .click();
+    await expect(
+      phaseDetail.getByRole("heading", { name: "Python 调用", exact: true }),
+    ).toBeVisible();
+    await expect(phaseDetail).toContainText("125 ms");
+    await phaseDetail
+      .getByRole("button", { name: "父节点", exact: true })
+      .click();
+    await expect(
+      phaseDetail.getByRole("heading", { name: "代码执行", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("treeitem", { name: "read_skill_md", exact: true })
+      .click();
+    await expect(
+      phaseDetail.getByRole("heading", { name: "read_skill_md", exact: true }),
+    ).toBeVisible();
+    await expect(phaseDetail).toContainText("17.09 ms");
     await page.getByRole("treeitem", { name: /Friday/ }).click();
     const search = page.getByRole("textbox", {
       name: "搜索名称、已加载输入 / 输出",

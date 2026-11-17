@@ -1263,3 +1263,243 @@ def test_trj_query_phase_nodes_retain_hierarchy_time_and_bodies_without_counting
         assert phase["output"]["text"] == '{"ready":true}'
     assert root["model_call_count"] == 2 and root["tool_call_count"] == 1
     assert root["usage"]["total"] == 50
+
+
+@pytest.mark.parametrize("pg", [False, True])
+@pytest.mark.parametrize("invalid_only", [False, True])
+def test_trj_query_tenant_facets_exclude_empty_members(
+    harness, monkeypatch, pg, invalid_only
+):
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+
+    from ops.db.trajectory import catalog as database
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        execution_options={
+            "schema_translate_map": {database.UserTenant.__table__.schema: None}
+        },
+    )
+    try:
+        # Execute the actual catalog ORM against owned membership rows, without a live PG dependency.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE user_tenant_t (tenant_id VARCHAR(100), delete_flag VARCHAR(1))"
+                )
+            )
+            rows = [(None, "N"), ("", "N"), ("   ", "N")] * 350 + [("deleted", "Y")]
+            if not invalid_only:
+                rows += [("t1", "N"), ("t1", "N"), ("t2", "N")]
+            connection.execute(
+                text(
+                    "INSERT INTO user_tenant_t (tenant_id,delete_flag) VALUES (:tenant,:deleted)"
+                ),
+                [{"tenant": tenant, "deleted": deleted} for tenant, deleted in rows],
+            )
+
+        @contextmanager
+        def scoped():
+            with Session(engine) as session:
+                yield session
+
+        monkeypatch.setattr(database, "_session", scoped)
+        monkeypatch.setattr(
+            harness.catalog, "tenants", database.TrajectoryCatalog().tenants
+        )
+        monkeypatch.setattr(
+            harness.catalog, "names", lambda tenants: {"t1": "Tenant t1"}
+        )
+        if pg:
+            harness.service.execution_catalog = Mock()
+        first = data(
+            get(harness, "/trajectory/records", actor="su", facet="tenants", limit=1)
+        )
+        if invalid_only:
+            assert first == {"items": [], "next_cursor": None}
+            return
+        assert [item["id"] for item in first["items"]] == ["t1"]
+        assert first["items"][0]["name"] == "Tenant t1"
+        assert first["next_cursor"]
+        second = data(
+            get(
+                harness,
+                "/trajectory/records",
+                actor="su",
+                facet="tenants",
+                limit=1,
+                cursor=first["next_cursor"],
+            )
+        )
+        assert [item["id"] for item in second["items"]] == ["t2"]
+        assert second["next_cursor"] is None
+        assert all(
+            item["tenant_id"] == item["id"] for item in first["items"] + second["items"]
+        )
+        matched = data(
+            get(
+                harness,
+                "/trajectory/records",
+                actor="su",
+                facet="tenants",
+                search="Tenant t1",
+            )
+        )
+        assert [item["id"] for item in matched["items"]] == ["t1"]
+        scoped_options = data(get(harness, "/trajectory/records", facet="tenants"))
+        assert [item["id"] for item in scoped_options["items"]] == ["t1"]
+    finally:
+        connection_record = engine.pool.connection
+        engine.dispose()
+        assert connection_record.dbapi_connection is None
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+@pytest.mark.parametrize("generated", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
+    harness, sandbox, generated, failed
+):
+    from uuid import uuid4
+
+    identity = harness.run.identity
+    run = str(uuid4())
+    ids = {
+        name: str(uuid4())
+        for name in ("root", "python", "sandbox", "code", "read", "model")
+    }
+    entries = [
+        ("root", None, "AGENT", "Root"),
+        ("python", "root", "TOOL", "python_interpreter"),
+        ("code", "python", "CHAIN", "code.execute"),
+        ("model", "root", "LLM", "model"),
+    ]
+    if sandbox:
+        entries.append(("sandbox", "python", "CHAIN", "agent.sandbox.initialize"))
+    if not generated:
+        entries.append(("read", "code", "TOOL", "read_skill_md"))
+    start = harness.now[0] - timedelta(seconds=2)
+    nanos = int(start.timestamp() * 1e9)
+    spans = []
+    for index, (key, parent, kind, name) in enumerate(entries, start=1):
+        attrs = {
+            "tenant.id": identity.tenant_id,
+            "nexent.owner_user_id": identity.owner_user_id,
+            "conversation.id": "123",
+            "session.id": "123",
+            "nexent.trace_id": "123",
+            "nexent.trajectory_id": run,
+            "nexent.record_id": ids[key],
+            "openinference.span.kind": kind,
+            "input.value": f"{key} input",
+            "output.value": f"{key} output",
+        }
+        if parent:
+            attrs["nexent.parent_record_id"] = ids[parent]
+        if kind == "TOOL":
+            attrs["tool.name"] = name
+        if kind == "CHAIN":
+            attrs["nexent.node.kind"] = "phase"
+        if kind == "LLM":
+            attrs.update(
+                {
+                    "llm.model_name": "model",
+                    "llm.token_count.prompt": 2,
+                    "llm.token_count.completion": 3,
+                }
+            )
+        if key == "code":
+            attrs["nexent.duration_ms"] = 125
+            if failed:
+                attrs["nexent.business_status"] = "failed"
+        spans.append(
+            {
+                "traceId": "b" * 32,
+                "spanId": f"{index:016x}",
+                "name": name,
+                "startTimeUnixNano": str(nanos),
+                "endTimeUnixNano": str(nanos + 1000000000),
+                "status": {"code": 2 if key == "code" and failed else 1},
+                "attributes": [
+                    {
+                        "key": k,
+                        "value": {"intValue": str(v)}
+                        if type(v) is int
+                        else {"stringValue": v},
+                    }
+                    for k, v in attrs.items()
+                ],
+            }
+        )
+    with harness.store.start(
+        identity, run, str(uuid4()), core_type="smolagents", started_at=start
+    ) as writer:
+        writer.append(
+            [{"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}],
+            batch_id=str(uuid4()),
+            expected_offset=0,
+        )
+        writer.finish(
+            "failed" if failed else "completed",
+            finished_at=start + timedelta(seconds=1),
+        )
+    indexed_nodes, cursor = {}, None
+    while True:
+        result = data(
+            get(
+                harness,
+                "/trajectory/conversations/123/snapshot",
+                trajectory_id=run,
+                limit=1,
+                **({"cursor": cursor} if cursor else {}),
+            )
+        )
+        context = {n["id"] for n in result["context_nodes"] + result["nodes"]}
+        for node in result["nodes"]:
+            assert node["id"] not in indexed_nodes
+            assert node["parent_id"] is None or node["parent_id"] in context
+            indexed_nodes[node["id"]] = node
+        cursor = result["next_cursor"]
+        if not cursor:
+            break
+    root = indexed_nodes[ids["root"]]
+    assert root["usage"]["total"] == 5 and root["model_call_count"] == 1
+    assert root["tool_call_count"] == (1 if generated else 2)
+    assert (ids["python"] in indexed_nodes) == (sandbox or failed)
+    assert (ids["code"] in indexed_nodes) == (generated or failed)
+    selected = indexed_nodes[ids["code" if generated or failed else "read"]]
+    assert selected["parent_id"] == ids["python" if sandbox or failed else "root"]
+    assert selected["duration_ms"] == (125 if generated or failed else 1000)
+    assert selected["status"] == ("failed" if failed else "completed")
+    if failed and not generated:
+        assert indexed_nodes[ids["read"]]["parent_id"] == ids["code"]
+    for slot in ("input", "output"):
+        text = data(
+            get(
+                harness,
+                "/trajectory/conversations/123/contents/"
+                + selected[slot]["content_id"],
+            )
+        )["text"]
+        assert (
+            text
+            == selected[slot]["text"]
+            == ("code" if generated or failed else "read") + " " + slot
+        )
+    expected_span = next(
+        s
+        for s in spans
+        if any(
+            a["key"] == "nexent.record_id"
+            and a["value"].get("stringValue") == selected["id"]
+            for a in s["attributes"]
+        )
+    )
+    assert selected["source"]["span_id"] == expected_span["spanId"]
+    assert selected["source"]["trace_id"] == "b" * 32

@@ -432,7 +432,10 @@ export function TrajectoryTimeline({
                     .join(" · ")}
                   onClick={() => onSelect(sourceById.get(node.id) ?? node)}
                 >
-                  <NodeIcon kind={node.kind} />
+                  <NodeIcon
+                    kind={node.kind}
+                    name={sourceById.get(node.id)?.name ?? node.name}
+                  />
                   <span className="truncate">{node.name}</span>
                   {node.kind === "agent" && (
                     <span className="trajectory-tree-version">

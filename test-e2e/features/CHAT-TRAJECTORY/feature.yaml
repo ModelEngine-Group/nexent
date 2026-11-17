@@ -17,7 +17,7 @@ feature:
       智能体input.value只记录本次用户query，子智能体记录本次任务；配置与上下文快照独立保存，模型请求正文保持完整，预览与分块正文一致。
       模型展示输入采用实际HTTP请求JSON，输出采用服务端响应正文；流式按原字段合并，内部DTO/采集状态不混入，指标独立展示，预览与完整正文来源一致。
       记忆准备按每个智能体合并为一个phase节点，正文保留内部步骤与错误，名称区分归属，总耗时按实际起止范围；沙箱初始化合并展示，python_interpreter下代码执行单独计时且排除延迟初始化，准备事实归入同次执行，阶段不计为模型/工具调用。
-      智能体及记忆归属优先采用采集时展示名称，缺失沿用内部名；Python解释器由前端统一本地化，搜索与详情一致。
+      智能体及记忆归属优先采用采集时展示名称，缺失沿用内部名；Python包装分组显示代码执行，生成代码显示Python调用，具体工具直接显示实际名称；成功的重复包装层在Ops完整树投影中归并，原ID、正文、耗时和原始汇总指标保持，异常包装保留，搜索、详情和父导航一致。
   - rule_id: TRJ-RULE-002
     description: PG新增执行摘要及统计快照两张表，复用现有授权目录，列表和候选只读PG；节点详情按需读取文件。本地按tenant/user/agent/conversation组织；meta保存固定归属/执行清单，每执行一份OTLP，全部正文内嵌属性/Events并按字段分块读取。256KiB为刷盘阈值，单行可更大，增量编码/解码须实际验证。
   - rule_id: TRJ-RULE-003
@@ -49,6 +49,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-TRAJECTORY-CODE-DISPLAY-20261117
     - CHAT-TRAJECTORY-BUILTIN-VERSION-20261116
     - CHAT-LOCAL-TRAJECTORY-20261103
     - CHAT-TRAJECTORY-VERSION-20261111

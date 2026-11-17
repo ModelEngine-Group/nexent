@@ -10,6 +10,8 @@ preparation:
   special_assets: false
   d4_groups: []
 notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and product OTLP file storage/reader.
+  The tenant-facet variants execute actual catalog ORM on owned in-memory SQLite membership rows, dispose the engine,
+  and assert the connection is released; PostgreSQL syntax is covered separately by traditional UT compilation.
   Only PG authority/catalog and existing unrelated directory services are controlled; no live PG, provider or deployed
   multiworker proof is claimed. Each fixture owns its temporary root and TestClient, shuts down the managed workers
   in finally and asserts zero active workers. No shared preparation family, deployment, browser or business asset
@@ -31,6 +33,7 @@ acceptance_bindings:
   - test_trj_query_conversation_and_message_snapshot_bounds
   - test_trj_query_unarchived_partial_missing_and_snapshot_cleanup
   AC-03:
+  - test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry
   - test_trj_query_large_unicode_content_roundtrip_and_reference_scope
   - test_trj_query_incremental_parser_memory_and_source_boundaries
   - test_trj_query_fragment_final_precedence_and_unknown_metrics
@@ -51,6 +54,7 @@ acceptance_bindings:
   - test_trj_query_existing_directory_admin_branch_and_user_reuse
   - test_trj_query_facets_and_only_declared_trajectory_routes
   AC-07:
+  - test_trj_query_tenant_facets_exclude_empty_members
   - test_trj_query_whole_result_metrics_filters_and_stable_membership
   - test_trj_query_facets_and_only_declared_trajectory_routes
   - test_trj_query_complete_subtree_and_static_node_paging

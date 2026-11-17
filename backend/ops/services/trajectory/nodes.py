@@ -8,11 +8,10 @@ from datetime import UTC, datetime
 
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
 from infrastructure.observability.trajectory_reader import Text
-
 from nexent.monitor.agent_version import valid_agent_version
 
+from .code_nodes import simplify_code_nodes
 from .primitives import finite_number
-
 
 BODY_FIELDS = {
     "input": "input.value",
@@ -444,6 +443,7 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
     for node in nodes.values():
         for field in ("_models", "_tools", "_totals", "_known"):
             node.pop(field)
+    nodes = simplify_code_nodes(nodes, check=check)
     root_id = roots[0] if len(roots) == 1 else None
     if root_id:
         nodes[root_id]["display_trace_id"] = conversation_id

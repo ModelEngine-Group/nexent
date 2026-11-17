@@ -90,7 +90,16 @@ export async function installTrajectoryFixture(
     makeNode("capacity", "root", "agent", "容量规划", 500),
     makeNode("prepare", "root", "phase", "agent.prepare", 0),
     makeNode("memory", "prepare", "phase", "memory.presearch", 20),
-    makeNode("sandbox", "root", "phase", "agent.sandbox.initialize", 50),
+    makeNode("execute", "root", "tool", "python_interpreter", 40),
+    makeNode("sandbox", "execute", "phase", "agent.sandbox.initialize", 50),
+    {
+      ...makeNode("python-call", "execute", "phase", "code.execute", 1700),
+      duration_ms: 125,
+    },
+    {
+      ...makeNode("read-skill", "storage", "tool", "read_skill_md", 1800),
+      duration_ms: 17.09,
+    },
   ];
   const row = {
     tenant_id: "tenant",
@@ -146,10 +155,7 @@ export async function installTrajectoryFixture(
       url = new URL(request.url()),
       path = url.pathname.replace(/^.*\/api\//, "/api/");
     let data: unknown = {};
-    if (
-      path.includes("/trajectory/") &&
-      !["OPS", "SU"].includes(state.role)
-    ) {
+    if (path.includes("/trajectory/") && !["OPS", "SU"].includes(state.role)) {
       await route.fulfill({
         status: 403,
         json: { detail: { code: "administrator_required" } },

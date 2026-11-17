@@ -6,6 +6,8 @@ import {
   BrainCircuit,
   Check,
   Copy,
+  CodeXml,
+  Terminal,
   Settings2,
   Wrench,
   X,
@@ -20,6 +22,8 @@ export function trajectoryNodeName(node: TrajectoryNode, t: TFunction): string {
     return t("trajectory.tools.python_interpreter", {
       defaultValue: node.name,
     });
+  if (node.kind === "tool" && node.name === "code")
+    return t("trajectory.tools.code", { defaultValue: node.name });
   if (node.kind !== "phase") return node.name;
   const label = t(`trajectory.phases.${node.name}`, {
     defaultValue: node.name,
@@ -36,22 +40,30 @@ export function trajectoryNodeName(node: TrajectoryNode, t: TFunction): string {
 
 export function NodeIcon({
   kind,
+  name,
   large = false,
 }: {
   kind: string;
+  name?: string;
   large?: boolean;
 }) {
-  const Icon =
-    kind === "agent"
-      ? Bot
-      : kind === "model"
-        ? BrainCircuit
-        : kind === "phase"
-          ? Settings2
-          : Wrench;
+  const pythonCall =
+    (kind === "phase" && name === "code.execute") ||
+    (kind === "tool" && name === "code");
+  const Icon = pythonCall
+    ? Terminal
+    : kind === "tool" && name === "python_interpreter"
+      ? CodeXml
+      : kind === "agent"
+        ? Bot
+        : kind === "model"
+          ? BrainCircuit
+          : kind === "phase"
+            ? Settings2
+            : Wrench;
   return (
     <span
-      className={`trajectory-kind-icon kind-${kind}${large ? " is-large" : ""}`}
+      className={`trajectory-kind-icon kind-${pythonCall ? "tool" : kind}${large ? " is-large" : ""}`}
       aria-hidden
     >
       <Icon size={large ? 22 : 14} />
