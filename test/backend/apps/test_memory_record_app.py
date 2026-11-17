@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 
 # Path setup
@@ -254,6 +255,38 @@ def test_list_records_filters_by_user(client):
     )
     assert response.status_code == 410
     services["record"].list_memories.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("failure", "status_code"),
+    [(OperationalError, 503), (ProgrammingError, 500)],
+)
+def test_list_records_reports_failed_database_read(client, failure, status_code):
+    cli, services = client
+    services["record"].list_memories.side_effect = failure(
+        "private query", {}, RuntimeError("private database diagnostics")
+    )
+
+    response = cli.get(
+        "/memory/records?layer=agent",
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "Failed to load memory records"}
+
+
+def test_list_records_returns_empty_result_after_successful_read(client):
+    cli, services = client
+    services["record"].list_memories.return_value = []
+
+    response = cli.get(
+        "/memory/records?layer=agent",
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "count": 0}
 
 
 def test_list_tenant_records_are_shared_across_users(client):
