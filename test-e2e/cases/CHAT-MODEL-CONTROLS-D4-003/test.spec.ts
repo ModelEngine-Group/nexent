@@ -32,18 +32,19 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
     for (const entry of creatorEntries) {
       await enter(page, entry); await chooseModel(page, "Default A"); await open();
       await expect(temperature).toHaveValue("0.6"); await expect(topP).toHaveValue("0.85");
-      await expect(panel.getByRole("slider")).toHaveCount(0);
+      await expect(panel.getByRole("slider", {name:"Top P 滑块",exact:true})).toHaveAttribute("aria-valuenow","0.85");
       await temperature.focus(); await topP.focus();
       expect(state.writes.filter(path => /workbench-config/.test(path))).toEqual([]);
-      for (const [level, pValue] of [["0", "0.005"], ["0.7", "0.6"], ["2", "1"]]) {
+      for (const [level, pValue] of [["0", "0"], ["0.7", "0.6"], ["2", "1"]]) {
         await set(level, pValue);
-        await expect(temperature).toHaveValue(level);
-        await expect(topP).toHaveValue(pValue);
+        await expect(panel.getByRole("slider", { name: "温度 滑块", exact: true })).toHaveAttribute("aria-valuenow", level);
+        await expect(panel.getByRole("slider", { name: "Top P 滑块", exact: true })).toHaveAttribute("aria-valuenow", pValue);
       }
-      const stepped = refreshed();
-      await temperature.press("ArrowDown"); await stepped;
+      const slider = panel.getByRole("slider", { name: "温度 滑块", exact: true });
+      const sliderSaved = refreshed();
+      await slider.focus(); await slider.press("ArrowLeft"); await sliderSaved;
       await expect(temperature).toBeEnabled(); await expect(temperature).toHaveValue("1.9");
-      for (const invalid of ["-0.1", "2.1"]) {
+      for (const invalid of ["-0.1", "2.1", ""]) {
         await temperature.fill(invalid); await temperature.press("Enter");
         await expect(temperature).toHaveAttribute("aria-invalid", "true");
         await expect(panel.getByRole("alert")).toBeVisible();
@@ -60,7 +61,8 @@ journey("CHAT-MODEL-CONTROLS-D4-003", async ({ page, contract }) => {
     for (const entry of creatorEntries) {
       await enter(page, entry); await chooseModel(page, "Default A"); await set("0.7", "1"); await page.keyboard.press("Escape");
       await chooseModel(page, "Effort B"); await open(); await expect(temperature).toHaveValue("1"); await expect(topP).toHaveValue("1");
-      await page.keyboard.press("Escape");
+      await expect(panel.getByRole("slider", {name:"温度 滑块",exact:true})).toHaveAttribute("aria-valuenow","1");
+      await expect(panel.getByRole("slider", {name:"Top P 滑块",exact:true})).toHaveAttribute("aria-valuenow","1"); await page.keyboard.press("Escape");
       await chooseModel(page, "Default A"); await open(); await expect(temperature).toHaveValue("0.7"); await expect(topP).toHaveValue("1"); await page.keyboard.press("Escape");
       await send(page, state);
       await open(); await expect(temperature).toHaveValue("0.7"); await expect(topP).toHaveValue("1"); await page.keyboard.press("Escape");

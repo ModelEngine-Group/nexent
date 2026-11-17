@@ -18,7 +18,7 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Prove creator advanced controls support decimal stepper inputs, isolate session/model state and serialize
+  objective: Prove creator advanced controls synchronize decimal sliders/inputs, isolate session/model state and serialize
     explicit sampling into actual run/history snapshots without global configuration writes.
   preconditions:
   - actual frontend creator surfaces with isolated mock model directory, authorized identity and deterministic run endpoints.
@@ -48,11 +48,11 @@ case:
       top_p: effective-outlet-default
   steps:
   - order: 1
-    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; edit both numeric inputs,
-      exercise keyboard stepping, try invalid values, and restore defaults.
-    expected: Shared panel is reachable by pointer and keyboard; Temperature accepts 0 through 2 with step 0.1 and Top P accepts
-      values greater than 0 through 1 with step 0.01. Invalid values do not persist and restoring defaults clears both overrides
-      and displays the effective numeric defaults. Fixture models display their declared outlet defaults 1.0/1.0;
+    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; change both slider
+      and numeric input across minimum, middle and maximum values; exercise invalid/empty input and restore defaults.
+    expected: Shared panel is reachable by pointer and keyboard; numeric values and sliders stay synchronized at temperature
+      0-2 and Top P 0-1 with step 0.1, invalid committed values do not persist and restore clears both overrides and shows
+      the effective numeric defaults with matching sliders. Fixture models display their declared outlet defaults 1.0/1.0;
       opening/focusing unchanged defaults does not create an override.
   - order: 2
     action: Set model-A sampling overrides, switch to B and back, switch to another creation session and return; transition
@@ -74,7 +74,7 @@ case:
   actor: Isolated authorized Agent and Skill creator
   journey:
   - Open creator model controls
-  - Edit values with the numeric steppers
+  - Edit slider and numeric values
   - Restore defaults
   - Switch models and sessions
   - Transition composer
@@ -90,7 +90,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: Creator controls display configured or SDK defaults accurately, support numeric steppers, and preserve scoped state.
+    description: Creator controls display configured or SDK defaults accurately, synchronize numeric sliders, and preserve scoped state.
     steps:
     - 1
     - 2
