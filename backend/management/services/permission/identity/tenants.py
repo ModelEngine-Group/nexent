@@ -498,12 +498,20 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         users = users_result.get("users", [])
 
         if users:
+            # Every authority needs the original live issuer and owner, including a tenant-local SU.
+            private_cleanup = {}
+            for user in users:
+                if user.get('user_id'):
+                    private_cleanup[user['user_id']] = await user_service.prepare_private_cleanup(
+                        user['user_id'], tenant_id, deleted_by, purpose='tenant_deletion')
             soft_delete_users_by_tenant_id(tenant_id, deleted_by)
             async def delete_single_user(user: Dict[str, Any]) -> None:
                 user_id = user.get("user_id")
                 if user_id:
                     try:
-                        await user_service.delete_user_and_cleanup(user_id, tenant_id, actor_id=deleted_by, membership_removed=True)
+                        await user_service.delete_user_and_cleanup(
+                            user_id, tenant_id, actor_id=deleted_by, membership_removed=True,
+                            private_cleanup=private_cleanup[user_id])
                         logger.info(
                             f"Deactivated user {user_id} for tenant {tenant_id}")
                     except Exception as e:
@@ -527,6 +535,10 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
         knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
         for kb in knowledge_list:
+            # PRIVATE resources are owned by admitted cleanup, not a raw metadata soft-delete.
+            # A pending ordinary deletion also keeps its parent available for finalization.
+            if kb.get('ingroup_permission') == 'PRIVATE' or kb.get('deletion_request') is not None:
+                continue
             try:
                 delete_knowledge_record({
                     "knowledge_id": kb["knowledge_id"],

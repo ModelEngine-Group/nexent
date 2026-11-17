@@ -2,66 +2,10 @@
 """
 Unit tests for management.services.permission.identity.users module
 """
-import importlib.machinery
-import os
-import sys
-import types
-
-# Add backend path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
-
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Mock external dependencies before any imports
-boto3_module = types.ModuleType("boto3")
-boto3_module.client = MagicMock()
-boto3_module.resource = MagicMock()
-boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
-sys.modules['boto3'] = boto3_module
-sys.modules['psycopg2'] = MagicMock()
-sys.modules['nexent'] = MagicMock()
-sys.modules['nexent.core'] = MagicMock()
-sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.storage'] = MagicMock()
-sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
-sys.modules['nexent.storage.minio_config'] = MagicMock()
-
-# Mock for memory_service import used in delete_user_and_cleanup
-nexent_memory_service = MagicMock()
-sys.modules['nexent.memory'] = MagicMock()
-sys.modules['nexent.memory.memory_service'] = nexent_memory_service
-
-# Create mock ToolConfig class for imports
-from pydantic import BaseModel
-
-
-class MockToolConfig(BaseModel):
-    name: str = ""
-    description: str = ""
-    parameters: dict = {}
-
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
-
-# Patch storage client factory before imports
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.object_storage.client.MinioClient', return_value=MagicMock()).start()
-
-# Mock database functions before importing the service
-patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()
-patch('management.db.identity.user_tenant.get_user_tenant_by_user_id').start()
-patch('management.db.identity.user_tenant.soft_delete_user_tenant_by_user_id').start()
-patch('management.db.identity.group.remove_user_from_all_groups').start()
-patch('management.db.identity.group.query_groups_by_users', return_value={}).start()
-
-# Keep knowledge cleanup as an explicit service collaborator in this unit suite.
-sys.modules['management.services.knowledge_base.management'] = MagicMock()
-sys.modules['management.services.knowledge_base.common'] = MagicMock()
-
-# Import unit under test
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, RoleAssignmentConflict
 from management.services.permission.identity import users as user_service
 from management.services.permission.identity.users import (
@@ -71,6 +15,17 @@ from management.services.permission.identity.users import (
     update_user,
     update_user_for_requester,
 )
+
+
+@pytest.fixture(autouse=True)
+def private_cleanup_collaborators(mocker):
+    mocker.patch('management.services.permission.identity.users.enrich_cas_usernames')
+    for name in ('remove_user_from_all_groups', 'soft_delete_all_configs_by_user_id',
+                 'soft_delete_all_conversations_by_user', 'soft_delete_all_oauth_accounts_by_user_id',
+                 'soft_delete_tokens_by_user'):
+        mocker.patch('management.services.permission.identity.users.' + name, return_value=0)
+    mocker.patch("management.services.permission.identity.users.prepare_private_cleanup", new_callable=AsyncMock)
+    mocker.patch("management.services.permission.identity.users.execute_private_cleanup", new_callable=AsyncMock, return_value=None)
 
 
 class TestUserAuthorization:
@@ -160,21 +115,11 @@ class TestUserAuthorization:
 
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
-    """Reset mock return values, call counts, and side effects for each test"""
-
-    # Reset all mocks and clear side effects
-    user_service.get_users_by_tenant_id.reset_mock()
-    user_service.get_users_by_tenant_id.side_effect = None
-    user_service.get_user_tenant_by_user_id.reset_mock()
-    user_service.get_user_tenant_by_user_id.side_effect = None
-    user_service.soft_delete_user_tenant_by_user_id.reset_mock()
-    user_service.soft_delete_user_tenant_by_user_id.side_effect = None
-    user_service.remove_user_from_all_groups.reset_mock()
-    user_service.remove_user_from_all_groups.side_effect = None
-    user_service.query_groups_by_users.reset_mock()
-    user_service.query_groups_by_users.side_effect = None
-    user_service.query_groups_by_users.return_value = {}
+def reset_mocks(mocker):
+    for name in ('get_users_by_tenant_id', 'get_user_tenant_by_user_id',
+                 'soft_delete_user_tenant_by_user_id', 'remove_user_from_all_groups'):
+        mocker.patch('management.services.permission.identity.users.' + name)
+    mocker.patch('management.services.permission.identity.users.query_groups_by_users', return_value={})
 
 
 class TestGetUsers:
@@ -554,153 +499,6 @@ class TestDeleteUserAndCleanup:
         with pytest.raises(Exception, match="tenant deletion failed"):
             await delete_user_and_cleanup(user_id, tenant_id)
 
-    def _mock_base_cleanup(self, mocker):
-        mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
-            return_value=True,
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.remove_user_from_all_groups",
-            return_value=1,
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_configs_by_user_id"
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_conversations_by_user",
-            return_value=5,
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_oauth_accounts_by_user_id",
-            return_value=0,
-        )
-        mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.delete_account"
-        )
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.delete_user = MagicMock()
-        mock_get_admin.return_value = mock_admin
-
-    def _install_fake_vdb(self, mocker, delete_side_effect=None):
-        fake_vdb = types.ModuleType("management.services.knowledge_base.service")
-        fake_vdb.get_vector_db_core = MagicMock(return_value="vdb-core")
-        fake_vdb.ElasticSearchService = MagicMock()
-        fake_vdb.ElasticSearchService.full_delete_knowledge_base = AsyncMock(
-            side_effect=delete_side_effect
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.get_vector_db_core", fake_vdb.get_vector_db_core
-        )
-        mocker.patch(
-            "management.services.permission.identity.users.knowledge_management",
-            types.SimpleNamespace(KnowledgeBaseManagementService=fake_vdb.ElasticSearchService),
-        )
-        return fake_vdb
-
-    @pytest.mark.asyncio
-    async def test_delete_user_and_cleanup_success_with_private_kb_cleanup(
-        self, mocker
-    ):
-        self._mock_base_cleanup(mocker)
-        mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
-            return_value=[
-                {"knowledge_id": 1, "index_name": "private-kb-1"},
-                {"knowledge_id": 2, "index_name": "private-kb-2"},
-            ],
-        )
-        fake_vdb = self._install_fake_vdb(mocker)
-
-        result = await delete_user_and_cleanup("user123", "tenant456")
-
-        assert result == {"total": 2, "succeeded": 2, "failed": 0}
-        fake_vdb.get_vector_db_core.assert_called_once_with()
-        assert (
-            fake_vdb.ElasticSearchService.full_delete_knowledge_base.await_count
-            == 2
-        )
-        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_any_await(
-            "private-kb-1", "vdb-core", "user123"
-        )
-        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_any_await(
-            "private-kb-2", "vdb-core", "user123"
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_user_and_cleanup_reports_partial_cleanup_failures(
-        self, mocker
-    ):
-        self._mock_base_cleanup(mocker)
-        mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
-            return_value=[
-                {"knowledge_id": 1, "index_name": "private-kb-1"},
-                {"knowledge_id": 2, "index_name": "private-kb-2"},
-            ],
-        )
-        fake_vdb = self._install_fake_vdb(
-            mocker, delete_side_effect=[None, Exception("delete failed")]
-        )
-
-        result = await delete_user_and_cleanup("user123", "tenant456")
-
-        assert result == {"total": 2, "succeeded": 1, "failed": 1}
-        assert (
-            fake_vdb.ElasticSearchService.full_delete_knowledge_base.await_count
-            == 2
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_user_and_cleanup_skips_private_kb_cleanup_when_none(
-        self, mocker
-    ):
-        self._mock_base_cleanup(mocker)
-        mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
-            return_value=[],
-        )
-        fake_vdb = self._install_fake_vdb(mocker)
-
-        result = await delete_user_and_cleanup("user123", "tenant456")
-
-        assert result is None
-        fake_vdb.get_vector_db_core.assert_not_called()
-        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_delete_user_and_cleanup_counts_missing_index_name_as_failed(
-        self, mocker
-    ):
-        self._mock_base_cleanup(mocker)
-        mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
-            return_value=[
-                {"knowledge_id": 1, "index_name": None},
-                {"knowledge_id": 2, "index_name": "private-kb-2"},
-            ],
-        )
-        fake_vdb = self._install_fake_vdb(mocker)
-
-        result = await delete_user_and_cleanup("user123", "tenant456")
-
-        assert result == {"total": 2, "succeeded": 1, "failed": 1}
-        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_awaited_once_with(
-            "private-kb-2", "vdb-core", "user123"
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_user_and_cleanup_private_kb_query_failure_is_swallowed(
-        self, mocker
-    ):
-        self._mock_base_cleanup(mocker)
-        mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
-            side_effect=Exception("query failed"),
-        )
-
-        result = await delete_user_and_cleanup("user123", "tenant456")
-
-        assert result is None
 
 
 class TestCoverageGaps:

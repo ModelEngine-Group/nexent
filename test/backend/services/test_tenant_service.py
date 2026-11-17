@@ -6,7 +6,7 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 # Mock external dependencies before importing
 sys.modules['psycopg2'] = MagicMock()
@@ -649,6 +649,8 @@ class TestDeleteTenant:
 
     @pytest.fixture(autouse=True)
     def membership_cleanup(self, mocker):
+        mocker.patch("management.services.permission.identity.tenants.user_service.prepare_private_cleanup",
+                     new_callable=AsyncMock)
         return mocker.patch("management.services.permission.identity.tenants.soft_delete_users_by_tenant_id", return_value=True)
 
     @pytest.mark.asyncio

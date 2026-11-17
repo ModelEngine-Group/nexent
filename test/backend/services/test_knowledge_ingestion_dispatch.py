@@ -15,6 +15,8 @@ from nexent.storage.models import Page
 
 @pytest.fixture
 def cycle(monkeypatch):
+    # This suite isolates file discovery; parent scheduling has its own component tests.
+    monkeypatch.setattr(dispatch, 'dispatch_bases_once', AsyncMock(return_value=(0, None)))
     events = []
     rows = [
         {"file_id": c * 32, "tenant_id": "tenant-" + c, "user_id": "user-" + c, 'operation': 'ingest'}

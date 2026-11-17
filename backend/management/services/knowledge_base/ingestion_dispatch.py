@@ -17,7 +17,9 @@ from nexent.storage.errors import InvalidInput
 from nexent.storage.models import OperationContext, PageRequest, RecordQuery, Sort
 
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.knowledge_base_dispatch import base_dispatch_ports
 from infrastructure.knowledge_ingestion import ingestion_dispatch_ports
+from infrastructure.rdb.knowledge_base_dispatch import DATASET as BASES
 from infrastructure.rdb.knowledge_ingestion_dispatch import DATASET
 
 logger = logging.getLogger(__name__)
@@ -105,6 +107,31 @@ async def dispatch_once(coordinator, *, stop, cursor=None):
     return consumed, page.next_cursor
 
 
+async def dispatch_bases_once(coordinator, *, stop, cursor=None):
+    if stop.is_set():
+        return 0, cursor
+    context = OperationContext('knowledge-base-discovery-' + uuid4().hex, monotonic() + 10, cancelled=stop)
+
+    def discover():
+        context.remaining()
+        with base_dispatch_ports(context=context) as records:
+            return records.query(BASES, RecordQuery(order_by=(Sort('knowledge_id'),)),
+                                 PageRequest(limit=100, cursor=cursor), context=context)
+
+    page = await run_blocking('knowledge-base-discovery', discover,
+                              lane='control-io', owner='management.knowledge_base')
+    selected, consumed = default_base_deletion_coordinator(coordinator) if page.items else None, 0
+    for row in page.items:
+        if stop.is_set():
+            break
+        await selected.request_owner_cleanup(
+            row['index_name'], row['owner_user_id'], ServicePrincipal(row['user_id'], row['tenant_id']),
+            purpose=row['purpose'], context=OperationContext(
+                'knowledge-base-advance-' + uuid4().hex, monotonic() + 10, cancelled=stop))
+        consumed += 1
+    return consumed, page.next_cursor
+
+
 async def serve(coordinator, *, stop, poll_seconds=1):
     if (
         type(poll_seconds) not in {int, float}
@@ -112,9 +139,10 @@ async def serve(coordinator, *, stop, poll_seconds=1):
         or not 0.01 <= poll_seconds <= 30
     ):
         raise InvalidInput()
-    cursor = None
+    cursor, base_cursor = None, None
     while not stop.is_set():
         _, cursor = await dispatch_once(coordinator, stop=stop, cursor=cursor)
+        _, base_cursor = await dispatch_bases_once(coordinator, stop=stop, cursor=base_cursor)
         if not stop.is_set():
             await asyncio.sleep(poll_seconds)
 

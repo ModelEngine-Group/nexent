@@ -14,7 +14,6 @@ Main features include:
 
 import json
 import logging
-from contextvars import ContextVar
 from typing import Any, Optional
 
 from contracts.constants.constants import DATAMATE_URL
@@ -182,9 +181,6 @@ ALLOWED_CHUNK_FIELDS = {
 logger = logging.getLogger("vectordatabase_service")
 
 _QUOTA_LIMIT_UNSET = object()
-_SKIP_INDEX_SOURCE_CLEANUP: ContextVar[bool] = ContextVar(
-    "skip_index_source_cleanup", default=False
-)
 
 
 def get_vector_db_core(

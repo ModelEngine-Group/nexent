@@ -421,7 +421,6 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
@@ -432,7 +431,6 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
         # Setup the return value for delete_index
         es_result = {"status": "success",
                      "message": "Index deleted successfully"}
-        mock_delete.return_value = es_result
 
         # Setup the mock for delete_knowledgebase_records
         redis_result = {
@@ -550,7 +548,6 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
@@ -561,7 +558,6 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
         # Setup the return value for delete_index
         es_result = {"status": "success",
                      "message": "Index deleted successfully"}
-        mock_delete.return_value = es_result
 
         # Setup redis error
         redis_error_message = "Redis error: Connection failed"

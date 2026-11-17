@@ -22,14 +22,9 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIV
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
-from infrastructure.rdb.client import get_db_session
-from management.db.conversation.repository import remove_conversation_knowledge_bindings
 from management.db.file.attachment import get_file_stream
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.db.knowledge_base.file_lifecycle import (
-    delete_file_records_for_knowledge_base,
-)
 from management.db.knowledge_base.repository import (
     create_knowledge_record,
     delete_knowledge_record,
@@ -41,18 +36,13 @@ from management.db.knowledge_base.repository import (
     update_model_name_by_index_name,
 )
 from management.db.model.repository import get_model_by_model_id
-from management.db.tool.repository import remove_tool_knowledge_references
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
-    _SKIP_INDEX_SOURCE_CLEANUP,
     _rethrow_or_plain,
     _update_progress,
     get_vector_db_core,
     logger,
-)
-from management.services.knowledge_base.files import (
-    KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES as KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
 )
 from management.services.knowledge_base.files import (
     KnowledgeBaseFileService,
@@ -89,10 +79,6 @@ from nexent.vector_database.base import VectorDatabaseCore
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 
-# A knowledge base deletion is rejected while any file is still owned by the
-# ingestion pipeline. DELETE_REQUESTED/DELETED rows are already owned by a
-# file-deletion operation and therefore do not block the broader deletion.
-
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):
     CREATOR_PERMISSION = CREATOR_PERMISSION
@@ -110,145 +96,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         """Preview agents affected by deleting the selected knowledge bases."""
         return {"agents": query_knowledge_binding_agents(index_names=index_names, tenant_id=tenant_id)}
 
-    @staticmethod
-    async def full_delete_knowledge_base(
-        index_name: str, vdb_core: VectorDatabaseCore, user_id: str
-    ):
-        """
-        Completely delete a knowledge base, including its index, associated files in MinIO,
-        and all related records in Redis and PostgreSQL.
-        """
-        logger.debug(
-            f"Starting full deletion process for knowledge base (index): {index_name}"
-        )
-
-        # Check the durable lifecycle table before mutating any external
-        # system.  This closes the race where a processing task can recreate
-        # data after the index/source cleanup has started.
-        lifecycle_rows = (
-            KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(
-                index_name
-            )
-        )
-
-        lifecycle_fence_cleanup = {"cleared_count": 0, "failed_count": 0}
-        try:
-            minio_cleanup = (
-                await KnowledgeBaseManagementService._delete_kb_source_objects(
-                    index_name=index_name,
-                    vdb_core=vdb_core,
-                    updated_by=user_id,
-                )
-            )
-
-            # 3. Mark all related tasks as cancelled and clean up Redis records BEFORE deleting ES index
-            # This ensures ongoing indexing tasks will detect cancellation and stop immediately
-            logger.debug(
-                f"Step 3/5: Marking all tasks as cancelled and cleaning up Redis records for index '{index_name}'."
-            )
-            redis_cleanup_result = {}
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_knowledgebase_records(
-                    index_name
-                )
-                logger.debug(
-                    f"Redis cleanup for index '{index_name}' completed. "
-                    f"Deleted {redis_cleanup_result['total_deleted']} records, "
-                    f"marked {redis_cleanup_result.get('tasks_cancelled', 0)} tasks as cancelled."
-                )
-            except Exception as redis_error:
-                logger.error(
-                    f"Redis cleanup failed for index '{index_name}': {str(redis_error)}"
-                )
-                redis_cleanup_result = {"error": str(redis_error)}
-
-            # 4. Delete Elasticsearch index and its DB record
-            logger.debug(
-                f"Step 4/5: Deleting Elasticsearch index '{index_name}' and its database record."
-            )
-            cleanup_token = _SKIP_INDEX_SOURCE_CLEANUP.set(True)
-            try:
-                delete_index_result = await KnowledgeBaseManagementService.delete_index(
-                    index_name, vdb_core, user_id
-                )
-            finally:
-                _SKIP_INDEX_SOURCE_CLEANUP.reset(cleanup_token)
-
-            lifecycle_cleanup = {"deleted_count": 0}
-            if lifecycle_rows:
-                try:
-                    lifecycle_cleanup["deleted_count"] = (
-                        delete_file_records_for_knowledge_base(
-                            index_name=index_name,
-                        )
-                    )
-                    logger.info(
-                        "Deleted %d lifecycle records for knowledge base '%s'",
-                        lifecycle_cleanup["deleted_count"],
-                        index_name,
-                    )
-                except Exception as lifecycle_error:
-                    logger.error(
-                        "Failed to delete lifecycle records for knowledge base '%s': %s",
-                        index_name,
-                        lifecycle_error,
-                        exc_info=True,
-                    )
-                    lifecycle_cleanup["error"] = str(lifecycle_error)
-
-            # Clear only the legacy fences still owned by whole-KB cleanup.
-            for lifecycle_row in lifecycle_rows:
-                file_id = lifecycle_row.get("file_id")
-                if not file_id:
-                    continue
-                try:
-                    if get_redis_service().clear_document_delete_fence(file_id=file_id):
-                        lifecycle_fence_cleanup["cleared_count"] += 1
-                except Exception as fence_error:
-                    lifecycle_fence_cleanup["failed_count"] += 1
-                    logger.warning(
-                        "Failed to clear deletion fence for file %s after knowledge-base deletion: %s",
-                        file_id,
-                        fence_error,
-                    )
-
-            # Construct final result
-            result = {
-                "status": "success",
-                "message": (
-                    f"Index {index_name} deleted successfully. "
-                    f"MinIO: {minio_cleanup['deleted_count']} files deleted, "
-                    f"{minio_cleanup['failed_count']} failed. "
-                    f"Redis: Cleaned up {redis_cleanup_result.get('total_deleted', 0)} records."
-                ),
-                "es_delete_result": delete_index_result,
-                "minio_cleanup": minio_cleanup,
-                "redis_cleanup": redis_cleanup_result,
-                "lifecycle_cleanup": lifecycle_cleanup,
-                "lifecycle_fence_cleanup": lifecycle_fence_cleanup,
-            }
-
-            if "errors" in redis_cleanup_result:
-                result["redis_warnings"] = redis_cleanup_result["errors"]
-
-            try:
-                with get_db_session() as session:
-                    remove_tool_knowledge_references(session, index_names=[index_name])
-                    remove_conversation_knowledge_bindings(session, index_names=[index_name])
-            except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
-                logger.warning("Failed to clean up bindings for deleted knowledge base '%s': %s", index_name, exc)
-            logger.info(
-                f"Successfully completed full deletion process for knowledge base '{index_name}'."
-            )
-            return result
-
-        except Exception as e:
-            logger.error(
-                f"Error during full deletion of index '{index_name}': {str(e)}",
-                exc_info=True,
-            )
-            raise e
 
     @staticmethod
     def create_index(
@@ -601,49 +448,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             )
             raise Exception(f"Failed to update embedding model: {str(e)}")
 
-    @staticmethod
-    async def delete_index(
-        index_name: str = Path(..., description="Name of the index to delete"),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        user_id: Optional[str] = Body(
-            None, description="ID of the user delete the knowledge base"
-        ),
-    ):
-        try:
-            if not _SKIP_INDEX_SOURCE_CLEANUP.get():
-                try:
-                    await KnowledgeBaseManagementService._delete_kb_source_objects(
-                        index_name=index_name,
-                        vdb_core=vdb_core,
-                        updated_by=user_id,
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Error deleting associated files from MinIO for index {index_name}: {str(e)}"
-                    )
-
-            # Delete the index in Elasticsearch
-            success = vdb_core.delete_index(index_name)
-            if not success:
-                # Even if deletion fails, we proceed to database record cleanup
-                logger.warning(
-                    f"Index {index_name} not found in Elasticsearch or could not be deleted, but proceeding with DB cleanup."
-                )
-
-            # Delete the knowledge base record from the database
-            update_data = {"updated_by": user_id, "index_name": index_name}
-            success = delete_knowledge_record(update_data)
-            if not success:
-                raise Exception(
-                    f"Error deleting knowledge record for index {index_name}"
-                )
-
-            return {
-                "status": "success",
-                "message": f"Index {index_name} and associated files deleted successfully",
-            }
-        except Exception as e:
-            raise Exception(f"Error deleting index: {str(e)}")
 
     @staticmethod
     def _prepare_indices_page(

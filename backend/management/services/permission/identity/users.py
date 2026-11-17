@@ -24,12 +24,12 @@ from management.db.identity.user_tenant import (
     get_users_by_tenant_id,
     soft_delete_user_tenant_by_user_id,
 )
-from management.db.knowledge_base.repository import (
-    get_private_knowledge_info_by_creator,
-)
 from management.db.memory.config import soft_delete_all_configs_by_user_id
-from management.services.knowledge_base import management as knowledge_management
-from management.services.knowledge_base.common import get_vector_db_core
+from management.services.knowledge_base.deprovision import (
+    PrivateCleanupPlan,
+    execute_private_cleanup,
+    prepare_private_cleanup,
+)
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.permission.identity.roles import replace_roles
 
@@ -182,51 +182,9 @@ async def update_user_for_requester(
     return await update_user(user_id, update_data, updated_by)
 
 
-async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optional[Dict[str, int]]:
-    """Delete PRIVATE knowledge bases created by a user."""
-    private_kbs = get_private_knowledge_info_by_creator(tenant_id, user_id)
-    if not private_kbs:
-        return None
-
-
-    vdb_core = get_vector_db_core()
-    succeeded = 0
-    failed = 0
-    for kb in private_kbs:
-        index_name = kb.get("index_name")
-        kb_id = kb.get("knowledge_id")
-        if not index_name:
-            failed += 1
-            logger.error(
-                "Personal KB %s for user %s has no index_name",
-                kb_id,
-                user_id,
-            )
-            continue
-        try:
-            await knowledge_management.KnowledgeBaseManagementService.full_delete_knowledge_base(
-                index_name, vdb_core, user_id
-            )
-            succeeded += 1
-        except Exception:
-            failed += 1
-            logger.exception(
-                "Failed deleting personal KB for user %s kb_id %s index_name %s",
-                user_id,
-                kb_id,
-                index_name,
-            )
-
-    cleanup_result = {
-        "total": len(private_kbs),
-        "succeeded": succeeded,
-        "failed": failed,
-    }
-    logger.info("Personal KB cleanup for user %s: %s", user_id, cleanup_result)
-    return cleanup_result
-
-
-async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str = None, membership_removed: bool = False) -> None:
+async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str | None = None,
+                                  membership_removed: bool = False,
+                                  private_cleanup: PrivateCleanupPlan | None = None) -> dict[str, int] | None:
     """
     Permanently delete user account and all related data.
 
@@ -243,6 +201,12 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str
     """
     try:
         logger.debug(f"Start permanently deleting user {user_id} and all related data...")
+        # Admission needs live issuer and owner identities. Execution follows credential revocation.
+        if private_cleanup is None:
+            try:
+                private_cleanup = await prepare_private_cleanup(user_id, tenant_id, actor_id or user_id)
+            except Exception:
+                logger.exception("Failed personal KB admission for user %s", user_id)
         # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
             tenant_deleted = membership_removed or soft_delete_user_tenant_by_user_id(user_id, actor_id or user_id)
@@ -298,7 +262,8 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str
         # created by the user are intentionally left untouched.
         cleanup_result = None
         try:
-            cleanup_result = await _delete_private_knowledge_bases(user_id, tenant_id)
+            if private_cleanup is not None:
+                cleanup_result = await execute_private_cleanup(private_cleanup)
         except Exception:
             logger.exception("Failed personal KB cleanup for user %s", user_id)
 
