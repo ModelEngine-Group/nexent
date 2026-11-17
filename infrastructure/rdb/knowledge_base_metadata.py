@@ -1,7 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Finite scoped legacy metadata mappings share the KB admission transaction."""
 
+from dataclasses import replace
+
 import sqlalchemy as sa
+from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge_base_metadata import (
     KNOWLEDGE_CONVERSATIONS as CONVERSATIONS,
 )
@@ -22,6 +25,7 @@ from infrastructure.rdb.knowledge_admission import admission_mapping
 from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
+from infrastructure.rdb.storage_ledger import ledger_catalog
 from infrastructure.storage.catalog import (
     DatasetCatalog,
     DatasetDefinition,
@@ -72,6 +76,11 @@ def bind_base_metadata_records(scope, engine):
     ))).subquery('scoped_knowledge_tool_bindings')
     additions = {TOOLS: tool_view, CONVERSATIONS: conversation_view, TAGS: tags, PROJECTIONS: projections}
     tables.update(additions)
+    if LEDGER in scope.namespaces:
+        definition, table, audit = ledger_catalog()
+        tables[LEDGER] = table
+        definitions.append(replace(definition, write_roles=frozenset()))
+        revisions[LEDGER], audits[LEDGER] = 'version', audit
     if scope.system or scope.service_role != 'management' or not scope.namespaces <= tables.keys():
         raise ScopeDenied()
     for name, table in additions.items():

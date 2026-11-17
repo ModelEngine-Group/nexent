@@ -46,14 +46,20 @@ def cascade(monkeypatch):
 
     monkeypatch.setattr(tenants, 'prepare_tenant_cleanup', AsyncMock(side_effect=prepare_shared))
     monkeypatch.setattr(tenants, 'execute_cleanup', AsyncMock(side_effect=execute_shared))
+    async def unlink(tenant_id, actor_id):
+        assert (tenant_id, actor_id) == ('target', 'su')
+        events.append('unlink-datamate')
+        return {'total': 1, 'succeeded': 1, 'failed': 0, 'pending': 0}
+
+    monkeypatch.setattr(tenants, 'unlink_datamate_for_tenant', AsyncMock(side_effect=unlink))
     monkeypatch.setattr(tenants, '_delete_skills_for_tenant', Mock())
     return SimpleNamespace(**locals())
 
 
 async def test_all_private_authority_precedes_bulk_disable_and_pending_parents_survive(cascade):
     assert await tenants.delete_tenant('target', 'su') is True
-    assert cascade.events[:4] == ['prepare-shared', 'prepare-u1', 'prepare-u2', 'bulk']
-    assert set(cascade.events[4:-1]) == {'delete-u1', 'delete-u2'}
+    assert cascade.events[:5] == ['prepare-shared', 'unlink-datamate', 'prepare-u1', 'prepare-u2', 'bulk']
+    assert set(cascade.events[5:-1]) == {'delete-u1', 'delete-u2'}
     assert cascade.events[-1] == 'execute-shared'
     assert not hasattr(tenants, 'delete_knowledge_record')
 

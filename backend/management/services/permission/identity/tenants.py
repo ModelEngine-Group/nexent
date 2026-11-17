@@ -18,6 +18,7 @@ from management.services.permission.identity.users import delete_user_and_cleanu
 from management.db.identity.group import query_groups_by_tenant, remove_group
 from management.services.model.commands import deactivate_tenant_models
 from management.services.knowledge_base.deprovision import execute_cleanup, prepare_tenant_cleanup
+from management.services.knowledge_base.external_unlink import unlink_datamate_for_tenant
 from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
 from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
@@ -489,6 +490,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
 
         # Shared resources have their own SU tenant authority; creators need not remain active.
         shared_cleanup = await prepare_tenant_cleanup(tenant_id, deleted_by)
+        await unlink_datamate_for_tenant(tenant_id, deleted_by)
 
         # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")

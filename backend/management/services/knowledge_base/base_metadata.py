@@ -146,6 +146,25 @@ def _remove_bindings(records, row, context):
     return counts
 
 
+def remove_knowledge_metadata_bindings(records, row, *, context):
+    """Remove only this scoped catalog's bindings, local tags and projection ledger."""
+    counts = _remove_bindings(records, row, context)
+    counts.update(tag_assignments_deleted=0, tag_projections_deleted=0)
+    for tag in _rows(records, TAGS, ('assignment_id',), context=context,
+                     where=Comparison('resource_type', 'in', ['knowledge_base', 'knowledge_document'])):
+        selected = tag['resource_id'] == row['index_name'] if tag['resource_type'] == 'knowledge_base' else (
+            _document_matches(tag['resource_id'], row['index_name']))
+        if selected:
+            _confirmed(records.delete(TAGS, tag['assignment_id'], context=context), context, delete=True)
+            counts['tag_assignments_deleted'] += 1
+    for projection in _rows(records, PROJECTIONS, ('projection_id',), context=context, where=Junction('and', (
+        Comparison('provider', 'eq', 'local'), Comparison('knowledge_base_id', 'eq', row['index_name']),
+    ))):
+        _confirmed(records.delete(PROJECTIONS, projection['projection_id'], context=context), context, delete=True)
+        counts['tag_projections_deleted'] += 1
+    return counts
+
+
 def finalize_knowledge_base_deletion(records, resources, previous, actor, *, context):
     require_admission_actor(records, resources, actor)
     journal = KnowledgeBaseDeletionJournal(records, resources, actor)
@@ -159,21 +178,9 @@ def finalize_knowledge_base_deletion(records, resources, previous, actor, *, con
         row = change_knowledge_admission(transaction, current, {}, expected=Revision(str(current['version'])), context=context)
         authorize_base_deletion(transaction, resources, KnowledgeBaseDeleteAuthorization(knowledge_id=row['knowledge_id']),
                                 actor, context=context)
-        counts = _remove_bindings(transaction, row, context)
-        counts.update(tag_assignments_deleted=0, tag_projections_deleted=0, files_deleted=0)
+        counts = remove_knowledge_metadata_bindings(transaction, row, context=context)
+        counts['files_deleted'] = 0
         sources = set()
-        for tag in _rows(transaction, TAGS, ('assignment_id',), context=context,
-                         where=Comparison('resource_type', 'in', ['knowledge_base', 'knowledge_document'])):
-            selected = tag['resource_id'] == row['index_name'] if tag['resource_type'] == 'knowledge_base' else (
-                _document_matches(tag['resource_id'], row['index_name']))
-            if selected:
-                _confirmed(transaction.delete(TAGS, tag['assignment_id'], context=context), context, delete=True)
-                counts['tag_assignments_deleted'] += 1
-        for projection in _rows(transaction, PROJECTIONS, ('projection_id',), context=context, where=Junction('and', (
-            Comparison('provider', 'eq', 'local'), Comparison('knowledge_base_id', 'eq', row['index_name']),
-        ))):
-            _confirmed(transaction.delete(PROJECTIONS, projection['projection_id'], context=context), context, delete=True)
-            counts['tag_projections_deleted'] += 1
         for file in _rows(transaction, FILES, ('file_id',), context=context,
                           where=Comparison('knowledge_id', 'eq', row['knowledge_id'])):
             if file['source_key'] is not None:

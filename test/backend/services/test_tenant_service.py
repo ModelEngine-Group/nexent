@@ -649,6 +649,7 @@ class TestDeleteTenant:
 
     @pytest.fixture(autouse=True)
     def membership_cleanup(self, mocker):
+        mocker.patch("management.services.permission.identity.tenants.unlink_datamate_for_tenant", new_callable=AsyncMock)
         mocker.patch("management.services.permission.identity.tenants.prepare_tenant_cleanup", new_callable=AsyncMock)
         mocker.patch("management.services.permission.identity.tenants.execute_cleanup", new_callable=AsyncMock)
         mocker.patch("management.services.permission.identity.tenants.user_service.prepare_private_cleanup",

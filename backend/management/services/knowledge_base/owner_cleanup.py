@@ -68,10 +68,14 @@ def require_tenant_resource(row, tenant_id):
 
 def authorize_tenant_cleanup_admission(row, actor, *, context, ports=owner_cleanup_identity_ports):
     require_tenant_resource(row, actor.tenant_id)
+    return KnowledgeTenantCleanup(actor_tenant_id=require_tenant_cleanup_issuer(actor, context=context, ports=ports))
+
+
+def require_tenant_cleanup_issuer(actor, *, context, ports=owner_cleanup_identity_ports):
     issuer, _ = _identities(actor, actor.user_id, context, ports)
     if not has_any_role(roles_from_record(issuer), {'SU'}):
         raise ScopeDenied()
-    return KnowledgeTenantCleanup(actor_tenant_id=issuer['tenant_id'])
+    return issuer['tenant_id']
 
 
 def has_cleanup_authority(row, user_id, tenant_id):

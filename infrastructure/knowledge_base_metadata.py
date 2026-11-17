@@ -3,6 +3,7 @@
 
 from contextlib import contextmanager
 
+from contracts.knowledge import STORAGE_LEDGER_DATASET
 from contracts.knowledge_admission import (
     KNOWLEDGE_ADMISSION_DATASET,
     UPLOAD_ADMISSION_DATASET,
@@ -21,13 +22,16 @@ from infrastructure.rdb.knowledge_base_metadata import bind_base_metadata_record
 
 
 @contextmanager
-def knowledge_base_metadata_ports(actor, *, context):
+def knowledge_base_metadata_ports(actor, *, context, ledger=False):
     engine, owned = record_engine(context, connections=2), []
     try:
-        scope = StorageScope('management', actor.tenant_id, actor.user_id, {
+        namespaces = {
             KNOWLEDGE_ADMISSION_DATASET, UPLOAD_ADMISSION_DATASET, KNOWLEDGE_CONVERSATIONS,
             KNOWLEDGE_TAG_ASSIGNMENTS, KNOWLEDGE_TAG_PROJECTIONS, KNOWLEDGE_TOOL_BINDINGS,
-        })
+        }
+        if ledger:
+            namespaces.add(STORAGE_LEDGER_DATASET)
+        scope = StorageScope('management', actor.tenant_id, actor.user_id, namespaces)
         records = bind_base_metadata_records(scope, engine)
         owned.append(records)
         resources = bind_cleanse_resources(StorageScope('management', actor.tenant_id, actor.user_id, set(TABLES)), engine)
