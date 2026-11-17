@@ -274,3 +274,26 @@ async def test_parent_deadline_closes_signed_agentos_http_client_and_next_call_o
     assert pending['stage'] == 'DELETE_RUNTIME_SUBMITTING'
     assert len(messages) == len(clients) == 2 and all(client.is_closed for client in clients)
     s.source.assert_not_called()
+
+
+async def test_waiting_publication_does_not_call_runtime_until_confirmed_then_uses_same_delete_identity(setup):
+    from test.backend.services.test_knowledge_deletion_pending_publication import (
+        publishing,
+    )
+
+    s = setup
+    value = publishing(s.s)
+    await s.coordinator.admit(value, s.actor, context=context())
+    waiting = await s.coordinator.advance(value.file_id, s.actor, context=context())
+    assert waiting['status'] == 'UPLOADING' and waiting['stage'] == 'SOURCE_UPLOAD'
+    s.client.delete_knowledge_file.assert_not_called()
+    s.source.assert_not_called()
+    with s.s.engine.begin() as connection:
+        connection.execute(s.s.table.update().values(status='UPLOADED', stage='UPLOAD', source_space='files',
+                                                     source_key='source.txt', source_revision='etag:one', source_sha256='a' * 64,
+                                                     storage_object_id=17, version=waiting['version'] + 1))
+    s.client.delete_knowledge_file.return_value = s.child()
+    row = await s.coordinator.advance(value.file_id, s.actor, context=context())
+    assert row['stage'] == 'DELETE_RUNTIME_PENDING'
+    s.client.delete_knowledge_file.assert_awaited_once_with(value.runtime_request(), user_id='user-a', tenant_id='tenant-a')
+    assert row['deletion_request']['source']['version'] == 'etag:one'

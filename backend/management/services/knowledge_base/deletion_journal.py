@@ -1,9 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Fence deletion side effects after the caller has checked current resource DAC."""
 
+import re
 from datetime import UTC, datetime
 
-from contracts.agentos_knowledge import KnowledgeJobState
+from contracts.agentos_knowledge import KnowledgeJobState, ObjectReference
 from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
 from nexent.storage.errors import (
     Conflict,
@@ -13,6 +14,10 @@ from nexent.storage.errors import (
     ScopeDenied,
 )
 from nexent.storage.models import FieldPatch, Revision, WriteOutcome
+
+
+class DeletionPhaseChanged(Conflict):
+    """A captured lifecycle revision changed; its side effect must not be repeated."""
 
 
 class DeletionJournal:
@@ -31,11 +36,12 @@ class DeletionJournal:
     def _identity(self, row, intent):
         if row["tenant_id"] != self.records.scope.tenant_id or intent.user_id != self.records.scope.actor_id:
             raise ScopeDenied()
+        waiting = intent.scope == 'full' and self.awaiting_source(row)
         if any(row[name] != getattr(intent, field) for name, field in (
             ("file_id", "file_id"), ("knowledge_id", "knowledge_id"),
             ("source_generation", "file_version"), ("index_name", "index_name"),
             ("original_filename", "filename"), ("object_name", "object_name"),
-        )):
+        ) if not (waiting and field == 'filename')):
             raise Conflict()
         source = [row[name] for name in ("source_space", "source_key", "source_revision", "source_sha256")]
         expected = ([intent.source.space, intent.source.key, intent.source.version, intent.source.sha256]
@@ -43,7 +49,29 @@ class DeletionJournal:
         if intent.scope == "source_only" and row["stage"] == "SOURCE_DELETED":
             expected = [None] * 4
         if source != expected:
+            if intent.scope != 'full' or intent.source is not None or not self.awaiting_source(row):
+                raise Conflict()
+            self._published_source(row)
+
+    @staticmethod
+    def awaiting_source(row):
+        return row.get('deletion_request') is not None and (
+            row['status'] == 'UPLOADING' and row['stage'] in {
+                'SOURCE_UPLOAD', 'SOURCE_CONFIRMED', 'SOURCE_ACCOUNTED', 'SOURCE_REVIEW',
+            } or row['status'] == 'UPLOADED' and row['stage'] == 'UPLOAD'
+        )
+
+    @staticmethod
+    def _published_source(row):
+        try:
+            source = ObjectReference(space=row['source_space'], key=row['source_key'],
+                                     version=row['source_revision'], sha256=row['source_sha256'])
+        except ValueError:
+            raise Conflict() from None
+        if (source.space != 'files' or source.key != row['object_name']
+                or source.sha256 != row['source_upload_sha256'] or not row['upload_owner_service']):
             raise Conflict()
+        return source
 
     def request(self, row):
         intent = KnowledgeDeletionIntent.model_validate(row["deletion_request"])
@@ -57,8 +85,10 @@ class DeletionJournal:
         )
         if receipt.outcome is WriteOutcome.UNKNOWN:
             raise OutcomeUnknown(operation_id=context.operation_id)
-        if receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.matched:
+        if receipt.outcome is not WriteOutcome.CONFIRMED:
             raise Conflict()
+        if not receipt.matched:
+            raise DeletionPhaseChanged()
         current = self.records.get(DELETION_DATASET, row["file_id"], context=context)
         if current is None:
             raise OutcomeUnknown(operation_id=context.operation_id)
@@ -93,14 +123,40 @@ class DeletionJournal:
             raise Conflict()
         if intent.scope == "source_only" and row["status"] != "COMPLETED":
             raise Conflict()
-        if row["status"] == "UPLOADING" and (row["stage"] != "UPLOAD" or intent.source is not None):
-            # A started source write must retain its publication/reconciliation owner.
-            raise Conflict()
+        if row['status'] == 'UPLOADING':
+            if row['stage'] in {'SOURCE_UPLOAD', 'SOURCE_CONFIRMED', 'SOURCE_ACCOUNTED', 'SOURCE_REVIEW'}:
+                if (not row['bucket_name'] or not row['object_name'] or not row['upload_owner_service']
+                        or not isinstance(row['source_upload_sha256'], str)
+                        or not re.fullmatch(r'[0-9a-f]{64}', row['source_upload_sha256'])):
+                    raise Conflict()
+                # Keep the existing source owner eligible to confirm and account its write.
+                return self._patch(row, {'deletion_request': intent.model_dump(mode='json')}, context)
+            if row['stage'] != 'UPLOAD' or intent.source is not None:
+                raise Conflict()
         return self._patch(row, {
             "deletion_request": intent.model_dump(mode="json"),
             "status": "DELETE_REQUESTED" if intent.scope == "full" else "COMPLETED",
             "stage": "DELETE_ACCEPTED",
         }, context)
+
+    def activate(self, row, *, context):
+        intent = self.request(row)
+        if intent.scope != 'full' or not self.awaiting_source(row):
+            raise Conflict()
+        ready = row['status'] == 'UPLOADED' or (
+            row['status'] == 'UPLOADING' and row['stage'] == 'SOURCE_REVIEW'
+            and row['error_code'] == 'STORAGE_QUOTA_EXCEEDED'
+        )
+        if not ready:
+            return row
+        source = self._published_source(row)
+        if row['storage_object_id'] is None:
+            raise Conflict()
+        bound = KnowledgeDeletionIntent.model_validate({**intent.model_dump(mode='json'),
+                                                        'source': source.model_dump(mode='json'),
+                                                        'filename': row['original_filename']})
+        return self._patch(row, {'deletion_request': bound.model_dump(mode='json'),
+                                 'status': 'DELETE_REQUESTED', 'stage': 'DELETE_ACCEPTED'}, context)
 
     def begin_runtime(self, row, *, context):
         intent = self._phase(row, {"DELETE_ACCEPTED"})

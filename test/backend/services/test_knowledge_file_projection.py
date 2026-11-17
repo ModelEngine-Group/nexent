@@ -63,3 +63,19 @@ def test_old_activity_cannot_resurrect_newer_tombstone_and_new_upload_can_replac
     ]
     merge_lifecycle_files(files, rows)
     assert (files == {}) if deletion_is_newer else (files["a"]["file_id"] == "active")
+
+
+def test_full_request_hides_waiting_publication_and_local_aliases_without_changing_public_fields():
+    files = {'object': {'file': 'source.txt'}, '/local/source.txt': {'file': 'source.txt'}}
+    row = {'status': 'UPLOADING', 'stage': 'SOURCE_UPLOAD', 'object_name': 'object',
+           'local_source_path': '/local/source.txt', 'deletion_request': {'scope': 'full'}}
+    assert public_file_state(row) == 'DELETE_REQUESTED'
+    merge_lifecycle_files(files, [row])
+    assert files == {}
+
+
+def test_source_only_request_keeps_completed_file_visible_without_exposing_internal_intent():
+    files = {}
+    merge_lifecycle_files(files, [{'status': 'COMPLETED', 'object_name': 'object', 'original_filename': 'source.txt',
+                                  'deletion_request': {'scope': 'source_only', 'user_id': 'editor-b'}}])
+    assert files['object']['status'] == 'COMPLETED' and 'deletion_request' not in files['object']

@@ -7,6 +7,9 @@ from datetime import datetime
 
 def public_file_state(row):
     status = row.get("status") or "UPLOADING"
+    deletion = row.get('deletion_request')
+    if status != 'DELETED' and isinstance(deletion, dict) and deletion.get('scope') == 'full':
+        return 'DELETE_REQUESTED'
     if status in {"UPLOADING", "UPLOADED"}:
         return "WAIT_FOR_PROCESSING"
     if status == "PROCESSING" and row.get("cleanse_status") == "queued":
@@ -23,7 +26,7 @@ def merge_lifecycle_files(files_map, lifecycle_rows):
     hidden_paths = {
         path
         for row in lifecycle_rows
-        if row.get("status") in {"DELETE_REQUESTED", "DELETED"}
+        if public_file_state(row) in {"DELETE_REQUESTED", "DELETED"}
         for path in (row.get("object_name"), row.get("local_source_path"))
         if path
     }
@@ -31,7 +34,7 @@ def merge_lifecycle_files(files_map, lifecycle_rows):
         files_map.pop(hidden_path, None)
 
     for row in sorted(lifecycle_rows, key=lambda row: str(row.get("update_time") or "")):
-        if row.get("status") in {"DELETE_REQUESTED", "DELETED"}:
+        if public_file_state(row) in {"DELETE_REQUESTED", "DELETED"}:
             for path in (row.get("object_name"), row.get("local_source_path")):
                 if path:
                     files_map.pop(path, None)

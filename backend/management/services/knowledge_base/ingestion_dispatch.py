@@ -10,6 +10,7 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.constants import environment
+from management.services.knowledge_base.deletion_journal import DeletionPhaseChanged
 from management.services.knowledge_base.ingestion_journal import IngestionPhaseChanged
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import InvalidInput
@@ -41,6 +42,14 @@ def default_coordinator():
     )
 
 
+def default_deletion_coordinator(coordinator):
+    from management.services.knowledge_base.deletion_coordinator import (
+        DeletionCoordinator,
+    )
+
+    return DeletionCoordinator(coordinator.cleanse, coordinator.client)
+
+
 async def dispatch_once(coordinator, *, stop, cursor=None):
     if stop.is_set():
         return 0, cursor
@@ -69,14 +78,20 @@ async def dispatch_once(coordinator, *, stop, cursor=None):
         if stop.is_set():
             break
         try:
-            await coordinator.advance(
+            if row['operation'] == 'delete':
+                selected = default_deletion_coordinator(coordinator)
+            elif row['operation'] == 'ingest':
+                selected = coordinator
+            else:
+                raise InvalidInput()
+            await selected.advance(
                 row["file_id"],
                 ServicePrincipal(row["user_id"], row["tenant_id"]),
                 context=OperationContext(
                     "ingestion-advance-" + uuid4().hex, monotonic() + 10, cancelled=stop
                 ),
             )
-        except IngestionPhaseChanged:
+        except (IngestionPhaseChanged, DeletionPhaseChanged):
             continue
         consumed += 1
     return consumed, page.next_cursor

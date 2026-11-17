@@ -13,6 +13,9 @@ from test.backend.infrastructure.test_knowledge_ingestion_records import (
     records,  # noqa: F401
 )
 from test.backend.services.test_cleanse_jobs import context
+from test.backend.services.test_knowledge_deletion_contract import (
+    intent as deletion_intent,
+)
 from test.backend.services.test_knowledge_ingestion_contract import intent
 
 
@@ -32,6 +35,7 @@ def test_discovery_is_minimal_read_only_and_preserves_original_actor(records):  
         row = page.items[0]
         assert row["file_id"] == value.file_id and row["tenant_id"] == "tenant-a"
         assert row["user_id"] == "user-a"
+        assert row['operation'] == 'ingest'
         assert set(row) == {
             "file_id",
             "tenant_id",
@@ -41,6 +45,7 @@ def test_discovery_is_minimal_read_only_and_preserves_original_actor(records):  
             "created_by",
             "updated_by",
             "delete_flag",
+            'operation',
         }
         with pytest.raises(InvalidInput):
             discover.query(
@@ -56,6 +61,44 @@ def test_discovery_is_minimal_read_only_and_preserves_original_actor(records):  
                 FieldPatch(set_values={"user_id": "foreign"}),
                 context=context(),
             )
+    finally:
+        discover.close()
+
+
+@pytest.mark.parametrize('status,stage', [
+    ('UPLOADING', 'SOURCE_UPLOAD'), ('UPLOADING', 'SOURCE_CONFIRMED'), ('UPLOADING', 'SOURCE_ACCOUNTED'),
+    ('UPLOADING', 'SOURCE_REVIEW'), ('UPLOADED', 'UPLOAD'),
+    ('DELETE_REQUESTED', 'DELETE_ACCEPTED'), ('DELETE_REQUESTED', 'DELETE_RUNTIME_SUBMITTING'),
+    ('DELETE_REQUESTED', 'DELETE_RUNTIME_PENDING'), ('DELETE_REQUESTED', 'DELETE_CLEANSE_PENDING'),
+    ('DELETE_REQUESTED', 'DELETE_SOURCE_PENDING'), ('DELETE_REQUESTED', 'DELETE_SOURCE_DELETING'),
+    ('COMPLETED', 'DELETE_ACCEPTED'), ('COMPLETED', 'DELETE_SOURCE_DELETING'),
+])
+def test_delete_discovery_uses_original_deleting_editor_and_hides_payload(records, status, stage):  # noqa: F811
+    _, engine, table = records
+    value = deletion_intent(user_id='editor-b', scope='source_only' if status == 'COMPLETED' else 'full')
+    with engine.begin() as connection:
+        connection.execute(table.update().values(status=status, stage=stage, ingestion_request=intent().model_dump(mode='json'),
+                                                 deletion_request=value.model_dump(mode='json'), created_by='uploader-a'))
+    discover = bind_ingestion_dispatch(engine)
+    try:
+        (row,) = discover.query(DATASET, RecordQuery(), PageRequest(), context=context()).items
+        assert row['operation'] == 'delete' and row['user_id'] == 'editor-b' and row['tenant_id'] == 'tenant-a'
+        assert not {'ingestion_request', 'deletion_request', 'source_revision', 'source_sha256'} & row.keys()
+        with pytest.raises(ScopeDenied):
+            discover.patch(DATASET, row['file_id'], FieldPatch(set_values={'operation': 'ingest'}), context=context())
+    finally:
+        discover.close()
+
+
+@pytest.mark.parametrize('status,stage', [('DELETED', 'DELETE_DONE'), ('COMPLETED', 'SOURCE_DELETED'), ('FAILED', 'FAILED')])
+def test_terminal_deletions_are_not_rediscovered_as_ingestion(records, status, stage):  # noqa: F811
+    _, engine, table = records
+    with engine.begin() as connection:
+        connection.execute(table.update().values(status=status, stage=stage, deletion_request=deletion_intent().model_dump(mode='json'),
+                                                 ingestion_request=intent().model_dump(mode='json')))
+    discover = bind_ingestion_dispatch(engine)
+    try:
+        assert not discover.query(DATASET, RecordQuery(), PageRequest(), context=context()).items
     finally:
         discover.close()
 

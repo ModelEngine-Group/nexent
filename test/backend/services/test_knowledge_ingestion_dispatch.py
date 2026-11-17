@@ -17,7 +17,7 @@ from nexent.storage.models import Page
 def cycle(monkeypatch):
     events = []
     rows = [
-        {"file_id": c * 32, "tenant_id": "tenant-" + c, "user_id": "user-" + c}
+        {"file_id": c * 32, "tenant_id": "tenant-" + c, "user_id": "user-" + c, 'operation': 'ingest'}
         for c in ("a", "b")
     ]
     records = Mock()
@@ -60,6 +60,37 @@ async def test_page_is_closed_before_advance_and_original_actor_is_used(cycle):
     calls = s.coordinator.advance.call_args_list
     assert [c.args[1].user_id for c in calls] == ["user-a", "user-b"]
     assert [c.args[1].tenant_id for c in calls] == ["tenant-a", "tenant-b"]
+
+
+async def test_existing_scan_routes_deletion_to_current_request_actor_without_ingesting(cycle, monkeypatch):
+    s = cycle
+    s.rows[0].update(operation='delete', user_id='deleting-editor')
+    deletion = SimpleNamespace(advance=AsyncMock())
+    factory = Mock(return_value=deletion)
+    monkeypatch.setattr(dispatch, 'default_deletion_coordinator', factory)
+    assert await dispatch.dispatch_once(s.coordinator, stop=Event()) == (2, 'next-page')
+    factory.assert_called_once_with(s.coordinator)
+    args = deletion.advance.call_args.args
+    assert args[0] == 'a' * 32 and args[1].user_id == 'deleting-editor' and args[1].tenant_id == 'tenant-a'
+    s.coordinator.advance.assert_awaited_once()
+    assert s.coordinator.advance.call_args.args[0] == 'b' * 32
+
+
+async def test_expected_deletion_cas_race_skips_only_that_row(cycle, monkeypatch):
+    from management.services.knowledge_base.deletion_journal import DeletionPhaseChanged
+
+    s = cycle
+    s.rows[0]['operation'] = 'delete'
+    deletion = SimpleNamespace(advance=AsyncMock(side_effect=DeletionPhaseChanged()))
+    monkeypatch.setattr(dispatch, 'default_deletion_coordinator', Mock(return_value=deletion))
+    assert await dispatch.dispatch_once(s.coordinator, stop=Event()) == (1, 'next-page')
+    assert deletion.advance.await_count == s.coordinator.advance.await_count == 1
+
+
+def test_default_deletion_reuses_existing_cleanse_and_agentos_client():
+    ingestion = dispatch.default_coordinator()
+    deletion = dispatch.default_deletion_coordinator(ingestion)
+    assert deletion.cleanse is ingestion.cleanse and deletion.client is ingestion.client
 
 
 async def test_serve_preserves_cursor_then_wraps_without_replaying_submit(cycle):

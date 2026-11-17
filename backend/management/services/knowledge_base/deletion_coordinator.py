@@ -10,7 +10,10 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.errors.exceptions import RuntimeUpstreamError
-from management.services.knowledge_base.deletion_journal import DeletionJournal
+from management.services.knowledge_base.deletion_journal import (
+    DeletionJournal,
+    DeletionPhaseChanged,
+)
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
@@ -18,7 +21,7 @@ from management.services.knowledge_base.ingestion_coordinator import (
     IngestionCancellation,
 )
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.storage.models import OperationContext
 
 from infrastructure.knowledge_deletion import knowledge_deletion_ports
@@ -89,7 +92,7 @@ class DeletionCoordinator:
         with self.ports(actor, context=context) as (records, resources):
             journal, row, _ = self._validated(records, resources, previous['file_id'], actor, context)
             if row['version'] != previous['version']:
-                raise Conflict()
+                raise DeletionPhaseChanged()
             return getattr(journal, method)(row, *args, context=context, **kwargs)
 
     def _delete_source(self, previous, actor, context):
@@ -101,13 +104,18 @@ class DeletionCoordinator:
         with self.ports(actor, context=context) as (records, resources):
             _, row, _ = self._validated(records, resources, previous['file_id'], actor, context)
             if row['version'] != previous['version']:
-                raise Conflict()
+                raise DeletionPhaseChanged()
             with deletion_source_objects(row, actor, context=context) as objects:
                 return SourceDeletion(records, objects).advance(row, context=context)
 
     async def advance(self, file_id, actor, *, context=None):
         async with self._operation(context, file_id) as operation:
             row, intent = await self._blocking('load', self._load, file_id, actor, operation)
+            if DeletionJournal.awaiting_source(row):
+                row = await self._blocking('activate', self._change, row, actor, operation, 'activate')
+                if DeletionJournal.awaiting_source(row):
+                    return row
+                row, intent = await self._blocking('load-activated', self._load, file_id, actor, operation)
             if row['stage'] in {'DELETE_DONE', 'SOURCE_DELETED'}:
                 return row
             if intent.scope == 'full':

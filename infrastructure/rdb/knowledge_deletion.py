@@ -27,7 +27,7 @@ def deletion_catalog():
         "source_key", "source_revision", "source_sha256", "deletion_request",
         "version", "deleted_at", "created_by", "updated_by", "create_time", "update_time",
         "delete_flag", "bucket_name", "file_size", "storage_object_id", "uploaded_at",
-        "upload_owner_service", "source_upload_sha256",
+        "upload_owner_service", "source_upload_sha256", "error_code",
     )
     integers = {"knowledge_id", "source_generation", "version", "file_size", "storage_object_id"}
     definition = DatasetDefinition(

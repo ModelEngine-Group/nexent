@@ -90,6 +90,7 @@ def file_read_catalog():
         "delete_flag",
         "created_by",
         "updated_by",
+        'deletion_request',
     )
     integers = {"knowledge_id", "file_size", "processed_chunks", "total_chunks"}
     definition = DatasetDefinition(
@@ -98,7 +99,7 @@ def file_read_catalog():
         tuple(
             FieldDefinition(
                 name,
-                "integer" if name in integers else "string",
+                'object' if name == 'deletion_request' else "integer" if name in integers else "string",
                 nullable=files.c[name].nullable,
             )
             for name in names

@@ -43,3 +43,11 @@ def test_reader_consumes_all_si_pages_without_cross_kb_rows(reader):  # noqa: F8
     assert len(rows) == 1001 and len({row["file_id"] for row in rows}) == 1001
     assert {row["knowledge_id"] for row in rows} == {1}
     assert reader.opened == [("tenant-a", "user-a")]
+
+
+def test_internal_file_read_carries_pending_delete_to_projection(reader):  # noqa: F811
+    with reader.engine.begin() as connection:
+        connection.execute(reader.table.update().where(reader.table.c.tenant_id == 'tenant-a').values(
+            status='UPLOADING', stage='SOURCE_UPLOAD', deletion_request={'scope': 'full', 'user_id': 'editor-b'}))
+    (row,) = reader.service.files('kb-one', reader.actor, context=context())
+    assert row['deletion_request']['scope'] == 'full'

@@ -4,7 +4,10 @@
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
 from management.services.file.source_publish import validate_scope
-from management.services.knowledge_base.deletion_journal import DeletionJournal
+from management.services.knowledge_base.deletion_journal import (
+    DeletionJournal,
+    DeletionPhaseChanged,
+)
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown
 from nexent.storage.models import (
@@ -56,7 +59,7 @@ class SourceDeletion:
                 journal = DeletionJournal(tx)
                 current = journal.record(row['file_id'], context=context)
                 if current['version'] != row['version']:
-                    raise Conflict()
+                    raise DeletionPhaseChanged()
                 intent = journal.request(current)
                 ledger = self._ledger(tx, current, intent, context)
                 if ledger is not None and ledger['status'] == 'COMMITTED':
@@ -105,7 +108,7 @@ class SourceDeletion:
                 raise Conflict()
             if not source.version.startswith('version:') and (
                 not source.version.startswith('etag:') or row['source_upload_sha256'] != source.sha256
-                or not row['upload_owner_service'] or row['uploaded_at'] is None
+                or not row['upload_owner_service'] or row['storage_object_id'] is None
             ):
                 # Unversioned deletion needs the closed single-publisher path, never a guessed legacy owner.
                 raise OutcomeUnknown(operation_id=context.operation_id)
