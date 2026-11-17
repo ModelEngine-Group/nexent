@@ -299,3 +299,23 @@ def test_old_queued_job_gets_its_prefix_attested_before_any_execution(release):
     actual = public.records.get('file_cleanse_jobs', row['id'], context=context())
     assert actual['artifact_prefix'] == row['artifact_prefix'] and actual['reconcile_required']
     assert actual['execution_ended'] is False
+
+
+@pytest.mark.parametrize('target', ['shared', 'other-job', 'other-source', 'other-space'])
+def test_private_prefix_cannot_confirm_cleanup_of_an_unowned_artifact(release, target):
+    s = release
+    public, _state, _prefix = s.completed()
+    row = public.records.query('file_cleanse_jobs', RecordQuery(), PageRequest(limit=1), context=context()).items[0]
+    reference = dict(row['artifact'])
+    if target == 'shared':
+        reference['key'] = 'artifacts/shared/' + reference['sha256'] + '.json'
+    elif target == 'other-job':
+        reference['key'] = reference['key'].replace(row['job_id'], 'e' * 32)
+    elif target == 'other-source':
+        reference['key'] = reference['key'].replace(knowledge_request().source.sha256, 'e' * 64)
+    else:
+        reference['space'] = 'other'
+    public.records.patch('file_cleanse_jobs', row['id'], FieldPatch(set_values={'artifact': reference}), context=context())
+    with pytest.raises(Conflict):
+        s.cleanup()
+    assert not s.opened and not s.objects.deleted

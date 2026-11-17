@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Resource-authorized release retains uploader identity and never replays a delete."""
 
-from contracts.agentos_knowledge import cleanse_output_prefix
+from contracts.agentos_knowledge import ObjectReference, cleanse_output_prefix
 from contracts.knowledge_cleanse import cleanse_lookup, parse_cleanse_request
 from management.services.file.cleanse_cancellation import require_knowledge_cleanup
 from management.services.file.cleanse_jobs import DATASET
@@ -72,6 +72,14 @@ def release_knowledge_artifacts(jobs, resources, reference, *, user_id, context,
                 continue
             if row['artifact_prefix'] != prefix:
                 raise Conflict()
+            if row['artifact'] is not None:
+                try:
+                    artifact = ObjectReference.model_validate(row['artifact'])
+                except (TypeError, ValueError):
+                    raise Conflict() from None
+                expected = prefix + 'artifacts/' + request.source.sha256 + '/' + artifact.sha256 + '.json'
+                if artifact.space != request.source.space or artifact.key != expected:
+                    raise Conflict()
             authorize()
             objects = bind_knowledge_cleanse_artifacts(jobs.scope.tenant_id, user_id, selected, request.source, context=context)
             try:

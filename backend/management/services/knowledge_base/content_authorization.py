@@ -9,6 +9,7 @@ from contracts.agentos_knowledge import (
     ObjectReference,
 )
 from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
+from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
@@ -28,20 +29,16 @@ class KnowledgeContentAuthorization:
     def authorize(self, request, *, context):
         if not isinstance(request, KnowledgeContentRequest):
             raise ScopeDenied()
-        file, _ = self.resources.resolve(request, edit=False, context=context)
-        try:
-            source = ObjectReference(
-                space=file["source_space"],
-                key=file["source_key"],
-                version=file["source_revision"],
-                sha256=file["source_sha256"],
-            )
-        except ValueError:
-            raise ScopeDenied() from None
+        image = request.image_ref is not None
+        file, knowledge = self.resources.resolve(request, edit=False, history=image, context=context)
+        if image and (file['delete_flag'] != 'N' or file['status'] in {'DELETE_REQUESTED', 'DELETED'}
+                      or file['source_generation'] != request.file_version):
+            raise ScopeDenied()
+        source = self._source(file, knowledge, request)
         if source.space != "files":
             raise ScopeDenied()
         selected = source
-        if request.image_ref is not None:
+        if image:
             if request.image_ref.space != "files":
                 raise ScopeDenied()
             self._image(request, source, context)
@@ -52,6 +49,30 @@ class KnowledgeContentAuthorization:
             filename=file["original_filename"],
         )
 
+    @staticmethod
+    def _source(file, knowledge, request):
+        try:
+            if file['deletion_request'] is not None:
+                intent = KnowledgeDeletionIntent.model_validate(file['deletion_request'])
+                if (request.image_ref is None or intent.scope != 'source_only' or file['status'] != 'COMPLETED'
+                        or file['stage'] != 'SOURCE_DELETED' or intent.index_name != knowledge['index_name']
+                        or any(getattr(intent, key) != file[column] for key, column in (
+                            ('knowledge_id', 'knowledge_id'), ('file_id', 'file_id'), ('file_version', 'source_generation'),
+                            ('filename', 'original_filename'), ('object_name', 'object_name'),
+                        )) or intent.source.key != file['object_name'] or any(file[key] is not None for key in (
+                            'source_space', 'source_key', 'source_revision', 'source_sha256',
+                        ))):
+                    raise ScopeDenied()
+                return intent.source
+            return ObjectReference(
+                space=file["source_space"],
+                key=file["source_key"],
+                version=file["source_revision"],
+                sha256=file["source_sha256"],
+            )
+        except (TypeError, ValueError):
+            raise ScopeDenied() from None
+
     def _image(self, request, source, context):
         terms = tuple(
             Comparison(name, "eq", value)
@@ -61,6 +82,7 @@ class KnowledgeContentAuthorization:
                 "file_id": request.file_id,
                 "file_version": request.file_version,
                 "status": "completed",
+                'reconcile_required': False,
             }.items()
         )
         cursor = None
