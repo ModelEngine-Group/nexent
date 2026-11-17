@@ -3,6 +3,7 @@
 "use client";
 
 import i18next from "i18next";
+import { recordNl2AgentState } from "./nl2agent-state-history";
 import {
   persistModelDrafts,
   snapshotModelDrafts,
@@ -133,7 +134,21 @@ export interface Nl2aToolRecommendation {
 export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
-  | "installed_resource_binding";
+  | "installed_resource_binding"
+  | "requirement_coverage"
+  | "prompt_generation"
+  | "resource_recommendation";
+
+export interface Nl2aPromptGenerationPayload {
+  subtype: "prompt_generation";
+  agent_id: number;
+  conversation_id: string;
+  run_id: string;
+  card_id: string;
+  prompt_revision: string;
+  proposed_prompt: string;
+  status: "pending" | "applied" | "cancelled";
+}
 
 export interface Nl2AgentCardAction {
   type: "nl2agent_card_action";
@@ -148,9 +163,29 @@ export type Nl2AgentDraftField =
   | "display_name"
   | "description"
   | "enable_protocol_repair_retry"
+  | "model_ids"
+  | "related_agents"
+  | "group_ids"
+  | "ingroup_permission"
+  | "is_main_agent"
+  | "is_a2a"
+  | "tags"
+  | "verification_config"
+  | "max_steps"
+  | "provide_run_summary"
+  | "allow_chat_metadata"
   | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
+  | {
+      event: "resource_retrieval_progress";
+      agent_id: number;
+      run_id: string;
+      sequence: number;
+      stage: "preparing_embeddings" | "computing_similarity" | "verifying_capabilities" | "fallback_to_text" | "searching_text" | "searching_hybrid";
+      completed?: number;
+      total?: number;
+    }
   | {
       event: "agent_draft_fields_saved";
       agent_id: number;
@@ -185,6 +220,43 @@ export interface Nl2aRequirementClarificationPayload {
   subtype: "requirement_clarification";
   agent_id: number;
   questions: Nl2aRequirementClarificationQuestion[];
+  protocol_version?: 2;
+  requirements?: Nl2aResourceRequirement[];
+  card_id?: string;
+  state_version?: number;
+  conversation_id?: string;
+}
+
+interface Nl2aCoverageResource {
+  candidate_ref: string;
+  name: string;
+  resource_type?: "tool" | "skill" | "mcp_server";
+  source?: string;
+  retrieval_score?: number;
+  installation_status?: "installed" | "disabled";
+}
+
+export interface Nl2aResourceRequirement {
+  requirement_id: string;
+  query: string;
+  required: boolean;
+  coverage_status: "covered" | "installable" | "uncovered";
+  covered_resources: Nl2aCoverageResource[];
+  installable_resources: Nl2aCoverageResource[];
+}
+
+export interface Nl2aResourceCardIdentity {
+  protocol_version: 2;
+  conversation_id: string;
+  run_id: string;
+  card_id: string;
+  state_version: number;
+  requirements: Nl2aResourceRequirement[];
+}
+
+export interface Nl2aCoveragePayload extends Nl2aResourceCardIdentity {
+  subtype: "requirement_coverage" | "resource_recommendation";
+  agent_id: number;
 }
 
 export type Nl2aLocalMcpRecommendationPayload =
@@ -221,6 +293,10 @@ export interface Nl2aInstalledResourceBindingPayload {
   subtype: "installed_resource_binding";
   agent_id: number;
   resources: Nl2aRecommendedResource[];
+  protocol_version?: 2;
+  requirements?: Nl2aResourceRequirement[];
+  card_id?: string;
+  state_version?: number;
 }
 
 export interface Nl2aResourceCandidate {
@@ -272,6 +348,7 @@ export type Nl2aRecommendedResource =
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      has_config?: boolean;
       knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
       knowledge_bound_values?: string[];
       form_kind: "TOOL_CONFIG";
@@ -281,6 +358,7 @@ export type Nl2aRecommendedResource =
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      has_config?: boolean;
       knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
       knowledge_bound_values?: string[];
       form_kind: "SKILL_CONFIG";
@@ -291,9 +369,11 @@ export type Nl2aPromptField =
   "prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
+  | Nl2aPromptGenerationPayload
   | Nl2aRequirementClarificationPayload
   | Nl2aLocalMcpRecommendationPayload
   | Nl2aAgentDraftPayload
+  | Nl2aCoveragePayload
   | Nl2aSuggestedResourceInstallationPayload
   | Nl2aInstalledResourceBindingPayload;
 
@@ -831,7 +911,32 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
 export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
     const content = JSON.parse(chunk.content) as Nl2aPayload;
-    if (content.subtype === "requirement_clarification") {
+    if (content.subtype === "prompt_generation") {
+      if (!Number.isSafeInteger(content.agent_id) || content.agent_id <= 0 ||
+          typeof content.card_id !== "string" || !content.card_id ||
+          typeof content.prompt_revision !== "string" || !content.prompt_revision ||
+          typeof content.conversation_id !== "string" || !content.conversation_id ||
+          typeof content.run_id !== "string" || !content.run_id ||
+          typeof content.proposed_prompt !== "string" || !content.proposed_prompt.trim() ||
+          !["pending", "applied", "cancelled"].includes(content.status)) return null;
+      return { type: "nl2a", content };
+    }
+    if ("protocol_version" in content && content.protocol_version === 2) {
+      if (
+        !Number.isSafeInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !content.card_id ||
+        !Number.isSafeInteger(content.state_version) ||
+        !Array.isArray(content.requirements) ||
+        content.requirements.some(
+          (row) => !row.requirement_id || typeof row.query !== "string" ||
+            typeof row.required !== "boolean" ||
+            !["covered", "installable", "uncovered"].includes(row.coverage_status) ||
+            !Array.isArray(row.covered_resources) || !Array.isArray(row.installable_resources)
+        )
+      ) return null;
+    }
+    if (content.subtype === "requirement_clarification" && content.protocol_version !== 2) {
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
@@ -848,7 +953,7 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
         !Array.isArray(content.resources) ||
-        content.resources.length > 12 ||
+        (content.protocol_version !== 2 && content.resources.length > 12) ||
         content.resources.some(
           (resource) =>
             !resource?.candidate?.candidate_ref ||
@@ -921,6 +1026,18 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
     if (!Number.isInteger(parsed.agent_id) || Number(parsed.agent_id) <= 0) {
       return null;
     }
+    if (parsed.event === "resource_retrieval_progress") {
+      const allowed = new Set(["event", "agent_id", "run_id", "sequence", "stage", "completed", "total"]);
+      const stages = new Set(["preparing_embeddings", "computing_similarity", "verifying_capabilities", "fallback_to_text", "searching_text", "searching_hybrid"]);
+      if (Object.keys(parsed).some((key) => !allowed.has(key)) ||
+          typeof parsed.run_id !== "string" || !parsed.run_id || parsed.run_id.length > 100 ||
+          !Number.isSafeInteger(parsed.sequence) || Number(parsed.sequence) < 1 ||
+          !stages.has(String(parsed.stage))) return null;
+      if ((parsed.completed !== undefined || parsed.total !== undefined) &&
+          (!Number.isSafeInteger(parsed.completed) || !Number.isSafeInteger(parsed.total) ||
+           Number(parsed.total) <= 0 || Number(parsed.completed) < 0 || Number(parsed.completed) > Number(parsed.total))) return null;
+      return parsed as unknown as Nl2AgentStateEvent;
+    }
     const promptFields = new Set<Nl2aPromptField>([
       "prompt",
       "greeting_message",
@@ -953,6 +1070,8 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "display_name",
       "description",
       "enable_protocol_repair_retry",
+      "model_ids", "related_agents", "group_ids", "ingroup_permission", "is_main_agent",
+      "is_a2a", "tags", "verification_config", "max_steps", "provide_run_summary", "allow_chat_metadata",
       ...promptFields,
     ]);
     if (
@@ -2230,6 +2349,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return true;
     };
     const deliveredNl2AgentStates = new Set<string>();
+    let workflowStates: Nl2AgentStateEvent[] = [];
     const upsertCreatedAgentPart = (completed: boolean) => {
       if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
@@ -2254,6 +2374,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         log.warn("[ChatModelAdapter] Ignored invalid nl2a_state payload");
         return;
       }
+      if (event.agent_id !== Number(nl2AgentId)) return;
+      workflowStates = recordNl2AgentState(workflowStates, event);
       const eventKey = JSON.stringify(event);
       if (event.event !== "agent_draft_fields_saved") {
         if (deliveredNl2AgentStates.has(eventKey)) return;
@@ -2353,7 +2475,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
+      metadata: nl2a || workflowStates.length ? { custom: {
+        ...(nl2a ? { nl2a } : {}), ...(workflowStates.length ? { nl2agentStates: workflowStates } : {}),
+      } } : undefined,
     });
 
     const streamStartTime = Date.now();

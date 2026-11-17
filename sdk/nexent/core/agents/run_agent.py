@@ -382,6 +382,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if callable(mcp_host_item.get("on_tool_result")):
+            result["on_tool_result"] = mcp_host_item["on_tool_result"]
+
         if "httpx_client_factory" in mcp_host_item:
             httpx_client_factory = mcp_host_item["httpx_client_factory"]
             if not callable(httpx_client_factory):

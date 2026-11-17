@@ -1,0 +1,37 @@
+schema_version: '1.0'
+case_id: NL2A-COVERAGE-D3-001
+timeout_seconds: 240
+implementations:
+- framework: pytest
+  file: test_runtime.py
+  selector: test_
+acceptance_bindings:
+  AC-ES-SEARCH-CONCURRENCY:
+  - test_es_search_concurrency_runtime
+  - test_es_search_cancellation_cleanup
+  AC-ES-AUTHORIZED-RESOURCES:
+  - test_es_authorized_resources_and_revision_conflicts
+  - test_es_backend_user_scope_before_search
+  AC-KNOWLEDGE-PRIORITY:
+  - test_knowledge_priority_runtime
+  AC-SEMANTIC-RECALL:
+  - test_semantic_recall_runtime
+  - test_top3_hybrid_uncovered_runtime
+  AC-COVERAGE:
+  - test_coverage_return_and_generation
+  AC-RETURN-AND-CONTINUE:
+  - test_coverage_return_and_generation
+  AC-LINKED-RECHECK:
+  - test_linked_installation_reenters_verification
+  AC-BILINGUAL-RECALL:
+  - test_bilingual_recall_and_edited_requirement
+  AC-SEARCH-ALTERNATIVES:
+  - test_search_alternatives_runtime
+  - test_top3_hybrid_uncovered_runtime
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Agent configuration proof. The local runner supplies disposable PostgreSQL Redis and disposable ES connections. The
+  case owns and cleans its ES indices, schema, Redis key, model and MCP listeners, workspace, and workers and verifies cleanup.

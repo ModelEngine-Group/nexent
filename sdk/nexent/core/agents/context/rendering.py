@@ -97,7 +97,7 @@ def _render_tool_arguments(arguments: Any) -> str:
     return escape(value)
 
 
-def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
+def _render_current_action(item: ContextItem, *, result_role: str = "assistant") -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
     from .execution_history import result_text
@@ -163,13 +163,15 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if c.get("output_ref"):
         parts.append("<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>")
     parts.extend(["</completed_action>", "</completed_action_history>"])
-    return [_text_message("assistant", "\n".join(parts))]
+    return [_text_message(result_role, "\n".join(parts))]
 
 
 class ContextItemRenderer:
     """Registry-backed renderer that consumes only the selected item values."""
 
-    def __init__(self, handlers: dict[ContextItemType, ItemHandler] | None = None):
+    def __init__(
+        self, handlers: dict[ContextItemType, ItemHandler] | None = None, *, execution_result_role: str = "assistant",
+    ):
         self._handlers = {
             ContextItemType.SYSTEM: lambda item: _render_text(item, default_role="system"),
             ContextItemType.KNOWLEDGE_BASE: lambda item: _render_text(item, default_role="user"),
@@ -177,7 +179,7 @@ class ContextItemRenderer:
             ContextItemType.CONVERSATION_TURN: _render_turn,
             ContextItemType.CURRENT_TASK: lambda item: _render_text(item, default_role="user"),
             ContextItemType.CURRENT_PLANNING: lambda item: _render_text(item, default_role="assistant"),
-            ContextItemType.CURRENT_ACTION: _render_current_action,
+            ContextItemType.CURRENT_ACTION: lambda item: _render_current_action(item, result_role=execution_result_role),
         }
         self._handlers.update(handlers or {})
 

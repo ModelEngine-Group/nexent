@@ -111,13 +111,15 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
   enableUploadImage?: boolean;
-  onAdded: () => void;
+  enableOnCreate?: boolean;
+  onAdded: (name: string, mcpId?: number) => void;
   onSubmittingChange?: (submitting: boolean) => void;
 }
 
 export default function AddMcpServiceLocalSection({
   active,
   enableUploadImage = false,
+  enableOnCreate,
   onAdded,
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
@@ -140,11 +142,12 @@ export default function AddMcpServiceLocalSection({
   const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
   const { submit, submitting } = useMcpAddLocal({
-    onSuccess: () => {
+    enableOnCreate,
+    onSuccess: (name, mcpId) => {
       setDraft(createInitialDraft());
       setDeploymentType(McpDeploymentType.REMOTE_LINK);
       form.resetFields();
-      onAdded();
+      onAdded(name, mcpId);
     },
     onContainerStarted: (containerId) => setDeployedContainerId(containerId),
   });

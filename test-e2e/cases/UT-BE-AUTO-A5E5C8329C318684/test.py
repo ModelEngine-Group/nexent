@@ -37,7 +37,7 @@ RUNTIME_LANES = {
 }
 CONFIG_LANES = {'control-io', 'background-service', 'evaluation', 'model-tool-io'}
 NORTHBOUND_LANES = {'control-io', 'background-service', 'model-tool-io'}
-MCP_LANES = {'control-io', 'background-service'}
+MCP_LANES = {'control-io', 'background-service', 'model-tool-io'}
 
 
 def _assert_policy(policy, lane_name, max_workers, max_queue_size,
@@ -123,6 +123,7 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
         assert policy.name == lane
     _assert_policy(mcp._policies['control-io'], 'control-io', 8, 16, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
     _assert_policy(mcp._policies['background-service'], 'background-service', 12, 8, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+    _assert_policy(mcp._policies['model-tool-io'], 'model-tool-io', 6, 16, 0, 5, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
 
     for i, left in enumerate(managers):
         for right in managers[i + 1:]:
@@ -183,6 +184,7 @@ async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
                 assert runtime_thread_manager.snapshot().active_count == 0
 
     await _check_northbound_model_lane_isolation(nb)
+    await _check_northbound_model_lane_isolation(mcp)
     for secret in ('sk-', 'api_key=', 'password=', 'authorization: bearer'):
         assert secret not in caplog.text.lower()
 

@@ -3,6 +3,7 @@
 from management.utils.orm import as_dict, filter_property
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 import logging
+from contextlib import contextmanager
 from typing import List, Optional, Sequence, Tuple
 from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
 from sqlalchemy.orm import aliased
@@ -18,6 +19,22 @@ from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitE
 from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
+
+
+@contextmanager
+def agent_draft_operation_lock(agent_id: int, tenant_id: str, operation: str):
+    """Serialize recoverable draft operations across processes without waiting.
+
+    The owning transaction releases the advisory lock even after process failure.
+    This is separate from row locks so existing conditional update helpers can
+    commit on their own connections while the operation remains serialized.
+    """
+    with get_db_session() as session:
+        acquired = session.execute(
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": f"agent-draft:{tenant_id}:{agent_id}:{operation}"},
+        ).scalar()
+        yield bool(acquired)
 
 
 def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
@@ -496,6 +513,8 @@ def update_agent_draft_fields(
     agent_id: int,
     tenant_id: str,
     fields: dict,
+    *,
+    expected_fields: dict | None = None,
 ) -> int:
     """Update only explicit AgentInfo draft fields within one tenant."""
     if not fields:
@@ -510,6 +529,7 @@ def update_agent_draft_fields(
                 AgentInfo.tenant_id == tenant_id,
                 AgentInfo.version_no == 0,
                 AgentInfo.delete_flag != "Y",
+                *(getattr(AgentInfo, key) == value for key, value in (expected_fields or {}).items()),
             )
             .values(**values)
         )
@@ -821,6 +841,8 @@ def update_related_agents(
     related_agents: Optional[List[dict]] = None,
     version_no: int = 0,
     allow_system: bool = False,
+    *,
+    expected_relations: dict[int, int | None] | None = None,
 ):
     """
     Update related agents for a parent agent by replacing all existing relations.
@@ -840,6 +862,11 @@ def update_related_agents(
     new_related_ids, version_map = _parse_related_agents(related_agents)
 
     with get_db_session() as session:
+        session.query(AgentInfo.agent_id).filter(
+            AgentInfo.agent_id == parent_agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+        ).with_for_update().first()
         current_relations = (
             session.query(AgentRelation)
             .filter(
@@ -852,6 +879,10 @@ def update_related_agents(
         )
 
         current_related_ids = {rel.selected_agent_id for rel in current_relations}
+        if expected_relations is not None and expected_relations != {
+            rel.selected_agent_id: rel.selected_agent_version_no for rel in current_relations
+        }:
+            return False
 
         ids_to_delete = current_related_ids - new_related_ids
         ids_to_add = new_related_ids - current_related_ids
@@ -868,6 +899,8 @@ def update_related_agents(
         _add_new_relations(session, parent_agent_id, tenant_id, user_id, version_no, ids_to_add, version_map)
 
         _update_existing_relations(current_relations, ids_to_update, version_map, user_id)
+    if expected_relations is not None:
+        return True
 
 
 def delete_agent_relationship(

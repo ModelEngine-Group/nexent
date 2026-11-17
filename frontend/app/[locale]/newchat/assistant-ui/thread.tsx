@@ -145,6 +145,8 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { RequirementCoverageCard } from "../ui/requirement-coverage-card";
+import { PromptGenerationCard } from "../ui/prompt-generation-card";
 import { findRequirementSubmission } from "../ui/requirement-clarification-history";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -1545,7 +1547,21 @@ const AssistantMessage: FC<{
   const isLatestMessage = useAuiState(
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
+  const isLatestResourceCard = useAuiState((s) =>
+    s.thread.messages.findLast((message) => {
+      const card = (message.metadata.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a?.content;
+      return card && "protocol_version" in card && card.protocol_version === 2;
+    })?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const isLatestPromptCard = useAuiState((s) =>
+    s.thread.messages.findLast((message) => {
+      const metadata = message.metadata.custom as { nl2a?: Nl2aMessage; nl2agentStates?: Array<{ event: string; updated_fields?: string[] }> } | undefined;
+      return metadata?.nl2a?.content.subtype === "prompt_generation" || metadata?.nl2agentStates?.some(
+        (event) => event.event === "agent_draft_fields_saved" && event.updated_fields?.includes("prompt")
+      );
+    })?.id === s.message.id
+  );
   const requirementMessages = useAuiState((s) =>
     nl2a?.content.subtype === "requirement_clarification"
       ? s.thread.messages
@@ -1890,7 +1906,20 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "requirement_clarification" ? (
+        {nl2a &&
+        (nl2a.content.subtype === "requirement_coverage" ||
+          nl2a.content.subtype === "resource_recommendation" ||
+          (nl2a.content.subtype === "requirement_clarification" &&
+            nl2a.content.protocol_version === 2)) ? (
+          <RequirementCoverageCard
+            key={nl2a.content.card_id}
+            payload={nl2a.content}
+            disabled={!isLatestResourceCard}
+            readOnly={readOnly}
+          />
+        ) : nl2a?.content.subtype === "prompt_generation" ? (
+          <PromptGenerationCard key={nl2a.content.card_id} payload={nl2a.content} disabled={readOnly || !isLatestPromptCard} />
+        ) : nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
             sourceMessageId={messageId}
@@ -1904,12 +1933,12 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
           <SuggestedResourceInstallationCard
             payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
+            disabled
           />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
-            disabled={readOnly || !isLatestMessage}
+            disabled={readOnly || nl2a.content.protocol_version !== 2 || !isLatestResourceCard}
           />
         ) : null}
         {skillFileAttachments?.length ? (

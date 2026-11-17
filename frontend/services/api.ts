@@ -110,6 +110,9 @@ export const API_ENDPOINTS = {
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
+    nl2agentResourceInstallations: `${API_BASE_URL}/agent/nl2agent/resource_installations`,
+    nl2agentResourceInstallationAttempts: `${API_BASE_URL}/agent/nl2agent/resource_installation_attempts`,
+    nl2agentResourceLinks: `${API_BASE_URL}/agent/nl2agent/resource_links`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     listPage: `${API_BASE_URL}/agent/list/page`,

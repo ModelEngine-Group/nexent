@@ -306,6 +306,7 @@ function AgentSetupContent({
 
   const handleStateEvent = useCallback(
     (event: Nl2AgentStateEvent) => {
+      if (event.event === "resource_retrieval_progress") return;
       if (event.event === "prompt_generation_failed") {
         markPromptGenerationFailed(event.agent_id, event.failed_fields);
         return;
@@ -314,6 +315,9 @@ function AgentSetupContent({
         markGenerationCompleted(event.agent_id);
         synchronizeCompletion(event.agent_id);
         return;
+      }
+      if (event.updated_fields.includes("tags")) {
+        void queryClient.invalidateQueries({ queryKey: ["resourceTagAssignments", "agent"] });
       }
       void enqueueSnapshotRefresh(
         event.agent_id,
@@ -324,6 +328,7 @@ function AgentSetupContent({
       enqueueSnapshotRefresh,
       markGenerationCompleted,
       markPromptGenerationFailed,
+      queryClient,
       synchronizeCompletion,
     ]
   );

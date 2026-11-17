@@ -25,7 +25,7 @@ import {
 } from "@/app/newchat/assistant-ui/nl2agent-chat-panel";
 
 const fixture = vi.hoisted(() => {
-  const state = { isRunning: false };
+  const state = { isRunning: false, messages: [] as unknown[] };
   return {
     state,
     locale: null as "zh" | "en" | null,
@@ -118,6 +118,17 @@ vi.mock("react-i18next", async (importOriginal) => ({
   }),
 }));
 vi.mock("@assistant-ui/react", () => ({
+  useAuiState: (
+    selector: (state: {
+      thread: { messages: unknown[]; isRunning: boolean };
+    }) => unknown
+  ) =>
+    selector({
+      thread: {
+        messages: fixture.state.messages,
+        isRunning: fixture.state.isRunning,
+      },
+    }),
   AssistantRuntimeProvider: ({ children }: { children: ReactNode }) => children,
   useLocalRuntime: (adapter: ChatModelAdapter) => {
     fixture.adapter = adapter;
@@ -154,6 +165,7 @@ vi.mock("@/app/newchat/assistant-ui/thread", () => ({
 afterEach(() => message.destroy());
 
 beforeEach(() => {
+  fixture.state.messages = [];
   vi.clearAllMocks();
   fixture.state.isRunning = false;
   fixture.locale = null;
@@ -166,6 +178,64 @@ beforeEach(() => {
   fixture.controls.canCreate = true;
   fixture.controls.canSend = true;
 });
+
+it.each(["", "Existing agent"])(
+  "requires generation evidence even when draft description is '%s'",
+  async (description) => {
+    const { rerender } = render(
+      <Nl2AgentChatPanel agentId={42} agentDescription={description} />
+    );
+    expect(screen.queryByTestId("nl2agent-workflow-progress")).toBeNull();
+    fixture.state.isRunning = true;
+    fixture.state.messages = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "帮我优化一下提示词，主要是要增加一个示例" },
+        ],
+      },
+    ];
+    await act(async () => {
+      const result = fixture.adapter!.run({
+        messages: fixture.state.messages,
+      } as never);
+      for await (const chunk of result as AsyncIterable<unknown>) void chunk;
+    });
+    rerender(<Nl2AgentChatPanel agentId={42} agentDescription={description} />);
+    expect(screen.queryByTestId("nl2agent-workflow-progress")).toBeNull();
+    fixture.state.messages.push({
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolName: "nl2a_read_generation_context",
+          args: { goal: "prompt", agent_id: 42 },
+        },
+      ],
+    });
+    rerender(<Nl2AgentChatPanel agentId={42} agentDescription={description} />);
+    expect(screen.queryByTestId("nl2agent-workflow-progress")).toBeNull();
+    fixture.state.messages.push({
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolName: "nl2a_read_generation_context",
+          args: { goal: "complete", agent_id: 42 },
+        },
+      ],
+    });
+    rerender(
+      <Nl2AgentChatPanel
+        agentId={42}
+        agentDescription="Generated description"
+      />
+    );
+    expect(
+      screen.getByTestId("nl2agent-workflow-progress")
+    ).toBeInTheDocument();
+  }
+);
 
 it("keeps tenant model controls connected while shared suggestions only fill input", () => {
   render(<Nl2AgentChatPanel agentId={42} agentDescription="Existing agent" />);

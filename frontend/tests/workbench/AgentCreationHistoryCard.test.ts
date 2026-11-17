@@ -3,6 +3,7 @@
 import { expect, it } from "vitest";
 import { RemoteConversationHistoryAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import type { ApiConversationDetail } from "@/types/conversation";
+import { projectNl2AgentWorkflow } from "@/app/newchat/assistant-ui/nl2agent-workflow-state";
 
 async function restore(
   units: Array<{ type: string; content: string }>,
@@ -24,6 +25,63 @@ async function restore(
   );
   return adapter.load();
 }
+
+it("restores trusted matching facts for the workflow header without trusting cross-target events", async () => {
+  const event = {
+    event: "resource_retrieval_progress",
+    agent_id: 17,
+    run_id: "saved-run",
+    sequence: 1,
+    stage: "searching_hybrid",
+  };
+  const history = await restore([
+    { type: "nl2a_state", content: JSON.stringify(event) },
+    {
+      type: "nl2a_state",
+      content: JSON.stringify({
+        ...event,
+        agent_id: 99,
+        stage: "fallback_to_text",
+        sequence: 2,
+      }),
+    },
+    { type: "final_answer", content: "All done" },
+  ]);
+  const messages = history.messages.map((item) => item.message);
+  const view = projectNl2AgentWorkflow({
+    agentId: 17,
+    messages,
+    isRunning: false,
+    phase: "idle",
+  });
+  expect(view.current).toBe(1);
+  expect(view.mode).toBe("hybrid");
+  expect(view.fallback).toBe(false);
+  expect(view.status).toBe("paused");
+});
+
+it("does not print structured workflow events as assistant prose when history has no final answer", async () => {
+  const history = await restore([
+    {
+      type: "nl2a_state",
+      content: JSON.stringify({
+        event: "resource_retrieval_progress",
+        agent_id: 17,
+        run_id: "run",
+        sequence: 1,
+        stage: "searching_text",
+      }),
+    },
+  ]);
+  const text = history.messages
+    .map((item) =>
+      item.message.content
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("")
+    )
+    .join("");
+  expect(text).not.toContain("resource_retrieval_progress");
+});
 
 it("restores a completed Agent card in the historical assistant message", async () => {
   const history = await restore([

@@ -16,6 +16,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
+    VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
     create_nl2agent_mcp_tool_configs,
 )
 
@@ -42,6 +43,7 @@ def build_nl2agent_system_prompt(
             "recommend_tool_name": recommend_tool_name,
             "wrapper_name": wrapper_name,
             "save_tool_name": save_tool_name,
+            "validate_completion_tool_name": VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
             "max_results": max_results,
         },
     )

@@ -573,35 +573,19 @@ async def delete_mcp_by_container_id(
         )
 
 
-async def get_remote_mcp_server_list(
-    tenant_id: str,
-    user_id: str | None = None,
-    is_need_auth: bool = True,
-) -> list[dict]:
-    """Get list of remote MCP servers with full details.
-
-    Args:
-        tenant_id: Tenant ID
-        user_id: User ID for permission checking
-        is_need_auth: Whether to include authorization tokens
-
-    Returns:
-        List of MCP server records with all fields including container_id, description,
-        enabled, source, update_time, tags, container_port, registry_json, config_json,
-        container_status, and authorization_token
-    """
+def list_visible_mcp_records(
+    tenant_id: str, user_id: str | None, *, strict: bool = False,
+) -> tuple[list[dict], list[str] | None]:
+    """Load MCP records and group membership without querying container status."""
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
-    mcp_records_list = []
-    can_edit_all = False
     user_groups: list[str] | None = None
     if user_id:
-        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-        user_role = roles_from_record(user_tenant_record)
-        can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
         try:
             raw_groups = query_group_ids_by_user(user_id) or []
             user_groups = [str(g) for g in raw_groups]
         except Exception:
+            if strict:
+                raise
             user_groups = []
 
     if user_groups is not None:
@@ -631,6 +615,22 @@ async def get_remote_mcp_server_list(
             f"total={len(mcp_records)}, filtered={len(filtered_records)}"
         )
         mcp_records = filtered_records
+    return mcp_records, user_groups
+
+
+async def get_remote_mcp_server_list(
+    tenant_id: str,
+    user_id: str | None = None,
+    is_need_auth: bool = True,
+) -> list[dict]:
+    """Get visible remote MCP servers with connection and container details."""
+    can_edit_all = False
+    if user_id:
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = roles_from_record(user_tenant_record)
+        can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
+    mcp_records, user_groups = list_visible_mcp_records(tenant_id, user_id)
+    mcp_records_list = []
 
     container_status_map = {}
     try:

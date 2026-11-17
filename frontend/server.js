@@ -822,7 +822,7 @@ function handleAllApiProxy(pathname, req, res) {
   // 2. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
-    "/api/agent/nl2agent/run",
+    "/api/agent/nl2agent/",
     "/api/agent/human-interactions",
     "/api/skills/nl2skill/run",
     "/api/agent/stop",

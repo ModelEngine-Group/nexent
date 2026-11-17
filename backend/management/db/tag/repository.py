@@ -788,6 +788,8 @@ class TagManagementDB:
         library_code: str,
         value_ids: list[int],
         actor_id: str,
+        *,
+        remove_value_ids: list[int] | None = None,
     ) -> list[dict[str, Any]]:
         """Atomically replace one resolved resource's controlled assignments."""
 
@@ -807,6 +809,12 @@ class TagManagementDB:
                 .with_for_update()
                 .all()
             )
+            if remove_value_ids is not None:
+                removed = set(remove_value_ids)
+                value_ids = list(dict.fromkeys([
+                    *(assignment.value_id for assignment in existing_assignments if assignment.value_id not in removed),
+                    *value_ids,
+                ]))
             value_rows = TagManagementDB._load_assignable_values(session, tenant_id, binding.bucket_id, value_ids)
             TagManagementDB._validate_replacement_values(value_ids, value_rows)
 

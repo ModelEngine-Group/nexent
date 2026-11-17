@@ -3,6 +3,8 @@
 "use client";
 
 import { getCreatorMode } from "@/lib/creatorConversation";
+import { recordNl2AgentState } from "./nl2agent-state-history";
+import type { Nl2AgentStateEvent } from "./remote-chat-model-adapter";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -501,6 +503,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       const content: any[] = [];
       let historicalCardAction: Nl2AgentCardAction | null = null;
+      let historicalWorkflowStates: Nl2AgentStateEvent[] = [];
       let historicalNl2a:
         import("./remote-chat-model-adapter").Nl2aMessage | null = null;
 
@@ -523,6 +526,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 suggested_resource_installation:
                   "Resource installation completed",
                 installed_resource_binding: "Resource selection completed",
+                requirement_coverage: "Requirements confirmed",
+                resource_recommendation: "Recommended resources selected",
+                prompt_generation: action.action === "cancel" ? "Prompt replacement cancelled" : "Prompt application confirmed",
               }[action.subtype] || "Agent creation continued";
           }
         } catch {
@@ -768,6 +774,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
           if (part.type === "nl2a_state") {
             const state = parseNl2AgentState(part.content);
+            if (state && getCreatorMode(detail) === "agent_create" &&
+                detail.target?.type === "agent" && state.agent_id === detail.target.id) {
+              historicalWorkflowStates = recordNl2AgentState(historicalWorkflowStates, state);
+            }
             if (
               getCreatorMode(detail) === "agent_create" &&
               state?.event === "agent_generation_completed"
@@ -1290,7 +1300,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         if (content.length === 0) {
           const fallbackText = messageParts
-            .filter((part) => part.type !== "skill_file_uploads")
+            .filter((part) => !["skill_file_uploads", "nl2a_state", "nl2a"].includes(part.type))
             .map((part) => part.content)
             .join("\n");
           if (fallbackText) content.push({ type: "text", text: fallbackText });
@@ -1379,7 +1389,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       // An NL2Agent turn may consist only of an interactive card boundary.
       // Keep the message so its restored metadata can render the card.
-      if (historicalNl2a && content.length === 0) {
+      if ((historicalNl2a || historicalWorkflowStates.length > 0) && content.length === 0) {
         content.push({ type: "text", text: "" });
       }
 
@@ -1416,6 +1426,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             ? { nl2agentCardAction: historicalCardAction }
             : {}),
           ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
+          ...(historicalWorkflowStates.length ? { nl2agentStates: historicalWorkflowStates } : {}),
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
           ...(msg.role === "user" && msg.annotations?.length
             ? { annotations: fromMessageAnnotationWireItems(msg.annotations) }

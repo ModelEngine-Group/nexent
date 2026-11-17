@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useId, useMemo, useReducer, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Input, InputNumber, Modal, Select } from "antd";
@@ -37,7 +37,7 @@ import {
   fetchOfficialSkillsWithStatus,
 } from "@/services/skillService";
 import skillRepositoryService from "@/services/skillRepositoryService";
-import { toApiError, type ApiError } from "@/services/api";
+import { ApiError, toApiError } from "@/services/api";
 import type { CommunityQuickAddDraft } from "@/types/mcpTools";
 import type {
   Nl2AgentCardAction,
@@ -209,12 +209,54 @@ const requireMcpId = async (name: string): Promise<number> => {
 const needsConfiguration = (resource: Nl2aInstallableResource): boolean =>
   resource.candidate.source !== "NEXENT_OFFICIAL_SKILL";
 
+function canInstallWithDefaults(item: InstallationItem): boolean {
+  const option = item.resource.installation_options.find(
+    ({ option_id }) => option_id === item.draft.optionId
+  );
+  if (option?.form_kind === "MCP_REMOTE")
+    return Boolean(item.draft.serverUrl.trim());
+  if (option?.form_kind === "MCP_CONTAINER") {
+    return Boolean(
+      item.draft.containerPort &&
+      parseContainerMcpConfigJson(item.draft.containerConfigJson)
+    );
+  }
+  return true;
+}
+
+export type InstallationAttemptResult =
+  | { status: "claimed"; target_name: string; attempt_id: string }
+  | { status: "pending"; target_name: string }
+  | {
+      status: "installed";
+      resource_type: "skill" | "mcp_server";
+      resource_id: number;
+    }
+  | { status: "not_started" };
+
+export type InstallationAttemptInput = {
+  operation: "claim" | "check" | "release";
+  target_name?: string;
+  attempt_id?: string;
+};
+
 export function SuggestedResourceInstallationCard({
   payload,
   disabled = false,
+  onInstalled,
+  installationAttempt,
+  onCloseInline,
 }: {
   payload: Nl2aSuggestedResourceInstallationPayload;
   disabled?: boolean;
+  onInstalled?: (resource: {
+    resource_type: "skill" | "mcp_server";
+    resource_id: number;
+  }) => void;
+  installationAttempt?: (
+    input: InstallationAttemptInput
+  ) => Promise<InstallationAttemptResult>;
+  onCloseInline?: () => void;
 }) {
   const { message } = App.useApp();
   const { t, i18n } = useTranslation("common");
@@ -238,10 +280,13 @@ export function SuggestedResourceInstallationCard({
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+    if (!disabled && !onInstalled) registerCard(cardKey, payload.subtype);
+  }, [cardKey, disabled, onInstalled, payload.subtype, registerCard]);
 
-  const interactive = !disabled && !submitted && isCardInteractive(cardKey);
+  const interactive =
+    !disabled &&
+    !submitted &&
+    (Boolean(onInstalled) || isCardInteractive(cardKey));
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
   const hasFailed = items.some((item) => item.status === "failed");
   const isBusy = items.some(
@@ -254,7 +299,13 @@ export function SuggestedResourceInstallationCard({
 
   const openConfig = async (item: InstallationItem) => {
     if (!interactive || item.status === "installed") return;
-    let draft = { ...item.draft };
+    const draft = { ...item.draft };
+    setDialogPreviousStatus(
+      item.status === "failed" ? "failed" : "not_started"
+    );
+    dispatch({ type: "configure", ref: candidateRef(item) });
+    setDialogRef(candidateRef(item));
+    setDialogDraft(draft);
     const selected = item.resource.installation_options.find(
       (option) => option.option_id === draft.optionId
     );
@@ -264,17 +315,17 @@ export function SuggestedResourceInstallationCard({
     ) {
       try {
         const suggested = await suggestMcpContainerPortService();
-        draft = { ...draft, containerPort: suggested.data.port };
+        setDialogDraft((current) =>
+          current &&
+          current.optionId === draft.optionId &&
+          current.containerPort == null
+            ? { ...current, containerPort: suggested.data.port }
+            : current
+        );
       } catch {
         // The user can still enter a port manually.
       }
     }
-    setDialogPreviousStatus(
-      item.status === "failed" ? "failed" : "not_started"
-    );
-    dispatch({ type: "configure", ref: candidateRef(item) });
-    setDialogRef(candidateRef(item));
-    setDialogDraft(draft);
   };
 
   const saveConfig = () => {
@@ -339,11 +390,11 @@ export function SuggestedResourceInstallationCard({
 
   const ensureAvailablePort = async (port?: number) => {
     if (!port || !Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error("A valid container port is required");
+      throw new ApiError("422", "A valid container port is required");
     }
     const availability = await checkMcpContainerPortConflictService({ port });
     if (!availability.data.available)
-      throw new Error("Container port is occupied");
+      throw new ApiError("422", "Container port is occupied");
     return port;
   };
 
@@ -373,17 +424,22 @@ export function SuggestedResourceInstallationCard({
       )!
     ) as unknown as CommunityQuickAddDraft;
     const name = draft.name.trim();
-    if (!name) throw new Error("MCP service name is required");
+    if (!name) throw new ApiError("422", "MCP service name is required");
     let customHeaders: Record<string, string> | undefined;
     if (draft.customHeaders.trim()) {
-      const parsed = JSON.parse(draft.customHeaders);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(draft.customHeaders);
+      } catch {
+        throw new ApiError("422", "Custom headers must be a JSON object");
+      }
       if (
         !parsed ||
         typeof parsed !== "object" ||
         Array.isArray(parsed) ||
         Object.values(parsed).some((value) => typeof value !== "string")
       ) {
-        throw new Error("Custom headers must be a JSON object");
+        throw new ApiError("422", "Custom headers must be a JSON object");
       }
       customHeaders = parsed as Record<string, string>;
     }
@@ -393,7 +449,8 @@ export function SuggestedResourceInstallationCard({
       )?.form_kind === "MCP_CONTAINER"
     ) {
       const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
-      if (!mcpConfig) throw new Error("Container configuration is invalid");
+      if (!mcpConfig)
+        throw new ApiError("422", "Container configuration is invalid");
       const usesPublishedPort =
         typeof config.containerPort === "number" &&
         draft.containerPort === config.containerPort;
@@ -431,7 +488,7 @@ export function SuggestedResourceInstallationCard({
       }
     } else {
       if (!draft.serverUrl.trim())
-        throw new Error("MCP server URL is required");
+        throw new ApiError("422", "MCP server URL is required");
       await addMcpToolService({
         name,
         description: String(config.description || ""),
@@ -443,6 +500,7 @@ export function SuggestedResourceInstallationCard({
         version: config.version,
         registry_json: config.registryJson,
         market_id: marketId,
+        enabled: true,
       });
     }
     incrementCommunityMcpDownloadCount(marketId).catch(() => undefined);
@@ -459,7 +517,51 @@ export function SuggestedResourceInstallationCard({
       return;
     }
     dispatch({ type: "install", ref: candidateRef(item) });
+    const ref = candidateRef(item);
+    const complete = (resourceId: number) => {
+      dispatch({ type: "installed", ref, resourceId });
+      onInstalled?.({
+        resource_type: item.resource.candidate.resource_type,
+        resource_id: resourceId,
+      });
+      message.success(
+        t("nl2agent.resourceInstallation.success", "Resource installed")
+      );
+    };
+    let attemptId: string | undefined;
     try {
+      if (installationAttempt) {
+        const targetName =
+          item.resource.candidate.resource_type === "mcp_server"
+            ? item.draft.name.trim()
+            : item.draft.targetName.trim();
+        const attempt = await installationAttempt({
+          operation: "claim",
+          target_name: targetName || undefined,
+        });
+        if (attempt.status === "installed") {
+          complete(attempt.resource_id);
+          return;
+        }
+        if (attempt.status !== "claimed") {
+          throw new ApiError(
+            "installation_pending",
+            t("nl2agent.coverage.installPending")
+          );
+        }
+        attemptId = attempt.attempt_id;
+        item = {
+          ...item,
+          draft: {
+            ...item.draft,
+            name:
+              item.resource.candidate.resource_type === "mcp_server"
+                ? attempt.target_name
+                : item.draft.name,
+            targetName: attempt.target_name,
+          },
+        };
+      }
       let resourceId: number;
       switch (item.resource.candidate.source) {
         case "NEXENT_OFFICIAL_SKILL":
@@ -474,15 +576,38 @@ export function SuggestedResourceInstallationCard({
         default:
           throw new Error("Unsupported installation source");
       }
-      dispatch({ type: "installed", ref: candidateRef(item), resourceId });
-      message.success(
-        t("nl2agent.resourceInstallation.success", "Resource installed")
-      );
+      complete(resourceId);
     } catch (error) {
+      let failure = toApiError(error);
+      if (installationAttempt && attemptId) {
+        try {
+          const current = await installationAttempt({ operation: "check" });
+          if (current.status === "installed") {
+            complete(current.resource_id);
+            return;
+          }
+          if ([400, 401, 403, 404, 422].includes(Number(failure.code))) {
+            await installationAttempt({
+              operation: "release",
+              attempt_id: attemptId,
+            });
+          } else {
+            failure = new ApiError(
+              "installation_pending",
+              t("nl2agent.coverage.installPending")
+            );
+          }
+        } catch {
+          failure = new ApiError(
+            "installation_pending",
+            t("nl2agent.coverage.installPending")
+          );
+        }
+      }
       dispatch({
         type: "failed",
-        ref: candidateRef(item),
-        error: toApiError(error),
+        ref,
+        error: failure,
       });
     }
   };
@@ -563,7 +688,16 @@ export function SuggestedResourceInstallationCard({
     });
   };
 
-  return (
+  const inlineItem = onCloseInline ? items[0] : undefined;
+  const startedInline = useRef(false);
+  useEffect(() => {
+    if (!inlineItem || !interactive || startedInline.current) return;
+    startedInline.current = true;
+    if (canInstallWithDefaults(inlineItem)) void installItem(inlineItem);
+    else void openConfig(inlineItem);
+  });
+
+  const legacyCard = (
     <section
       className="my-4 w-full max-w-3xl overflow-hidden rounded-md border border-border bg-background"
       data-testid="nl2agent-installation-card"
@@ -618,10 +752,6 @@ export function SuggestedResourceInstallationCard({
                   {item.resource.candidate.description}
                 </p>
               ) : null}
-              <p className="mt-1 break-words text-xs text-muted-foreground">
-                {t("nl2agent.resourceBinding.matches", "Matches")}:{" "}
-                {item.resource.candidate.requirement_ids.join(", ")}
-              </p>
               {item.error ? (
                 <p
                   className="mt-1 flex items-center gap-1 text-xs text-destructive"
@@ -677,7 +807,12 @@ export function SuggestedResourceInstallationCard({
                       <Download className="mr-1 size-4" />
                     )}
                     {item.status === "failed"
-                      ? t("common.retry", "Retry")
+                      ? item.error?.code === "installation_pending"
+                        ? t(
+                            "nl2agent.coverage.checkInstall",
+                            "Check installation"
+                          )
+                        : t("common.retry", "Retry")
                       : t("nl2agent.resourceInstallation.install", "Install")}
                   </Button>
                   {item.status === "failed" ? (
@@ -706,16 +841,258 @@ export function SuggestedResourceInstallationCard({
         ))}
       </div>
 
-      <div className="flex justify-end border-t px-4 py-3">
-        <Button type="button" disabled={!canContinue} onClick={continueFlow}>
-          {installedCount > 0
-            ? t("nl2agent.resourceBinding.continue", "Continue")
-            : t("nl2agent.resourceBinding.skip", "Skip")}
-        </Button>
-      </div>
+      {!onInstalled ? (
+        <div className="flex justify-end border-t px-4 py-3">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 px-2.5 py-0 text-xs"
+            disabled={!canContinue}
+            onClick={continueFlow}
+          >
+            {installedCount > 0
+              ? t("nl2agent.resourceBinding.continue", "Continue")
+              : t("nl2agent.resourceBinding.skip", "Skip")}
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+  const configuration =
+    dialogItem && dialogDraft ? (
+      <div className="space-y-4 py-2">
+        {dialogItem.resource.installation_options.length > 1 ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              {t("nl2agent.resourceInstallation.method", "Installation method")}
+            </span>
+            <Select
+              className="w-full"
+              value={dialogDraft.optionId}
+              options={dialogItem.resource.installation_options.map(
+                (option) => ({
+                  value: option.option_id,
+                  label: option.label,
+                })
+              )}
+              onChange={changeOption}
+            />
+          </label>
+        ) : null}
 
+        {dialogItem.resource.candidate.source === "TENANT_SKILL_REPOSITORY" ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              {t("nl2agent.resourceInstallation.skillName", "Skill name")}
+            </span>
+            <Input
+              value={dialogDraft.targetName}
+              placeholder={t(
+                "nl2agent.resourceInstallation.skillNamePlaceholder",
+                "Leave blank to generate a copy name"
+              )}
+              onChange={(event) =>
+                setDialogDraft({
+                  ...dialogDraft,
+                  targetName: event.target.value,
+                })
+              }
+            />
+          </label>
+        ) : null}
+
+        {dialogItem.resource.candidate.resource_type === "mcp_server" ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              {t("nl2agent.resourceInstallation.serviceName", "Service name")}
+            </span>
+            <Input
+              value={dialogDraft.name}
+              onChange={(event) =>
+                setDialogDraft({ ...dialogDraft, name: event.target.value })
+              }
+            />
+          </label>
+        ) : null}
+
+        {dialogItem.resource.candidate.source === "TENANT_MCP_REPOSITORY" &&
+        selectedInstallation?.form_kind === "MCP_REMOTE" ? (
+          <>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">URL</span>
+              <Input
+                value={dialogDraft.serverUrl}
+                onChange={(event) =>
+                  setDialogDraft({
+                    ...dialogDraft,
+                    serverUrl: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Authorization</span>
+              <Input.Password
+                value={dialogDraft.authorizationToken}
+                onChange={(event) =>
+                  setDialogDraft({
+                    ...dialogDraft,
+                    authorizationToken: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">
+                {t(
+                  "nl2agent.resourceInstallation.customHeaders",
+                  "Custom headers (JSON)"
+                )}
+              </span>
+              <Input.TextArea
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                value={dialogDraft.customHeaders}
+                onChange={(event) =>
+                  setDialogDraft({
+                    ...dialogDraft,
+                    customHeaders: event.target.value,
+                  })
+                }
+              />
+            </label>
+          </>
+        ) : null}
+
+        {dialogItem.resource.candidate.source === "TENANT_MCP_REPOSITORY" &&
+        selectedInstallation?.form_kind === "MCP_CONTAINER" ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              {t(
+                "nl2agent.resourceInstallation.containerConfig",
+                "Container configuration (JSON)"
+              )}
+            </span>
+            <Input.TextArea
+              autoSize={{ minRows: 5, maxRows: 12 }}
+              value={dialogDraft.containerConfigJson}
+              onChange={(event) =>
+                setDialogDraft({
+                  ...dialogDraft,
+                  containerConfigJson: event.target.value,
+                })
+              }
+            />
+          </label>
+        ) : null}
+
+        {selectedInstallation?.form_kind === "MCP_CONTAINER" ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              {t("nl2agent.resourceInstallation.port", "Container port")}
+            </span>
+            <InputNumber
+              className="w-full"
+              min={1}
+              max={65535}
+              value={dialogDraft.containerPort}
+              onChange={(value) =>
+                setDialogDraft({
+                  ...dialogDraft,
+                  containerPort: typeof value === "number" ? value : undefined,
+                })
+              }
+            />
+          </label>
+        ) : null}
+      </div>
+    ) : null;
+
+  if (inlineItem) {
+    if (inlineItem.status === "installed") {
+      return (
+        <span className="text-xs text-muted-foreground">
+          {t("nl2agent.coverage.installed", "Installed")}
+        </span>
+      );
+    }
+    if (
+      inlineItem.status === "installing" ||
+      inlineItem.status === "not_started"
+    ) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+          role="status"
+        >
+          <Loader2 className="size-3.5 animate-spin" />
+          {t("nl2agent.coverage.installing", "Installing…")}
+        </span>
+      );
+    }
+    const pending = inlineItem.error?.code === "installation_pending";
+    return (
+      <div className="basis-full space-y-2 pt-1">
+        {configuration}
+        {inlineItem.error ? (
+          <p className="text-xs text-destructive" role="alert">
+            {inlineItem.error.message}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-1.5">
+          {inlineItem.status === "failed" &&
+          !pending &&
+          needsConfiguration(inlineItem.resource) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              disabled={!interactive}
+              onClick={() => void openConfig(inlineItem)}
+            >
+              {t("nl2agent.resourceBinding.configure", "Configure")}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            disabled={!interactive}
+            onClick={() => {
+              if (dialogDraft) {
+                saveConfig();
+                void installItem({ ...inlineItem, draft: dialogDraft });
+              } else {
+                void installItem(inlineItem);
+              }
+            }}
+          >
+            {pending
+              ? t("nl2agent.coverage.checkInstall", "Check installation")
+              : inlineItem.status === "failed"
+                ? t("common.retry", "Retry")
+                : t("nl2agent.resourceInstallation.install", "Install")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            disabled={!interactive}
+            onClick={onCloseInline}
+          >
+            {t("common.cancel", "Cancel")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {legacyCard}
       <Modal
-        open={Boolean(dialogItem && dialogDraft)}
+        open={Boolean(configuration)}
         title={dialogItem?.resource.candidate.name}
         okText={t("common.save", "Save")}
         cancelText={t("common.cancel", "Cancel")}
@@ -723,162 +1100,8 @@ export function SuggestedResourceInstallationCard({
         onCancel={cancelConfig}
         destroyOnHidden
       >
-        {dialogItem && dialogDraft ? (
-          <div className="space-y-4 py-2">
-            {dialogItem.resource.installation_options.length > 1 ? (
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">
-                  {t(
-                    "nl2agent.resourceInstallation.method",
-                    "Installation method"
-                  )}
-                </span>
-                <Select
-                  className="w-full"
-                  value={dialogDraft.optionId}
-                  options={dialogItem.resource.installation_options.map(
-                    (option) => ({
-                      value: option.option_id,
-                      label: option.label,
-                    })
-                  )}
-                  onChange={changeOption}
-                />
-              </label>
-            ) : null}
-
-            {dialogItem.resource.candidate.source ===
-            "TENANT_SKILL_REPOSITORY" ? (
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">
-                  {t("nl2agent.resourceInstallation.skillName", "Skill name")}
-                </span>
-                <Input
-                  value={dialogDraft.targetName}
-                  placeholder={t(
-                    "nl2agent.resourceInstallation.skillNamePlaceholder",
-                    "Leave blank to generate a copy name"
-                  )}
-                  onChange={(event) =>
-                    setDialogDraft({
-                      ...dialogDraft,
-                      targetName: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            ) : null}
-
-            {dialogItem.resource.candidate.resource_type === "mcp_server" ? (
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">
-                  {t(
-                    "nl2agent.resourceInstallation.serviceName",
-                    "Service name"
-                  )}
-                </span>
-                <Input
-                  value={dialogDraft.name}
-                  onChange={(event) =>
-                    setDialogDraft({ ...dialogDraft, name: event.target.value })
-                  }
-                />
-              </label>
-            ) : null}
-
-            {dialogItem.resource.candidate.source === "TENANT_MCP_REPOSITORY" &&
-            selectedInstallation?.form_kind === "MCP_REMOTE" ? (
-              <>
-                <label className="block text-sm">
-                  <span className="mb-1 block font-medium">URL</span>
-                  <Input
-                    value={dialogDraft.serverUrl}
-                    onChange={(event) =>
-                      setDialogDraft({
-                        ...dialogDraft,
-                        serverUrl: event.target.value,
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block font-medium">Authorization</span>
-                  <Input.Password
-                    value={dialogDraft.authorizationToken}
-                    onChange={(event) =>
-                      setDialogDraft({
-                        ...dialogDraft,
-                        authorizationToken: event.target.value,
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block font-medium">
-                    {t(
-                      "nl2agent.resourceInstallation.customHeaders",
-                      "Custom headers (JSON)"
-                    )}
-                  </span>
-                  <Input.TextArea
-                    autoSize={{ minRows: 2, maxRows: 6 }}
-                    value={dialogDraft.customHeaders}
-                    onChange={(event) =>
-                      setDialogDraft({
-                        ...dialogDraft,
-                        customHeaders: event.target.value,
-                      })
-                    }
-                  />
-                </label>
-              </>
-            ) : null}
-
-            {dialogItem.resource.candidate.source === "TENANT_MCP_REPOSITORY" &&
-            selectedInstallation?.form_kind === "MCP_CONTAINER" ? (
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">
-                  {t(
-                    "nl2agent.resourceInstallation.containerConfig",
-                    "Container configuration (JSON)"
-                  )}
-                </span>
-                <Input.TextArea
-                  autoSize={{ minRows: 5, maxRows: 12 }}
-                  value={dialogDraft.containerConfigJson}
-                  onChange={(event) =>
-                    setDialogDraft({
-                      ...dialogDraft,
-                      containerConfigJson: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            ) : null}
-
-            {selectedInstallation?.form_kind === "MCP_CONTAINER" ? (
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">
-                  {t("nl2agent.resourceInstallation.port", "Container port")}
-                </span>
-                <InputNumber
-                  className="w-full"
-                  min={1}
-                  max={65535}
-                  value={dialogDraft.containerPort}
-                  onChange={(value) =>
-                    setDialogDraft({
-                      ...dialogDraft,
-                      containerPort:
-                        typeof value === "number" ? value : undefined,
-                    })
-                  }
-                />
-              </label>
-            ) : null}
-          </div>
-        ) : null}
+        {configuration}
       </Modal>
-    </section>
+    </>
   );
 }

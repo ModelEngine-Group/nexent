@@ -67,8 +67,9 @@ def database_fixture(monkeypatch, provider):
     models = {}
     try:
         with sessions() as session:
-            session.add(db_models.UserTenant(user_id=owner, tenant_id=tenant, user_role="CREATOR",
-                                            user_email="model-controls@fixture.invalid", created_by=owner, updated_by=owner))
+            session.add(db_models.UserAccount(user_id=owner, user_roles=["DEV"],
+                                             user_email="model-controls@fixture.invalid", created_by=owner, updated_by=owner))
+            session.add(db_models.UserTenant(user_id=owner, tenant_id=tenant, created_by=owner, updated_by=owner))
             for label, capacity, effort in [("default-A", 16000, "low"), ("selected-B", 8000, "medium"),
                                             ("budget-B", 10000, "auto"), ("business-C", 12000, "high")]:
                 record = db_models.ModelRecord(
@@ -136,7 +137,7 @@ def database_fixture(monkeypatch, provider):
                     ))
                     session.flush()
             for typ, sub in [("agent", "create"), ("skill", "create"), ("agent", "read"), ("agent", "use")]:
-                session.add(db_models.RolePermission(user_role="CREATOR", permission_category="RESOURCE",
+                session.add(db_models.RolePermission(user_role="DEV", permission_category="RESOURCE",
                                                     permission_type=typ, permission_subtype=sub))
             for kind in ("embedding", "stt", "tts"):
                 session.add(db_models.ModelRecord(model_repo="", model_name="fixture-" + kind,

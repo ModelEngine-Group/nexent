@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-BIND-CONFIG-20261113
+  change_type: bugfix
+  bug_id: NL2AGENT-BIND-CONFIG-20261113
+  title: Load resource parameters before bind-triggered configuration
+  description: Reuse the configuration loader when binding requires Tool or Skill configuration.
+  observed_behavior: Version 2 cards open a configuration dialog with an empty parameter list on the first Bind click.
+  expected_behavior: Load schema and saved values before opening; failures remain retryable without binding.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Ordinary configuration was tested only through Configure with inline parameters, not Bind with deferred schemas.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-RESOURCE-D1-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentBindingConfig.test.tsx
+      - frontend/tests/component/nl2AgentKnowledgeConfig.test.tsx
+    behaviors:
+      - Failed autosave prevents bind-triggered configuration and persistence.
+      - Existing knowledge identity and configuration merging remain unchanged.
+    reason: Frontend unit proof covers the save boundary; the existing real-card D1 covers deferred schema loading and retry. No Python code changes.
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-nl2agent-resource-card/design.md,
+    Bind-triggered configuration loading. Reuse existing D1 reducer/row/service collaboration.
+    No deployed service or new browser layout contract is affected.
