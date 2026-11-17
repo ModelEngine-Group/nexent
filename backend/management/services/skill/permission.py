@@ -4,8 +4,14 @@
 
 from typing import Any, Dict, Optional
 
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
+    PERMISSION_READ,
+)
 from contracts.errors.exceptions import ForbiddenError
+from contracts.roles import has_any_role, roles_from_record
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.serialization import convert_list_to_string
@@ -37,7 +43,7 @@ def can_view_skill(
     """Return whether a skill is available to the current user."""
     if skill.get("source") == "official":
         return True
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES):
         return True
     if str(skill.get("created_by")) == str(user_id):
         return True
@@ -54,7 +60,7 @@ def resolve_skill_permission(
     user_group_ids: set[int],
 ) -> str:
     """Resolve whether the current user can edit or only use a visible skill."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES):
         return PERMISSION_EDIT
     if str(skill.get("created_by")) == str(user_id):
         return PERMISSION_EDIT
@@ -88,7 +94,7 @@ def _get_user_role(user_id: Optional[str]) -> str:
     user_tenant = get_user_tenant_by_user_id(user_id)
     if not user_tenant:
         return "USER"
-    return str(user_tenant.get("user_role") or "USER")
+    return roles_from_record(user_tenant)
 
 
 def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
@@ -110,7 +116,7 @@ def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
 def _can_manage_skill_access(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
     if not user_id:
         return False
-    return _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES or str(
+    return has_any_role(_get_user_role(user_id), CAN_EDIT_ALL_USER_ROLES) or str(
         skill.get("created_by")
     ) == str(user_id)
 

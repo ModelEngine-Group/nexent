@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline orchestration tests. Never deploy, notify, or contact product services."""
 import argparse
 from contextlib import contextmanager
@@ -125,18 +127,49 @@ class SuiteTests(unittest.TestCase):
                                                {"hooks": {}, "case_timeout_seconds": 1800}), 0)
             self.assertEqual(observed, [4800])
 
-    def test_notification_refuses_incomplete(self):
+    def test_notification_refuses_nonterminal(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": False})
+            save(directory / "summary.json", {"status": "RUNNING", "execution_complete": False})
             with patch.object(suite_notify, "logged") as send:
-                self.assertEqual(suite_notify.send_report(directory, {}), "INCOMPLETE_NOT_SENT")
+                self.assertEqual(suite_notify.send_report(directory, {}), "NOT_TERMINAL")
                 send.assert_not_called()
+
+    def test_case_failures_continue_unless_an_environment_fault_marker_remains(self):
+        for outcome, fault in (("FAIL", False), ("TIMEOUT", False), ("CLEANUP_FAILED", False), ("PASS", True)):
+            with self.subTest(outcome=outcome, fault=fault), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary)
+                records = [{"case_id": case_id, "stage": "D5", "status": "active", "execution": {"test": True}}
+                           for case_id in ("FIRST", "INDEPENDENT")]
+                calls = []
+
+                def execute(command, cwd, env, log, timeout):
+                    if "--case" in command:
+                        case_id = command[command.index("--case") + 1]
+                        batch = Path(command[command.index("--batch-dir") + 1])
+                        calls.append(case_id)
+                        save(batch / "cases" / case_id / "receipt.json", {
+                            "case_id": case_id, "stage": "D5", "result": outcome if case_id == "FIRST" else "PASS"})
+                        if fault:
+                            save(home / "state/deployment-guard/pending.json", {"status": "PENDING"})
+                    return 0
+
+                with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                        patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                        patch.object(suite, "static_requirements", return_value=set()), \
+                        patch.object(suite, "static_inventory", return_value=[]), \
+                        patch.object(suite, "logged", side_effect=execute):
+                    self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}), 1)
+                batch = next((home / "runs/repository-daily").iterdir())
+                summary = json.loads((batch / "summary.json").read_text())
+                self.assertEqual(calls, ["FIRST"] if fault else ["FIRST", "INDEPENDENT"])
+                self.assertEqual(summary["execution_complete"], not fault)
+                self.assertEqual(summary["counts"].get(outcome), 1)
 
     def test_notification_deduplicates_uncertain_delivery(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": True})
+            save(directory / "summary.json", {"status": "FAILED", "d6_complete": True, "execution_complete": True})
             with patch.object(suite_notify, "logged", return_value=124) as send:
                 env = {"LARK_CLI": "test-cli", "FEISHU_REPORT_CHAT_ID": "test-chat"}
                 self.assertEqual(suite_notify.send_report(directory, env), "UNKNOWN")
@@ -146,7 +179,7 @@ class SuiteTests(unittest.TestCase):
     def test_notification_sends_once_after_complete_report(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": True})
+            save(directory / "summary.json", {"status": "PASSED", "d6_complete": True, "execution_complete": True})
             with patch.object(suite_notify, "logged", return_value=0) as send:
                 env = {"LARK_CLI": "test-cli", "FEISHU_REPORT_CHAT_ID": "test-chat"}
                 self.assertEqual(suite_notify.send_report(directory, env), "SENT")
@@ -282,7 +315,7 @@ class SuiteTests(unittest.TestCase):
             self.assertIn("STEP-02", receipt["reason"])
             self.assertEqual(receipt["test_evidence"], ["d4/PW-TEST-01/trace.zip"])
 
-    def test_d5_cleanup_failure_stops_remaining_cases_and_finalizes_incomplete(self):
+    def test_unresolved_d5_environment_fault_stops_remaining_cases_and_finalizes_incomplete(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)
             records = [{"case_id": name, "stage": "D5", "status": "active", "execution": {"test": True}}
@@ -297,6 +330,7 @@ class SuiteTests(unittest.TestCase):
                     save(batch / "cases" / case_id / "receipt.json", {
                         "case_id": case_id, "stage": "D5", "result": "CLEANUP_FAILED",
                         "test_result": "PASS", "cleanup_exit_code": 1})
+                    save(home / "state/deployment-guard/pending.json", {"status": "PENDING"})
                     return 1
                 return 0
 

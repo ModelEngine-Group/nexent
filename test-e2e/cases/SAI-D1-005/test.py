@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SAI-D1-005: case-local preserved component regression."""
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents import sandbox
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from shared.sai_component import (
     ORIGINAL_SANDBOX_CLEANUP as ORIGINAL_SANDBOX_CLEANUP,
 )

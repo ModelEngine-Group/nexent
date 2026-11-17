@@ -15,6 +15,7 @@ import Link from "next/link";
 import { Button, Tooltip } from "antd";
 import {
   Bell,
+  Activity,
   BookOpen,
   Blocks,
   Bot,
@@ -34,6 +35,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { hasRole, isOperationsOnly } from "@/lib/roles";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -63,6 +65,20 @@ interface RouteConfig {
 }
 
 const ROUTE_CONFIG: RouteConfig[] = [
+  {
+    path: "/ops/dashboard",
+    Icon: LineChart,
+    labelKey: "ops.dashboard",
+    order: 12.5,
+    parentKey: null,
+  },
+  {
+    path: "/ops/configuration",
+    Icon: Settings,
+    labelKey: "ops.configuration",
+    order: 12.6,
+    parentKey: null,
+  },
   {
     path: "/",
     Icon: Home,
@@ -164,6 +180,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: "/resource-space",
   },
   {
+    path: "/observability",
+    Icon: Activity,
+    labelKey: "sidebar.observability",
+    order: 12.5,
+    parentKey: null,
+  },
+  {
     path: "/resource-manage",
     Icon: FolderCog,
     labelKey: "sidebar.resourceManage",
@@ -209,7 +232,7 @@ export function SideNavigation({
   isNavigating = false,
 }: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
-  const { accessibleRoutes } = useAuthorizationContext();
+  const { accessibleRoutes, user } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
@@ -274,7 +297,9 @@ export function SideNavigation({
     unreadCount,
     items,
     isLoading: isNotificationsLoading,
-  } = useNotifications(!isSpeedMode && isAuthenticated);
+  } = useNotifications(
+    !isSpeedMode && isAuthenticated && !isOperationsOnly(user)
+  );
   const markNotificationReadMutation = useMarkNotificationRead();
   const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
@@ -330,10 +355,11 @@ export function SideNavigation({
     return ROUTE_CONFIG.filter(
       (route) =>
         !route.isSection &&
+        (route.path !== "/observability" || hasRole(user, "OPS", "SU")) &&
         !(route.path === "/" && hideHomePage) &&
         isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
+  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage, user]);
 
   const getRouteNavigationPath = (route: RouteConfig) => {
     const routePath = route.navigationPath || route.path;
@@ -380,42 +406,43 @@ export function SideNavigation({
     else router.push(navigationPath);
   };
 
-  const notificationAction = isSpeedMode ? null : isAuthenticated ? (
-    <NotificationBell
-      rail
-      expanded={expanded}
-      onOpenChange={(open) => handlePopupChange("notification", open)}
-      unreadCount={unreadCount}
-      items={items}
-      isLoading={isNotificationsLoading}
-      isMarkingAllRead={markAllNotificationsReadMutation.isPending}
-      onMarkRead={async (receiverId) => {
-        await markNotificationReadMutation.mutateAsync(receiverId);
-      }}
-      onMarkAllRead={async () => {
-        await markAllNotificationsReadMutation.mutateAsync();
-      }}
-    />
-  ) : (
-    <button
-      type="button"
-      aria-label={t("notifications.bell.label")}
-      className={RAIL_ITEM_CLASS}
-      onClick={() => {
-        if (!isAuthenticated && !isSpeedMode) {
-          openAuthPromptModal("/");
-        }
-      }}
-    >
-      <span className="flex h-11 w-12 shrink-0 items-center justify-center">
-        <Bell className={RAIL_ICON_CLASS} />
-      </span>
-      <NavigationRailLabel
+  const notificationAction =
+    isSpeedMode || isOperationsOnly(user) ? null : isAuthenticated ? (
+      <NotificationBell
+        rail
         expanded={expanded}
-        label={t("notifications.bell.label")}
+        onOpenChange={(open) => handlePopupChange("notification", open)}
+        unreadCount={unreadCount}
+        items={items}
+        isLoading={isNotificationsLoading}
+        isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+        onMarkRead={async (receiverId) => {
+          await markNotificationReadMutation.mutateAsync(receiverId);
+        }}
+        onMarkAllRead={async () => {
+          await markAllNotificationsReadMutation.mutateAsync();
+        }}
       />
-    </button>
-  );
+    ) : (
+      <button
+        type="button"
+        aria-label={t("notifications.bell.label")}
+        className={RAIL_ITEM_CLASS}
+        onClick={() => {
+          if (!isAuthenticated && !isSpeedMode) {
+            openAuthPromptModal("/");
+          }
+        }}
+      >
+        <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+          <Bell className={RAIL_ICON_CLASS} />
+        </span>
+        <NavigationRailLabel
+          expanded={expanded}
+          label={t("notifications.bell.label")}
+        />
+      </button>
+    );
 
   return (
     <div

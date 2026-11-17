@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for the immutable authorized run snapshot."""
 
 import pytest
 
-from sdk.nexent.core.agents.context import ContextItemInput
-from sdk.nexent.core.agents.context_input import ContextInput
+from nexent.core.agents.context import ContextItemInput
+from nexent.core.agents.contracts.context import ContextInput
 
 
 def test_context_input_freezes_authorized_item_collection():

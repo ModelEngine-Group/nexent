@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-CONTEXT-LOG-20261110
+  change_type: bugfix
+  bug_id: BUG-AGENT-CONTEXT-LOG
+  title: Remove verbose Agent loop context evidence JSON logging
+  description: Delete the complete log without a DEBUG replacement; retain evidence collection and trace export.
+  observed_behavior: Agent finalization serializes the complete evidence dataclass as indented INFO JSON.
+  expected_behavior: Finalization remains silent even at DEBUG and retains the same evidence results.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT requires the unwanted pretty-printed log rather than asserting silent finalization. New regression assertions belong in traditional UT; no duplicate formal D1 is added.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-183]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [UT-SDK-AUTO-FD74C47E39BAE2FC]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Finalization emits no evidence JSON for empty/populated completed/error/cancelled runs, even at DEBUG.
+      - Preserve aggregation, return values, idempotence, reset and the finalized-collector guard.
+      - Preserve remaining model logger routing and separate monitoring evidence export.
+    test_selectors:
+      - test/sdk/core/agents/test_context_evidence.py
+      - test/sdk/core/agents/test_history_context_runtime.py
+      - test/backend/utils/test_logging_utils.py
+      - test/sdk/core/agents/test_core_agent.py::test_context_evidence_marks_an_early_closed_stream_as_cancelled
+      - test/sdk/monitor/test_monitoring.py::TestAgentObservability::test_record_final_context_evidence_adds_content_free_event
+    reason: Focused collector assertions detect the unwanted output directly; routing and monitoring UT protect adjacent contracts. Existing formal context-budget Case supplies separate unchanged regression coverage.
+  notes: >-
+    SPEC: nexent-doc/docs/Developing/management-agent-context-log-removal/.
+    User approved implementation on 2026-11-10. Target hotfix/v2.8.5, PR 4318.
+    F-183 and its existing Case remain unchanged: their context-budget contract is unaffected.
+    No new D1 duplicates the isolated log regression. API/UI/model semantics do not change;
+    required VM final container verification remains a separate acceptance gate.

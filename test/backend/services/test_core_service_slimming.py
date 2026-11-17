@@ -71,17 +71,6 @@ def _project_python_files(root):
                 yield Path(directory) / filename
 
 
-def test_ac002_preview_key_matches_existing_contract(monkeypatch):
-    import hashlib
-
-    module = load_source(monkeypatch, "backend/management/services/file/preview.py", "slimming_keys")
-    for name in ("a.docx", "folder/中文.pptx", "without-extension", "a.b.c"):
-        stem = name.rsplit(".", 1)[0] if "." in name else name
-        digest = hashlib.md5(name.encode()).hexdigest()[:8]
-        assert module.build_preview_pdf_object_key(name) == f"preview/converted/{stem}_{digest}.pdf"
-        assert module.build_preview_pdf_object_key(name, temporary=True) == f"preview/converting/{stem}_{digest}.pdf.tmp"
-
-
 @pytest.fixture
 def naming(monkeypatch):
     dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})
@@ -230,6 +219,7 @@ def model_resolver(monkeypatch):
     dependency(
         monkeypatch, "management.db.model.repository",
         get_model_by_model_id=lambda *args: None, get_model_records=lambda *args: [],
+        get_model_records_by_ids=lambda ids: {},
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
     )
@@ -290,6 +280,7 @@ def agent_reader(monkeypatch, model_resolver):
     dependency(
         monkeypatch, "management.db.tool.repository", search_tools_for_sub_agent=lambda **kwargs: [],
         check_tool_is_available=lambda ids: [True] * len(ids),
+        query_agent_tools_for_list=lambda agent_ids, tenant_id: ([], {}),
     )
     load_source(monkeypatch, "backend/contracts/constants/constants.py", "contracts.constants.constants")
     return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")

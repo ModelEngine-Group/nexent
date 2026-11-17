@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-MULTI-ROLE-D3-001
+  feature_id: AUTH-MULTI-ROLE
+  requirement_ids:
+  - AUTH-MULTI-ROLE-20261031
+  business_rule_ids:
+  - AUTH-MULTI-ROLE-RULE-01
+  - AUTH-MULTI-ROLE-RULE-04
+  - AUTH-MULTI-ROLE-RULE-06
+  - AUTH-MULTI-ROLE-RULE-07
+  title: 注册落库与现有会话使用同一完整角色集合
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 注册落库与现有会话使用同一完整角色集合
+  preconditions:
+  - Current-source management and required operations permission entry shell are available in an isolated test deployment.
+  - Logical fixture accounts su, tenant_a_admin_1, tenant_a_admin_2, tenant_a_user and tenant_b_admin have isolated
+    owned data.
+  - No mutation touches shared users; cleanup uses the fixture SU account and keeps all evidence outside Git.
+  test_data:
+    tenants:
+    - tenant_a
+    - tenant_b
+    ordinary_roles:
+    - ADMIN
+    - DEV
+    - USER
+    - OPS
+  steps:
+  - order: 1
+    action: Create owned DEV plus OPS invitation of capacity one; complete a local signup through the actual management
+      HTTP and configured identity boundary.
+    expected: User row stores both roles, expected group membership is persisted and the invite is consumed exactly
+      once; identity response agrees with PostgreSQL.
+  - order: 2
+    action: Using the existing session after an administrator removes DEV, make a new protected development request
+      and reread user info; force one local registration failure before commit using the declared controlled failure
+      boundary.
+    expected: The new request loses DEV access without relogin, user info reports OPS only, and failed registration
+      leaves no partial local role/group rows or consumed invite capacity.
+  - order: 3
+    action: Register using an otherwise valid invite after revoking its issuer, and restore or remove all owned
+      accounts, memberships and invitations.
+    expected: Registration succeeds with fixed invitation roles despite issuer revocation; owned fixtures are cleaned
+      and unaffected tenant data is unchanged.
+  expected_results:
+  - User row stores both roles, expected group membership is persisted and the invite is consumed exactly once;
+    identity response agrees with PostgreSQL.
+  - The new request loses DEV access without relogin, user info reports OPS only, and failed registration leaves
+    no partial local role/group rows or consumed invite capacity.
+  - Registration succeeds with fixed invitation roles despite issuer revocation; owned fixtures are cleaned and
+    unaffected tenant data is unchanged.
+  forbidden_side_effects:
+  - Mocking the role repository or permission decision under test, leaking credentials, leaving a partially successful
+    local registration.
+  acceptance:
+  - id: AC-01
+    description: User row stores both roles, expected group membership is persisted and the invite is consumed exactly
+      once; identity response agrees with PostgreSQL.
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: The new request loses DEV access without relogin, user info reports OPS only, and failed registration
+      leaves no partial local role/group rows or consumed invite capacity.
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: Registration succeeds with fixed invitation roles despite issuer revocation; owned fixtures are
+      cleaned and unaffected tenant data is unchanged.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  integration_boundary:
+  - Actual management HTTP and PostgreSQL user/group/invitation transaction.
+  - Actual session authentication reuses the configured identity service; external registration failure is controlled
+    only at its declared outer boundary.
+  observations:
+  - HTTP identity roles versus persisted array and membership.
+  - Invite capacity before and after success or rollback; next-request denial after revocation.
+  cleanup:
+  - Use isolated SU to remove owned accounts, invitations and fixture resources; preserve sanitized evidence.

@@ -66,6 +66,8 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+const OPS_HTTP_BACKEND =
+  process.env.OPS_HTTP_BACKEND || "http://localhost:5016";
 // Reuse the existing northbound service address, which conventionally ends with /api.
 const NORTHBOUND_HTTP_BACKEND = (
   process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
@@ -278,18 +280,9 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
-// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
-const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
-
-// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
 const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
 
 async function isSuperAdminRequest(req) {
-  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
-  if (IS_SPEED_MODE) {
-    return true;
-  }
-
   const cookies = parseCookies(req);
   const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
   if (!token) {
@@ -309,7 +302,12 @@ async function isSuperAdminRequest(req) {
 
     const data = await response.json();
     const userRole = data?.data?.user?.user_role;
-    return SUPER_ADMIN_ROLES.has(userRole);
+    const roles = data?.data?.user?.roles ?? [userRole];
+    return (
+      Array.isArray(roles) &&
+      roles.length === 1 &&
+      SUPER_ADMIN_ROLES.has(roles[0])
+    );
   } catch (error) {
     console.error(
       "[isSuperAdminRequest] Error checking super admin:",
@@ -823,6 +821,17 @@ function handleAllApiProxy(pathname, req, res) {
     return true;
   }
 
+  // Historical trajectory queries are owned by the operations service.
+  if (isTrajectoryOpsRequest(pathname, req.url)) {
+    proxy.web(req, res, {
+      target: OPS_HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+    return true;
+  }
+
   // 2. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
@@ -992,4 +1001,16 @@ function getRuntimeProxyConfig(timeout) {
     proxyTimeout: timeout,
     timeout: timeout,
   };
+}
+
+/** Route only trajectory directories to ops; ordinary history stays on Runtime. */
+function isTrajectoryOpsRequest(pathname, requestUrl) {
+  if (pathname.startsWith("/api/trajectory/")) return true;
+  const directory =
+    /^\/api\/conversation\/agent_groups(?:\/[^/]+\/conversations)?\/?$/;
+  return (
+    directory.test(pathname) &&
+    new URL(requestUrl, "http://localhost").searchParams.get("view") ===
+      "trajectory"
+  );
 }

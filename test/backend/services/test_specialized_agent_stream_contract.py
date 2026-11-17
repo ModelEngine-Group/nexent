@@ -47,7 +47,7 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
     if kind == "nl2agent":
         builder.assert_awaited_once_with(**{**arguments, "system_ref": system_ref})
     else:
-        builder.assert_awaited_once_with(request, "tenant-a", "en", system_ref=system_ref)
+        builder.assert_awaited_once_with(request, "tenant-a", "en", system_ref=system_ref, user_id=None)
     chunks = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert chunks[0]["type"] == "tool"

@@ -1,7 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared permission data models."""
 
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+from contracts.roles import normalize_roles
 
 
 @dataclass(frozen=True)
@@ -12,6 +15,14 @@ class CurrentUser:
     tenant_id: str
     role: str
     groups: List[int] = field(default_factory=list)
+    roles: Optional[tuple[str, ...]] = None
+
+    @property
+    def effective_roles(self) -> tuple[str, ...]:
+        try:
+            return normalize_roles(self.role if self.roles is None else self.roles, allow_empty=True)
+        except ValueError:
+            return ()
 
     @property
     def normalized_role(self) -> str:

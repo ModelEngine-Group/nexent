@@ -5,8 +5,6 @@ Quota management API endpoints.
 Provides tenant-level and platform-level quota configuration and usage tracking.
 """
 
-from contracts.constants.constants import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
-from contracts.constants.constants import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
@@ -14,16 +12,30 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, TokenExpiredError
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    PERSONAL_KB_CAPACITY_MANAGE_PERMISSION,
+    PERSONAL_KB_CAPACITY_READ_PERMISSION,
+    QUOTA_PAYLOAD_DESCRIPTION,
+    TARGET_TENANT_ID_DESCRIPTION,
+)
+from contracts.errors.exceptions import (
+    AppException,
+    PlatformQuotaConflictError,
+    TokenExpiredError,
+)
+from contracts.roles import has_any_role, roles_from_record
+from gateway.authentication.auth import authenticate, get_current_user_id
+from infrastructure.formatting import bytes_to_readable
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.auth import authenticate
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.service import (
+    ElasticSearchService,
+    get_vector_db_core,
+)
 from permissions.depends import require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
-from management.services.knowledge_base.quota import QuotaService
-from gateway.authentication.auth import get_current_user_id
-from infrastructure.formatting import bytes_to_readable
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +67,7 @@ def _get_user_role(authorization: Optional[str]) -> str:
     try:
         user_id, _ = get_current_user_id(authorization)
         user_info = get_user_tenant_by_user_id(user_id)
-        return (user_info.get("user_role") or "USER").upper() if user_info else "USER"
+        return roles_from_record(user_info)
     except Exception:
         return "USER"
 
@@ -63,7 +75,7 @@ def _get_user_role(authorization: Optional[str]) -> str:
 def _require_admin_or_su(authorization: Optional[str]) -> str:
     """Require ADMIN, SU, or ASSET_OWNER role. Returns the role string."""
     role = _get_user_role(authorization)
-    if role not in ("SU", "ADMIN", "ASSET_OWNER"):
+    if not has_any_role(role, {'SU','ADMIN','ASSET_OWNER'}):
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
             detail="This operation requires ADMIN, SU, or ASSET_OWNER role",
@@ -74,20 +86,16 @@ def _require_admin_or_su(authorization: Optional[str]) -> str:
 def _require_platform_quota_manager(authorization: Optional[str]) -> str:
     """Require a role that can manage platform-level quotas."""
     role = _get_user_role(authorization)
-    if role not in ("SU", "ASSET_OWNER", "SPEED"):
+    if not has_any_role(role, {'SU','ASSET_OWNER'}):
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU, ASSET_OWNER, or SPEED role",
+            detail="This operation requires SU or ASSET_OWNER role",
         )
     return role
 
 
 def _get_manageable_index_names(tenant_id: str, user_id: str) -> set[str]:
     """Return KB index names the current user can manage."""
-    from management.services.knowledge_base.service import (
-        ElasticSearchService,
-        get_vector_db_core,
-    )
 
     result = ElasticSearchService.list_indices(
         pattern="*",
@@ -120,7 +128,7 @@ def get_tenant_quota(
         user_id, auth_tenant_id = get_current_user_id(authorization)
         # Use auth tenant_id if accessing own tenant; SU can see any
         role = _get_user_role(authorization)
-        if role not in ("SU", "ASSET_OWNER") and tenant_id != auth_tenant_id:
+        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="Cannot access quota config for another tenant",
@@ -168,7 +176,7 @@ def update_tenant_quota(
         role = _require_admin_or_su(authorization)
 
         # Non-SU users can only modify their own tenant
-        if role not in ("SU", "ASSET_OWNER") and tenant_id != auth_tenant_id:
+        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="Cannot modify quota config for another tenant",
@@ -185,14 +193,14 @@ def update_tenant_quota(
             hard_limit_info = service.get_hard_limit()
             if not hard_limit_info.get("hard_limit_editable", True):
                 # Only allow SU to modify SU-set limits
-                if role not in ("SU", "ASSET_OWNER"):
+                if not has_any_role(role, {'SU','ASSET_OWNER'}):
                     raise HTTPException(
                         status_code=HTTPStatus.FORBIDDEN,
                         detail="Tenant hard quota is managed by the platform administrator",
                     )
 
             # SU sets tenant hard limit → mark as non-editable for tenant admin
-            if role in ("SU", "ASSET_OWNER"):
+            if has_any_role(role, {'SU','ASSET_OWNER'}):
                 QuotaService.set_tenant_hard_limit(
                     tenant_id,
                     limit_gb=hard_limit_gb,
@@ -260,7 +268,7 @@ def delete_tenant_quota(
         user_id, auth_tenant_id = get_current_user_id(authorization)
         role = _require_admin_or_su(authorization)
 
-        if role not in ("SU", "ASSET_OWNER") and tenant_id != auth_tenant_id:
+        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="Cannot modify quota config for another tenant",
@@ -302,7 +310,7 @@ def get_tenant_quota_usage(
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
         role = _get_user_role(authorization)
-        if role not in ("SU", "ASSET_OWNER") and tenant_id != auth_tenant_id:
+        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="Cannot access usage data for another tenant",
@@ -310,7 +318,7 @@ def get_tenant_quota_usage(
 
         service = QuotaService(tenant_id, user_id)
         usage = service.get_usage(force_refresh=force_refresh, detail=detail)
-        if detail and role in ("USER", "DEV"):
+        if detail and has_any_role(role, {'USER','DEV'}):
             manageable_index_names = _get_manageable_index_names(tenant_id, user_id)
             usage["breakdown"] = [
                 item for item in usage.get("breakdown", []) if item.get("index_name") in manageable_index_names
@@ -331,7 +339,7 @@ def get_tenant_quota_usage(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Platform-Level Quota Endpoints (SU/ASSET_OWNER/SPEED only)
+# Platform-Level Quota Endpoints (SU/ASSET_OWNER only)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -341,7 +349,7 @@ def get_platform_overview(
 ):
     """
     Get platform-level storage overview: all tenants' quotas and usage.
-    Restricted to SU, ASSET_OWNER, and SPEED roles.
+    Restricted to SU and ASSET_OWNER roles.
     """
     try:
         _require_platform_quota_manager(authorization)
@@ -369,7 +377,7 @@ def set_platform_capacity(
 ):
     """
     Set platform-wide declared storage capacity.
-    Restricted to SU, ASSET_OWNER, and SPEED roles.
+    Restricted to SU and ASSET_OWNER roles.
     """
     try:
         _require_platform_quota_manager(authorization)
@@ -402,7 +410,7 @@ def delete_platform_capacity(
 ):
     """
     Remove platform capacity declaration.
-    Restricted to SU, ASSET_OWNER, and SPEED roles.
+    Restricted to SU and ASSET_OWNER roles.
     """
     try:
         _require_platform_quota_manager(authorization)
@@ -434,7 +442,7 @@ def set_tenant_hard_quota(
 ):
     """
     SU sets a hard quota on a target tenant.
-    Restricted to SU, ASSET_OWNER, and SPEED roles.
+    Restricted to SU and ASSET_OWNER roles.
     """
     try:
         _require_platform_quota_manager(authorization)
@@ -478,7 +486,7 @@ def delete_tenant_hard_quota(
 ):
     """
     SU removes a tenant's hard quota.
-    Restricted to SU, ASSET_OWNER, and SPEED roles.
+    Restricted to SU and ASSET_OWNER roles.
     """
     try:
         _require_platform_quota_manager(authorization)
@@ -531,7 +539,7 @@ def get_personal_self_capacity(
 
 @personal_quota_router.get("/users")
 def list_personal_capacity_users(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
@@ -585,7 +593,7 @@ def list_personal_capacity_users(
 @personal_quota_router.get("/users/{user_id}/kbs")
 def get_personal_capacity_kbs(
     user_id: str = Path(..., description="User ID"),
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
@@ -614,7 +622,7 @@ def get_personal_capacity_kbs(
 
 @personal_quota_router.get("/summary")
 def get_personal_capacity_summary(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Return aggregate personal KB capacity stats for a tenant."""
@@ -675,7 +683,7 @@ def set_personal_user_quota(
 
 @personal_quota_router.get("/default-quota")
 def get_personal_default_quota(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Get the tenant default personal KB quota."""

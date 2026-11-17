@@ -47,6 +47,9 @@ class ErrorMessage:
         ErrorCode.CHAT_METADATA_INVALID: "Runtime metadata is invalid.",
         ErrorCode.CHAT_METADATA_TOO_LARGE: "Runtime metadata exceeds the maximum allowed size.",
         ErrorCode.CHAT_METADATA_VERSION_CONFLICT: "Runtime metadata was updated by another request.",
+        ErrorCode.CHAT_MCP_HEADER_KEY_FORBIDDEN: "Reserved _mcp_headers field contains disallowed header keys (hop-by-hop or non-whitelisted).",
+        ErrorCode.CHAT_MCP_HEADER_VALUE_TOO_LARGE: "Reserved _mcp_headers field contains oversized values (>4KB per header or >16KB total).",
+        ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND: "_mcp_headers_by_server URLs do not match any configured MCP server.",
         # ==================== 02 QuickConfig / 快速配置 ====================
         ErrorCode.QUICK_CONFIG_INVALID: "Invalid configuration.",
         ErrorCode.QUICK_CONFIG_SYNC_FAILED: "Sync configuration failed.",
@@ -163,6 +166,7 @@ class ErrorMessage:
         ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND: "Agent not found.",
         ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED: "Judge model ID is required.",
         ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: "Only the creator or a tenant administrator can delete this evaluation run.",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_REQUIRED: "At least one published evaluator is required.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED: "Failed to generate test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT: "AI returned invalid format for test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY: "AI generated no valid test queries.",

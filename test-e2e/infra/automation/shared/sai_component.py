@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SAI-D1 contracts for isolated invocation factories and ownership."""
 import asyncio
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents import nexent_agent as factory_module
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents import agent as factory_module
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.concurrency.context import (

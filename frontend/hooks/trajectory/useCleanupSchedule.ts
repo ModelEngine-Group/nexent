@@ -1,0 +1,64 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { useEffect, useRef } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CleanupSchedule } from "@/types/trajectory";
+import { trajectoryService } from "@/services/trajectoryService";
+
+export function useCleanupSchedule(
+  scope: string,
+  tenantId?: string,
+  allTenants = false
+) {
+  const client = useQueryClient();
+  const controller = useRef<AbortController | null>(null);
+  const key = [
+    "trajectory-cleanup-schedule",
+    scope,
+    allTenants ? "all" : tenantId,
+  ];
+  const query = useQuery({
+    queryKey: key,
+    queryFn: ({ signal }) =>
+      allTenants
+        ? trajectoryService.cleanupSchedule(undefined, signal, true)
+        : trajectoryService.cleanupSchedule(tenantId, signal),
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+  const mutation = useMutation({
+    mutationFn: async (
+      policy: Pick<CleanupSchedule, "enabled" | "retention_days">
+    ) => {
+      controller.current?.abort();
+      const request = new AbortController();
+      controller.current = request;
+      const result = allTenants
+        ? await trajectoryService.saveCleanupSchedule(
+            undefined,
+            policy,
+            request.signal,
+            true
+          )
+        : await trajectoryService.saveCleanupSchedule(
+            tenantId,
+            policy,
+            request.signal
+          );
+      if (request.signal.aborted) throw new Error("Aborted");
+      return result;
+    },
+    onSuccess: (result) => {
+      if (allTenants)
+        client.removeQueries({
+          queryKey: ["trajectory-cleanup-schedule", scope],
+          type: "inactive",
+        });
+      client.setQueryData(key, result);
+    },
+    retry: false,
+  });
+  useEffect(() => () => controller.current?.abort(), []);
+  return { query, mutation };
+}

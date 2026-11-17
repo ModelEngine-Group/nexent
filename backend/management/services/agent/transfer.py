@@ -431,6 +431,7 @@ async def export_agent_by_agent_id(
         )
 
     agent_info = ExportAndImportAgentInfo(
+        enable_context_manager=bool(agent_info.get("enable_context_manager", True)),
         agent_id=agent_id,
         tenant_id=agent_info["tenant_id"],
         name=agent_info["name"],
@@ -442,6 +443,9 @@ async def export_agent_by_agent_id(
         is_main_agent=agent_info.get("is_main_agent", True),
         provide_run_summary=agent_info["provide_run_summary"],
         allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
+        allow_mcp_header_passthrough=agent_info.get(
+            "allow_mcp_header_passthrough", False
+        ),
         enable_protocol_repair_retry=agent_info.get("enable_protocol_repair_retry")
         is True,
         verification_config=agent_info.get("verification_config"),
@@ -606,6 +610,7 @@ async def import_agent_by_agent_id(
     user_group_ids = _get_user_group_ids(user_id, tenant_id)
     new_agent = create_agent(
         agent_info={
+            "enable_context_manager": import_agent_info.enable_context_manager,
             "name": agent_names["name"],
             "display_name": agent_names["display_name"],
             "description": import_agent_info.description,
@@ -620,6 +625,9 @@ async def import_agent_by_agent_id(
             "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
             "provide_run_summary": import_agent_info.provide_run_summary,
             "allow_chat_metadata": import_agent_info.allow_chat_metadata,
+            "allow_mcp_header_passthrough": getattr(
+                import_agent_info, "allow_mcp_header_passthrough", False
+            ),
             "enable_protocol_repair_retry": getattr(
                 import_agent_info, "enable_protocol_repair_retry", False
             ),

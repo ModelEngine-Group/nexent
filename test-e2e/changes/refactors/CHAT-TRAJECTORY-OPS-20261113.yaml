@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-OPS-20261113
+  change_type: refactor
+  title: Move trajectory queries and maintenance into operations
+  description: Preserve capture wiring in Runtime while operations owns historical query and retrieval APIs and background projections.
+  affected_features:
+    existing: [CHAT-TRAJECTORY, OPS-BOOTSTRAP]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-QUERY-D2-001, OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, CHAT-TRAJECTORY-RETENTION-D5-001, CHAT-TRAJECTORY-CAPTURE-D3-001]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Public query contracts and disabled-mode operations health contracts remain unchanged; module bindings and deployment assertions follow the relocation.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve administrator authorization, PG-only lists, private caches, bounded detail reads and error mapping under ops routes.
+    - Verify ops owns query lanes and projection/maintenance workers; startup failures and shutdown release all owned resources.
+    - Preserve Runtime capture and immediate conversation-deletion cleanup without an ops import.
+    - Verify proxy routing and shared storage configuration while ordinary conversation traffic remains on Runtime.
+    reason: Reuse trajectory service and file suites; add focused service-ownership and lifecycle regression coverage rather than duplicate formal D1.
+    test_selectors:
+    - test/backend/ops/test_trajectory_migration.py
+    - test/backend/ops/test_bootstrap.py
+    - test/backend/ops/test_trajectory_proxy.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/services/trajectory/test_catalog.py
+    - test/backend/services/trajectory/test_summary_projection.py
+    - test/backend/utils/test_trajectory_capture_catalog.py
+    - test/backend/utils/test_trajectory_lifespan.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - test/backend/deploy/test_ops_chart.py
+  notes: >-
+    Baseline 30e5ec4ca; SPEC chat-local-file-trajectory/changes/chat-trajectory-ops-query-migration.
+    Reuse existing runtime and ops responsibility routing. D2 fixture owns temporary files and controlled PG boundaries;
+    D5 scripts own subprocesses and finally cleanup. Real PG, Docker and model integration acceptance remains deferred
+    at the user's request; unit and static validation are reported separately from formal runtime results.
