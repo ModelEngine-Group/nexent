@@ -5,6 +5,7 @@ import json
 import logging
 
 from contracts.conversation import MessageSource
+from contracts.agentos_knowledge import validate_knowledge_source_reference
 
 from management.services.agent.context import (
     strip_current_time_prefix,
@@ -870,6 +871,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                            "tool_sign": record["tool_sign"], "score_details": {}}
 
             search_item["score_details"].update(record.get("aidp_source_reference") or {})
+            search_item.update(validate_knowledge_source_reference(record.get("knowledge_reference")) or {})
             if record.get("aidp_metadata") is not None:
                 search_item["score_details"]["metadata"] = record["aidp_metadata"]
 
@@ -1159,6 +1161,7 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
 
                 search_item["score_details"] = {}
                 search_item["score_details"].update(record.get("aidp_source_reference") or {})
+                search_item.update(validate_knowledge_source_reference(record.get("knowledge_reference")) or {})
                 if record.get("aidp_metadata") is not None:
                     search_item["score_details"]["metadata"] = record["aidp_metadata"]
                 if record["score_accuracy"] is not None:

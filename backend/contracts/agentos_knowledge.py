@@ -87,6 +87,22 @@ class KnowledgeFileReference(Contract):
     file_version: int = Field(ge=0)
 
 
+class KnowledgeSourceReference(Contract):
+    file_ref: KnowledgeFileReference
+    image_ref: ObjectReference | None = None
+    location: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bounded_snapshot(self):
+        if len(self.model_dump_json().encode("utf-8")) > 16384:
+            raise ValueError("Knowledge source reference exceeds 16 KiB")
+        return self
+
+
+def validate_knowledge_source_reference(value):
+    return None if value is None else KnowledgeSourceReference.model_validate(value).model_dump(mode="json", exclude_none=True)
+
+
 class KnowledgeContentRequest(KnowledgeFileReference):
     image_ref: ObjectReference | None = None
 

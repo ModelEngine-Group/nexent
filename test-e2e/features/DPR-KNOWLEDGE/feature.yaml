@@ -18,4 +18,6 @@ feature:
     description: Multi-embedding ingests verified manifest image references through Model.invoke and exact read-only ObjectStore, preserving block identity without persisting image bytes.
   - rule_id: DPR-KNOWLEDGE-RULE-05
     description: Bound knowledge tool retrieval groups immutable model versions, fixes file scope, rechecks resource revisions and invokes one optional final rerank without replay.
-  required_test_stages: [D3]
+  - rule_id: DPR-KNOWLEDGE-RULE-06
+    description: Bounded typed file/image source identities survive message persistence and history without URL guessing; deployment preserves legacy rows and invalid snapshots roll back atomically.
+  required_test_stages: [D3, D5]

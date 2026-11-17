@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from contracts.agentos_knowledge import validate_knowledge_source_reference
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from contracts.errors.exceptions import sampling_configuration_error_payload
 
@@ -375,6 +376,10 @@ class AssistantMessageProjection:
                         "source_title": result.get("title", ""),
                         "source_location": result.get("url", ""),
                         "source_content": result.get("text", ""),
+                        "knowledge_reference": validate_knowledge_source_reference(
+                            {key: result[key] for key in ("file_ref", "image_ref", "location") if key in result}
+                            if result.get("file_ref") is not None else None
+                        ),
                         "aidp_metadata": result.get(
                             "score_details", {}
                         ).get("metadata"),

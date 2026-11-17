@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: DPR-SOURCE-HISTORY-D5-001
+timeout_seconds: 180
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_knowledge_source_history
+acceptance_bindings:
+  AC-01: [test_knowledge_source_history]
+  AC-02: [test_knowledge_source_history]
+  AC-03: [test_knowledge_source_history]
+  AC-04: [test_knowledge_source_history]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

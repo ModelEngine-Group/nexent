@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from contracts.clarification import ClarificationResponse, normalize_form
+from contracts.agentos_knowledge import validate_knowledge_source_reference
 from contracts.constants.constants import (
     ASSET_OWNER_ROLE,
     ASSET_OWNER_TENANT_ID,
@@ -926,6 +927,7 @@ def branch_conversation(
                     "retrieval_highlight_terms": search.retrieval_highlight_terms,
                     "aidp_metadata": search.aidp_metadata,
                     "aidp_source_reference": search.aidp_source_reference,
+                    "knowledge_reference": validate_knowledge_source_reference(search.knowledge_reference),
                     "published_date": search.published_date,
                     "cite_index": search.cite_index,
                     "search_type": search.search_type,
@@ -1126,6 +1128,7 @@ def persist_assistant_run_batch(
                         "retrieval_highlight_terms": record.get("retrieval_highlight_terms"),
                         "aidp_metadata": record.get("aidp_metadata"),
                         "aidp_source_reference": record.get("aidp_source_reference"),
+                        "knowledge_reference": validate_knowledge_source_reference(record.get("knowledge_reference")),
                         "published_date": record.get("published_date"),
                         "cite_index": record.get("cite_index"),
                         "search_type": record.get("search_type"),
@@ -2636,6 +2639,7 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data["aidp_metadata"] = search_data["aidp_metadata"]
         if "aidp_source_reference" in search_data:
             data["aidp_source_reference"] = search_data["aidp_source_reference"]
+        data["knowledge_reference"] = validate_knowledge_source_reference(search_data.get("knowledge_reference"))
         if user_id:
             data = add_creation_tracking(data, user_id)
 

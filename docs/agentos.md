@@ -162,6 +162,8 @@ Runtime 的 `KnowledgeToolSearch` 按每个知识库绑定的模型 ID 和版本
 
 新工具事件保留 typed file_ref、image_ref 和位置。来源下载与图片展示消费者、公开写入切换及历史索引迁移尚未完成，生产切换须按退役 SPEC 联合执行。
 
+Management 使用会话来源记录的 knowledge_reference 保存这些身份。字段接受 file_ref、可选 image_ref 和 location，紧凑 UTF-8 JSON 上限 16 KiB；旧行及网页来源保持 NULL。新增迁移为 v2.9.0_018_knowledge_source_reference.sql，部署 Management 前须完成数据库基础表初始化并应用该迁移，镜像已包含它。批量投影、单条来源、会话分支和两处历史回读均保留引用，内容访问仍须当前用户和租户重新授权。前端展示接入尚未完成。
+
 Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，文本检索及 rerank 已有标准接口。图片及 Management 对象清理仍在迁移，当前公开入库和旧 SDK 检索尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |

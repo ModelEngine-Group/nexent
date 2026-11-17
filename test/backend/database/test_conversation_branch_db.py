@@ -101,6 +101,7 @@ def _search(search_id, message_id, unit_id=None, **overrides):
         retrieval_highlight_terms=None,
         aidp_metadata=None,
         aidp_source_reference=None,
+        knowledge_reference=None,
         published_date=None,
         cite_index=None,
         search_type="web_search",
@@ -228,13 +229,14 @@ def _wire(session, rows, *, conversation=_UNSET, units=None, searches=None, imag
 
 
 def test_branch_copies_turn_range_and_remaps_children(session):
+    reference = {"file_ref": {"knowledge_id": 1, "file_id": "a" * 32, "file_version": 2}, "location": {"page": 1}}
     rows = _three_turn_rows()
     units = [
         _unit(21, 15, unit_index=1, tool_call_id="t-1"),
     ]
     searches = [
         _search(31, 12),
-        _search(33, 15, unit_id=21),
+        _search(33, 15, unit_id=21, knowledge_reference=reference),
     ]
     images = [
         _image(41, 15),
@@ -264,6 +266,7 @@ def test_branch_copies_turn_range_and_remaps_children(session):
             table = text.split("nexent.")[1].split(" ")[0]
             inserted.setdefault(table, []).append(params(statement))
 
+    assert inserted["conversation_source_search_t"][1]["knowledge_reference"] == reference
     # Only the four active rows of turns one and two are copied.
     assert [row["message_content"] for row in inserted["conversation_message_t"]] == [
         "Q1",

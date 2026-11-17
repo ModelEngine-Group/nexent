@@ -29,6 +29,9 @@ def _reset_captured():
 
 # Stub sqlalchemy with minimal API used by conversation_db
 sa_mod = types.ModuleType("sqlalchemy")
+sa_exc = types.ModuleType("sqlalchemy.exc")
+sa_exc.SQLAlchemyError = type("SQLAlchemyError", (Exception,), {})
+sys.modules["sqlalchemy.exc"] = sa_exc
 sa_mod.and_ = MagicMock(name="and_")
 sa_mod.asc = MagicMock(name="asc")
 sa_mod.desc = MagicMock(name="desc")
@@ -1189,6 +1192,7 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
             "source_content": "content",
             "aidp_metadata": {"count": 0, "enabled": False, "nested": {"tags": [0, False]}},
             "aidp_source_reference": {"chunk_id": "chunk-first", "retrieval_source": "vector"},
+            "knowledge_reference": {"file_ref": {"knowledge_id": 1, "file_id": "a" * 32, "file_version": 2}, "location": {"page": 1}},
             "cite_index": 1,
             "search_type": "web_search",
             "tool_sign": "web",
@@ -1208,6 +1212,7 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
     source_row = session.execute.call_args_list[2].args[1][0]
     assert source_row["aidp_metadata"] == {"count": 0, "enabled": False, "nested": {"tags": [0, False]}}
     assert source_row["aidp_source_reference"] == {"chunk_id": "chunk-first", "retrieval_source": "vector"}
+    assert source_row["knowledge_reference"] == {"file_ref": {"knowledge_id": 1, "file_id": "a" * 32, "file_version": 2}, "location": {"page": 1}}
     assert source_row["unit_id"] == 101
     assert parent.message_content == "done"
     assert parent.status == "completed"
@@ -2364,6 +2369,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
             "score_accuracy": 0.90,
             "score_semantic": 0.88,
             "retrieval_highlight_terms": ["RFT-2026-042"],
+            "knowledge_reference": {"file_ref": {"knowledge_id": 1, "file_id": "a" * 32, "file_version": 2}},
         },
         user_id="actor",
     )
@@ -2372,6 +2378,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
     assert fresh_insert_mock["score_overall"] == 0.95
     assert fresh_insert_mock["score_accuracy"] == 0.90
     assert fresh_insert_mock["retrieval_highlight_terms"] == ["RFT-2026-042"]
+    assert fresh_insert_mock["knowledge_reference"] == {"file_ref": {"knowledge_id": 1, "file_id": "a" * 32, "file_version": 2}, "location": {}}
 
 
 # =============================================================================

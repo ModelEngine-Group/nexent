@@ -83,6 +83,10 @@ class ConversationSourceSearch(TableBase):
         JSONB, nullable=True,
         comment="AIDP source reference attributes for this retrieval hit, excluding metadata",
     )
+    knowledge_reference = Column(
+        JSONB, nullable=True,
+        comment="Validated KB file/image identities and source location, at most 16 KiB; NULL for legacy or non-KB hits",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(

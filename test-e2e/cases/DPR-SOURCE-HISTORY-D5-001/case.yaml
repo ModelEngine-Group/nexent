@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-SOURCE-HISTORY-D5-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-06]
+  title: Management image preserves typed knowledge sources through PostgreSQL migration and persistence
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Apply the packaged source-reference migration to a legacy table and prove actual typed persistence and atomic rejection.
+  preconditions:
+  - Current Management latest image, cached PostgreSQL 15 image and Docker are available.
+  test_data:
+    resources: Uniquely labelled PostgreSQL and Management probe containers with only their own network namespace.
+    fixtures: A legacy source row, one owned streaming message, one foreign actor and a bounded file/image/location reference.
+  steps:
+  - order: 1
+    action: Create disposable legacy conversation tables, apply the migration from the built Management image twice and inspect the column and old row.
+    expected: The JSONB column is nullable and commented; the old source survives with a null reference and a repeated migration is harmless.
+  - order: 2
+    action: Project a typed search event, persist through the actual assistant batch repository and read the stored source for its owner and a foreign actor.
+    expected: File/image versions and location survive without URL or AIDP overloading; the foreign actor receives no source.
+  - order: 3
+    action: Persist an invalid source reference in another message and inspect its message, unit and source rows.
+    expected: Validation rejects the reference and the transaction leaves the message streaming with no new units or sources.
+  - order: 4
+    action: Close the probe and remove only containers and anonymous volumes matching this test run label.
+    expected: No owned container remains and no application state was accessed.
+  expected_results:
+  - The packaged migration preserves legacy rows and creates the documented nullable JSONB column.
+  - Actual PG persistence retains typed identities and filters source reads by owner.
+  - Invalid references cause atomic rollback without partial message completion.
+  - Owned resources are reclaimed.
+  forbidden_side_effects:
+  - No application database, external object store, Runtime source, old data-process service or retry/fallback path is used.
+  risk_type: DEPLOYMENT
+  risk: A missing schema migration or dropped reference fields breaks stored KB citations after deployment.
+  condition:
+  - Use the built Management image and only a uniquely labelled disposable PostgreSQL container.
+  metrics:
+  - Column type/nullability/comment, legacy row value, persisted reference equality and transaction state.
+  - Owned containers remaining after cleanup.
+  thresholds:
+  - The reference is exact JSONB, the legacy value remains null and foreign reads return no rows.
+  - Invalid writes leave zero child rows and the message streaming; zero owned containers remain.
+  recovery_expectations:
+  - Roll back failed transactions and remove only uniquely labelled Case containers and anonymous volumes.
+  integration_boundary:
+  - Built Management image, packaged SQL, actual PostgreSQL and production message projection/repository.
+  - Object storage is isolated at its import boundary; browser consumption and complete service startup are not proved.
+  observations:
+  - Image ID, migration checksum, PG column type/comment, exact JSONB reference, foreign read result and rollback state.
+  cleanup:
+  - Remove only the unique-label containers and anonymous volumes, even on failure; keep the built image.
+  acceptance:
+  - id: AC-01
+    description: The image migration is repeatable and preserves the old row with a commented nullable JSONB column.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Actual typed source persistence and owner-filtered reads preserve the complete reference.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Invalid references roll back all message/unit/source changes.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: All owned resources close without touching application state.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]

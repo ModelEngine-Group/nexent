@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-SOURCE-REFERENCE-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Persist versioned knowledge source references through conversation history
+  description: Add a bounded nullable source-reference snapshot, preserve it through projection, writes, branch copies and both history reads. Browser consumption remains pending.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-PARSER-IMAGES-D5-001]
+    added: [DPR-SOURCE-HISTORY-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Bound file/image/location reference JSON to 16 KiB and reject unknown or invalid fields.
+    - Preserve typed references in source projection, single and atomic writes, branches and both read facades.
+    - Keep legacy and web sources null, AIDP metadata separate and existing user ownership filters intact.
+    reason: Existing database and service UT cover transaction parameters and response shaping; new focused assertions cover typed identities. A new D5 supplies the missing built-image migration, actual PG JSONB, legacy preservation and rollback proof. It owns uniquely labelled PG/image containers and removes only those resources in finally. No duplicate formal D1 is introduced.
+    test_selectors:
+    - test/backend/services/test_knowledge_source_reference.py
+    - test/backend/services/test_agent_message_projection.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/database/test_conversation_branch_db.py
+    - test/backend/services/test_conversation_management_service.py

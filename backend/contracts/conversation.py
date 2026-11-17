@@ -280,6 +280,7 @@ class SearchRecord(TypedDict):
     retrieval_highlight_terms: Optional[List[str]]
     aidp_metadata: Optional[Dict[str, Any]]
     aidp_source_reference: Optional[Dict[str, Any]]
+    knowledge_reference: Optional[Dict[str, Any]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
