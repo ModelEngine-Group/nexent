@@ -81,7 +81,8 @@ async def test_complete_uses_only_the_reclassified_final_step(stream_capture):
     ], final_answer_mode="complete")
     assert [event["content"] for event in answers(events)] == ["Reclassified answer"]
     assert batch["message_content"] == "Reclassified answer"
-    assert [event["type"] for event in events[:2]] == ["model_output_thinking", "model_output_code"]
+    process = [event for event in events if not event.get("answer_preview")]
+    assert [event["type"] for event in process[:2]] == ["model_output_thinking", "model_output_code"]
 
 
 @pytest.mark.asyncio
@@ -93,7 +94,7 @@ async def test_complete_discards_rolled_back_answers(stream_capture):
         answer("Accepted", attempt_id="ok"), answer("", "complete", attempt_id="ok"),
     ], final_answer_mode="complete")
     assert [event["content"] for event in answers(events)] == ["Accepted"]
-    assert events[0]["phase"] == "rollback"
+    assert events[0]["answer_preview"] and events[1]["phase"] == "rollback"
     assert batch["message_content"] == "Accepted"
 
 

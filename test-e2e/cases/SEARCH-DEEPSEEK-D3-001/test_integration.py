@@ -8,8 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.tools import DeepSeekSearchTool
 from nexent.core.utils.observer import MessageObserver, ProcessType
 

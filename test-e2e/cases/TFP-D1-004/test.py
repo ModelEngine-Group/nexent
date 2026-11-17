@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TFP-D1-004: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -9,13 +10,8 @@ from shared.tool_fastpath import make_wrapper
 from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
 from smolagents.default_tools import FinalAnswerTool
 
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.tool_fastpath import (
-    OFFICIAL_FASTPATH_TOOL_CLASSES,
-    DeferredToolExecutor,
-    is_simple_whitelisted_action,
-    official_fastpath_tools,
-)
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.smolagents.tool_fastpath import OFFICIAL_FASTPATH_TOOL_CLASSES, DeferredToolExecutor, is_simple_whitelisted_action, official_fastpath_tools
 from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchTool
 from nexent.core.tools.ind_aidp_search_tool import IndependentAidpSearchTool
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool

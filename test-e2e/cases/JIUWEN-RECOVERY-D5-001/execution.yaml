@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: JIUWEN-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test_recovery.py
+  selector: ""
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01:
+  - test_bounded_recovery_without_effect_replay
+  - test_recovery_respects_remaining_run_budget
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

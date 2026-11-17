@@ -24,14 +24,14 @@ if "nexent.core" not in sys.modules:
     sys.modules["nexent.core"] = mock.MagicMock()
 if "nexent.core.agents" not in sys.modules:
     sys.modules["nexent.core.agents"] = mock.MagicMock()
-if "nexent.core.agents.agent_model" not in sys.modules:
-    agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+if "nexent.core.agents.contracts.config" not in sys.modules:
+    agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 
     class ToolConfig:  # minimal stub
         pass
 
     agent_model_mod.ToolConfig = ToolConfig
-    sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+    sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
 # Stub boto3 used by management.db.client
 if "boto3" not in sys.modules:

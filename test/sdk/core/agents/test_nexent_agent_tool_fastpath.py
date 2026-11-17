@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent factories defer initialization and release only resources they acquire."""
 
 import json
@@ -7,13 +9,15 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from nexent.core.agents.resources import workspace as workspace_resources
+
 import pytest
 
-from nexent.core.agents import nexent_agent as agent_module
-from nexent.core.agents import sandbox
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.cores.smolagents import agent as agent_module
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 from nexent.core.utils.observer import MessageObserver
 
@@ -178,7 +182,7 @@ def test_conflicting_session_group_releases_new_lease_before_skill_runner_creati
     e.factory.agent = e.factory.create_single_agent(e.config, _sandbox_tree_context=tree)
     with pytest.raises(RuntimeError, match="multiple session sandbox containers"):
         e.factory.agent.python_executor('import math')
-    e.cleanup.assert_called_once_with(e.remotes[0], agent_module.logger, timeout=5.0)
+    e.cleanup.assert_called_once_with(e.remotes[0], workspace_resources.logger, timeout=5.0)
     e.runner.assert_not_called()
     assert e.factory._sandbox_executors == []
 
@@ -218,7 +222,7 @@ def test_failed_child_activation_retains_shared_skills_until_root_cleanup(factor
     assert root._sandbox_skill_runners == [runner]
     assert e.factory._sandbox_skill_runners == []
     assert e.factory._sandbox_executors == []
-    e.cleanup.assert_called_once_with(e.remotes[0], agent_module.logger, timeout=5.0)
+    e.cleanup.assert_called_once_with(e.remotes[0], workspace_resources.logger, timeout=5.0)
     e.factory._cleanup_sandbox()
     runner.cleanup.assert_not_called()
     root._close_subagent_invocations()
@@ -285,7 +289,7 @@ def test_unwrapped_root_is_also_released_when_not_registered(factory_execution):
     executor = Mock()
     e.factory.agent = SimpleNamespace(python_executor=executor)
     e.factory._cleanup_sandbox()
-    e.cleanup.assert_called_once_with(executor, agent_module.logger, timeout=5.0)
+    e.cleanup.assert_called_once_with(executor, workspace_resources.logger, timeout=5.0)
     assert e.factory.agent.python_executor is None
 
 

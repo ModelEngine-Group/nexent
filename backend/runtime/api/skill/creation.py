@@ -44,6 +44,7 @@ async def nl2skill_run_api(
             stream_factory=lambda effective, ref: create_nl2skill_stream(
                 request=effective, tenant_id=tenant_id,
                 language=request.language or user_language or "zh", system_ref=ref,
+                user_id=user_id,
             ),
         )
         return StreamingResponse(stream, media_type="text/event-stream",

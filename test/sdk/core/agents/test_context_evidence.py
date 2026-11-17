@@ -6,7 +6,7 @@ import logging
 import pytest
 
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
-from nexent.core.context_runtime.contracts import ContextEvidence
+from nexent.core.agents.contracts.context import ContextEvidence
 
 
 @pytest.mark.parametrize("status", ["completed", "error", "cancelled"])

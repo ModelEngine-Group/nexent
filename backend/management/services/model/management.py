@@ -14,8 +14,9 @@ from contracts.model import _infer_model_type_from_name
 from contracts.constants.constants import DASHSCOPE_BASE_URL, DASHSCOPE_REALTIME_BASE_URL, MODEL_ENGINE_URL_MARKER, SILICON_BASE_URL, TOKENPONY_BASE_URL
 from contracts.model import ProviderEnum
 from management.utils.managed_read import managed_read
-from management.db.model.repository import create_model_record, delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_model_records_page, get_models_by_display_name, get_models_by_tenant_factory_type, update_model_record
+from management.db.model.repository import delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_model_records_page, get_models_by_display_name, get_models_by_tenant_factory_type
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
+from management.db.model.repository import create_model_record, update_model_record
 from management.services.model.names import (
     add_repo_to_name,
     sort_models_by_id,

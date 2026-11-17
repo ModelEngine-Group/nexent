@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from pathlib import Path
 import asyncio
 import types
 import json
@@ -64,7 +65,7 @@ def test_log_memory_value_assessment_for_store_attempt(caplog):
     )
     agent = types.SimpleNamespace(tools={"store_memory": store_tool})
 
-    run_agent._log_memory_value_assessment(agent)
+    smol_runner._log_memory_value_assessment(agent)
 
     assert "event=memory_value_assessment" in caplog.text
     assert "decision=store_attempted" in caplog.text
@@ -84,10 +85,10 @@ def test_log_memory_value_assessment_for_skip_and_unavailable(caplog):
         last_outcome="not_invoked",
     )
 
-    run_agent._log_memory_value_assessment(
+    smol_runner._log_memory_value_assessment(
         types.SimpleNamespace(tools={"store_memory": store_tool})
     )
-    run_agent._log_memory_value_assessment(types.SimpleNamespace(tools={}))
+    smol_runner._log_memory_value_assessment(types.SimpleNamespace(tools={}))
 
     assert "decision=skip" in caplog.text
     assert "last_outcome=not_invoked" in caplog.text
@@ -265,7 +266,7 @@ module_mocks = {
         ChatCompletionMessage=mock_openai_chat_completion_message
     ),
     "openai.types.chat.chat_completion_message_param": MagicMock(),
-    # exa_py is imported by sdk.nexent.core.tools – provide dummy to skip real import
+    # exa_py is imported by nexent.core.tools – provide dummy to skip real import
     "exa_py": MagicMock(Exa=MagicMock()),
     "tavily": MagicMock(TavilyClient=MagicMock()),
     "linkup": MagicMock(
@@ -280,14 +281,14 @@ module_mocks = {
     "nexent.skills.skill_manager": MagicMock(),
 }
 
-# Stub the gateway bridge: ``sdk.nexent.memory.embedding_model`` and the vector
+# Stub the gateway bridge: ``nexent.memory.embedding_model`` and the vector
 # database core import gateway adapter symbols at module level, and the real
 # gateway eagerly registers every vendor adapter (absolute ``nexent.*`` imports
 # that the mocked environment cannot satisfy). The mocked modules only need the
 # adapter names for typing / construction stubs.
-_gateway_mod = ModuleType("sdk.nexent.core.gateway")
+_gateway_mod = ModuleType("nexent.core.gateway")
 _gateway_mod.__path__ = []
-_gateway_modality_mod = ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod = ModuleType("nexent.core.gateway.modality")
 _gateway_modality_mod.__path__ = []
 for _name in (
     "OpenAICompatibleEmbeddingAdapter",
@@ -298,28 +299,42 @@ for _name in (
     setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
 _gateway_mod.modality = _gateway_modality_mod
 _gateway_mod.EmbeddingContext = MagicMock(name="gateway.EmbeddingContext")
-sys.modules["sdk.nexent.core.gateway"] = _gateway_mod
-sys.modules["sdk.nexent.core.gateway.modality"] = _gateway_modality_mod
+sys.modules["nexent.core.gateway"] = _gateway_mod
+sys.modules["nexent.core.gateway.modality"] = _gateway_modality_mod
 
 # ---------------------------------------------------------------------------
 # Import modules under test with patched dependencies in place
 # ---------------------------------------------------------------------------
+# Apply existing dependency doubles at canonical lookup sites after module migration.
+for _legacy_name, _double in list(module_mocks.items()):
+    if _legacy_name.startswith("nexent"):
+        _canonical_name = _legacy_name.removeprefix("sdk.")
+        if _canonical_name == "nexent.core.agents.cores.smolagents.core_agent":
+            _canonical_name = "nexent.core.agents.cores.smolagents.core_agent"
+        module_mocks[_canonical_name] = _double
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models"):
+    _package_double = module_mocks.setdefault(_package, types.ModuleType(_package))
+    _package_double.__path__ = [str(Path(__file__).resolve().parents[4] / "sdk" / _package.replace(".", "/"))]
+
+_engine_agent_double = ModuleType("nexent.core.agents.cores.smolagents.agent")
+_engine_agent_double.NexentAgent = MagicMock()
+module_mocks[_engine_agent_double.__name__] = _engine_agent_double
+
 with patch.dict("sys.modules", module_mocks):
-    from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
-    from sdk.nexent.core.agents.agent_model import (
-        AgentRunInfo,
-        ModelConfig,
-        AgentConfig,
-        ToolConfig,
-    )  # noqa: E402
-    import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
-    from sdk.nexent.consts.mcp_errors import (  # noqa: E402
+    from nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.contracts.config import ModelConfig, AgentConfig, ToolConfig  # noqa: E402
+    import nexent.core.agents.orchestration.entry as run_agent  # noqa: E402
+    from nexent.core.agents.cores.smolagents import runner as smol_runner
+    from nexent.consts.mcp_errors import (  # noqa: E402
         is_mcp_connection_timeout_error,
         MCPConnectionFailure,
         MCPToolTimeoutError,
         is_mcp_timeout_error,
         propagate_mcp_timeout,
     )
+
+sys.modules[smol_runner.__name__] = smol_runner
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -390,7 +405,7 @@ def _mock_managed_mcp(monkeypatch):
         __exit__=MagicMock(return_value=None),
     )
     factory = MagicMock(return_value=context)
-    monkeypatch.setattr(run_agent, "ManagedMCPToolCollection", factory)
+    monkeypatch.setattr(smol_runner, "ManagedMCPToolCollection", factory)
     return factory, collection
 
 
@@ -407,14 +422,14 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch, fastpath
     basic_agent_run_info.tool_fastpath_allowed_tools = ["ReadSkillConfigTool"]
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     # Call the function under test
     run_agent.agent_run_thread(basic_agent_run_info)
 
     # NexentAgent should be instantiated with observer, model_config_list, stop_event
-    run_agent.NexentAgent.assert_called_once_with(
+    smol_runner.NexentAgent.assert_called_once_with(
         observer=basic_agent_run_info.observer,
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
@@ -468,7 +483,7 @@ def test_agent_run_thread_binds_capacity_and_budget_snapshots(
     )
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     run_agent.agent_run_thread(basic_agent_run_info)
@@ -525,7 +540,7 @@ def test_agent_run_thread_mcp_flow(
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     # Execute
@@ -546,7 +561,7 @@ def test_agent_run_thread_mcp_flow(
     assert managed_mcp_factory.call_args.kwargs["connect_timeout_seconds"] == 10.0
 
     # NexentAgent should be instantiated with mcp_tool_collection
-    run_agent.NexentAgent.assert_called_once_with(
+    smol_runner.NexentAgent.assert_called_once_with(
         observer=basic_agent_run_info.observer,
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
@@ -603,7 +618,7 @@ def test_agent_run_thread_mcp_flow_with_explicit_transport(
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     # Execute
@@ -635,7 +650,7 @@ def test_agent_run_thread_mcp_flow_mixed_formats(
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     # Execute
@@ -957,7 +972,7 @@ def test_agent_run_thread_marks_kernel_cancellation_stopped(basic_agent_run_info
 
     instance = MagicMock()
     instance.create_single_agent.side_effect = CancelledError("cancelled during bootstrap")
-    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=instance))
+    monkeypatch.setattr(smol_runner, "NexentAgent", MagicMock(return_value=instance))
     run_agent.agent_run_thread(basic_agent_run_info)
     assert basic_agent_run_info.attempt_outcome == "stopped"
     assert not any("Run Agent Error" in str(call) for call in basic_agent_run_info.observer.add_message.call_args_list)
@@ -972,7 +987,7 @@ def test_agent_run_thread_handles_internal_exception(
     failing_nexent_instance.create_single_agent.side_effect = Exception("Boom")
 
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=failing_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=failing_nexent_instance)
     )
 
     # Execute and expect ValueError
@@ -1001,7 +1016,7 @@ def test_agent_run_thread_cleans_workspace_when_agent_creation_fails(
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     mock_nexent_instance.create_single_agent.side_effect = RuntimeError("Boom")
     monkeypatch.setattr(
-        run_agent,
+        smol_runner,
         "NexentAgent",
         MagicMock(return_value=mock_nexent_instance),
     )
@@ -1028,7 +1043,7 @@ def test_agent_run_thread_cleanup_is_idempotent_after_normal_agent_cleanup(
 
     mock_nexent_instance.agent_run_with_observer.side_effect = run_and_clean
     monkeypatch.setattr(
-        run_agent,
+        smol_runner,
         "NexentAgent",
         MagicMock(return_value=mock_nexent_instance),
     )
@@ -1121,7 +1136,7 @@ async def test_agent_run_close_releases_real_manager_capacity(
     monkeypatch,
 ):
     """A cooperative interrupted session returns its agent lane to zero."""
-    from sdk.nexent.core.concurrency import LanePolicy
+    from nexent.core.concurrency import LanePolicy
 
     manager = run_agent.ThreadManager(
         service_name="session-lifecycle-test",
@@ -1251,7 +1266,7 @@ def test_agent_run_thread_mcp_connection_error(basic_agent_run_info, monkeypatch
         "Couldn't connect to the MCP server"
     )
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     with pytest.raises(ValueError) as exc_info:
@@ -1270,7 +1285,7 @@ def test_agent_run_thread_mcp_timeout_error_is_localized(basic_agent_run_info, m
         "MCP tool request timed out after 60 seconds"
     )
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     with pytest.raises(ValueError):
@@ -1292,7 +1307,7 @@ def test_agent_run_thread_chinese_lang(basic_agent_run_info, monkeypatch):
         "Couldn't connect to the MCP server"
     )
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
+        smol_runner, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
     )
 
     with pytest.raises(ValueError):
@@ -1459,7 +1474,7 @@ def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatc
         return mock_nexent_instance
 
     monkeypatch.setattr(
-        run_agent, "NexentAgent", MagicMock(side_effect=create_nexent_agent)
+        smol_runner, "NexentAgent", MagicMock(side_effect=create_nexent_agent)
     )
 
     test_var.set("preserved!")
@@ -1615,7 +1630,10 @@ def test_agent_run_thread_grouped_mcp_failure_friendly_message(
     failing.create_single_agent.side_effect = BaseExceptionGroup(
         "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
     )
-    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=failing))
+    from nexent.core.agents.cores.smolagents import runner
+
+    monkeypatch.setattr(runner, "NexentAgent", MagicMock(return_value=failing))
+    monkeypatch.setattr(runner, "ManagedMCPToolCollection", MagicMock())
 
     with pytest.raises(ValueError):
         run_agent.agent_run_thread(basic_agent_run_info)

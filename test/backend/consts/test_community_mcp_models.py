@@ -16,7 +16,7 @@ sys.modules.setdefault("botocore", MagicMock())
 sys.modules.setdefault("botocore.client", MagicMock())
 sys.modules.setdefault("botocore.exceptions", MagicMock())
 
-_agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+_agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 _agent_model_mod.AgentVerificationConfig = MagicMock()
 _agent_model_mod.ToolConfig = MagicMock()
 sys.modules.setdefault("nexent", MagicMock())
@@ -26,7 +26,7 @@ sys.modules["nexent.core"].__path__ = [
     str(Path(__file__).resolve().parents[3] / "sdk" / "nexent" / "core")
 ]
 sys.modules.setdefault("nexent.core.agents", MagicMock())
-sys.modules["nexent.core.agents.agent_model"] = _agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = _agent_model_mod
 
 from contracts.tool import CommunityPublishRequest, CommunityReviewActionRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
 from contracts.skill import SkillRepositoryListingCreateRequest

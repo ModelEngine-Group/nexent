@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NB-ANSWER-PREVIEW-20261111
+  change_type: requirement
+  requirement_id: NB-ANSWER-PREVIEW-20261111
+  title: Stream smolagents complete-mode answer previews before final confirmation
+  description: Keep canonical answer storage and delta delivery unchanged while publishing root answer fragments as explicitly marked model_output_thinking previews in complete mode.
+  affected_features:
+    existing: [FAF-001]
+    added: []
+    modified: [F-146]
+    retired: []
+  affected_cases:
+    existing: [FAF-D1-001, FAF-D4-001]
+    added: []
+    modified: [NB-CHAT-FINAL-ANSWER-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Root answer deltas stream as marked thinking previews before source exhaustion and persistence in complete mode.
+    - Final confirmation replaces the preview once; real reasoning remains distinct; rollback restores the previous answer slot.
+    - Only canonical final-answer units are persisted; failed, stopped, cancelled and persistence-error runs never confirm previews.
+    - Native/default delta and jiuwen event handling remain unchanged; child answers do not leak into root previews.
+    reason: Strengthen the existing stream boundary tests and frontend adapter/projection tests. Existing SDK parser UT and formal D1 already prove tag classification; no duplicate D1 is needed.
+    test_selectors:
+    - test/backend/services/test_northbound_answer_preview.py
+    - test/backend/services/test_northbound_final_answer_stream.py
+    - test/backend/services/test_agent_run_final_answers.py
+  notes: >-
+    SPEC: nexent-doc/docs/Developing/chat-northbound-final-answer-compatibility/changes/chat-message-complete-answer-preview/.
+    F-146 inherits northbound responsibility through the central ownership catalog; FAF-001 remains runtime.
+    Existing NB D2 supplies actual deployed HTTP/SSE/history evidence and retains its registered owned-conversation cleanup, anchors and reachable streaming model prerequisite.
+    No new preparation family is needed; cleanup remains in finally and records orphaned resources on failure.
+    Frontend event projection is verified with controlled adapter tests; FAF-D4-001 remains the existing browser/history regression rather than being relabeled or duplicated.

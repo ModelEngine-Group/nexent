@@ -6,6 +6,7 @@ case:
   feature_id: F-179
   business_rule_ids:
     - F-179-RULE-01
+    - F-179-RULE-02
   title: 普通对话的前端消息按用户轮次正确分组
   type: FE-COMP
   priority: P0

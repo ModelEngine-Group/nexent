@@ -13,6 +13,7 @@ import { APP_VERSION } from "@/const/constants";
 import log from "@/lib/logger";
 
 interface DeploymentContextType {
+  agentCore: "smolagents" | "jiuwen";
   isSpeedMode: boolean;
   isDeploymentReady: boolean;
   appVersion: string;
@@ -24,6 +25,7 @@ interface DeploymentContextType {
 }
 
 const DeploymentContext = createContext<DeploymentContextType>({
+  agentCore: "smolagents",
   isSpeedMode: false,
   isDeploymentReady: false,
   appVersion: APP_VERSION,
@@ -35,6 +37,7 @@ const DeploymentContext = createContext<DeploymentContextType>({
 });
 
 interface DeploymentVersionResponse {
+  agent_core?: "smolagents" | "jiuwen";
   deployment_version: string;
   app_version: string;
   enable_aidp_knowledge?: boolean;
@@ -44,6 +47,9 @@ interface DeploymentVersionResponse {
 }
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
+  const [agentCore, setAgentCore] = useState<"smolagents" | "jiuwen">(
+    "smolagents"
+  );
   const isSpeedMode = false;
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
@@ -59,6 +65,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
           API_ENDPOINTS.tenantConfig.deploymentVersion
         );
         const data: DeploymentVersionResponse = await response.json();
+        setAgentCore(data.agent_core ?? "smolagents");
         setDeploymentVersion(data.deployment_version);
         setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         setEnableAgentWorkbench(data.enable_agent_workbench ?? false);
@@ -79,6 +86,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   return (
     <DeploymentContext.Provider
       value={{
+        agentCore,
         isSpeedMode,
         isDeploymentReady,
         appVersion,
