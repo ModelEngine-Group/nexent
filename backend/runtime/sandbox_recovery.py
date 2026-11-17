@@ -193,9 +193,10 @@ class SandboxRuntimeRecovery:
 
     def recover(self, *, startup=False, deadline=None):
         deadline = time.monotonic() + 15 if deadline is None else deadline
-        result = {'recovered_runs': 0, 'unknown_owners': 0}
+        result = {'recovered_runs': 0, 'unknown_owners': 0, 'restart_confirmed': False}
         stopped = set()
         retired_facts = []
+        peer_unresolved = False
         # Reconcile previous epochs even if no run reached journal publication.
         for directory in (self.journal.root / 'owners').glob('*'):
             if startup and directory.name != self.coordinator.owner.key:
@@ -221,6 +222,8 @@ class SandboxRuntimeRecovery:
                     if self._owner_stopped(owner, fact, store, deadline, startup=startup):
                         stopped.add((owner.key, owner.epoch))
                         retired_facts.append(store)
+                    elif owner != self.coordinator.owner:
+                        peer_unresolved = True
                 except Exception:
                     result['unknown_owners'] += 1
                     if startup and (owner is None or owner.key == self.coordinator.owner.key):
@@ -241,6 +244,8 @@ class SandboxRuntimeRecovery:
             except Exception:
                 logger.warning('Sandbox run recovery preserved unknown state run_id=%s', path.stem, exc_info=True)
         if not startup:
+            # A scale-out or an incomplete owner observation cannot establish a restart.
+            result['restart_confirmed'] = bool(stopped) and not (peer_unresolved or result['unknown_owners'])
             self._collect_owner_facts(retired_facts, deadline)
         return result
 

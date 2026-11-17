@@ -156,6 +156,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+_concurrency_module.ManagedThreadSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
 _concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
@@ -422,8 +423,8 @@ agent_run_manager_module.AgentRunConcurrencyExceededError = (
 # answers attribute access lazily but monkeypatch.setattr needs a real entry,
 # so newer pytest versions reject attributes that were never set.
 _agent_run_manager_mock = MagicMock()
-_agent_run_manager_mock.reserve_agent_capacity.return_value = "agent-capacity-test"
-_agent_run_manager_mock.reserve_agent_run.return_value = "agent-run-reservation"
+_agent_run_manager_mock.reserve_agent_capacity = MagicMock(return_value="agent-capacity-test")
+_agent_run_manager_mock.reserve_agent_run = MagicMock(return_value="agent-run-reservation")
 for _method in (
     "register_agent_run",
     "unregister_agent_run",

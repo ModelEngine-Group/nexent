@@ -50,6 +50,8 @@
         "test/backend/agents/test_sandbox_run_lifecycle.py",
         "test/backend/agents/test_sandbox_stream_state.py",
         "test/backend/app/test_agent_evaluation_runtime_app.py",
+        "test/backend/services/test_agent_automation_scheduler.py",
+        "test/backend/services/test_agent_subscription_lifecycle.py",
         "test/backend/app/test_health_app.py",
         "test/backend/apps/test_sandbox_callbacks.py",
         "test/backend/database/test_runtime_owned_recovery.py",

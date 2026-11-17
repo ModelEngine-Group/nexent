@@ -82,11 +82,14 @@ def responses_for(cfg, nonce, promoted):
     return responses
 
 
-async def setup(case_id):
+async def setup(case_id, *, verify_runtime=None):
     cfg = fixture_config()
     # Preflight must precede every product mutation.
-    fingerprints = verify_deployment(cfg)
-    await verify_trace_access(cfg)
+    if verify_runtime is None:
+        fingerprints = verify_deployment(cfg)
+        await verify_trace_access(cfg)
+    else:
+        fingerprints = verify_runtime(cfg)
     controlled_asset_url()
     identity = await sign_in("tenant_a_admin")
     nonce = uuid.uuid4().hex

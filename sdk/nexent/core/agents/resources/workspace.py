@@ -485,6 +485,7 @@ class WorkspaceResources:
             logger.error("Run workspace exists but upload_to_s3 is unavailable")
             return
 
+        mapping = getattr(self, "workspace_mapping", None)
         uploaded_paths = getattr(upload_tool, "uploaded_paths", set())
         for path in workspace.rglob("*") if workspace.exists() else ():
             if not path.is_file():
@@ -498,7 +499,8 @@ class WorkspaceResources:
             if normalized in uploaded_paths:
                 continue
             try:
-                upload_tool.forward(str(path), relative.as_posix())
+                upload_path = str(mapping.to_container(path)) if mapping is not None else str(path)
+                upload_tool.forward(upload_path, relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
                 self.observer.add_message(

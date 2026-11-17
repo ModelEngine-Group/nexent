@@ -113,13 +113,20 @@ async def dispatch_evaluation_run_api(
 
     if status == EvalRunStatus.PENDING and uses_distributed_runtime():
         from management.db.runtime_recovery import claim_owned_evaluation_run, restore_unstarted_evaluation_run
+        from runtime.sandbox_coordination import SandboxRunBusy
         from runtime.sandbox_evaluation import dispatch_owned_evaluation
         from runtime.sandbox_runtime import get_coordinator
 
-        claimed = await dispatch_owned_evaluation(tenant_id, user_id, payload.agent_evaluation_id,
-            run.get('judge_model_id'), _load_evaluation_executor(), manager=runtime_thread_manager,
-            coordinator=get_coordinator(), claim=claim_owned_evaluation_run,
-            restore=restore_unstarted_evaluation_run, admission=require_business_admission)
+        try:
+            claimed = await dispatch_owned_evaluation(
+                tenant_id, user_id, payload.agent_evaluation_id, run.get("judge_model_id"),
+                _load_evaluation_executor(), manager=runtime_thread_manager, coordinator=get_coordinator(),
+                claim=claim_owned_evaluation_run, restore=restore_unstarted_evaluation_run,
+                admission=require_business_admission,
+            )
+        except SandboxRunBusy:
+            # A reservation can precede the other request's database claim.
+            claimed = False
         if claimed:
             return {'accepted': True, 'agent_evaluation_id': payload.agent_evaluation_id}
         latest = get_agent_evaluation(agent_evaluation_id=payload.agent_evaluation_id, tenant_id=tenant_id)

@@ -126,6 +126,10 @@ sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent.core'] = types.ModuleType('nexent.core')
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
+# Route tests stub the SDK package; coordination admission has its own tests.
+runtime_sandbox_stub = types.ModuleType('runtime.sandbox_runtime')
+runtime_sandbox_stub.require_business_admission = Mock()
+sys.modules['runtime.sandbox_runtime'] = runtime_sandbox_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
 sys.modules['management.db.client'] = MagicMock()

@@ -33,7 +33,9 @@ def recovery(tmp_path):
 def test_live_owner_is_preserved_without_database_or_resource_mutations(recovery):
     engine, record, facts, observer, api, fail = recovery
     observer.process_stopped.return_value = False
-    assert engine.recover()['recovered_runs'] == 0
+    result = engine.recover()
+    assert result['recovered_runs'] == 0
+    assert not result['restart_confirmed']
     fail.assert_not_called()
     api.delete_namespaced_pod.assert_not_called()
     assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
@@ -42,7 +44,9 @@ def test_live_owner_is_preserved_without_database_or_resource_mutations(recovery
 def test_proved_dead_unused_owner_recovers_only_exact_associations(recovery):
     engine, record, facts, observer, api, fail = recovery
     observer.process_stopped.return_value = True
-    assert engine.recover()['recovered_runs'] == 1
+    result = engine.recover()
+    assert result['recovered_runs'] == 1
+    assert result['restart_confirmed']
     kwargs = fail.call_args.kwargs
     assert kwargs['assistant_message_id'] == 19
     assert kwargs['tenant_id'] == 'tenant' and kwargs['conversation_id'] == 7
@@ -56,8 +60,23 @@ def test_current_owner_never_recovers_itself_even_if_observer_is_wrong(recovery)
     engine, record, facts, observer, api, fail = recovery
     engine.coordinator.owner = facts.owner
     observer.process_stopped.return_value = True
-    assert engine.recover()['recovered_runs'] == 0
+    result = engine.recover()
+    assert result['recovered_runs'] == 0
+    assert not result['restart_confirmed']
     fail.assert_not_called()
+
+
+def test_stopped_epoch_does_not_confirm_restart_while_peer_is_active(recovery):
+    engine, _, facts, observer, _, _ = recovery
+    peer = SandboxOwnerFacts(engine.journal, replace(facts.owner, pod_uid='uid-c', pod_name='runtime-c'))
+    peer.initialize(facts.read(facts.owner.epoch)['process'])
+    observer.process_stopped.side_effect = lambda fact: fact['owner']['pod_uid'] == facts.owner.pod_uid
+
+    result = engine.recover()
+
+    assert result['recovered_runs'] == 1
+    assert not result['restart_confirmed']
+    assert peer.read(peer.owner.epoch)['process_stopped_at'] is None
 
 
 def test_new_epoch_same_pod_is_blocked_by_another_live_process(recovery):
