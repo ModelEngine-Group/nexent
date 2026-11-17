@@ -40,6 +40,8 @@ def _all(*terms):
 
 def job_state(row):
     return KnowledgeJobState(
+        processed_chunks=row.get("processed_chunks"),
+        total_chunks=row.get("total_chunks"),
         **{
             name: row[name]
             for name in (
@@ -390,6 +392,23 @@ class KnowledgeJobs:
             )
         return True
 
+    def progress(self, handle, *, processed_chunks, total_chunks, context):
+        if (any(type(value) is not int or not 0 <= value <= 2**31 - 1 for value in (processed_chunks, total_chunks))
+                or processed_chunks > total_chunks):
+            raise InvalidInput()
+        self.authorize(_lookup(handle), context=context)
+        with self.records.transaction(context=context) as tx:
+            manifest = self._lock_file(tx, _lookup(handle), context)
+            row = self._attempt(tx, handle, context)
+            if row is None or not row["write_started"] or not self._current(manifest, row):
+                return False
+            if (row["total_chunks"] is not None and row["total_chunks"] != total_chunks
+                    or row["processed_chunks"] is not None and row["processed_chunks"] > processed_chunks):
+                raise Conflict()
+            if row["processed_chunks"] != processed_chunks or row["total_chunks"] != total_chunks:
+                self._patch(tx, JOBS, row, {"processed_chunks": processed_chunks, "total_chunks": total_chunks}, context)
+        return True
+
     def complete(self, handle, *, chunk_count, context):
         if type(chunk_count) is not int or not 0 <= chunk_count <= 2**31 - 1:
             raise InvalidInput()
@@ -403,6 +422,8 @@ class KnowledgeJobs:
                 or not self._current(manifest, row)
             ):
                 return False
+            if row["total_chunks"] is not None and (row["total_chunks"] != chunk_count or row["processed_chunks"] != chunk_count):
+                raise Conflict()
             self._patch(
                 tx,
                 JOBS,
@@ -412,6 +433,8 @@ class KnowledgeJobs:
                     "writer_ended": True,
                     "reconcile_required": False,
                     "chunk_count": chunk_count,
+                    "processed_chunks": chunk_count,
+                    "total_chunks": chunk_count,
                 },
                 context,
             )

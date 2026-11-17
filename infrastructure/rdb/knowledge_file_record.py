@@ -191,9 +191,23 @@ class KnowledgeFileLifecycle(TableBase):
         nullable=True,
         comment="Validated Management ingestion intent snapshot, at most 16 KiB; NULL for legacy or unadmitted files.",
     )
+    cleanse_status = Column(String(30), nullable=True, comment="Last confirmed Management cleansing child state; NULL before observation or for legacy rows.")
+    runtime_status = Column(String(30), nullable=True, comment="Last confirmed AgentOS Runtime child state; NULL before observation or for legacy rows.")
+    processed_chunks = Column(Integer, nullable=True, comment="Last confirmed Runtime vector-write count for the current file attempt; NULL when unknown.")
+    total_chunks = Column(Integer, nullable=True, comment="Fixed Runtime chunk total for the current file attempt; NULL when unknown.")
 
 
 _source = KnowledgeFileLifecycle.__table__.c
+sa.CheckConstraint(
+    "(processed_chunks IS NULL OR processed_chunks >= 0) AND (total_chunks IS NULL OR total_chunks >= 0) "
+    "AND (processed_chunks IS NULL OR total_chunks IS NULL OR processed_chunks <= total_chunks)",
+    name="ck_knowledge_file_progress", table=KnowledgeFileLifecycle.__table__,
+)
+sa.CheckConstraint(
+    "(cleanse_status IS NULL OR cleanse_status IN ('queued','running','completed','failed','cancelled')) "
+    "AND (runtime_status IS NULL OR runtime_status IN ('queued','running','completed','failed','cancelled','deleted','cleanup_pending'))",
+    name="ck_knowledge_file_child_status", table=KnowledgeFileLifecycle.__table__,
+)
 sa.CheckConstraint(
     sa.or_(
         _source.ingestion_request.is_(None),

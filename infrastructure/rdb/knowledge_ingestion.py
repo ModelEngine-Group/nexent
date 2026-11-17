@@ -38,6 +38,10 @@ def ingestion_catalog():
         "process_task_id",
         "forward_task_id",
         "parent_task_id",
+        "cleanse_status",
+        "runtime_status",
+        "processed_chunks",
+        "total_chunks",
         "version",
         "error_code",
         "error_message",
@@ -50,7 +54,7 @@ def ingestion_catalog():
         "update_time",
         "delete_flag",
     )
-    integers = {"knowledge_id", "source_generation", "processing_attempt", "version", "file_size"}
+    integers = {"knowledge_id", "source_generation", "processing_attempt", "version", "file_size", "processed_chunks", "total_chunks"}
     fields = tuple(
         FieldDefinition(
             name,

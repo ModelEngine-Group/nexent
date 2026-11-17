@@ -213,6 +213,11 @@ class KnowledgeUploadWorker:
                     objects,
                     vectors,
                 ):
+                    async def progress(processed_chunks, total_chunks):
+                        if not await self._job(actor, grant, "progress", handle,
+                                               processed_chunks=processed_chunks, total_chunks=total_chunks, context=context):
+                            raise OperationCancelled(operation_id=context.operation_id)
+
                     ingestor = KnowledgeIngestor(
                         objects,
                         vectors,
@@ -233,6 +238,7 @@ class KnowledgeUploadWorker:
                         generation=Revision(handle["attempt_id"]),
                         context=context,
                         checkpoint=checkpoint,
+                        progress=progress,
                     )
                     if not ingestor.stop_writes():
                         raise OutcomeUnknown(operation_id=context.operation_id)

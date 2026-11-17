@@ -214,6 +214,7 @@ class KnowledgeIngestor:
         new_after_n_chars=1024,
         batch_size=64,
         checkpoint=None,
+        progress=None,
     ):
         if (
             not isinstance(request, KnowledgeFileUpload)
@@ -289,6 +290,8 @@ class KnowledgeIngestor:
             documents.extend(await self._blocking(image_documents, artifact, self.image_objects,
                                                    actor=actor, limit=self.max_source_bytes, context=context))
         keys = []
+        if progress is not None:
+            await progress(0, len(documents))
         for start in range(0, len(documents), batch_size):
             if checkpoint is not None:
                 await checkpoint()
@@ -332,6 +335,8 @@ class KnowledgeIngestor:
             )
             await self._blocking(self._upsert, rows, context=context)
             keys.extend(row.key.key for row in rows)
+            if progress is not None:
+                await progress(len(keys), len(documents))
         return IngestedChunks(tuple(keys), expected.revision)
 
     def _artifact(self, request, source, *, context):

@@ -321,13 +321,28 @@ async def test_batches_stop_on_failure_without_reembedding_confirmed_batch(setup
     s = setup
     s.arguments["filename"] = "source.xlsx"
     s.vectors.upsert.side_effect = [(WriteReceipt("0", True),), OutcomeUnknown()]
+    progress = AsyncMock()
     with pytest.raises(OutcomeUnknown):
-        await s.service.execute(s.request, batch_size=1, **s.arguments)
+        await s.service.execute(s.request, batch_size=1, progress=progress, **s.arguments)
     assert [call.args[0].input for call in s.models.invoke.call_args_list] == [
         ["first"],
         ["second"],
     ]
     assert s.vectors.upsert.call_count == 2
+    assert [call.args for call in progress.await_args_list] == [(0, 2), (1, 2)]
+
+
+async def test_confirmed_batches_advance_progress_after_each_storage_confirmation(setup):
+    s = setup
+    s.arguments["filename"] = "source.xlsx"
+    observed = []
+
+    async def progress(processed, total):
+        assert s.vectors.upsert.call_count == processed
+        observed.append((processed, total))
+
+    result = await s.service.execute(s.request, batch_size=1, progress=progress, **s.arguments)
+    assert len(result.chunk_keys) == 2 and observed == [(0, 2), (1, 2), (2, 2)]
 
 
 async def test_model_revision_change_after_preflight_never_writes(setup):

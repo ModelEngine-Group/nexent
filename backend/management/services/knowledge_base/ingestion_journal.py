@@ -124,6 +124,10 @@ class IngestionJournal:
                 "error_stage": None,
                 "failed_at": None,
                 "completed_at": None,
+                "cleanse_status": None,
+                "runtime_status": None,
+                "processed_chunks": None,
+                "total_chunks": None,
             },
             context,
         )
@@ -167,6 +171,9 @@ class IngestionJournal:
                 "error_message": None,
                 "error_stage": stage,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
+                **({"cleanse_status": state.status} if stage == "PROCESS" else {
+                    "runtime_status": state.status, **self._runtime_progress(row, state)
+                }),
             },
             context,
         )
@@ -174,14 +181,16 @@ class IngestionJournal:
     def observe_cleanse(self, row, state, *, context):
         self._phase(row, {"CLEANSE_SUBMITTING", "CLEANSE_PENDING"}, "PROCESSING")
         self._child(row, state, KnowledgeCleanseState, "process_task_id")
+        if row["cleanse_status"] == "running" and state.status == "queued":
+            raise Conflict()
         if state.status in {"failed", "cancelled"}:
             return self._failed(row, state, "PROCESS", context)
         if state.status not in {"queued", "running"}:
             raise InvalidInput()
         return (
             row
-            if row["stage"] == "CLEANSE_PENDING"
-            else self._patch(row, {"stage": "CLEANSE_PENDING"}, context)
+            if row["stage"] == "CLEANSE_PENDING" and row["cleanse_status"] == state.status
+            else self._patch(row, {"stage": "CLEANSE_PENDING", "cleanse_status": state.status}, context)
         )
 
     def begin_runtime(self, row, state, *, context):
@@ -200,14 +209,39 @@ class IngestionJournal:
                 "forward_task_id": knowledge_job_id(
                     payload, row["tenant_id"], intent.user_id
                 ),
+                "cleanse_status": "completed",
+                "runtime_status": None,
+                "processed_chunks": None,
+                "total_chunks": None,
             },
             context,
         )
         return row, payload
 
+    @staticmethod
+    def _runtime_progress(row, state):
+        values = {}
+        for name in ("processed_chunks", "total_chunks"):
+            value = getattr(state, name)
+            if value is not None and (type(value) is not int or not 0 <= value <= 2**31 - 1):
+                raise InvalidInput()
+            prior = row[name]
+            if value is not None and prior is not None and (
+                value < prior if name == "processed_chunks" else value != prior
+            ):
+                raise Conflict()
+            values[name] = value if value is not None else prior
+        if (values["processed_chunks"] is not None and values["total_chunks"] is not None
+                and values["processed_chunks"] > values["total_chunks"]):
+            raise InvalidInput()
+        return values
+
     def observe_runtime(self, row, state, *, context):
         self._phase(row, {"RUNTIME_SUBMITTING", "RUNTIME_PENDING"}, "FORWARDING")
         self._child(row, state, KnowledgeJobState, "forward_task_id")
+        if row["runtime_status"] == "running" and state.status == "queued":
+            raise Conflict()
+        progress = self._runtime_progress(row, state)
         if state.status in {"failed", "cancelled"}:
             return self._failed(row, state, "FORWARD", context)
         if state.status == "completed":
@@ -217,6 +251,8 @@ class IngestionJournal:
                     "status": "COMPLETED",
                     "stage": "COMPLETE",
                     "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "runtime_status": state.status,
+                    **progress,
                 },
                 context,
             )
@@ -224,6 +260,7 @@ class IngestionJournal:
             raise InvalidInput()
         return (
             row
-            if row["stage"] == "RUNTIME_PENDING"
-            else self._patch(row, {"stage": "RUNTIME_PENDING"}, context)
+            if row["stage"] == "RUNTIME_PENDING" and row["runtime_status"] == state.status
+            and all(row[name] == value for name, value in progress.items())
+            else self._patch(row, {"stage": "RUNTIME_PENDING", "runtime_status": state.status, **progress}, context)
         )

@@ -109,6 +109,8 @@ class RuntimeKnowledgeJob(TableBase):
         nullable=True,
         comment="Number of confirmed chunks published by a completed upload.",
     )
+    processed_chunks = sa.Column(sa.Integer, nullable=True, comment="Number of chunks with confirmed vector writes in this attempt; NULL when unknown.")
+    total_chunks = sa.Column(sa.Integer, nullable=True, comment="Fixed chunk count after Runtime prepares text and image inputs; NULL before preparation.")
     error_code = sa.Column(
         sa.String(128),
         nullable=True,
@@ -191,6 +193,11 @@ class RuntimeKnowledgeFile(TableBase):
 
 
 jobs, files = RuntimeKnowledgeJob.__table__, RuntimeKnowledgeFile.__table__
+sa.CheckConstraint(
+    "(processed_chunks IS NULL OR processed_chunks >= 0) AND (total_chunks IS NULL OR total_chunks >= 0) "
+    "AND (processed_chunks IS NULL OR total_chunks IS NULL OR processed_chunks <= total_chunks)",
+    name="ck_runtime_knowledge_progress", table=jobs,
+)
 for table in (jobs, files):
     for name, comment in {
         "create_time": "UTC admission time of this Runtime record.",
@@ -284,6 +291,8 @@ def bind_knowledge_jobs(scope, engine):
         "visible_version",
         "tombstone_version",
         "chunk_count",
+        "processed_chunks",
+        "total_chunks",
     }
     boolean = {
         "write_started",

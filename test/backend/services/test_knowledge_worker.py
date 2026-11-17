@@ -220,6 +220,7 @@ async def test_worker_publishes_confirmed_generation_and_duplicate_never_runs_mo
         s.lookup, s.actor, owner_id="owner", context=s.context
     )
     assert result.status == "completed" and s.closed == [True]
+    assert result.processed_chunks == result.total_chunks == 1
     persisted = await s.db(s.records.get, JOBS, s.state.job_id, context=s.context)
     assert persisted["writer_ended"] and not persisted["reconcile_required"]
     assert await s.db(
@@ -251,6 +252,7 @@ async def test_unknown_upsert_never_publishes_or_marks_writer_ended(setup):
         s.policy.is_visible, s.lookup, row["attempt_id"], context=s.context
     )
     assert s.closed == [True] and s.vectors.upsert.call_count == 1
+    assert row["processed_chunks"] == 0 and row["total_chunks"] == 1
 
 
 async def test_delete_during_model_call_blocks_vector_write_and_final_publication(

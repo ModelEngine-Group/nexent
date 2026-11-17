@@ -186,6 +186,14 @@ class KnowledgeJobState(KnowledgeJobLookup):
     ]
     error_code: str | None = Field(default=None, max_length=128)
     physical_cleanup_complete: bool = False
+    processed_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
+    total_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
+
+    @model_validator(mode="after")
+    def valid_progress(self):
+        if self.processed_chunks is not None and self.total_chunks is not None and self.processed_chunks > self.total_chunks:
+            raise ValueError("Confirmed progress cannot exceed the known total")
+        return self
 
 
 class KnowledgeSearchAuthorization(Contract):

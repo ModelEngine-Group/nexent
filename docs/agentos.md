@@ -188,6 +188,10 @@ Management 的公开 `POST /api/file/knowledge/content` 接收同一 typed 请�
 
 KB 文件生命周期及授权客户端有十秒总截止，connect/read/write/pool 分别为 5/10/10/5 秒，连接关闭属于这次请求的所有者，不自动重试。Runtime 接纳与 Management 授权各自也有十秒服务预算。未知写入返回 `KNOWLEDGE_OUTCOME_UNKNOWN`，调用方应保留原幂等身份核对状态。`physical_cleanup_complete=false` 不能解释为物理数据已清空。
 
+`File.inspect` 返回可空的 `processed_chunks` 和 `total_chunks`。Runtime 准备好切片后固定总量，每批向量写入确认后更新数量；未知写入不增加计数。数量达到总量仍须检查任务 `status`，它不表示文件已发布或物理清理完成。inspect 保留原用户、租户及资源授权校验。Management 的原用户协调任务保存这些观测，公开列表读取投影的接线仍在退役计划中，不能改用其他知识库读者身份查询原任务。
+
+部署该状态快照前执行 SQL 022，再升级 Management，最后升级 Runtime。新列允许空值，历史行保持未知；回滚先 Runtime、后 Management，保留新增列。
+
 文本 search 的客户端与 Runtime 各有 180 秒总截止，包含授权、embedding、存储、rerank 和最终可见性检查。`search_mode` 支持 accurate、semantic、hybrid，默认 semantic；指定 `rerank_model` 才执行重排，使用既有十倍候选常量。accurate/hybrid 的文本分支沿用原分词加权、短语/模糊匹配及同次查询高亮，失败不回退普通 text。所有模型调用进入 `ModelService.invoke`，非法重排结果直接报错。Runtime 在重排前及返回前核对权威 generation，不能返回已删除或未发布的向量。结果 `score_details` 包含适用的 accurate/semantic 归一化分量和 retrieval_highlight_terms，重排后仍保留这些检索信息。
 
 ```python
