@@ -14,12 +14,17 @@ class CleanseService:
         self.parser_version = parser_version
 
     @contextmanager
-    def _jobs(self, tenant_id, user_id, context):
+    def _records(self, tenant_id, user_id, context):
         if any(not isinstance(value, str) or not value.strip() or len(value) > 100
                for value in (tenant_id, user_id)):
             raise ScopeDenied()
         context.remaining()
-        with self._ports(tenant_id, user_id, context=context) as (jobs, resources):
+        with self._ports(tenant_id, user_id, context=context) as ports:
+            yield ports
+
+    @contextmanager
+    def _jobs(self, tenant_id, user_id, context):
+        with self._records(tenant_id, user_id, context) as (jobs, resources):
             authorization = self.authorization_type(resources, user_id=user_id)
             yield CleanseJobs(jobs, authorize=authorization.authorize, parser_version=self.parser_version)
 

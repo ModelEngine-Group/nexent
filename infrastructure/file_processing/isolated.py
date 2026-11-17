@@ -79,7 +79,7 @@ def _reclaim(process):
     process.close()
 
 
-def run_isolated(factory, payload, *, context, tick=None):
+def run_isolated(factory, payload, *, context, tick=None, on_finished=None):
     """Call only from a fork-safe worker root; never from an HTTP request thread."""
     if "fork" not in multiprocessing.get_all_start_methods():
         raise CapabilityUnsupported()
@@ -89,7 +89,8 @@ def run_isolated(factory, payload, *, context, tick=None):
     ):
         raise CapabilityUnsupported()
     ensure_isolation_available()
-    if not callable(factory) or tick is not None and not callable(tick):
+    if (not callable(factory) or tick is not None and not callable(tick)
+            or on_finished is not None and not callable(on_finished)):
         raise InvalidInput()
     encoded = _encode(payload)
     context.remaining()
@@ -143,3 +144,5 @@ def run_isolated(factory, payload, *, context, tick=None):
                 raise OutcomeUnknown(operation_id=context.operation_id) from None
         else:
             process.close()
+        if on_finished is not None:
+            on_finished()

@@ -126,11 +126,13 @@ def test_cancel_during_execution_is_observed_by_parent_tick(prepared, mocker):
         ),
     )
 
-    def execute(row, request, *, tick, context):
-        public.cancel(lookup, context=context)
-        clock[0] += 30
-        tick(context=context)
-        pytest.fail("cancelled parser continued")
+    def execute(row, request, *, tick, context, on_finished):
+        try:
+            public.cancel(lookup, context=context)
+            tick(context=context)
+            pytest.fail("cancelled parser continued")
+        finally:
+            on_finished()
 
     assert consume(queue, execute)
     assert public.inspect(lookup, context=context()).status == "cancelled"

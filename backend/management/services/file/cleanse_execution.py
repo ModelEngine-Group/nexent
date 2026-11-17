@@ -30,7 +30,7 @@ def _authorization(resources, user_id, reference):
     raise ScopeDenied()
 
 
-def execute_cleanse(row, request, *, tick, context):
+def execute_cleanse(row, request, *, tick, context, on_finished=None):
     def factory(*, context):
         from contracts.constants import environment
 
@@ -62,7 +62,7 @@ def execute_cleanse(row, request, *, tick, context):
     def renew(_row, *, context):
         tick(context=context)
 
-    return ProcessCleanseExecutor(factory, tick=renew)(row, request, context=context)
+    return ProcessCleanseExecutor(factory, tick=renew)(row, request, context=context, on_finished=on_finished)
 
 
 def consume_cleanse_once(
@@ -100,13 +100,17 @@ def consume_cleanse_once(
             jobs, authorize_execution=authorize, lease_seconds=lease_seconds
         )
 
-        def process(row, request, *, context):
-            guard(row, context=context)
+        def process(row, request, *, context, on_finished):
+            try:
+                guard(row, context=context)
+            except BaseException:
+                on_finished()
+                raise
 
             def tick(*, context):
                 guard(row, context=context)
 
-            return execute(row, request, tick=tick, context=context)
+            return execute(row, request, tick=tick, context=context, on_finished=on_finished)
 
         handler = CleanseHandler(
             jobs,

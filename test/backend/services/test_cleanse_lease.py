@@ -110,3 +110,16 @@ def test_interval_must_be_bounded_by_half_lease(interval):
             lease_seconds=60,
             interval_seconds=interval,
         )
+
+
+
+def test_cancellation_is_observed_inside_the_renewal_cache_window(setup):
+    make, _ = setup
+    public, worker = make(), make("worker")
+    state = public.submit(request(), context=context())
+    handle = worker.claim("worker", lease_seconds=60, context=context())
+    check = guard(worker)
+    check(handle, context=context())
+    public.cancel(lookup(state), context=context())
+    with pytest.raises(OperationCancelled):
+        check(handle, context=context())

@@ -23,10 +23,13 @@ def test_factory_initializes_only_in_child_boundary(mocker):
     factory = Mock()
     factory.return_value.return_value = artifact()
 
-    def isolate(initialize, snapshot, *, context, tick):
+    def isolate(initialize, snapshot, *, context, tick, on_finished):
         factory.assert_not_called()
-        execute = initialize(context=context)
-        return execute(snapshot, context=context)
+        try:
+            execute = initialize(context=context)
+            return execute(snapshot, context=context)
+        finally:
+            on_finished()
 
     mocker.patch(
         "management.services.file.process_cleanse_executor.run_isolated",
@@ -70,8 +73,11 @@ def test_owned_executor_closes_on_child_failure(mocker, phase):
     else:
         factory.return_value.side_effect = ValueError("controlled execution failure")
 
-    def isolate(initialize, snapshot, *, context, tick):
-        return initialize(context=context)(snapshot, context=context)
+    def isolate(initialize, snapshot, *, context, tick, on_finished):
+        try:
+            return initialize(context=context)(snapshot, context=context)
+        finally:
+            on_finished()
 
     mocker.patch(
         "management.services.file.process_cleanse_executor.run_isolated",
@@ -80,3 +86,22 @@ def test_owned_executor_closes_on_child_failure(mocker, phase):
     with pytest.raises(ValueError):
         ProcessCleanseExecutor(factory)(row(), request(), context=context())
     factory.return_value.close.assert_called_once()
+
+
+
+def test_unknown_reclamation_never_invents_execution_end(mocker):
+    mocker.patch("management.services.file.process_cleanse_executor.run_isolated", side_effect=OutcomeUnknown())
+    finished = Mock()
+    with pytest.raises(OutcomeUnknown):
+        ProcessCleanseExecutor(Mock())(row(), request(), context=context(), on_finished=finished)
+    finished.assert_not_called()
+
+
+def test_pre_dispatch_unavailability_confirms_no_execution_started(mocker):
+    from nexent.storage.errors import Unavailable
+
+    mocker.patch("management.services.file.process_cleanse_executor.run_isolated", side_effect=Unavailable())
+    finished = Mock()
+    with pytest.raises(Unavailable):
+        ProcessCleanseExecutor(Mock())(row(), request(), context=context(), on_finished=finished)
+    finished.assert_called_once_with()

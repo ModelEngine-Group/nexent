@@ -132,3 +132,29 @@ def test_initialization_error_does_not_escape_with_provider_details(mocker):
     )
     assert json.loads(pipe.send_bytes.call_args.args[0]) == {"phase": "unknown"}
     pipe.close.assert_called_once()
+
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_execution_end_callback_follows_reclamation(process_boundary, failed):
+    parent, _, process = process_boundary
+    parent.recv_bytes.side_effect = [b'{"phase":"ready"}', b'{"phase":"unknown"}' if failed else b'{"phase":"result","value":1}']
+    finished = Mock()
+    isolated._reclaim.side_effect = lambda child: finished.assert_not_called()
+    if failed:
+        with pytest.raises(OutcomeUnknown):
+            isolated.run_isolated(Mock(), {}, context=context(), on_finished=finished)
+    else:
+        assert isolated.run_isolated(Mock(), {}, context=context(), on_finished=finished) == 1
+    isolated._reclaim.assert_called_once_with(process)
+    finished.assert_called_once_with()
+
+
+def test_reclamation_failure_never_confirms_execution_end(process_boundary):
+    parent, _, _ = process_boundary
+    parent.recv_bytes.side_effect = [b'{"phase":"ready"}', b'{"phase":"result","value":1}']
+    finished = Mock()
+    isolated._reclaim.side_effect = RuntimeError("stuck")
+    with pytest.raises(OutcomeUnknown):
+        isolated.run_isolated(Mock(), {}, context=context(), on_finished=finished)
+    finished.assert_not_called()

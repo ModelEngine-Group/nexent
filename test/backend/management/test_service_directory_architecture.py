@@ -107,6 +107,7 @@ MIGRATED_MODULES = {
     'file/preview.py',
     'file/service.py',
     'file/upload.py',
+    'file/cleanse_cancellation.py',
     'knowledge_base/clustering.py',
     'knowledge_base/common.py',
     'knowledge_base/document_tasks.py',

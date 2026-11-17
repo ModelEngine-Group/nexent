@@ -131,6 +131,7 @@ class CleanseJobs:
                         "lease_until": None,
                         "artifact": None,
                         "error_code": None,
+                        "execution_ended": True,
                     },
                     context=context,
                 )
@@ -203,7 +204,7 @@ class CleanseJobs:
                 RecordQuery(
                     where=both(
                         self._owned(lookup),
-                        Comparison("status", "in", ["queued", "running"]),
+                        Comparison("status", "eq", "queued"),
                     )
                 ),
                 FieldPatch(
@@ -212,10 +213,17 @@ class CleanseJobs:
                         "owner_id": None,
                         "attempt_id": None,
                         "lease_until": None,
+                        "execution_ended": True,
                     }
                 ),
                 limit=1,
                 context=context,
+            )
+            tx.claim(
+                DATASET,
+                RecordQuery(where=both(self._owned(lookup), Comparison("status", "eq", "running"))),
+                FieldPatch(set_values={"status": "cancelled"}),
+                limit=1, context=context,
             )
         return self.state(self._find(self._owned(lookup), context))
 
@@ -250,6 +258,7 @@ class CleanseJobs:
                         "status": "running",
                         "attempt_id": uuid4().hex,
                         "owner_id": owner_id,
+                        "execution_ended": True,
                         "lease_until": (
                             now + timedelta(seconds=lease_seconds)
                         ).isoformat(),
@@ -323,9 +332,36 @@ class CleanseJobs:
             rows = tx.claim(
                 DATASET,
                 RecordQuery(where=self._attempt_where(handle, now=self.clock())),
-                FieldPatch(set_values={"reconcile_required": True}),
+                FieldPatch(set_values={"reconcile_required": True, "execution_ended": False}),
                 limit=1,
                 context=context,
+            )
+        return bool(rows)
+
+    def execution_current(self, handle, *, context):
+        return bool(self.records.query(
+            DATASET,
+            RecordQuery(where=self._attempt_where(handle, now=self.clock()), fields=("id",)),
+            PageRequest(limit=1), context=context,
+        ).items)
+
+    def finish_execution(self, handle, *, context):
+        """A worker may acknowledge only its exact reclaimed or unstarted attempt."""
+        if any(not handle.get(name) for name in ("owner_id", "attempt_id")):
+            return False
+        with self.records.transaction(context=context) as tx:
+            rows = tx.claim(
+                DATASET,
+                RecordQuery(where=both(
+                    Comparison("job_id", "eq", handle["job_id"]),
+                    Comparison("owner_id", "eq", handle["owner_id"]),
+                    Comparison("attempt_id", "eq", handle["attempt_id"]),
+                    Comparison("status", "in", ["running", "completed", "failed", "cancelled", "released"]),
+                    Junction("or", (Comparison("execution_ended", "eq", False),
+                                    Comparison("execution_ended", "is_null", True))),
+                )),
+                FieldPatch(set_values={"execution_ended": True}),
+                limit=1, context=context,
             )
         return bool(rows)
 

@@ -108,6 +108,11 @@ class FileCleanseJob(TableBase):
         "Unknown write outcome blocks automatic retry until reconciliation.",
         nullable=False,
     )
+    execution_ended = column(
+        "execution_ended", sa.Boolean,
+        "Confirmed local parser execution and process group have ended; NULL for legacy unknown, independent of object write certainty.",
+        nullable=True, server_default=sa.true(),
+    )
     attempt_id = column(
         "attempt_id",
         sa.String(32),
@@ -206,7 +211,7 @@ def bind_cleanse_jobs(scope, engine):
         FieldDefinition(
             field.name,
             "boolean"
-            if field.name == "reconcile_required"
+            if field.name in {"reconcile_required", "execution_ended"}
             else "integer"
             if field.name in {"id", "revision", "knowledge_id", "file_version"}
             else "object"

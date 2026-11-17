@@ -111,47 +111,59 @@ class CleanseHandler:
         )
         if row is None:
             return  # A terminal/owned duplicate must not execute the parser again.
+        execution_started = execution_ended = False
+
+        def confirm_finished():
+            nonlocal execution_ended
+            execution_ended = True
+
         try:
-            request = parse_cleanse_request(row)
-            self.authorize(row, request, context=context)
-            if row["parser_version"] != self.jobs.parser_version:
+            try:
+                request = parse_cleanse_request(row)
+                self.authorize(row, request, context=context)
+                if row["parser_version"] != self.jobs.parser_version:
+                    self.jobs.transition(
+                        row,
+                        status="failed",
+                        error_code="PARSER_VERSION_UNAVAILABLE",
+                        context=context,
+                    )
+                    return
+                remaining = (
+                    datetime.fromisoformat(row["lease_until"]) - self.jobs.clock()
+                ).total_seconds()
+                execution = replace(
+                    context, deadline=min(context.deadline, monotonic() + max(0, remaining))
+                )
+                execution.remaining()
+                if not self.jobs.begin_execution(row, context=execution):
+                    raise OperationCancelled(operation_id=execution.operation_id)
+                execution_started = True
+                artifact = self.execute(row, request, context=execution, on_finished=confirm_finished)
+                execution_ended = True
+                if not isinstance(artifact, ObjectReference):
+                    raise InvalidInput()
+            except OutcomeUnknown:
+                self.jobs.mark_uncertain(row, context=self._finalize_context(context))
+                return
+            except Exception as error:  # noqa: BLE001 - Persist a sanitized handler failure.
+                logger.warning("cleanse_handler_failed error_type=%s", type(error).__name__)
                 self.jobs.transition(
                     row,
                     status="failed",
-                    error_code="PARSER_VERSION_UNAVAILABLE",
-                    context=context,
+                    error_code="CLEANSE_FAILED",
+                    context=self._finalize_context(context),
                 )
                 return
-            remaining = (
-                datetime.fromisoformat(row["lease_until"]) - self.jobs.clock()
-            ).total_seconds()
-            execution = replace(
-                context, deadline=min(context.deadline, monotonic() + max(0, remaining))
-            )
-            execution.remaining()
-            if not self.jobs.begin_execution(row, context=execution):
-                raise OperationCancelled(operation_id=execution.operation_id)
-            artifact = self.execute(row, request, context=execution)
-            if not isinstance(artifact, ObjectReference):
-                raise InvalidInput()
-        except OutcomeUnknown:
-            self.jobs.mark_uncertain(row, context=self._finalize_context(context))
-            return
-        except Exception as error:  # noqa: BLE001 - Persist a sanitized handler failure.
-            logger.warning("cleanse_handler_failed error_type=%s", type(error).__name__)
-            self.jobs.transition(
+            completed = self.jobs.transition(
                 row,
-                status="failed",
-                error_code="CLEANSE_FAILED",
+                status="completed",
+                artifact=artifact,
                 context=self._finalize_context(context),
             )
-            return
-        completed = self.jobs.transition(
-            row,
-            status="completed",
-            artifact=artifact,
-            context=self._finalize_context(context),
-        )
-        if not completed:
-            # A confirmed artifact without an accepted completion must not replay blindly.
-            self.jobs.mark_uncertain(row, context=self._finalize_context(context))
+            if not completed:
+                # A confirmed artifact without an accepted completion must not replay blindly.
+                self.jobs.mark_uncertain(row, context=self._finalize_context(context))
+        finally:
+            if not execution_started or execution_ended:
+                self.jobs.finish_execution(row, context=self._finalize_context(context))

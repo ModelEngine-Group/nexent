@@ -3,7 +3,14 @@
 
 from contracts.agentos_knowledge import ObjectReference
 from contracts.knowledge_cleanse import parse_cleanse_request
-from nexent.storage.errors import InvalidInput, OutcomeUnknown
+from nexent.storage.errors import (
+    CapabilityUnsupported,
+    DeadlineExceeded,
+    InvalidInput,
+    OperationCancelled,
+    OutcomeUnknown,
+    Unavailable,
+)
 
 from infrastructure.file_processing.isolated import run_isolated
 
@@ -15,7 +22,7 @@ class ProcessCleanseExecutor:
         self.factory = factory
         self.tick = tick
 
-    def __call__(self, row, request, *, context):
+    def __call__(self, row, request, *, context, on_finished=None):
         if parse_cleanse_request(row) != request:
             raise InvalidInput()
 
@@ -42,9 +49,24 @@ class ProcessCleanseExecutor:
             if self.tick is not None:
                 self.tick(row, context=context)
 
-        result = run_isolated(
-            initialize, row, context=context, tick=tick if self.tick else None
-        )
+        finished = False
+
+        def confirm_finished():
+            nonlocal finished
+            if not finished:
+                finished = True
+                if on_finished is not None:
+                    on_finished()
+
+        try:
+            result = run_isolated(
+                initialize, row, context=context, tick=tick if self.tick else None,
+                on_finished=confirm_finished,
+            )
+        except (CapabilityUnsupported, DeadlineExceeded, InvalidInput, OperationCancelled, Unavailable):
+            # These categories cannot escape a dispatched process without reclamation.
+            confirm_finished()
+            raise
         try:
             return ObjectReference.model_validate(result)
         except ValueError:

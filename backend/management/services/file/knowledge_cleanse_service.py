@@ -3,6 +3,7 @@
 
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
+from management.services.file.cleanse_cancellation import cancel_knowledge_executions
 from management.services.file.cleanse_service import CleanseService
 
 from infrastructure.knowledge_cleanse import knowledge_cleanse_ports
@@ -15,3 +16,7 @@ class KnowledgeCleanseService(CleanseService):
 
     def _ports(self, tenant_id, user_id, *, context):
         return knowledge_cleanse_ports(tenant_id, user_id, context=context)
+
+    def cancel_file(self, reference, *, tenant_id, user_id, context):
+        with self._records(tenant_id, user_id, context) as (jobs, resources):
+            return cancel_knowledge_executions(jobs, resources, reference, user_id=user_id, context=context)

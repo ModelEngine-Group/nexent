@@ -45,6 +45,8 @@ class CleanseLeaseGuard:
         context.remaining()
         if row["tenant_id"] != self.jobs.records.scope.tenant_id:
             raise ScopeDenied()
+        if not self.jobs.execution_current(row, context=context):
+            raise OperationCancelled(operation_id=context.operation_id)
         attempt = (row["job_id"], row["owner_id"], row["attempt_id"])
         now = self.clock()
         if attempt == self._attempt and now < self._next:
