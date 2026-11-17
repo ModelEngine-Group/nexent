@@ -3,6 +3,7 @@
 "use client";
 
 import { getCreatorMode } from "@/lib/creatorConversation";
+import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -1430,6 +1431,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       messages.push({
         id: messageId,
         role: msg.role,
+        // A persisted active status is not a live runtime connection. Hydrate it
+        // as idle so useConversationResume can establish the actual stream.
+        ...(msg.role === "assistant" ? { status: messageExecutionStatus(
+          msg.status === "streaming" || msg.status === "pending" ? "completed"
+            : msg.status ?? (content.some(part => "isError" in part && part.isError) ? "failed" : "completed")
+        ) } : {}),
         content,
         ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0

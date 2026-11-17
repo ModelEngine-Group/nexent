@@ -1175,6 +1175,48 @@ def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
         ]
 
 
+def checkpoint_creator_message(
+    message_id: int, conversation_id: int, user_id: str,
+    units: List[Dict[str, Any]], content: str, status: str = "streaming",
+) -> None:
+    """Append an owned creator checkpoint and its status in one transaction."""
+    if status not in {"streaming", "completed", "failed", "stopped"}:
+        raise ValueError("Invalid creator checkpoint status")
+    with get_db_session() as session:
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update())
+        if owned is None:
+            raise ValueError("Conversation does not exist or is not accessible")
+        parent = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_role == "assistant",
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.delete_flag == "N",
+        ).with_for_update())
+        if parent is None or parent.status != "streaming":
+            raise ValueError("Creator message is not an owned active stream")
+        if units:
+            session.execute(insert(ConversationMessageUnit), [add_creation_tracking({
+                "message_id": message_id, "conversation_id": conversation_id,
+                "unit_index": unit["unit_index"], "unit_type": unit["unit_type"],
+                "unit_content": unit["unit_content"], "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"), "delete_flag": "N",
+            }, user_id) for unit in units])
+        session.execute(update(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+        ).values(**add_update_tracking({
+            "message_content": content, "status": status,
+            "update_time": func.current_timestamp(),
+        }, user_id)))
+        if status != "streaming":
+            _touch_conversation_activity(session, conversation_id, user_id)
+
+
 def update_conversation_message_content(message_id: int, content: str, user_id: Optional[str] = None) -> None:
     """
     Update the message_content field of a conversation message.

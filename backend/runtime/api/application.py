@@ -66,6 +66,8 @@ async def runtime_lifespan(_app):
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
         await stop_agent_automation_scheduler()
+        from management.services.conversation.creator_runtime import shutdown_creator_streams
+        await shutdown_creator_streams(timeout=max(0, shutdown_deadline - time.monotonic()))
         from management.services.agent.execution import (
             shutdown_agent_stream_tasks,
         )

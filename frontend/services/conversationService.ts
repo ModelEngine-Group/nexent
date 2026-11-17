@@ -511,11 +511,15 @@ export const conversationService = {
   },
 
   // Stop conversation agent
-  async stop(runId: string | number) {
-    const response = await fetch(API_ENDPOINTS.agent.stop(runId), {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
+  async stop(runId: string | number, generation?: string) {
+    const url = API_ENDPOINTS.agent.stop(runId);
+    const response = await fetch(
+      generation ? `${url}?generation=${encodeURIComponent(generation)}` : url,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
 
     const data = await response.json();
 
@@ -1251,6 +1255,7 @@ export const conversationService = {
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       persist_history?: boolean;
+      request_id?: string;
       retry_message_index?: number;
       retry_user_message_id?: number;
       workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
@@ -1294,6 +1299,8 @@ export const conversationService = {
         requestParams.language = params.language;
       }
       if (params.runtime_mode) {
+        if (!params.is_resume && params.request_id)
+          requestParams.request_id = params.request_id;
         requestParams.persist_history = true;
         requestParams.workbench_config = params.workbench_config;
         if (params.retry_message_index !== undefined) {

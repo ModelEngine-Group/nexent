@@ -3,6 +3,8 @@
 "use client";
 
 import i18next from "i18next";
+import { messageExecutionStatus } from "@/lib/messageExecutionState";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   persistModelDrafts,
   snapshotModelDrafts,
@@ -24,6 +26,7 @@ import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDra
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
+import { safeUUID } from "@/lib/utils";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
@@ -136,6 +139,7 @@ export type Nl2AgentCardActionSubtype =
   | "installed_resource_binding";
 
 export interface Nl2AgentCardAction {
+  card_id?: string;
   type: "nl2agent_card_action";
   subtype: Nl2AgentCardActionSubtype;
   agent_id: number;
@@ -182,6 +186,7 @@ export interface Nl2aRequirementClarificationQuestion {
 }
 
 export interface Nl2aRequirementClarificationPayload {
+  card_id?: string;
   subtype: "requirement_clarification";
   agent_id: number;
   questions: Nl2aRequirementClarificationQuestion[];
@@ -212,12 +217,14 @@ export interface Nl2aAgentDraftPayload {
 }
 
 export interface Nl2aSuggestedResourceInstallationPayload {
+  card_id?: string;
   subtype: "suggested_resource_installation";
   agent_id: number;
   resources: Nl2aInstallableResource[];
 }
 
 export interface Nl2aInstalledResourceBindingPayload {
+  card_id?: string;
   subtype: "installed_resource_binding";
   agent_id: number;
   resources: Nl2aRecommendedResource[];
@@ -310,6 +317,7 @@ interface NexentRunConfig {
   onGenerationStopped?: (conversationId: number) => void;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
+  onMessageAccepted?: (submittedText: string) => void;
   onRunRejected?: (error: unknown, message?: ThreadMessage) => void;
   // Structured reply annotations for the outgoing message; set when the
   // composer keeps the library-managed send (in-flight attachment uploads).
@@ -472,8 +480,6 @@ export interface VerificationPanelPart {
   completed: boolean;
 }
 
-// Accumulated total duration across all steps
-let accumulatedDuration = 0;
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -1348,7 +1354,6 @@ export function pushStepTokenCount(step: StepTokenCount): void {
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
-  accumulatedDuration = 0;
 }
 
 /**
@@ -1359,8 +1364,10 @@ export function clearStepTokenCounts(): void {
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
 function buildTimingFromTokenCount(
-  content: string
+  chunk: SseChunk,
+  counts: Map<string, StepTokenCount>
 ): ReturnType<typeof buildTimingResult> | null {
+  const content = chunk.content;
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -1370,21 +1377,11 @@ function buildTimingFromTokenCount(
   // Store step data in global registry so the currently-streaming message's
   // `SingleTurnTokenUsage` can render it without subscribing to per-message
   // metadata updates.
-  pushStepTokenCount(parsed);
-
-  // Accumulate duration across all steps
-  accumulatedDuration += parsed.duration;
-
-  // Use accumulated duration for total stream time
-  const totalDuration = accumulatedDuration;
-
-  return buildTimingResult(
-    Date.now(), // streamStartTime - approximate
-    undefined, // firstTokenTime - not available
-    0, // toolCallCount - tracked separately
-    parsed.totalOutputTokens,
-    totalDuration
-  );
+  const identity = chunk.unit_index !== undefined ? `unit:${chunk.unit_index}`
+    : parsed.stepNumber > 0 ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}` : `event:${counts.size}`;
+  counts.set(identity, parsed);
+  const timing = buildHistoricalMessageTiming([...counts.values()]);
+  return timing ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } } : null;
 }
 
 /**
@@ -1424,7 +1421,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
-    const isResume = !isEphemeralRuntime && custom?.resume === true;
+    const isResume = !isAgentDebug && custom?.resume === true;
     // Freeze the controls before draft creation or other asynchronous work.
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
@@ -1473,9 +1470,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       lastUserIndex >= 0
         ? (
             messages[lastUserIndex].metadata?.custom as
-              | { annotations?: unknown }
-              | undefined
-        )?.annotations
+              { annotations?: unknown } | undefined
+          )?.annotations
         : undefined
     );
     const annotations = messageAnnotations.length
@@ -1522,9 +1518,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ? (msg.metadata?.custom as
             { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
         : undefined;
-      const text = customMetadata?.nl2agentCardAction
-        ? JSON.stringify(customMetadata.nl2agentCardAction)
-        : extractTextContent([msg]);
+      const historicalCard =
+        isNl2Agent && msg.role === "assistant"
+          ? (msg.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
+          : undefined;
+      const text = historicalCard
+        ? JSON.stringify(historicalCard.content)
+        : customMetadata?.nl2agentCardAction
+          ? JSON.stringify(customMetadata.nl2agentCardAction)
+          : extractTextContent([msg]);
       const historicalFiles = msg.role === "user" ? extractMinioFiles(msg) : [];
       return {
         role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
@@ -1548,7 +1550,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Build request payload. Resume only needs the conversation identity; the
     // backend owns the original query and execution state.
     const requestBody: Record<string, unknown> = {
-      query: isResume ? "" : query,
+      query: isResume ? (isNl2Agent || isNl2Skill ? "Resume" : "") : query,
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: isAgentDebug,
@@ -1626,8 +1628,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let userAborted = false;
     const stopBackendRun = async (runId: string | number) => {
       if (backendStopPromise) return;
-      backendStopPromise = conversationService
-        .stop(runId)
+      const stop =
+        (isNl2Agent || isNl2Skill) && backendRunId
+          ? conversationService.stop(runId, backendRunId)
+          : conversationService.stop(runId);
+      backendStopPromise = stop
         .then(() => undefined)
         .catch((error) => {
           log.error(
@@ -1682,8 +1687,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           clarification_response: requestBody.clarification_response as
             ClarificationResponse | undefined,
           annotations: requestBody.annotations as
-            | import("@/types/conversation").ApiMessageAnnotation[]
-            | undefined,
+            import("@/types/conversation").ApiMessageAnnotation[] | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;
@@ -1709,6 +1713,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               ? "nl2skill"
               : undefined,
           persist_history: isNl2Agent || isNl2Skill,
+          request_id: isNl2Agent || isNl2Skill ? safeUUID() : undefined,
           retry_message_index: isEphemeralRuntime
             ? custom?.retry_message_index
             : undefined,
@@ -1770,6 +1775,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
+      if (!("type" in agentResponse) && !isResume) custom?.onMessageAccepted?.(query);
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
@@ -1831,6 +1837,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const streamTokenCounts = new Map<string, StepTokenCount>();
+    let terminalOutcome: string | undefined;
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
@@ -2353,7 +2361,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
+      metadata: { custom: {
+        ...(nl2a ? { nl2a } : {}),
+        stepTokenCounts: [...streamTokenCounts.values()],
+      } },
     });
 
     const streamStartTime = Date.now();
@@ -2376,6 +2387,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+          if (chunk.type === "status") {
+            if (["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+            continue;
+          }
           if (chunk.type === "final_answer") {
             chunk.content = unwrapFinalAnswer(chunk.content);
           }
@@ -2456,7 +2471,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
-            storedTiming = buildTimingFromTokenCount(chunk.content);
+            storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
             continue; // Don't yield for internal data chunks
           }
 
@@ -2910,6 +2925,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Process any remaining buffered line
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
+        if (chunk?.type === "status" && ["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+        if (chunk?.type === "token_count") {
+          storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
+        }
         if (chunk && chunk.type !== "status") {
           if (!isHumanInteractionEvent(chunk)) {
             if (chunk.type === "final_answer") {
@@ -3390,6 +3409,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
       yield {
         ...finalResult,
+        status: messageExecutionStatus(terminalOutcome ?? (contentParts.some(part => part.isError) ? "failed" : "completed")),
         messageId,
         metadata: {
           ...finalResult.metadata,

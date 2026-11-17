@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import hashlib
+import json
 import logging
 import socket
 import time
@@ -13,6 +14,7 @@ except ImportError:
     redis = None
 
 from contracts.constants.environment import RUNTIME_CANCEL_TTL_SECONDS, RUNTIME_COMPLETED_TTL_SECONDS, RUNTIME_RUN_TTL_SECONDS, RUNTIME_STATE_REDIS_URL, RUNTIME_STREAM_MAX_LEN, RUNTIME_STREAM_TTL_SECONDS
+from contracts.constants.environment import RUNTIME_CREATOR_LEASE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,9 @@ class RuntimeStateService:
     def _stream_done_key(self, user_id: str, conversation_id: int) -> str:
         return f"runtime:stream:done:{user_id}:{conversation_id}"
 
+    def _replay_key(self, user_id: str, conversation_id: int) -> str:
+        return f"runtime:replay:{user_id}:{conversation_id}"
+
     def _idempotency_key(self, key: str) -> str:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return f"northbound:idempotency:{digest}"
@@ -88,6 +93,7 @@ class RuntimeStateService:
             self._cancel_key(user_id, conversation_id),
             self._stream_key(user_id, conversation_id),
             self._stream_done_key(user_id, conversation_id),
+            self._replay_key(user_id, conversation_id),
         ):
             self.client.expire(key, ttl)
 
@@ -98,20 +104,21 @@ class RuntimeStateService:
         try:
             if generation is not None:
                 self.client.eval("""
-                    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+                    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5])
                     redis.call('HSET', KEYS[4], 'generation', ARGV[1])
                     redis.call('EXPIRE', KEYS[4], ARGV[2])
                     return 1
-                """, 4, self._stream_key(user_id, conversation_id),
+                """, 5, self._stream_key(user_id, conversation_id),
                     self._stream_done_key(user_id, conversation_id),
                     self._cancel_key(user_id, conversation_id), self._run_key(user_id, conversation_id),
-                    generation, RUNTIME_RUN_TTL_SECONDS)
+                    self._replay_key(user_id, conversation_id), generation, RUNTIME_RUN_TTL_SECONDS)
                 return
             self.client.hdel(self._run_key(user_id, conversation_id), "generation")
             self.client.delete(
                 self._stream_key(user_id, conversation_id),
                 self._stream_done_key(user_id, conversation_id),
                 self._cancel_key(user_id, conversation_id),
+                self._replay_key(user_id, conversation_id),
             )
         except Exception as exc:
             logger.warning("Failed to reset runtime stream state: %s", exc)
@@ -121,6 +128,43 @@ class RuntimeStateService:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
         else:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id, generation)
+
+    def claim_creator_run(self, user_id: str, conversation_id: int, generation: str) -> bool:
+        """Atomically claim an idle creator conversation across runtime replicas."""
+        if not self.enabled:
+            return True
+        return bool(self.client.eval("""
+            if redis.call('HGET', KEYS[1], 'status') == 'running' and redis.call('EXISTS', KEYS[5]) == 1 then return 0 end
+            redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[6])
+            redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'status', 'running',
+                'owner_pod', ARGV[2], 'updated_at', ARGV[3])
+            redis.call('EXPIRE', KEYS[1], ARGV[4])
+            redis.call('SET', KEYS[5], ARGV[1], 'EX', ARGV[5])
+            return 1
+        """, 6, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
+            self._stream_done_key(user_id, conversation_id), self._cancel_key(user_id, conversation_id),
+            self._run_key(user_id, conversation_id) + ":creator-lease",
+            self._replay_key(user_id, conversation_id),
+            generation, self._pod_name, str(int(time.time())), RUNTIME_RUN_TTL_SECONDS, max(1, RUNTIME_CREATOR_LEASE_SECONDS)))
+
+    async def claim_creator_run_async(self, user_id: str, conversation_id: int, generation: str) -> bool:
+        return await self._run_managed("creator-claim", self.claim_creator_run, user_id, conversation_id, generation)
+
+    def creator_lease(self, user_id, conversation_id, generation, renew=False):
+        if not self.enabled:
+            return True
+        return bool(self.client.eval("""
+            if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
+            if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+            if ARGV[2] == '1' then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
+            return 1
+        """, 2, self._run_key(user_id, conversation_id),
+            self._run_key(user_id, conversation_id) + ":creator-lease", generation,
+            "1" if renew else "0", max(1, RUNTIME_CREATOR_LEASE_SECONDS)))
+
+    async def creator_lease_async(self, user_id, conversation_id, generation, renew=False):
+        return await self._run_managed("creator-lease", self.creator_lease,
+                                      user_id, conversation_id, generation, renew)
 
     def register_run(self, user_id: str, conversation_id: int, message_id: Optional[int] = None) -> None:
         if not self.enabled:
@@ -154,8 +198,9 @@ class RuntimeStateService:
                     redis.call('HSET', KEYS[1], 'status', ARGV[2], 'updated_at', ARGV[3])
                     for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[4]) end
                     return 1
-                """, 4, key, self._cancel_key(user_id, conversation_id),
+                """, 5, key, self._cancel_key(user_id, conversation_id),
                     self._stream_key(user_id, conversation_id), self._stream_done_key(user_id, conversation_id),
+                    self._replay_key(user_id, conversation_id),
                     generation, status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
                 return
             self.client.hset(key, mapping={
@@ -207,10 +252,42 @@ class RuntimeStateService:
     async def is_cancelled_async(self, user_id: str, conversation_id: int) -> bool:
         return await self._run_managed("runtime-state-is-cancelled", self.is_cancelled, user_id, conversation_id)
 
-    def append_stream_event(self, user_id: str, conversation_id: int, chunk: str) -> Optional[str]:
+    def append_stream_event(
+        self, user_id: str, conversation_id: int, chunk: str, generation: Optional[str] = None,
+        replay_update: Optional[dict] = None,
+    ) -> Optional[str]:
         if not self.enabled:
             return None
         try:
+            if replay_update is not None:
+                return self.client.eval("""
+                    if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
+                    local payload = cjson.decode(ARGV[6])
+                    local field = 'part:' .. ARGV[5]
+                    if ARGV[7] == '1' then
+                        local old = redis.call('HGET', KEYS[3], field)
+                        if not old then return redis.error_reply('Replay checkpoint prefix missing') end
+                        old = cjson.decode(old)
+                        payload.content = old.content .. payload.content
+                    end
+                    local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
+                    redis.call('HSET', KEYS[3], field, cjson.encode(payload), 'cursor', id,
+                        'count', tonumber(ARGV[5]) + 1, 'generation', ARGV[1])
+                    redis.call('EXPIRE', KEYS[2], ARGV[4])
+                    redis.call('EXPIRE', KEYS[3], ARGV[4])
+                    return id
+                """, 3, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
+                    self._replay_key(user_id, conversation_id), generation or "", max(1, RUNTIME_STREAM_MAX_LEN),
+                    chunk, RUNTIME_STREAM_TTL_SECONDS, replay_update["slot"],
+                    json.dumps(replay_update["payload"], ensure_ascii=False), "1" if replay_update["append"] else "0") or None
+            if generation is not None:
+                return self.client.eval("""
+                    if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
+                    local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
+                    redis.call('EXPIRE', KEYS[2], ARGV[4])
+                    return id
+                """, 2, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
+                    generation, max(1, RUNTIME_STREAM_MAX_LEN), chunk, RUNTIME_STREAM_TTL_SECONDS) or None
             stream_key = self._stream_key(user_id, conversation_id)
             event_id = self.client.xadd(
                 stream_key,
@@ -224,14 +301,34 @@ class RuntimeStateService:
             logger.warning("Failed to append runtime stream event: %s", exc)
             return None
 
-    async def append_stream_event_async(self, user_id: str, conversation_id: int, chunk: str) -> Optional[str]:
+    async def append_stream_event_async(
+        self, user_id: str, conversation_id: int, chunk: str, generation: Optional[str] = None,
+        replay_update: Optional[dict] = None,
+    ) -> Optional[str]:
         return await self._run_managed(
             "runtime-state-append-event",
             self.append_stream_event,
             user_id,
             conversation_id,
             chunk,
+            **({"generation": generation} if generation is not None else {}),
+            **({"replay_update": replay_update} if replay_update is not None else {}),
         )
+
+    def read_replay_checkpoint(self, user_id: str, conversation_id: int) -> Optional[dict]:
+        """Read records and their covered cursor in one atomic Redis operation."""
+        if not self.enabled:
+            return None
+        data = self.client.hgetall(self._replay_key(user_id, conversation_id))
+        if not data:
+            return None
+        return {
+            "entries": [json.loads(data[f"part:{index}"]) for index in range(int(data["count"]))],
+            "cursor": data["cursor"], "generation": data.get("generation", ""),
+        }
+
+    async def read_replay_checkpoint_async(self, user_id: str, conversation_id: int) -> Optional[dict]:
+        return await self._run_managed("runtime-state-read-replay", self.read_replay_checkpoint, user_id, conversation_id)
 
     def mark_stream_completed(
         self,
@@ -239,6 +336,7 @@ class RuntimeStateService:
         conversation_id: int,
         status: str,
         error: Optional[str] = None,
+        generation: Optional[str] = None,
     ) -> None:
         if not self.enabled:
             return
@@ -250,6 +348,15 @@ class RuntimeStateService:
             if error:
                 payload["error"] = error
             done_key = self._stream_done_key(user_id, conversation_id)
+            if generation is not None:
+                self.client.eval("""
+                    if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
+                    redis.call('HSET', KEYS[2], 'status', ARGV[2], 'updated_at', ARGV[3])
+                    redis.call('EXPIRE', KEYS[2], ARGV[4])
+                    return 1
+                """, 2, self._run_key(user_id, conversation_id), done_key, generation,
+                    status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+                return
             self.client.hset(done_key, mapping=payload)
             self._expire_completed_runtime_keys(user_id, conversation_id)
         except Exception as exc:
@@ -261,6 +368,7 @@ class RuntimeStateService:
         conversation_id: int,
         status: str,
         error: Optional[str] = None,
+        generation: Optional[str] = None,
     ) -> None:
         await self._run_managed(
             "runtime-state-mark-stream-completed",
@@ -269,6 +377,7 @@ class RuntimeStateService:
             conversation_id,
             status,
             error,
+            **({"generation": generation} if generation is not None else {}),
         )
 
     def get_stream_status(self, user_id: str, conversation_id: int) -> Dict[str, str]:

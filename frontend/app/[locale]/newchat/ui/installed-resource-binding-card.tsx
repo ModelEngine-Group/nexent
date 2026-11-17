@@ -326,7 +326,7 @@ export const InstalledResourceBindingCard: FC<{
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const queryClient = useQueryClient();
   const reactId = useId();
-  const cardKey = `installed_resource_binding:${payload.agent_id}:${reactId}`;
+  const cardKey = `installed_resource_binding:${payload.agent_id}:${payload.card_id ?? reactId}`;
   const {
     agentId: sessionAgentId,
     failedPromptFields,
@@ -336,6 +336,7 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound,
     requestConfigFocus,
     isCardInteractive,
+    sessionGeneration,
   } = useNl2AgentFlow();
   const [items, dispatch] = useReducer(
     reducer,
@@ -377,7 +378,7 @@ export const InstalledResourceBindingCard: FC<{
 
   useEffect(() => {
     if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+  }, [cardKey, disabled, payload.subtype, registerCard, sessionGeneration]);
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const isInteractionLocked =
@@ -681,6 +682,7 @@ export const InstalledResourceBindingCard: FC<{
 
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "continue",
@@ -727,6 +729,7 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound(payload.agent_id);
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "retry_generation",

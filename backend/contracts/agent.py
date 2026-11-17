@@ -277,6 +277,7 @@ class NL2AgentRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Agent turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = Field(default=None, gt=0)
@@ -292,6 +293,7 @@ class NL2SkillRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Skill turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     target: Optional[ConversationTarget] = None

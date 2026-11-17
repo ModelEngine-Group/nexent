@@ -27,19 +27,35 @@ export const RequirementClarificationCard: FC<{
   const { t } = useTranslation("common");
   const aui = useAui();
   const reactId = useId();
-  const cardKey = `requirement_clarification:${reactId}`;
-  const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
+  const cardKey = `requirement_clarification:${payload.agent_id}:${payload.card_id ?? sourceMessageId ?? reactId}`;
+  const {
+    registerCard,
+    submitCard,
+    isCardInteractive,
+    sessionGeneration,
+    draftScope,
+  } = useNl2AgentFlow();
+  const draftKey = draftScope
+    ? JSON.stringify(["creator-card-draft", draftScope, cardKey])
+    : undefined;
 
   useEffect(() => {
-    if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+    if (!disabled && !submission) registerCard(cardKey, payload.subtype);
+  }, [
+    cardKey,
+    disabled,
+    payload.subtype,
+    registerCard,
+    sessionGeneration,
+    submission,
+  ]);
 
   const submit = (answers: ClarificationAnswer[]) => {
-    submitCard(cardKey);
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
       subtype: payload.subtype,
       agent_id: payload.agent_id,
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       action: "submit",
       result: {
         answers: answers.map((answer) => ({
@@ -50,23 +66,55 @@ export const RequirementClarificationCard: FC<{
       },
     };
 
-    aui.thread().append({
-      runConfig: nl2AgentCardRunConfig(
-        aui.thread().composer().getState().runConfig,
+    const thread = aui.thread();
+    const snapshot = thread.export?.();
+    return new Promise<void>((resolve, reject) => {
+      const base = nl2AgentCardRunConfig(
+        thread.composer().getState().runConfig,
         payload.agent_id
-      ),
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: t(
-            "nl2agent.requirementClarification.submittedSummary",
-            "Requirements submitted"
-          ),
+      );
+      thread.append({
+        runConfig: {
+          ...base,
+          custom: {
+            ...base.custom,
+            onRunStarted: () => {
+              submitCard(cardKey);
+              try {
+                if (draftKey) sessionStorage.removeItem(draftKey);
+              } catch {
+                /* Best-effort draft cleanup. */
+              }
+              resolve();
+            },
+            onRunRejected: (error: unknown) => {
+              // Restore the rejected optimistic turn after assistant-ui leaves running.
+              setTimeout(() => {
+                if (
+                  snapshot &&
+                  thread
+                    .getState()
+                    .messages.some((item) => item.id === sourceMessageId)
+                )
+                  thread.import(snapshot);
+                reject(error);
+              }, 0);
+            },
+          },
         },
-      ],
-      metadata: { custom: { nl2agentCardAction: action } },
-      startRun: true,
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: t(
+              "nl2agent.requirementClarification.submittedSummary",
+              "Requirements submitted"
+            ),
+          },
+        ],
+        metadata: { custom: { nl2agentCardAction: action } },
+        startRun: true,
+      });
     });
   };
 
@@ -96,6 +144,7 @@ export const RequirementClarificationCard: FC<{
       }))}
       disabled={disabled || !isCardInteractive(cardKey)}
       initialAnswers={submission?.answers}
+      draftKey={draftKey}
       submitted={submission !== undefined}
       otherLabel={t("nl2agent.requirementClarification.other", "Other")}
       submitLabel={t("nl2agent.requirementClarification.submit", "Submit")}

@@ -136,7 +136,8 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     )
 
     messages = [json.loads(item) for item in observer.get_cached_message()]
-    assert stop_event.is_set()
+    assert not stop_event.is_set()
+    assert observer.turn_complete is True
     assert observer.boundary_reached is True
     assert [item["type"] for item in messages] == [
         ProcessType.NL2A.value,

@@ -15578,6 +15578,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
     fake_runtime_state = MagicMock()
     fake_runtime_state.enabled = True
     fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[{'status': 'running'}, {'status': 'completed'}])
+    fake_runtime_state.read_replay_checkpoint_async = AsyncMock(return_value=None)
     fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[('1-0', 'data: {"type": "model_output", "content": "old"}\n\n'), ('2-0', '')])
     fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[('3-0', 'data: {"type": "final_answer", "content": "new"}\n\n')])
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={'status': 'completed'})
@@ -15617,6 +15618,7 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
     fake_runtime_state = MagicMock()
     fake_runtime_state.enabled = True
     fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[{'status': 'running'}, {'status': 'stopped'}])
+    fake_runtime_state.read_replay_checkpoint_async = AsyncMock(return_value=None)
     fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[])
     fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[('1-0', '')])
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
@@ -15651,8 +15653,10 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
     fake_runtime_state.get_run_state_async = AsyncMock(return_value={})
     mock_channel = MagicMock()
     mock_channel.history_size = 1
+    mock_channel.completion_status = "completed"
 
-    async def mock_subscribe(_start_index):
+    async def mock_subscribe(_start_index, *, include_replay_checkpoint=False):
+        assert include_replay_checkpoint
         yield 'data: {"type": "final_answer", "content": "from-channel"}\n\n'
     mock_channel.subscribe_with_history = mock_subscribe
     with patch('management.services.agent.subscription._resolve_user_tenant_language', return_value=('user1', 'tenant1', 'en')), patch('management.services.agent.subscription._detect_resume_position') as mock_detect, patch('management.services.agent.subscription.agent_run_manager') as mock_mgr, patch('management.services.agent.subscription.streaming_channel_manager') as mock_channel_mgr:

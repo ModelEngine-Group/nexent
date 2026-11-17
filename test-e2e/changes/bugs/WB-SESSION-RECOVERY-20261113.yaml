@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SESSION-RECOVERY-20261113
+  change_type: bugfix
+  bug_id: WB-SESSION-RECOVERY-20261113
+  title: Deliver creator cards and recover detached Workbench sessions
+  description: Separate graceful card completion from cancellation and preserve running creator output, card drafts and multi-turn context across page re-entry.
+  observed_behavior: Queued cards can disappear before worker cleanup, detached creators stop, flow restoration disables unanswered cards, and following requests omit their questions.
+  expected_behavior: Cards arrive once and persist normally, creators continue independently of subscribers, reconnect resumes the owned run, and latest unanswered cards remain editable with isolated drafts.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Observer queue UT and readonly history journeys do not prove queue delivery before cleanup, detached creator execution or editable card restoration.
+  feature_contract_changed: true
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    modified: [SYS-AGENT-LIFECYCLE]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [WB-REQUIREMENT-HISTORY-D4-001]
+    modified: []
+    added: [WB-SESSION-RECOVERY-D2-001, WB-SESSION-RECOVERY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Deliver a graceful card boundary under both worker-exit orderings without weakening explicit cancellation.
+    - Persist and reconnect creator turns, reject concurrent execution, preserve retry branches and release resources.
+    - Restore latest unanswered cards after flow reset, preserve owner-scoped drafts and send complete structured history.
+    reason: Existing isolated observer and readonly-card tests miss the SDK delivery race and detached producer boundary.
+    test_selectors:
+    - test/backend/services/test_nl2agent_boundary_delivery.py
+    - test/backend/services/test_creator_session_recovery.py
+    - test/backend/services/test_creator_generation_guards.py
+    - test/backend/services/test_creator_execution.py
+    - test/backend/database/test_creator_checkpoints.py
+    - frontend/tests/workbench/Nl2AgentRequirementHistory.test.tsx
+    - frontend/tests/workbench/CreatorConversationRuntime.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/session-recovery/design.md.
+    D2 verifies the actual creator HTTP/lifecycle contract with controlled external boundaries;
+    D4 adds browser re-entry/submission evidence beyond UT. Existing readonly history remains regression.
+    Both added Cases are self-contained and must release all owned tasks, gates, clients and browser routes.

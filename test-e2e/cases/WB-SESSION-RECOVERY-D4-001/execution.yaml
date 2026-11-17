@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: WB-SESSION-RECOVERY-D4-001
+preparation:
+  families: []
+notes: Self-contained controlled browser routes own creator histories and delayed response gates. Finally releases both gates and closes the page; no backend resource or provider is used.
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: WB-SESSION-RECOVERY-D4-001
+acceptance_bindings:
+  AC-01: [WB-SESSION-RECOVERY-D4-001]
+  AC-02: [WB-SESSION-RECOVERY-D4-001]

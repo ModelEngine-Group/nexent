@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: WB-EXECUTION-RECOVERY-20261116
+  change_type: bugfix
+  bug_id: WB-EXECUTION-RECOVERY-20261116
+  title: Restore execution records, outcomes, drafts and timing after navigation
+  description: Recover complete execution rendering independently of a trimmed event tail and preserve truthful terminal state and scoped UI state.
+  observed_behavior: Navigation drops earlier code records; failure and stop show success; unsent input disappears; duration changes on reload.
+  expected_behavior: Reentry restores the same complete answer and actual outcome, isolates drafts, and preserves per-answer timing without rerunning execution.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Creator/card recovery and bounded channel UT omit trimmed ordinary execution replay, terminal headers and unsent plain drafts.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-055, F-065, SYS-AGENT-LIFECYCLE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [WB-SESSION-RECOVERY-D2-001, WB-SESSION-RECOVERY-D4-001]
+    modified: []
+    added: [WB-EXECUTION-RECOVERY-D3-001, WB-EXECUTION-RECOVERY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Complete compact replay survives local and shared event trimming and stale generations.
+    - Terminal status and per-answer duration agree across streaming and history.
+    - Scoped unsent drafts survive remount and clear only after send admission.
+    reason: Existing UT does not reproduce the execution-mode browser defects.
+    test_selectors:
+    - test/backend/services/test_execution_replay.py
+    - test/backend/services/test_runtime_state_service.py
+    - test/backend/services/test_streaming_channel.py
+    - frontend/tests/workbench/ExecutionStreamState.test.ts
+    - frontend/tests/workbench/WorkbenchComposerDraft.test.tsx
+  notes: 'Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/execution-recovery/design.md. Preserve prior creator repairs and keep planning-only rollback. D3/D4 own isolated fixture resources and cleanup, with no shared asset families or deployment changes.'

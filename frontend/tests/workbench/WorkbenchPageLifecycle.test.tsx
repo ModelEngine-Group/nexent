@@ -53,6 +53,7 @@ const runtime = {
   thread: {
     getState: () => ({ isRunning: false }),
     composer: {
+      subscribe: () => () => {},
       setRunConfig: view.setRunConfig,
       getState: () => ({
         text: view.drafts[view.threadId ?? ""] ?? "",

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-SESSION-RECOVERY-D2-001
+  feature_id: SYS-AGENT-LIFECYCLE
+  requirement_ids: [WB-SESSION-RECOVERY-20261113]
+  business_rule_ids: [SYS-AGENT-LIFECYCLE-RULE-004, SYS-AGENT-LIFECYCLE-RULE-006]
+  title: Creator HTTP reconnect preserves the owned background turn
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify actual creator routes and lifecycle with controlled generation and storage boundaries.
+  preconditions: [Self-contained authenticated ASGI client and isolated in-memory creator storage.]
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Start Agent and Skill creator requests and release their output after the initial subscriber leaves.
+    expected: A streaming message exists before output and the owned producer completes without another generation.
+  - order: 2
+    action: Reconnect and attempt a concurrent start and unauthorized target access.
+    expected: Reconnect returns the same ordered output; concurrent and unauthorized requests cannot create or replace a run.
+  - order: 3
+    action: Stop a retry with its generation, reject a stale generation stop, then retry to a structured card boundary.
+    expected: The card is delivered and persisted normally, explicit stop remains effective and stale cleanup cannot alter the retry.
+  expected_results:
+  - Agent and Skill routes preserve output and terminal status across subscriber departure.
+  - Reconnect never starts generation or duplicates messages; admission and target ownership remain enforced.
+  - Graceful boundaries are not recorded as user stops and cancellation releases resources.
+  forbidden_side_effects:
+  - No external model, real database, resource installation or persistent user mutation.
+  contract:
+    protocol: HTTP SSE
+    request_expectations:
+    - Authenticated creator requests use an owned target and optional resume controls.
+    response_expectations:
+    - Reconnect preserves the generation and SSE payloads without another model run.
+    - Concurrent and unauthorized requests fail without mutating another run.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Detached creators reconnect to the same persisted output.
+    steps: [1, 2]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: Graceful completion, cancellation and retry ownership remain distinct.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]

@@ -11,15 +11,21 @@ from management.services.conversation import creator_execution as execution
 from management.services.conversation import creation_history, creator_targets
 
 
+@pytest.fixture(autouse=True)
+def checkpoints(mocker):
+    return mocker.patch("management.services.conversation.creator_checkpoints.checkpoint_creator_message")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["agent", "skill"])
 @pytest.mark.parametrize("workbench", [False, True])
-async def test_both_entrypoints_save_each_turn_once_with_executor_and_target(mocker, kind, workbench):
+async def test_both_entrypoints_save_each_turn_once_with_executor_and_target(mocker, kind, workbench, checkpoints):
     ref = SystemAgentRef("shared", f"nl2{kind}_main", 77, 0)
     mocker.patch.object(execution.system_agent_provider, "get_creator_ref", return_value=ref)
     mocker.patch.object(execution, "authorize_target", side_effect=lambda target, *_: target)
     create = mocker.patch.object(creation_history, "create_new_conversation", return_value={"conversation_id": 9})
     save = mocker.patch.object(creation_history, "save_message", side_effect=[10, 11])
+    mocker.patch.object(execution, "save_message", save)
     unit = mocker.patch.object(creation_history, "save_message_unit")
     target = {"type": kind, "id": 201}
     config = {"schema_version": 4, "mode": f"{kind}_create", "agent_mounts": [], "skill_mounts": []} if workbench else None
@@ -42,7 +48,9 @@ async def test_both_entrypoints_save_each_turn_once_with_executor_and_target(moc
     assert create.call_args.kwargs["agent_id"] == 77
     assert create.call_args.kwargs["target"] == target
     assert [call.args[0].role for call in save.call_args_list] == ["user", "assistant"]
-    assert unit.call_count == 1
+    assert checkpoints.call_args.args[-1] == "completed"
+    assert sum(len(call.args[3]) for call in checkpoints.call_args_list) == 1
+    unit.assert_not_called()
     effective, actor = factory.call_args.args
     assert actor == ref and effective.target.model_dump() == target
     if kind == "agent":
@@ -112,6 +120,7 @@ def test_target_authorization_uses_current_tenant_and_edit_permission(mocker, ki
 
 @pytest.mark.asyncio
 async def test_resume_derives_target_from_owned_history(mocker):
+    mocker.patch.object(execution, "save_message", return_value=101)
     mocker.patch("management.services.conversation.model_preferences.read_model_preferences",
         return_value={"model_parameter_preferences": {}, "selected_model_id": None})
     ref = SystemAgentRef("shared", "nl2agent_main", 77, 0)

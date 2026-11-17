@@ -23,7 +23,7 @@ const runtimeMock = {
     getState: vi.fn(),
   },
   thread: {
-    composer: { setRunConfig },
+    composer: { setRunConfig, getState: () => ({ text: "" }), setText: vi.fn(), subscribe: () => () => {} },
     getState: vi.fn(),
   },
 };

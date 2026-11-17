@@ -126,6 +126,10 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
         with self._boundary_lock:
             return self._boundary_reached
 
+    @property
+    def turn_complete(self) -> bool:
+        return self.boundary_reached
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
             (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
@@ -144,7 +148,9 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
                 if self._boundary_reached:
                     return
                 self._boundary_reached = True
-            self._boundary_stop_event.set()
+            # Graceful turn completion must not cancel the SDK output consumer.
+            # CoreAgent observes turn_complete between actions, after the card
+            # has been queued, while agent_run drains output during cleanup.
 
 
 class Nl2AgentDraftSaveError(Exception):
@@ -1588,6 +1594,10 @@ async def create_nl2agent_stream(
         authorization=authorization,
     )
 
+    control = getattr(request, "_creator_control", None)
+    if control is not None:
+        control.configure(run_info)
+
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
@@ -1604,6 +1614,8 @@ async def create_nl2agent_stream(
             async for chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,
+                **({"execution": control.execution, "deferred_run": control.deferred}
+                   if control is not None and control.execution is not None else {}),
             ):
                 if boundary_delivered:
                     continue
@@ -1629,6 +1641,7 @@ async def create_nl2agent_stream(
             )
             yield f"data: {error_payload}\n\n"
         finally:
-            run_info.stop_event.set()
+            if control is None:
+                run_info.stop_event.set()
 
     return generate()

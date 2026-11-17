@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-SESSION-RECOVERY-D4-001
+  feature_id: SYS-AGENT-LIFECYCLE
+  requirement_ids: [WB-SESSION-RECOVERY-20261113]
+  business_rule_ids: [SYS-AGENT-LIFECYCLE-RULE-006]
+  title: Workbench continues consecutive clarification cards after re-entry
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify consecutive metadata-only cards and draft restoration through the actual Workbench page.
+  preconditions: [Local frontend with controlled authorized creator HTTP fixtures.]
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open an unanswered creator card while target restoration is delayed, select an answer, leave and reopen the history.
+    expected: Target restoration does not disable the card and the unsent answer remains editable after re-entry.
+  - order: 2
+    action: Submit the first card and return a second metadata-only card reusing its question IDs; submit the second card.
+    expected: Both cards remain visible, only the latest unanswered card is editable and both submissions contain the correct questions and answers.
+  - order: 3
+    action: Leave a running creator, return while it is active and retry a failed turn before leaving again.
+    expected: The page reconnects to the owned run without replaying generation and restores the retry result under the original user turn.
+  expected_results:
+  - Unsent drafts survive re-entry and delayed flow initialization.
+  - Consecutive clarification cards remain independently rendered and submitted history is readonly.
+  - Reconnect and retry preserve the correct execution and message branch.
+  forbidden_side_effects:
+  - No real model calls, installation, publication or changes outside isolated fixture state.
+  actor: Authorized controlled tenant user
+  journey: [Open history, Fill draft, Re-enter, Submit first card, Submit second card, Reconnect retry]
+  final_business_result: [The creator conversation can continue after navigation and repeated clarification.]
+  failure_evidence: [Browser control state, sanitized request counts and screenshot.]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Pending input survives target restoration and browser re-entry.
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: Consecutive cards and retry reconnect preserve their identities.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]
