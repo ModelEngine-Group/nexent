@@ -39,17 +39,12 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
-import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import { DreamingConfigCards } from "./DreamingConfigCards";
 import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
 import { ProviderConfigCard } from "./ProviderConfigCard";
 import {
-  addDisabledAgentId,
   loadMemoryConfig,
   loadTenantMemorySettings,
-  removeDisabledAgentId,
-  removeDisabledUserAgentId,
-  setTenantMemoryEnabled,
   type TenantMemorySettings,
   setExternalProviderTopK,
   setMemorySwitch,
@@ -147,12 +142,6 @@ export function MemoryManager() {
   const [loadingByScope, setLoadingByScope] = useState(initialLoadingByScope);
   const [configLoading, setConfigLoading] = useState(true);
   const [tenantMemory, setTenantMemory] = useState<TenantMemorySettings>();
-  const [savingTenantMemory, setSavingTenantMemory] = useState(false);
-  const [personalAgentOptions, setPersonalAgentOptions] = useState<
-    { value: string; label: string }[]
-  >([]);
-  const [selectedPersonalAgent, setSelectedPersonalAgent] = useState<string>();
-  const [savingPersonalAgent, setSavingPersonalAgent] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<MemoryRecord | null>(null);
@@ -202,18 +191,6 @@ export function MemoryManager() {
       .catch(() => {
         if (active) message.error(t("memory.manager.tenantMemoryLoadError"));
       });
-    void fetchPublishedAgentList().then(({ data: agents }) => {
-      if (active) {
-        setPersonalAgentOptions(
-          agents.map(
-            (agent: { id: string; display_name: string; name: string }) => ({
-              value: String(agent.id),
-              label: agent.display_name || agent.name,
-            })
-          )
-        );
-      }
-    });
     return () => {
       active = false;
     };
@@ -318,51 +295,6 @@ export function MemoryManager() {
     if (!saved) {
       setConfig((current) => ({ ...current, memoryEnabled: previous }));
       message.error(t("useMemory.setMemorySwitchError"));
-    }
-  };
-
-  const updateTenantMemory = async (enabled: boolean) => {
-    setSavingTenantMemory(true);
-    try {
-      setTenantMemory(await setTenantMemoryEnabled(enabled));
-    } catch {
-      message.error(t("useMemory.setMemorySwitchError"));
-    } finally {
-      setSavingTenantMemory(false);
-    }
-  };
-
-  const updatePersonalAgentMemory = async (enabled: boolean) => {
-    if (!selectedPersonalAgent) return;
-    setSavingPersonalAgent(true);
-    try {
-      const agentId = selectedPersonalAgent;
-      if (enabled) {
-        const saved = await removeDisabledAgentId(agentId);
-        const legacySaved =
-          !config.disableUserAgentIds.includes(agentId) ||
-          (await removeDisabledUserAgentId(agentId));
-        setConfig((current) => ({
-          ...current,
-          disableAgentIds: saved
-            ? current.disableAgentIds.filter((id) => id !== agentId)
-            : current.disableAgentIds,
-          disableUserAgentIds: legacySaved
-            ? current.disableUserAgentIds.filter((id) => id !== agentId)
-            : current.disableUserAgentIds,
-        }));
-        if (!saved || !legacySaved)
-          message.error(t("useMemory.setMemorySwitchError"));
-      } else if (await addDisabledAgentId(agentId)) {
-        setConfig((current) => ({
-          ...current,
-          disableAgentIds: [...current.disableAgentIds, agentId],
-        }));
-      } else {
-        message.error(t("useMemory.setMemorySwitchError"));
-      }
-    } finally {
-      setSavingPersonalAgent(false);
     }
   };
 
@@ -593,53 +525,6 @@ export function MemoryManager() {
               loading={savingConfig}
               onChange={updateMemoryEnabled}
             />
-          </Flex>
-        </Card>
-        {tenantMemory && (
-          <Card className="memory-config-card">
-            <Flex align="center" justify="space-between" gap={24}>
-              <div>
-                <Text strong>{t("memory.manager.tenantAutomaticMemory")}</Text>
-                <Text type="secondary" className="memory-setting-description">
-                  {t("memory.manager.tenantAutomaticMemoryHint")}
-                </Text>
-              </div>
-              <Switch
-                aria-label={t("memory.manager.tenantAutomaticMemory")}
-                checked={tenantMemory.enabled}
-                disabled={!tenantMemory.can_edit}
-                loading={savingTenantMemory}
-                onChange={updateTenantMemory}
-              />
-            </Flex>
-          </Card>
-        )}
-        <Card className="memory-config-card" loading={configLoading}>
-          <Flex align="center" justify="space-between" gap={24}>
-            <Text strong>{t("memory.manager.personalAgentMemory")}</Text>
-            <Space wrap>
-              <Select
-                aria-label={t("memory.manager.personalAgentMemory")}
-                placeholder={t("memory.manager.personalAgentPlaceholder")}
-                options={personalAgentOptions}
-                value={selectedPersonalAgent}
-                disabled={savingPersonalAgent}
-                onChange={setSelectedPersonalAgent}
-                showSearch
-                optionFilterProp="label"
-              />
-              <Switch
-                aria-label={t("memory.manager.personalAgentMemory")}
-                checked={
-                  !!selectedPersonalAgent &&
-                  !config.disableAgentIds.includes(selectedPersonalAgent) &&
-                  !config.disableUserAgentIds.includes(selectedPersonalAgent)
-                }
-                disabled={!selectedPersonalAgent}
-                loading={savingPersonalAgent}
-                onChange={updatePersonalAgentMemory}
-              />
-            </Space>
           </Flex>
         </Card>
         <DreamingConfigCards

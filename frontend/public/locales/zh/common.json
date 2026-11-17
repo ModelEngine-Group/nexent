@@ -4848,6 +4848,7 @@
   "agentRepository.copy.skillDuplicate.useExisting": "使用本地同名技能",
   "repository.mine.applyModal.sharedFields": "选择要共享的配置信息",
   "tenantResources.tabs.apiKeys": "API Key",
+  "tenantResources.tabs.memory": "记忆设置",
   "tenantResources.apiKeys.key": "API Key",
   "tenantResources.apiKeys.creatorEmail": "创建人邮箱",
   "tenantResources.apiKeys.ownerEmail": "所属用户邮箱",
@@ -6822,7 +6823,5 @@
   "memory.manager.tenantAutomaticMemory": "租户自动记忆",
   "memory.manager.tenantAutomaticMemoryHint": "控制此租户所有会话的自动记忆。",
   "memory.manager.tenantMemoryLoadError": "无法加载租户记忆设置。",
-  "memory.manager.personalAgentMemory": "我的智能体记忆偏好",
-  "memory.manager.personalAgentPlaceholder": "选择智能体",
   "dreaming.reason.memory_disabled": "自动记忆已关闭。"
 }
