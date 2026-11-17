@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: SKILLS-LIST-CONTENT-20261113
+  change_type: requirement
+  requirement_id: REQ-SKILLS-LIST-CONTENT-20261113
+  title: Omit skill bodies from list reads unless explicitly requested
+  description: Default include_content to false at the list HTTP boundary and exclude the body column from SQL; retain full detail reads.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-072]
+    retired: []
+  affected_cases:
+    existing: [API-076]
+    added: [SKILL-LIST-CONTENT-D2-001]
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/management-skills-list-content/.
+    The user explicitly authorized the changed HTTP default. Service/repository
+    internal defaults retain full content for existing callers. Existing D1 Cases
+    remain intact; SQL selection and UI fallback assertions stay in UT. The new D2
+    uses real HTTP and one self-owned skill, with existing authenticated anchors
+    and ownership-journal cleanup. Primary responsibility inherits F-072's skill domain.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Prove omitted SQL body selection without lazy loads and full metadata equivalence
+    - Validate default false, explicit boolean variants, invalid flags and unchanged inventory projection
+    - Preserve internal full-content callers, single-skill details, permissions and YAML overlay
+    - Render fetched detail content when list bodies are absent and file enumeration fails
+    reason: Existing tests preserve full payloads but do not prove body exclusion or detail fallback without list content.
+    test_selectors:
+    - test/backend/database/test_skill_batch_queries.py
+    - test/backend/services/test_skill_list_optimization.py
+    - test/backend/app/test_skill_list_scheduling.py
+    - test/backend/database/test_skill_db.py
+    - test/backend/services/test_skill_service.py
+    - test/backend/app/test_skill_app.py
+    - frontend/tests/component/skillDetailContent.test.tsx

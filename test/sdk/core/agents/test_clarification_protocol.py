@@ -1,15 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Terminal clarification parsing rejects the complete block before execution."""
 import pytest
-from nexent.core.agents.clarification import (
-    choose_clarification_tool_name,
-    render_question_text,
-)
-from nexent.core.agents.output_protocol import (
-    ModelOutputProtocolError,
-    extract_clarification_form,
-)
+from nexent.core.agents.contracts.clarification import choose_clarification_tool_name, render_question_text
+from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolError, extract_clarification_form
 
 QUESTIONS = "[{'id': 'scope', 'type': 'text', 'title': 'Which region?'}]"
 

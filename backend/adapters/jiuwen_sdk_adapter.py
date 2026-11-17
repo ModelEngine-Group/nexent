@@ -3,10 +3,13 @@
 """
 openjiuwen SDK adapter for Nexent.
 
-This module works around circular import bugs in openjiuwen 0.1.13 by:
+For versions before 0.1.18, this module works around circular imports by:
   1. Stubbing react_agent_evolve (causes the circular import)
   2. Installing a meta-path finder that blocks broken __init__.py files
-  3. All of the above runs at MODULE LOAD TIME (before openjiuwen imports)
+  3. Installing these workarounds before openjiuwen imports
+
+Native versions use their real packages so the Agent Core can coexist with
+prompt optimization in the same service process.
 
 The adapters/__init__.py wraps the import in try/except so the server
 starts even when openjiuwen is not installed.
@@ -19,10 +22,18 @@ import logging
 import os
 import sys
 import types
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, List, Literal, Optional, Tuple
 
 if TYPE_CHECKING:
     from openjiuwen.core.foundation.llm.schema.config import ModelClientConfig, ModelRequestConfig
+
+from packaging.version import Version
+
+try:
+    _needs_legacy_bypass = Version(version("openjiuwen")) < Version("0.1.18")
+except PackageNotFoundError:
+    _needs_legacy_bypass = False
 
 # ----------------------------------------------------------------------
 # MUST install bypasser + stubs before any openjiuwen import.
@@ -33,7 +44,7 @@ if TYPE_CHECKING:
 
 # Stub react_agent_evolve so single_agent.__init__.py can import it without
 # hitting the circular core.operator dependency.
-if "openjiuwen.core.single_agent.agents.react_agent_evolve" not in sys.modules:
+if _needs_legacy_bypass and "openjiuwen.core.single_agent.agents.react_agent_evolve" not in sys.modules:
     _stub = types.ModuleType("openjiuwen.core.single_agent.agents.react_agent_evolve")
     _stub.__file__ = "<bypasser stub>"
 
@@ -60,7 +71,7 @@ for _name, _attrs in [
     ("dashscope", {}),
     ("pdfplumber", {}),
 ]:
-    if _name not in sys.modules:
+    if _needs_legacy_bypass and _name not in sys.modules:
         _mod = types.ModuleType(_name)
         _mod.__path__ = []
         for _k, _v in _attrs.items():
@@ -68,7 +79,7 @@ for _name, _attrs in [
         sys.modules[_name] = _mod
 
 for _name in ["pymilvus.client", "pymilvus.client.utils"]:
-    if _name not in sys.modules:
+    if _needs_legacy_bypass and _name not in sys.modules:
         _m = types.ModuleType(_name)
         _m.__path__ = []
         if _name == "pymilvus.client.utils":
@@ -82,7 +93,7 @@ for _name, _attrs in [
     ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
     ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
 ]:
-    if _name not in sys.modules:
+    if _needs_legacy_bypass and _name not in sys.modules:
         _m = types.ModuleType(_name)
         _m.__path__ = []
         for _k, _v in _attrs.items():
@@ -180,23 +191,24 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         raise AttributeError(name)
 
 
-# Install the bypasser into sys.meta_path so it intercepts openjiuwen imports.
-for _finder in sys.meta_path:
-    if isinstance(_finder, _JiuwenInitBypasser):
-        break
-else:
-    sys.meta_path.insert(0, _JiuwenInitBypasser())
+# Install the finder only for the versions that require the import workaround.
+if _needs_legacy_bypass:
+    for _finder in sys.meta_path:
+        if isinstance(_finder, _JiuwenInitBypasser):
+            break
+    else:
+        sys.meta_path.insert(0, _JiuwenInitBypasser())
 
 # No-op: bypasser is already installed above.
 # Kept for backward compatibility with code that calls it.
-_bypasser_installed = True
+_bypasser_installed = _needs_legacy_bypass
 
 
 def _install_jiuwen_bypasser() -> bool:
     """No-op: bypasser is installed at module load time. Kept for compatibility."""
     return True
 
-# Now safe to import openjiuwen — bypasser is active.
+# Import native packages directly unless the legacy workaround is required.
 from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
 
 
@@ -253,7 +265,7 @@ def run_async(coro):
                 finally:
                     new_loop.close()
 
-            from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+            from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
             from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 
             manager = get_current_thread_manager() or _get_default_agent_thread_manager()

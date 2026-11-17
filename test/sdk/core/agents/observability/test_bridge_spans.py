@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-003/004/006/007 and local HTTP bridge integration."""
 
 import logging
@@ -6,7 +7,7 @@ from contextvars import ContextVar
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents import sandbox
+from nexent.core.agents.sandbox import execution as sandbox
 from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 from nexent.core.tools.parallel_executor import _parallel_executor
 from nexent.monitor import (

@@ -37,7 +37,7 @@ sys.modules['boto3'] = boto3_mock
 nexent_mock = types.ModuleType('nexent')
 nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
-nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.contracts.config')
 nexent_skills_mock = types.ModuleType('nexent.skills')
 nexent_skills_mock.__path__ = [os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/skills')]  # Required for submodule lookups
 nexent_skills_skill_loader_mock = types.ModuleType('nexent.skills.skill_loader')
@@ -70,7 +70,7 @@ nexent_core_agents_agent_model_mock.ToolConfig = MockToolConfig
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model_mock
+sys.modules['nexent.core.agents.contracts.config'] = nexent_core_agents_agent_model_mock
 sys.modules['nexent.skills'] = nexent_skills_mock
 sys.modules['nexent.skills.skill_loader'] = nexent_skills_skill_loader_mock
 sys.modules['nexent.skills.skill_manager'] = nexent_skills_skill_manager_mock
@@ -371,6 +371,7 @@ def mock_update_skill_by_id(skill_id, skill_data, tenant_id=None, updated_by=Non
     return {"skill_id": skill_id, "name": skill_data.get("name", "updated")}
 
 database_skill_db_mock.list_skills = mock_list_skills
+database_skill_db_mock.get_tool_ids_by_skill_ids = lambda skill_ids: {skill_id: [] for skill_id in skill_ids}
 database_skill_db_mock.get_skill_by_name = mock_get_skill_by_name
 database_skill_db_mock.get_skill_by_id = mock_get_skill_by_id
 database_skill_db_mock.create_skill = mock_create_skill
@@ -408,10 +409,10 @@ sys.modules['management.db.identity.group'] = database_group_db_mock
 sys.modules['management.db.identity.user_tenant'] = database_user_tenant_db_mock
 setattr(database_mock, 'skill_db', database_skill_db_mock)
 
-# Mock nexent.core.agents.run_agent for create_skill_from_request
-nexent_core_agents_run_agent_mock = types.ModuleType('nexent.core.agents.run_agent')
+# Mock nexent.core.agents.orchestration.entry for create_skill_from_request
+nexent_core_agents_run_agent_mock = types.ModuleType('nexent.core.agents.orchestration.entry')
 nexent_core_agents_run_agent_mock.agent_run_thread = MagicMock()
-sys.modules['nexent.core.agents.run_agent'] = nexent_core_agents_run_agent_mock
+sys.modules['nexent.core.agents.orchestration.entry'] = nexent_core_agents_run_agent_mock
 
 # Mock agents.skill_creation_agent module
 agents_mock = types.ModuleType('agents')
@@ -1819,7 +1820,7 @@ class TestSkillServiceOverlayParams:
         skill_data = {"name": "test_skill"}
 
         with patch('os.path.isfile', return_value=True):
-            with patch('builtins.open', mock_open(read_data="key: value\n")):
+            with patch('builtins.open', mock_open(read_data=b"key: value\n")):
                 with patch('management.services.skill.service._parse_skill_params_from_config_bytes', return_value={"key": "value"}):
                     result = service._enrich_configs_from_yaml(skill_data)
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import type {
   ConversationKnowledgeScope,
@@ -5,14 +7,17 @@ import type {
 } from "@/types/knowledgeScope";
 
 export async function restoreKnowledgeDisplay(
-  scope: ConversationKnowledgeScope | null
+  scope: ConversationKnowledgeScope | null,
+  lookupNames = true
 ): Promise<KnowledgeScopeEffectivePreview | null> {
   if (!scope) return null;
   const [local, aidp] = await Promise.all([
-    scope.local.mode === "override" && scope.local.knowledge_ids.length
+    lookupNames &&
+    scope.local.mode === "override" &&
+    scope.local.knowledge_ids.length
       ? knowledgeBaseService.getKnowledgeBasesInfo(true, false)
       : null,
-    scope.aidp.mode === "override" && scope.aidp.kds_ids.length
+    lookupNames && scope.aidp.mode === "override" && scope.aidp.kds_ids.length
       ? knowledgeBaseService.getAidpKnowledgeBasesAll()
       : null,
   ]);

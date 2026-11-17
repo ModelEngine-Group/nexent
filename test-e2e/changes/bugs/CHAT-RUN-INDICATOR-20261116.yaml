@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-RUN-INDICATOR-20261116
+  change_type: bugfix
+  bug_id: CHAT-RUN-INDICATOR-20261116
+  title: Unify conversation run indicators and acknowledge viewed completions
+  description: Share new-run and retry status across Workbench and Agent-chat history without changing run requests.
+  observed_behavior: Workbench completion dots never clear and overlap hovered row menus; Agent-chat uses a separate running-only indicator.
+  expected_behavior: Both pages show running spinners and unread successful completion dots; hover or focus hides status, while selection and conversation interaction acknowledge only the viewed completion.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing ActivityRuntime and ThreadListRefresh tests prove stream continuity and list refresh, but not completion acknowledgement or hovered status/menu layout across both entries.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: [CHAT-ACTIVITY-D4-001]
+    added: [CHAT-RUN-STATUS-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Frontend real-runtime and DOM tests own state transitions and interaction boundaries; no Python behavior changes. D4 adds actual browser hover and both entry journeys.
+    behaviors:
+    - New generation and retries clear older dots, show running state and mark only successful completion unread.
+    - Switching threads never finishes a background run or transfers another thread's status.
+    - Hover and keyboard focus hide indicators without acknowledging unread completion.
+    - Both history lists share overflow-only title tooltips and stable truncation while time hides for hovered or focused actions without reclaiming width.
+    - Row activation and conversation click or keyboard interaction acknowledge only the selected completed run.
+    - Local and persisted thread identities resolve the same status; failed and cancelled runs do not show successful completion.
+    test_selectors:
+    - frontend/tests/workbench/ConversationRunIndicators.test.tsx
+    - frontend/tests/workbench/ConversationHistoryLabel.test.tsx
+    - frontend/tests/workbench/AgentHistoryList.test.tsx
+    - frontend/tests/workbench/ThreadListRefresh.test.tsx
+    - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
+    - frontend/tests/workbench/ConversationActivitySync.test.tsx
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/design.md, Conversation run indicators.
+    CHAT-SIDEBAR responsibility remains runtime. Existing formal D1 assets are preserved; no new D1
+    duplicates frontend component/runtime UT. No changed API, Python service, database or deployment boundary.
+    Self-contained D4 uses browser-local controlled routes, owns and releases its browser context,
+    and declares empty preparation families; no real provider calls or persistent data writes.

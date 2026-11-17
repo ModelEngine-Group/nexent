@@ -4,6 +4,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from contracts.roles import normalize_roles
+
 
 # User authentication related request models
 class UserSignUpRequest(BaseModel):
@@ -55,7 +57,16 @@ class UserUpdateRequest(BaseModel):
 
     username: Optional[str] = Field(None, min_length=1, max_length=50)
     email: Optional[EmailStr] = None
-    role: Optional[str] = Field(None, pattern="^(ADMIN|DEV|USER)$")
+    role: Optional[str] = Field(None, pattern="^(ADMIN|DEV|USER|OPS)$")
+    roles: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def validate_role_input(self):
+        if self.role is not None and self.roles is not None:
+            raise ValueError("Use either role or roles, not both")
+        if self.roles is not None:
+            self.roles = list(normalize_roles(self.roles, ordinary_only=True))
+        return self
 
 
 class UserDeleteRequest(BaseModel):
@@ -263,15 +274,22 @@ class InvitationCreateRequest(BaseModel):
     tenant_id: str = Field(
         ..., min_length=1, description="Tenant ID where the invitation belongs"
     )
-    code_type: str = Field(
-        ..., description="Invitation code type (ADMIN_INVITE, DEV_INVITE, USER_INVITE)"
-    )
+    code_type: Optional[str] = None
+    roles: Optional[List[str]] = None
     invitation_code: Optional[str] = Field(
         None, description="Custom invitation code (auto-generated if not provided)"
     )
     group_ids: Optional[List[int]] = Field(None, description="Associated group IDs")
     capacity: int = Field(default=1, ge=1, description="Maximum usage capacity")
     expiry_date: Optional[str] = Field(None, description="Expiry date in ISO format")
+
+    @model_validator(mode="after")
+    def validate_invitation_roles(self):
+        if self.roles is not None:
+            self.roles = list(normalize_roles(self.roles, ordinary_only=True))
+        elif self.code_type is None:
+            raise ValueError("Invitation roles are required")
+        return self
 
 
 class InvitationUpdateRequest(BaseModel):
@@ -280,6 +298,13 @@ class InvitationUpdateRequest(BaseModel):
     capacity: Optional[int] = Field(None, ge=1, description="New capacity")
     expiry_date: Optional[str] = Field(None, description="New expiry date")
     group_ids: Optional[List[int]] = Field(None, description="New group IDs")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_role_mutation(cls, value):
+        if isinstance(value, dict) and ("roles" in value or "code_type" in value):
+            raise ValueError("Invitation roles are immutable")
+        return value
 
 
 class InvitationResponse(BaseModel):

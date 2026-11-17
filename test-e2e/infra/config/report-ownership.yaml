@@ -73,6 +73,13 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  AGENT-CORE-CONFIG: agent_config
+  JIUWEN-CONTEXT: context
+  JIUWEN-MODEL-BRIDGE: runtime
+  JIUWEN-OUTPUT: runtime
+  JIUWEN-RECOVERY: runtime
+  JIUWEN-RELEASE: runtime
+  JIUWEN-RESOURCES: runtime
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
   SDK-MODEL-OUTLET-RESOLUTION: model
@@ -83,6 +90,7 @@ feature_overrides:
   SDK-MODEL-PROFILE-NORMALIZATION: model
   SDK-MODEL-PROFILE-PARAMETERS: model
   SDK-MODEL-TRANSPORT: model
+  AUTH-MULTI-ROLE: system
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config
@@ -94,6 +102,7 @@ feature_overrides:
   CHAT-CLARIFICATION-HISTORY: runtime
   CHAT-MODEL-CONTROLS: model
   CHAT-SIDEBAR: runtime
+  CHAT-TRAJECTORY: runtime
   FAF-001: runtime
   MSRF-001: model
   NAV-MENU-VISIBILITY: system

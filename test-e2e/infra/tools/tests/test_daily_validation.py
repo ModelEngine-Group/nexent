@@ -157,8 +157,11 @@ def test_strict_validation_still_fails_and_daily_checks_derived_views_without_wr
 
 
 def test_launcher_uses_daily_report_and_never_regenerates():
-    script = (Path(__file__).resolve().parents[2] / "scripts/daily-launch.py").read_text(encoding="utf-8")
-    assert '"--daily-report"' in script and '"--generate"' not in script
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    supervisor = (scripts / "daily-launch.py").read_text(encoding="utf-8")
+    executor = (scripts / "daily-worker.py").read_text(encoding="utf-8")
+    assert '"--daily-report"' in executor
+    assert '"--generate"' not in supervisor + executor
 
 
 def test_campaign_receives_validation_and_a_disabled_case_without_rebuilding_in_children(tmp_path):

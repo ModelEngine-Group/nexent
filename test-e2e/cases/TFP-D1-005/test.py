@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TFP-D1-005: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ import pytest
 from shared.tool_fastpath import OrdinaryExecutor, make_wrapper
 from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
 
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -76,8 +77,8 @@ def test_tfp_d1_005(monkeypatch):
 @pytest.mark.parametrize("failure", ["workspace", "workspace_cancel", "binding_cancel"])
 def test_tfp_d1_005_deferred_setup(monkeypatch, tmp_path, failure):
     """TFP-D1-005: failed setup releases leases and a retry uses a fresh group."""
-    import nexent.core.agents.nexent_agent as factory_module
-    import nexent.core.agents.sandbox as sandbox_module
+    import nexent.core.agents.cores.smolagents.agent as factory_module
+    import nexent.core.agents.sandbox.execution as sandbox_module
 
     builds, closed, runner_cleanup, executors = [], [], [], []
 

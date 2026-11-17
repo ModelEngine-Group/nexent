@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
+    DEFAULT_TOOL_CALL_TIMEOUT,
     MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
@@ -16,9 +17,10 @@ from contracts.constants.environment import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
+    RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
+    NEXENT_MCP_INTERNAL_TOKEN,
 )
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
@@ -37,11 +39,13 @@ from management.services.agent.preparation.inputs import (
     join_minio_file_description_to_query,
 )
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
+from management.services.agent.mcp_passthrough import apply_mcp_header_passthrough
 from management.services.agent.tool_identity import resolve_tool_user_context
 from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
+from nexent.monitor.phase_capture import capture_preparation
 from runtime.adapters.nexent.factory import build_run_info
 
 logger = logging.getLogger("create_agent_info")
@@ -90,6 +94,136 @@ def _ensure_agent_reasoning_snapshot(
 
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 northbound MCP header passthrough preflight
+# ---------------------------------------------------------------------------
+
+
+async def preflight_mcp_header_passthrough(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str = "",
+    version_no: int = 0,
+    metadata: Optional[Dict[str, Any]],
+    agent_record: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Validate Phase-1 passthrough headers **before** an SSE stream opens.
+
+    This is the northbound 400 vs SSE-error fix for Phase 1.  When
+    :func:`apply_mcp_header_passthrough` runs *inside* the
+    :class:`generate_stream` async generator body, the northbound endpoint has
+    already committed to HTTP 200 via :class:`StreamingResponse`, so callers
+    only see an SSE error event, never the HTTP 400 + business code
+    ``CHAT_MCP_HEADER_ROUTE_NOT_FOUND`` (010111) that the Phase-1 spec
+    promises.
+
+    Callers must **invoke this function BEFORE** the northbound route returns
+    its :class:`StreamingResponse`.  It reuses exactly the same AgentConfig +
+    MCP lookup machinery that :func:`create_agent_run_info` uses, so the
+    ``mcp_host`` shape passed to
+    :func:`management.services.agent.mcp_passthrough.validate_mcp_header_passthrough`
+    is a faithful preimage of what the full pipeline will eventually build.
+
+    Raises
+    ------
+    AppException
+        010111 (unmatched ``by_server`` URL) when the caller-supplied metadata
+        cannot be applied.  Surface this as HTTP 400 — never swallow it into
+        an SSE error.
+    """
+    from management.services.agent.mcp_passthrough import (
+        validate_mcp_header_passthrough,
+        extract_passthrough_headers,
+    )
+    from management.services.agent.preparation.compiler import create_agent_config
+    from management.services.agent.preparation.tools import (
+        filter_mcp_servers_and_tools,
+    )
+    from nexent.core.concurrency import run_blocking
+
+    version_no_int = int(version_no or 0)
+
+    # Reuse the agent_record if the caller already fetched it (subscription.py
+    # does so early in run_agent_stream).  Otherwise do a single blocking
+    # lookup — cheap enough because this is the only DB hit we need here.
+    if agent_record is None or int(agent_record.get("version_no", -1)) != version_no_int:
+        agent_record = await run_blocking(
+            "preflight-agent-lookup",
+            search_agent_info_by_agent_id,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no_int,
+        ) or {}
+
+    # Skip the whole preflight when the caller did not supply any reserved
+    # fields — no need to build AgentConfig / MCP list for nothing.
+    mode, passthrough_headers = extract_passthrough_headers(metadata)
+    if mode is None or not passthrough_headers:
+        return
+
+    # Agent has no switch — no preflight needed (apply_mcp_header_passthrough
+    # itself handles switch=OFF via silent no-op).
+    if not agent_record:
+        return
+
+    # Build a lightweight AgentConfig (no workspace prep, no model snapshots)
+    # solely to enumerate which MCP servers the agent actually uses.  The
+    # regular create_agent_config call below does a full agent lookup + tool
+    # join inside compiler.py, which is exactly what we want here.
+    agent_config = await create_agent_config(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id or "preflight",
+        version_no=version_no_int,
+    )
+
+    # Fetch remote MCP server list and resolve the used URLs the same way
+    # create_agent_run_info does.
+    remote_mcp_list = await get_remote_mcp_server_list(
+        tenant_id=tenant_id, is_need_auth=True
+    )
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
+    remote_mcp_list.append(
+        {
+            "remote_mcp_server_name": "outer-apis",
+            "remote_mcp_server": default_mcp_url,
+            "status": True,
+        }
+    )
+    remote_mcp_dict = {
+        record["remote_mcp_server_name"]: record
+        for record in remote_mcp_list
+        if record.get("status")
+    }
+    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+
+    # Build a minimal mcp_host-shaped list.  We only need URL + static headers
+    # (Authorization token + per-server custom_headers) for the validate call.
+    mcp_host: List[Dict[str, Any]] = []
+    for url in used_mcp_urls:
+        mcp_record = None
+        for record in remote_mcp_list:
+            if record.get("remote_mcp_server") == url and record.get("status"):
+                mcp_record = record
+                break
+        static_headers: Dict[str, Any] = {}
+        if mcp_record:
+            auth_token = mcp_record.get("authorization_token")
+            if auth_token:
+                static_headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                static_headers.update(custom_headers)
+        entry: Dict[str, Any] = {"url": url}
+        if static_headers:
+            entry["headers"] = static_headers
+        mcp_host.append(entry)
+
+    validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
+
+
+@capture_preparation
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -113,6 +247,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -207,7 +342,9 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
-    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.outlet_storage import (
+        encode_resolved_model_profile,
+    )
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     captured_records = {}
     outlet_profiles = {}
@@ -222,6 +359,11 @@ async def create_agent_run_info(
     if captured_records:
         create_config_kwargs["runtime_model_records"] = captured_records
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
+
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        final_query = await join_minio_file_description_to_query(
+            minio_files=minio_files, query=query, history=None, language=language,
+        )
 
     # v2.6.0: Apply per-agent model params override to model_config_list.
     # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
@@ -284,7 +426,9 @@ async def create_agent_run_info(
                                     mc.reasoning_budget_tokens = v
                                 continue
                             if k == "__custom__" and isinstance(v, dict):
-                                from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+                                from nexent.core.model_service.profiles.protocol_parameters import (
+                                    without_outlet_token_limits,
+                                )
 
                                 for custom_key, custom_value in without_outlet_token_limits(v).items():
                                     # A null custom value is an explicit
@@ -309,6 +453,8 @@ async def create_agent_run_info(
                         ):
                             mc.reasoning_budget_tokens = budget
                     break
+    _capture_child_model_configs(agent_config, model_list, tenant_id)
+
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append(
@@ -347,7 +493,7 @@ async def create_agent_run_info(
                 mcp_config["httpx_client_factory"] = create_httpx_client
                 mcp_config["headers"] = {
                     "X-Tenant-ID": str(tenant_id),
-                    "X-Nexent-Internal-Token": TOKEN,
+                    "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
                 }
             headers = {}
             auth_token = mcp_record.get("authorization_token")
@@ -362,6 +508,17 @@ async def create_agent_run_info(
         else:
             # Fallback to string format if record not found
             mcp_host.append(url)
+
+    # Phase 1: northbound MCP header passthrough — placeholder resolution
+    # + dynamic header injection, both gated by the per-agent switch.
+    apply_mcp_header_passthrough(
+        mcp_host,
+        metadata,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        run_id=workspace_run_id,
+    )
 
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)
@@ -411,13 +568,27 @@ async def create_agent_run_info(
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        from management.services.model.runtime_options import compile_bound_model_profile
+
+        selected = next((model for model in model_list if model.cite_name == agent_config.model_name), None)
+        if selected is None:
+            raise ValueError("MODEL_OUTLET_NOT_FOUND")
+        selected.resolved_profile = compile_bound_model_profile(selected, agent_config)
+        selected.prompt_cache = None
+
     agent_run_info = build_run_info(
         query=final_query,
         model_config_list=model_list,
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
+        # Only surface the kwarg when the caller actually sent metadata, so
+        # agents without metadata keep the exact pre-existing payload shape.
+        **({"runtime_metadata": metadata} if metadata is not None else {}),
         mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        collaboration_timeout_seconds=RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
+        tool_call_timeout_seconds=DEFAULT_TOOL_CALL_TIMEOUT,
         history=converted_history,
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
@@ -445,7 +616,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
     """Give the root a private alias; never change a child Agent's model defaults."""
     if not preferences:
         return
-    from management.services.conversation.model_preferences import merge_model_preferences
+    from management.services.conversation.model_preferences import (
+        merge_model_preferences,
+    )
 
     for configured in model_list:
         profile = getattr(configured, "resolved_profile", None)
@@ -456,7 +629,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
             return
         original = (outlet_profiles or {}).get(profile.outlet_id)
         if original is not None:
-            from management.services.agent.model_parameters import merge_runtime_model_parameters
+            from management.services.agent.model_parameters import (
+                merge_runtime_model_parameters,
+            )
 
             resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
         else:
@@ -468,3 +643,92 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
         model_list.append(root)
         agent_config.model_name = root.cite_name
         return
+
+
+def _apply_agent_model_overrides(model_list, *, agent_id, tenant_id, version_no):
+    """Apply legacy child options only when no canonical outlet is available."""
+    from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "enable_thinking":
+                                if isinstance(v, bool):
+                                    mc.enable_thinking = v
+                                    if not v:
+                                        mc.reasoning_effort = None
+                                        mc.reasoning_budget_tokens = None
+                                continue
+                            if k == "reasoning_effort":
+                                if isinstance(v, str):
+                                    mc.reasoning_effort = v
+                                continue
+                            if k == "reasoning_budget_tokens":
+                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                                    mc.reasoning_budget_tokens = v
+                                continue
+                            if k == "__custom__" and isinstance(v, dict):
+                                for custom_key, custom_value in without_outlet_token_limits(v).items():
+                                    # A null custom value is an explicit
+                                    # removal marker: the agent opts out of a
+                                    # model-level custom param instead of
+                                    # inheriting it.
+                                    if custom_value is None:
+                                        merged.pop(custom_key, None)
+                                    else:
+                                        merged[custom_key] = custom_value
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    if override_entry.get("reasoning_effort") is not None:
+                        mc.reasoning_effort = override_entry["reasoning_effort"]
+                    if override_entry.get("reasoning_budget_tokens") is not None:
+                        budget = override_entry["reasoning_budget_tokens"]
+                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                            mc.reasoning_budget_tokens = budget
+                    break
+
+
+def _capture_child_model_configs(config, models, tenant_id):
+    """Freeze already bound child outlets before root-only conversation preferences."""
+    from management.services.model.runtime_options import compile_bound_model_profile, compile_model_runtime_profile
+
+    for child in getattr(config, "worker_agents", ()):
+        child_models = [model.model_copy(deep=True) for model in models]
+        selected = next((model for model in child_models if model.cite_name == child.model_name), None)
+        if selected is None:
+            raise ValueError("CHILD_MODEL_OUTLET_NOT_FOUND")
+        if selected.resolved_profile is None:
+            _apply_agent_model_overrides(child_models, agent_id=child.agent_id,
+                                         tenant_id=tenant_id, version_no=child.version_no)
+            if child.agent_core == "jiuwen":
+                selected.resolved_profile = compile_model_runtime_profile(selected, child)
+        elif child.agent_core == "jiuwen":
+            selected.resolved_profile = compile_bound_model_profile(selected, child)
+        if child.agent_core == "jiuwen":
+            selected.prompt_cache = None
+        child.runtime_model_config = selected.model_copy(deep=True)
+        _capture_child_model_configs(child, models, tenant_id)

@@ -19,6 +19,21 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  trajectory: {
+    records: `${API_BASE_URL}/trajectory/records`,
+    conversation: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
+    snapshot: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/snapshot`,
+    content: (id: string, contentId: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/contents/${encodeURIComponent(contentId)}`,
+    cleanup: `${API_BASE_URL}/trajectory/cleanup`,
+    cleanupSchedule: `${API_BASE_URL}/trajectory/cleanup/schedule`,
+  },
+  operations: {
+    authorization: `${API_BASE_URL}/ops/authorization`,
+    scope: `${API_BASE_URL}/ops/scope`,
+  },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
   agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
@@ -71,6 +86,7 @@ export const API_ENDPOINTS = {
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
+    branch: `${API_BASE_URL}/conversation/branch`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     target: (id: number) => `${API_BASE_URL}/conversation/${id}/target`,
     knowledgeScope: (id: number) =>
@@ -848,6 +864,8 @@ export const API_ENDPOINTS = {
     personalSelf: `${API_BASE_URL}/capacity/personal/me`,
   },
   users: {
+    assignableRoles: (userId: string) =>
+      `${API_BASE_URL}/users/${encodeURIComponent(userId)}/assignable_roles`,
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     update: (userId: string) => `${API_BASE_URL}/users/${userId}`,

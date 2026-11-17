@@ -24,6 +24,10 @@ import {
   fetchRepositoryImportPrecheck,
   importAgentFromRepository,
 } from "@/services/agentRepositoryService";
+import {
+  usePublishedAgentList,
+  publishedAgentQueryKey,
+} from "@/hooks/agent/usePublishedAgentList";
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
 import { RESOURCE_PAGE_SIZE, resourcePage } from "./ResourcePagination";
@@ -32,7 +36,8 @@ import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 export function AgentPicker({
   open,
-  agents,
+  agents: suppliedAgents,
+  identity,
   selectedId,
   selectedIds,
   onCancel,
@@ -42,7 +47,8 @@ export function AgentPicker({
   disabled = false,
 }: {
   open: boolean;
-  agents: Agent[];
+  agents?: Agent[];
+  identity?: string;
   selectedId?: string;
   selectedIds?: string[];
   onCancel: () => void;
@@ -51,6 +57,18 @@ export function AgentPicker({
   multiple?: boolean;
   disabled?: boolean;
 }) {
+  const [tab, setTab] = useState("mine");
+  const candidates = usePublishedAgentList({
+    enabled: open && tab === "mine" && suppliedAgents === undefined,
+    identity,
+    retry: false,
+  });
+  const agents = suppliedAgents ?? candidates.agents;
+  const catalogError =
+    tab === "mine" && suppliedAgents === undefined && candidates.isError;
+  const [needsHydration, setNeedsHydration] = useState(
+    open && suppliedAgents === undefined
+  );
   const [draft, setDraft] = useState<Agent[]>(() => {
     const ids = selectedIds ?? (selectedId ? [selectedId] : []);
     return open
@@ -86,7 +104,7 @@ export function AgentPicker({
   const [refreshRevision, setRefreshRevision] = useState(0);
   const queryClient = useQueryClient();
   const { t } = useTranslation();
-  const [tab, setTab] = useState("mine");
+
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [repository, setRepository] = useState<AgentRepositoryListingItem[]>(
@@ -132,14 +150,34 @@ export function AgentPicker({
     typeof repositoryRequest | null
   >(null);
   const loading =
+    (open &&
+      tab === "mine" &&
+      suppliedAgents === undefined &&
+      candidates.isFetching) ||
     operationLoading ||
     (open &&
       tab === "repository" &&
       settledRepositoryRequest !== repositoryRequest);
+  if (needsHydration && candidates.isSuccess) {
+    setNeedsHydration(false);
+    const ids = selectedIds ?? (selectedId ? [selectedId] : []);
+    setDraft(
+      ids
+        .map((id) => agents.find((agent) => String(agent.id) === id))
+        .filter((agent): agent is Agent => Boolean(agent))
+    );
+  }
+  const [previousIdentity, setPreviousIdentity] = useState(identity);
+  if (previousIdentity !== identity) {
+    setPreviousIdentity(identity);
+    setDraft([]);
+    setNeedsHydration(open && suppliedAgents === undefined);
+  }
   // Reset session state before children render, rather than after commit.
   if (previousOpen !== open) {
     setPreviousOpen(open);
     if (open) {
+      setNeedsHydration(suppliedAgents === undefined && !candidates.isSuccess);
       const ids = selectedIds ?? (selectedId ? [selectedId] : []);
       setDraft(
         ids
@@ -248,7 +286,7 @@ export function AgentPicker({
       if (!refreshed.success)
         throw new Error(t("ui.localization.importRefreshFailed"));
       const freshAgents = (refreshed.data ?? []) as Agent[];
-      queryClient.setQueryData(["publishedAgentsList"], freshAgents);
+      queryClient.setQueryData(publishedAgentQueryKey(identity), freshAgents);
       const imported = freshAgents.find(
         (agent) => Number(agent.id) === result.agent_id
       );
@@ -315,6 +353,13 @@ export function AgentPicker({
           spinning={loading}
           className="h-full [&>.ant-spin-container]:min-h-full"
         >
+          {catalogError && tab === "mine" && (
+            <Alert
+              type="error"
+              showIcon
+              title={t("businessLogic.config.error.agentListFailed")}
+            />
+          )}
           <AgentSelectionGrid aria-label={t("ui.localization.agentResources")}>
             {(tab === "mine" ? visible.length : repository.length) === 0 && (
               <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -471,7 +516,10 @@ export function AgentPicker({
       saving={saving}
       disabled={disabled}
       confirmDisabled={
-        loading || importing || (!!tags.predicates.length && tags.loading)
+        loading ||
+        catalogError ||
+        importing ||
+        (!!tags.predicates.length && tags.loading)
       }
       onCancel={() => {
         operationRef.current += 1;
@@ -482,7 +530,7 @@ export function AgentPicker({
         onCancel();
       }}
       onConfirm={async () => {
-        if (disabled || saving || loading || importing) return;
+        if (disabled || saving || loading || catalogError || importing) return;
         if (draft.length > (multiple ? 8 : 1)) {
           message.warning(
             t("workbench.controls.agentLimit", "最多选择 8 个智能体")

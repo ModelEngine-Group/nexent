@@ -17,29 +17,47 @@ import json
 import time
 from typing import Any, Dict, Optional
 
-from contracts.constants.environment import DOCUMENT_DELETE_DRAIN_TIMEOUT_S, DOCUMENT_DELETE_RETRY_INTERVAL_S
-from management.db.file.attachment import delete_file
-from management.db.knowledge_base.repository import get_knowledge_record, update_last_doc_update_time
-from management.db.knowledge_base.file_lifecycle import create_delete_tombstone, delete_file_record, get_file_record, transition_file_record
 from fastapi import Depends, Path, Query
+
+from contracts.constants.environment import (
+    DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
+    DOCUMENT_DELETE_RETRY_INTERVAL_S,
+)
+from management.db.file.attachment import delete_file
+from management.db.knowledge_base.file_lifecycle import (
+    create_delete_tombstone,
+    delete_file_record,
+    get_file_record,
+    transition_file_record,
+)
+from management.db.knowledge_base.repository import (
+    get_knowledge_record,
+    update_last_doc_update_time,
+)
 from management.services.knowledge_base.common import (
     get_vector_db_core,
     logger,
 )
+from management.services.knowledge_base.document_tasks import _document_delete_tasks
 from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
     KnowledgeBaseManagementService,
 )
 from management.services.knowledge_base.status import get_all_files_status
-from nexent.core.concurrency import run_blocking
-from nexent.vector_database.base import VectorDatabaseCore
 from management.services.knowledge_base.storage import (
     release_storage_charge,
     resolve_storage_reference,
 )
 from management.services.knowledge_base.task_state import get_redis_service
+from nexent.core.concurrency import run_blocking
+from nexent.vector_database.base import VectorDatabaseCore
 
-_document_delete_tasks: Dict[str, asyncio.Task] = {}
+# Worker task control is optional when Redis or the worker package is unavailable.
+try:
+    from data_process.app import app as celery_app
+except Exception as error:  # noqa: BLE001 - preserve optional worker integration
+    celery_app = None
+    logger.debug("Celery task control is unavailable: %s", error)
 
 
 class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
@@ -174,8 +192,6 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         }
         file_id = (lifecycle_record or {}).get("file_id")
         try:
-            from data_process.app import app as celery_app
-
             inspector = celery_app.control.inspect(timeout=0.5)
             for method_name in ("active", "reserved"):
                 try:
@@ -213,10 +229,6 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             redis_service = get_redis_service()
         except Exception:
             redis_service = None
-        try:
-            from data_process.app import app as celery_app
-        except Exception:
-            celery_app = None
         for task_id in sorted(task_ids):
             if redis_service:
                 try:
@@ -402,8 +414,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             "message": "Lifecycle record deleted; no storage object was created.",
         }
 
-    @staticmethod
+    @classmethod
     async def _finalize_document_delete(
+        cls,
         *,
         index_name: str,
         path_or_url: str,
@@ -413,12 +426,8 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Finish a document deletion after its parent chain has stopped."""
-        # Resolve the concrete service lazily to avoid the management ->
-        # deletion -> service import cycle while still honoring subclass
-        # overrides and test doubles.
-        from management.services.knowledge_base.service import ElasticSearchService
-
-        service_cls = ElasticSearchService
+        # Resolve helpers through the concrete class to honor subclass overrides.
+        service_cls = cls
         file_id = (lifecycle_record or {}).get("file_id")
         legacy_mode = lifecycle_record is None or not lifecycle_record.get(
             "object_name"
@@ -579,8 +588,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         result["lifecycle_deleted"] = True
         return result
 
-    @staticmethod
+    @classmethod
     async def _retry_document_delete(
+        cls,
         *,
         index_name: str,
         path_or_url: str,
@@ -589,13 +599,11 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         lifecycle_record: Optional[Dict[str, Any]],
         requested_by: Optional[str] = None,
     ) -> None:
-        from management.services.knowledge_base.service import ElasticSearchService
-
         file_id = (lifecycle_record or {}).get("file_id") or path_or_url
         try:
             while True:
                 try:
-                    result = await ElasticSearchService._finalize_document_delete(
+                    result = await cls._finalize_document_delete(
                         index_name=index_name,
                         path_or_url=path_or_url,
                         scope=scope,
@@ -618,8 +626,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         finally:
             _document_delete_tasks.pop(str(file_id), None)
 
-    @staticmethod
+    @classmethod
     def _schedule_document_delete_retry(
+        cls,
         *,
         index_name: str,
         path_or_url: str,
@@ -628,14 +637,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         lifecycle_record: Optional[Dict[str, Any]],
         requested_by: Optional[str] = None,
     ) -> None:
-        from management.services.knowledge_base.service import ElasticSearchService
-
         key = str((lifecycle_record or {}).get("file_id") or path_or_url)
         existing = _document_delete_tasks.get(key)
         if existing and not existing.done():
             return
         _document_delete_tasks[key] = asyncio.create_task(
-            ElasticSearchService._retry_document_delete(
+            cls._retry_document_delete(
                 index_name=index_name,
                 path_or_url=path_or_url,
                 scope=scope,
@@ -645,8 +652,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             )
         )
 
-    @staticmethod
+    @classmethod
     async def delete_document_by_scope(
+        cls,
         index_name: str,
         path_or_url: str,
         scope: str,
@@ -654,9 +662,7 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         file_id: Optional[str] = None,
         requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from management.services.knowledge_base.service import ElasticSearchService
-
-        service_cls = ElasticSearchService
+        service_cls = cls
         if scope not in KnowledgeBaseDocumentDeletionService.DOCUMENT_DELETE_SCOPES:
             raise ValueError(
                 f"Invalid scope '{scope}'. "

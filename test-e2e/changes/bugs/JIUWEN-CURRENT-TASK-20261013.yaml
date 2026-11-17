@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-CURRENT-TASK-20261013
+  change_type: bugfix
+  bug_id: JIUWEN-CURRENT-TASK-20261013
+  title: Separate historical attachments from the current Jiuwen task and update Core
+  description: Preserve conversational references without treating old uploads as a new task.
+  observed_behavior: Later capability and document requests repeat the original image analysis; a transient provider disconnect terminates execution.
+  expected_behavior: Only current uploads frame the new request; retain authorized historical context, use latest stable Core and retry a transient model failure once without replaying tools.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing history probes use no attachments or task changes and do not inject a provider failure after a completed tool call.
+  feature_contract_changed: false
+  affected_features: {existing: [], added: [], modified: [], retired: []}
+  affected_cases: {existing: [], added: [], modified: [], retired: []}
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Jiuwen current query excludes historical upload framing but retains historical file references and authorization.
+    - Current uploads remain usable; legacy smolagents framing is unchanged.
+    - Native instructions distinguish historical results from active requests; transient retry is bounded and does not replay tools.
+    reason: Backend unit framing and native adapter configuration need isolated regression coverage in addition to actual native HTTP execution.
+    test_selectors: [test/backend/agents/test_jiuwen_current_task.py, test/sdk/core/agents/test_jiuwen_history.py]
+  notes: 'Owning SPEC runtime-agent-core-factory AC-009/010/011. Strengthen legacy AGENT-CORE-D3-001, regress legacy D1/D5. Legacy AGENT-CORE-001 assets remain outside canonical index; empty canonical affected lists do not imply no runtime proof. Preserve all IDs and defer migration. Pre-existing global validator blocker F-111-RULE-02 remains separate.'

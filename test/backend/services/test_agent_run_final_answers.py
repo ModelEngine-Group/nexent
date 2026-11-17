@@ -24,7 +24,7 @@ def stream_capture(monkeypatch):
     monkeypatch.setattr(service.streaming_channel_manager, "complete_channel", AsyncMock())
     monkeypatch.setattr(service, "_cleanup_channel_later", AsyncMock())
 
-    async def capture(source_events, *, outcome="completed", stopped=False, **stream_kwargs):
+    async def capture(source_events, *, outcome="completed", stopped=False, core="smolagents", **stream_kwargs):
         async def source(*_args, **_kwargs):
             for event in source_events:
                 if isinstance(event, BaseException):
@@ -34,7 +34,7 @@ def stream_capture(monkeypatch):
         monkeypatch.setattr(service, "agent_run", source)
         info = SimpleNamespace(
             observer=SimpleNamespace(),
-            agent_config=SimpleNamespace(pre_run_tool_events=()), cancellation_scope=None,
+            agent_config=SimpleNamespace(pre_run_tool_events=(), agent_core=core), cancellation_scope=None,
             stop_event=asyncio.Event(), human_interaction=None,
             attempt_outcome=outcome, thread_future=None,
         )

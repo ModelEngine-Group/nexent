@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: JIUWEN-OUTPUT-D3-001
+implementations:
+- framework: pytest
+  file: test_output.py
+  selector: test_
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01:
+  - test_runtime_output_roundtrip
+  - test_clarification_terminal_history_before_and_after_submission
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -6,6 +6,6 @@ These are aliases to the existing implementation, so direct-stream cancellation,
 pre-admitted execution and managed worker ownership remain unchanged.
 """
 
-from nexent.core.agents.run_agent import DeferredAgentRun, agent_run
+from nexent.core.agents.orchestration.entry import DeferredAgentRun, agent_run
 
 __all__ = ["DeferredAgentRun", "agent_run"]

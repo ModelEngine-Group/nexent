@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-RETRY-PERSISTENCE-20261029
+  change_type: bugfix
+  bug_id: CHAT-RETRY-PERSISTENCE-20261029
+  title: Preserve persisted ordinary Agent retry siblings after history reload
+  description: Carry an explicit saved user target for ordinary regenerate, authorize
+    reuse of that user without inserting another turn, and restore completed and streaming siblings.
+  observed_behavior: Both Cores show 2/2 live but reload as two questions and two answers at indexes 0 through 3.
+  expected_behavior: Retry answers share one authorized user boundary and remain selectable x/y after reload;
+    independent repeated questions retain distinct turns and streaming reconnect adds no fourth branch.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing history tests seed same-index retries and do not exercise ordinary retry persistence;
+      current shared and inline reconnect still attach below an assistant.
+  feature_contract_changed: true
+  affected_features:
+    existing: [F-056]
+    modified: [F-179]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [UT-FE-040]
+    added: [CHAT-RETRY-HISTORY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - New turns reserve increasing boundaries even when text and attachments are identical.
+    - Explicit retry targets reuse the owned original user and reject wrong conversation role content index or attachment identity.
+    - Ordinary retry requests and saved boundary acknowledgements preserve exact server identity without text inference.
+    - Completed and streaming third answers remain siblings with exact branch count and old answers remain navigable.
+    - Invalid or stale streaming recovery cannot mutate another conversation or start duplicate runs.
+    reason: Unit and actual assistant-ui component proof complement a deployed real-model browser/database journey.
+    test_selectors:
+    - test/backend/database/test_conversation_append_order.py
+    - test/backend/database/test_conversation_history_stopped.py
+    - test/backend/services/test_conversation_runtime_boundary.py
+    - frontend/tests/workbench/ConversationRetryIdentity.test.ts
+    - frontend/tests/workbench/WorkbenchApi.test.ts
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+  notes: Existing chat-retry-branch-resume design is the owning SPEC. Retain all prior
+    D1 cases and normal-turn assertions. No SQL or model-directory change is planned.
+    Old ambiguous flattened history is not merged by equal text. Global F-111 rule blocker remains separate.

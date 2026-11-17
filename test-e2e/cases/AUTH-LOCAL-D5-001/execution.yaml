@@ -28,4 +28,7 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
-notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and no deployed Supabase.
+notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and an authorized Docker
+  daemon for labelled disposable deployment resources. Requires the Docker CLI, Bash
+  and cached nexent/nexent:latest and postgres:15-alpine images. No deployed Supabase
+  is accessed; automatic_upgrade and cleanup helpers own and release their test resources.

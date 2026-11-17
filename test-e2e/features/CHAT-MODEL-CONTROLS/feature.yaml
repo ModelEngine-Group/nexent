@@ -16,7 +16,7 @@ feature:
     description: One validated session selection supplies initial and subsequent composers, immutable turn requests and creation
       snapshots.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-003
-    description: Both Agent conversation modes use one per-outlet preference format and outlet to Agent to conversation merging; historical Workbench values migrate once, without retaining a second editable parameter store.
+    description: Both Agent conversation modes use one per-outlet preference format and outlet to Agent to conversation merging; historical Workbench values migrate once, without retaining a second editable parameter store. Historical Agent omission/custom-body aliases normalize against frozen outlet bindings with original precedence before session low/off values; canonical invalid and protected parameters remain rejected without rewriting saved versions.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-004
     description: The selected root model supplies provider binding and capacity while preserving independent models and target
       Agent configuration.
