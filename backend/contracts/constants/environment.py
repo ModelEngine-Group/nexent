@@ -18,6 +18,9 @@ NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
+OPS_MONITORING_ENABLED = (os.getenv('OPS_MONITORING_ENABLED') or 'true').lower() == 'true'
+OPS_MONITORING_TIMEZONE = os.getenv('OPS_MONITORING_TIMEZONE', 'UTC')
+OPS_MONITORING_REPLICAS = int(os.getenv('OPS_MONITORING_REPLICAS', '0'))
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -219,6 +222,14 @@ POSTGRES_USER = os.getenv('POSTGRES_USER')
 NEXENT_POSTGRES_PASSWORD = os.getenv('NEXENT_POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
+
+# Ops reuses the Nexent PostgreSQL connection and changes only the database name.
+OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
+if OPS_MONITORING_ENABLED:
+    if OPS_POSTGRES_DB == (POSTGRES_DB or 'nexent'):
+        raise ValueError('OPS_POSTGRES_DB must differ from POSTGRES_DB')
+    if len(OPS_POSTGRES_DB.encode('utf-8')) > 63:
+        raise ValueError('OPS_POSTGRES_DB must not exceed 63 UTF-8 bytes')
 
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')

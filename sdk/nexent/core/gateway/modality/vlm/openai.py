@@ -12,6 +12,7 @@ from typing import Any, BinaryIO, Dict, List, Union
 
 from ....models import OpenAIModel
 from nexent.core.concurrency import run_blocking
+from nexent.monitor.model_fact import suppress_model_attempts
 
 from ...model_context import VLMContext
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
@@ -63,6 +64,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             temperature=ctx.temperature,
             top_p=ctx.top_p,
             max_tokens=ctx.max_tokens if ctx.max_tokens is not None else 512,
+            monitoring_identity=(ctx.tenant_id, ctx.catalog_model_id, ctx.slot or "vlm"),
         )
         self._model.frequency_penalty = ctx.frequency_penalty if ctx.frequency_penalty is not None else 0.5
 
@@ -253,14 +255,15 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             ]
 
         try:
-            await run_blocking(
-                "gateway-vlm-connectivity",
-                self._model.client.chat.completions.create,
-                model=self._model.model_id,
-                messages=[{"role": "user", "content": content_parts}],
-                max_tokens=5,
-                stream=False,
-            )
+            with suppress_model_attempts():
+                await run_blocking(
+                    "gateway-vlm-connectivity",
+                    self._model.client.chat.completions.create,
+                    model=self._model.model_id,
+                    messages=[{"role": "user", "content": content_parts}],
+                    max_tokens=5,
+                    stream=False,
+                )
             return True
         except Exception:
             logger.exception("VLM connectivity check failed")

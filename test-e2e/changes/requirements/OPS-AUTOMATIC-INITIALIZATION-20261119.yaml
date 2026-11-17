@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AUTOMATIC-INITIALIZATION-20261119
+  change_type: requirement
+  requirement_id: OPS-AUTOMATIC-INITIALIZATION-20261119
+  title: Enable monitoring and initialize independent Ops storage during deployment
+  description: Deployment defaults monitoring on, reuses the Nexent PostgreSQL connection directly, and automatically creates and migrates an independent Ops database before application launch. Only the database name is separate; explicit false skips Ops initialization.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING, OPS-BOOTSTRAP]
+    added: []
+    modified: [OPS-MODEL-MONITORING]
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, OPS-MODEL-MONITORING-D3-001]
+    added: []
+    modified: [OPS-MODEL-MONITORING-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Monitoring defaults on and explicit false remains off, Reuse the Nexent connection with only a distinct database name, Entrypoint initializes or waits for Ops before application launch, Migration failures prevent launch, Disabled monitoring performs no Ops database operations, Reject a shared database name and overlong identifiers]
+    reason: Existing tests precreate Ops storage and require explicit configuration instead of proving deployment initialization.
+    test_selectors: [test/backend/deploy/test_ops_monitoring_bootstrap.py, test/backend/ops/test_monitoring_defaults.py, test/backend/deploy/test_ops_chart.py, test/backend/ops/test_bootstrap.py]
