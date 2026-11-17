@@ -326,12 +326,18 @@ def test_list_hits_for_user_with_since(monkeypatch, mock_session_ctx):
     query.limit.assert_called_once_with(20)
 
 
-def test_list_hits_for_user_rolls_back_on_error(monkeypatch, mock_session_ctx):
+@pytest.mark.parametrize("strict", [False, True])
+def test_list_hits_for_user_rolls_back_on_error(monkeypatch, mock_session_ctx, strict):
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
         "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
+
+    if strict:
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            memory_retrieval_hit_db.list_hits_for_user("t1", "u1", strict=True)
+        return
 
     assert memory_retrieval_hit_db.list_hits_for_user("t1", "u1") == []
     session.rollback.assert_called_once()

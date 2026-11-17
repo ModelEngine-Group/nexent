@@ -709,12 +709,18 @@ def test_list_memory_records_with_status_filter(monkeypatch, mock_session_ctx):
     query.filter.assert_called()
 
 
-def test_list_memory_records_exception(monkeypatch, mock_session_ctx):
+@pytest.mark.parametrize("strict", [False, True])
+def test_list_memory_records_exception(monkeypatch, mock_session_ctx, strict):
     session, ctx = mock_session_ctx
     session.query.return_value.outerjoin.side_effect = Exception("boom")
     monkeypatch.setattr(
         "management.db.memory.record.get_db_session", lambda: ctx
     )
+
+    if strict:
+        with pytest.raises(Exception, match="boom"):
+            memory_record_db.list_memory_records("t1", strict=True)
+        return
 
     rows = memory_record_db.list_memory_records("t1")
     assert rows == []
