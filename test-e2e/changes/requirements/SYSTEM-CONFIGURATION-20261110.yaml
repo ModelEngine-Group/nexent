@@ -62,7 +62,7 @@ change:
     - Detect missing, duplicate and invalid stored rows; merge and persist changed keys in one locked transaction.
     - Keep getters network-free, coalesce notifications, serialize refresh, retain the last valid snapshot and close owned resources.
     - Own an OPS ThreadManager in lifespan and route configuration database/Redis I/O through one bounded control-io entry.
-    - Enforce explicit operations read authorization, SU-only platform writes and safe 400/401/403/422/503 API responses, including unavailable recommendations.
+    - Enforce explicit operations read/update authorization for OPS and SU plus safe 400/401/403/422/503 API responses, including unavailable recommendations.
     - Preserve drafts across filtering, background queries, notification-degraded saves and edits made during a save.
     reason: New catalog, transaction, refresh, API and draft behavior require isolated success, boundary and error proof; D2/D3/D4 prove their distinct runtime boundaries.
   notes: >-

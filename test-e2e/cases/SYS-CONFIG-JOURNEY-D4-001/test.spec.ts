@@ -255,7 +255,6 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     deniedActorChecked = true;
 
     authorized = true;
-    actorRole = "SU";
     await page.goto("/zh/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),

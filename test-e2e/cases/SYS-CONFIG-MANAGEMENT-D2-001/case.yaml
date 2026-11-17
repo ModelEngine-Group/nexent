@@ -21,14 +21,14 @@ case:
     action: Query the catalog with each actor and with the database unavailable.
     expected: OPS and SU with explicit operations permission return exactly nineteen entries; unauthorized actors receive 401/403 and dependency failure returns a safe 503.
   - order: 2
-    action: Attempt writes as OPS and SU, then save valid, unknown, wrong-type, nonpositive and malformed batches as SU, including a notification failure after commit.
-    expected: Ordinary OPS receives 403 without persistence; only SU with the explicit update grant can save. Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
+    action: Attempt writes as OPS and SU, then save valid, unknown, wrong-type, nonpositive and malformed batches with the explicit update grant, including a notification failure after commit.
+    expected: OPS and SU with the explicit update grant can save; actors without the operations role or grant receive 403 without persistence. Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
   - order: 3
     action: Request a recommendation for every current numeric parameter and an unknown key.
     expected: Each managed parameter returns an explicit unavailable reason and no value or draft mutation; unknown keys are rejected.
   expected_results:
   - The actual ops routes enforce explicit authorization and safe error mappings without exposing secrets.
-  - Platform-wide writes require SU plus the explicit update grant; ordinary OPS is read-only. Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
+  - Platform-wide writes require the explicit update grant and the OPS or SU role. Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
   - Current parameters have no executable automatic recommendation.
   forbidden_side_effects:
   - No partial writes, permission bypass, secret disclosure or consumer status fabrication.

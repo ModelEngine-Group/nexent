@@ -162,8 +162,8 @@ def test_atomic_save_and_notification_degradation_contract():
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
-def test_only_su_can_save_platform_configuration():
-    for role, expected_status in (("OPS", 403), ("SU", 200)):
+def test_explicit_ops_and_su_can_save_platform_configuration():
+    for role in ("OPS", "SU"):
         with (
             patch("permissions.operations.has_permission", return_value=True),
             patch(
@@ -180,13 +180,10 @@ def test_only_su_can_save_platform_configuration():
                 role,
                 json={"changes": {"MAX_TENANT_COUNT": 5}},
             )
-        assert response.status_code == expected_status
-        if role == "SU":
-            save.assert_called_once_with(
-                {"MAX_TENANT_COUNT": 5}, actor="su-user"
-            )
-        else:
-            save.assert_not_called()
+        assert response.status_code == 200
+        save.assert_called_once_with(
+            {"MAX_TENANT_COUNT": 5}, actor=f"{role.lower()}-user"
+        )
 
 
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")

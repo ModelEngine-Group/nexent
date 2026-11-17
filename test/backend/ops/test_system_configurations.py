@@ -200,9 +200,11 @@ def test_standard_operations_scope_controls_catalog_access(mocker, role, expecte
 
 @pytest.mark.parametrize(
     "role,expected_status",
-    [("OPS", 403), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
+    [("OPS", 200), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
 )
-def test_platform_configuration_write_requires_su(mocker, role, expected_status):
+def test_platform_configuration_write_requires_operations_role(
+    mocker, role, expected_status
+):
     user = CurrentUser("actor", "tenant", role, roles=(role,))
     mocker.patch("permissions.operations.has_permission", return_value=True)
     save = mocker.patch(
@@ -221,6 +223,25 @@ def test_platform_configuration_write_requires_su(mocker, role, expected_status)
         save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="actor")
     else:
         save.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["OPS", "SU"])
+def test_platform_configuration_write_requires_update_grant(mocker, role):
+    user = CurrentUser("actor", "tenant", role, roles=(role,))
+    mocker.patch("permissions.operations.has_permission", return_value=False)
+    save = mocker.patch(
+        "ops.api.system_configurations.save_system_configurations"
+    )
+
+    response = _request(
+        "PATCH",
+        "/system_configurations",
+        user,
+        json={"changes": {"MAX_TENANT_COUNT": 5}},
+    )
+
+    assert response.status_code == 403
+    save.assert_not_called()
 
 
 def test_invalid_business_batch_maps_to_400(mocker):
