@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-M4-20261016
+  change_type: requirement
+  requirement_id: JIUWEN-M4-20261016
+  title: Jiuwen M4 shared context and persisted Core continuation
+  description: Configuration page changes Core, then existing conversations reload
+    and continue; no in-chat Core switch.
+  affected_features:
+    existing:
+    - AGENT-CORE-CONFIG
+    added:
+    - JIUWEN-CONTEXT
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    added:
+    - JIUWEN-CONTEXT-D3-001
+    - JIUWEN-CONTEXT-D4-001
+    - JIUWEN-CONTEXT-D5-001
+    modified:
+    - AGENT-CORE-UI-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Neutral ContextManager entry retains existing policy and checkpoints without
+      smolagents memory.
+    - Summary transport and budgets use saved ModelService profile; errors and cancellation
+      remain bounded.
+    - Historical units, attachments and chronology are read-only facts; unknown boundaries
+      fail closed.
+    - Saved CM flag is authoritative at the Agent layer; explicit request policy retains precedence.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_context.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py::test_context_summary_accepts_shared_chat_messages_and_validates_completion
+    - test/backend/agents/test_jiuwen_cm_policy.py
+    - test/backend/services/test_jiuwen_history_boundary.py
+    - test/backend/database/test_conversation_history_stopped.py
+    - test/backend/services/test_agent_service.py::test_prepare_agent_run
+    reason: Existing CM assembly and history UT cover algorithms, but not Jiuwen consumption
+      or database-to-mixed-Core continuation. Reuse them and add seam regressions;
+      no duplicate D1.
+  notes: D3 uses isolated PostgreSQL and real model protocols; D4 proves configuration-side
+    changes and old chat loading; D5 proves failed summary, ownership and cancellation.
+    Existing global missing F-111 rule is not waived.

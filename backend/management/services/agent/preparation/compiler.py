@@ -20,6 +20,7 @@ from management.db.agent.repository import (
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.context import build_context_inputs
+from management.services.agent.core_policy import apply_agent_core_policy
 from management.services.agent.preparation.resources import (
     _build_effective_knowledge_base_summary,
     _get_external_a2a_agents,
@@ -49,17 +50,13 @@ from management.services.model.run_budget import (
     _resolve_context_budget,
     _resolve_input_budget,
 )
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentVerificationConfig,
-    ToolConfig,
-)
+from nexent.core.agents.contracts.config import AgentConfig, AgentVerificationConfig, ToolConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.concurrency import run_blocking
 from nexent.memory import models as memory_models
@@ -682,17 +679,9 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
-    policy_layers = PolicyLayers.model_validate(
-        {
-            "platform": {
-                "processing_mode": "adaptive_compact"
-                if enable_context_manager
-                else "passthrough"
-            },
-            "tenant": tenant_config_manager.get_context_policy(tenant_id),
-            "agent": agent_info.get("context_policy"),
-            "request": request_context_policy,
-        }
+    policy_layers = build_agent_context_policy(
+        enable_context_manager, tenant_config_manager.get_context_policy(tenant_id),
+        agent_info.get("context_policy"), request_context_policy,
     )
     effective_context_policy = resolve_policy(policy_layers)
     effective_processing_mode = getattr(
@@ -752,7 +741,7 @@ async def create_agent_config(
     agent_config.runtime_ref = f"agent:{agent_id}:v{int(version_no)}"
     agent_config.display_name = agent_info.get("display_name") or agent_config.name
     agent_config.origin = "PERSISTED"
-    return agent_config
+    return apply_agent_core_policy(agent_config)
 
 
 def _select_agent_model_id(
@@ -825,3 +814,12 @@ def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
                 )
             break
     return result
+
+
+def build_agent_context_policy(enable_context_manager, tenant_policy=None, agent_policy=None, request_policy=None):
+    """Apply the saved CM switch at Agent precedence, retaining explicit request overrides."""
+    mode = "adaptive_compact" if enable_context_manager else "passthrough"
+    return PolicyLayers.model_validate({
+        "platform": {"processing_mode": mode}, "tenant": tenant_policy,
+        "agent": {**(agent_policy or {}), "processing_mode": mode}, "request": request_policy,
+    })

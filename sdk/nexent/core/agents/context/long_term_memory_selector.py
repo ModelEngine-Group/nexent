@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Validated, one-call selection of relevant Markdown long-term memory blocks."""
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from smolagents.models import ChatMessage, MessageRole
+from nexent.core.agents.contracts.context import ContextMessage
 
 
 @dataclass(frozen=True)
@@ -117,7 +119,7 @@ def select_long_term_memory(
         "rules": ["Return JSON only", "Select IDs only", "Keep each ID at most once"],
     }, ensure_ascii=False)
     try:
-        response = model([ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": prompt}])],
+        response = model([ContextMessage(role="user", content=[{"type": "text", "text": prompt}])],
                          stop_sequences=[])
         output = response.content
         if isinstance(output, list):

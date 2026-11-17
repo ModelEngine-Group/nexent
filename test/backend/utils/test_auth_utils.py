@@ -176,7 +176,7 @@ install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
 
 sys.modules['boto3'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()

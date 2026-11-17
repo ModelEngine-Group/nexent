@@ -7,12 +7,14 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from nexent.core.agents.resources import workspace as workspace_resources
+
 import pytest
 
-from nexent.core.agents import nexent_agent as agent_module
-from nexent.core.agents import sandbox
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents import agent as agent_module
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -157,7 +159,7 @@ def test_deferred_strict_warmup_failure_releases_executor(construction, mocker, 
     assert wrapper.remote is None
     assert c.factory._sandbox_executors == []
     assert c.factory._sandbox_skill_runners == []
-    release.assert_called_once_with(c.executor, agent_module.logger, timeout=5.0)
+    release.assert_called_once_with(c.executor, workspace_resources.logger, timeout=5.0)
     wrapper.cleanup()
     release.assert_called_once()
 

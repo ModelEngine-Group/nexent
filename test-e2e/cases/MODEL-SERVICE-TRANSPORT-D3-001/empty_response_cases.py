@@ -7,14 +7,14 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agent_runtime_support.contracts import (
+from nexent.core.agents.contracts.resources import (
     ResourceItem,
     RuntimeResourceView,
 )
-from nexent.core.agents.agent_model import ModelConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ModelConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope
-from nexent.core.context_runtime.contracts import ContextEvidence, FinalContext
+from nexent.core.agents.contracts.context import ContextEvidence, FinalContext
 from nexent.core.gateway.modality.llm.llm_adapter import LLMRequest
 from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter
 from nexent.core.gateway.model_context import LLMContext

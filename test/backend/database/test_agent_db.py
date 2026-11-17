@@ -165,6 +165,7 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
 class MockAgent:
     def __init__(self):
         self.agent_id = 1
+        self.agent_core = "smolagents"
         self.name = "test_agent"
         self.display_name = "test_agent"
         self.tenant_id = "tenant1"

@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from contracts.constants.constants import TENANT_NAME
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 

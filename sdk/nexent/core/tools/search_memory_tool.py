@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Search memory tool for the new Memory system.
 
 This tool is invoked once by the runtime before the agent model loop. Under
@@ -39,7 +40,7 @@ def _run_coroutine(coro):
         return asyncio.run(coro)
     manager = get_current_thread_manager()
     if manager is None:
-        from ..agents.run_agent import _get_default_agent_thread_manager
+        from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
 
         manager = _get_default_agent_thread_manager()
     return manager.run_sync(
