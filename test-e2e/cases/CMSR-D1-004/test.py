@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """CMSR-D1-004: correlated protocol diagnostics and opt-in preview privacy."""
 
 from __future__ import annotations
@@ -7,11 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.output_protocol import (
-    ModelOutputProtocolError,
-    ProtocolErrorReason,
-)
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolError, ProtocolErrorReason
 
 pytestmark = [pytest.mark.case_id("CMSR-D1-004"), pytest.mark.stage("D1")]
 

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-SKILL-CREATOR-D4-001
+  feature_id: JIUWEN-OUTPUT
+  requirement_ids: [JIUWEN-SKILL-HISTORY-20261109]
+  business_rule_ids: [JIUWEN-OUTPUT-RULE-003, JIUWEN-OUTPUT-RULE-004]
+  title: Real Workbench Skill creation files survive history reload
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove real generated artifact content and public history rendering beyond raw runtime facts.
+  preconditions:
+  - Operator-selected Local Jiuwen deployment with an authorized Workbench account and real model. The Case never changes Core or deploys.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Open Workbench Skill creation and request a uniquely named small Skill with a fresh marker using the real model.
+    expected: Actual generation completes, SKILL.md has nonempty content and the marker, and the output can be saved as the owned Skill.
+  - order: 2
+    action: Save the generated Skill, reload its conversation from canonical history and refresh again.
+    expected: File contents and summary match the live artifact, no missing-terminal error or extra generation request appears, and source history is unchanged.
+  - order: 3
+    action: Delete only the Case-owned Skill and conversation and verify cleanup and original records.
+    expected: Owned resources are reclaimed; existing user data is unchanged and private authentication state is removed.
+  expected_results:
+  - Real Skill generation and save complete with nonempty exact persisted artifact content.
+  - History restores the same files without terminal errors, duplicate output, automatic execution or record rewrites.
+  - Cleanup removes only owned resources and preserves original data.
+  forbidden_side_effects:
+  - No provider/response substitution, source mutation, fake terminal, credential disclosure or unowned deletion.
+  actor: Authorized Workbench user
+  journey: [Generate Skill, Save Skill, Reload history, Clean owned resources]
+  final_business_result: [A real generated Skill remains readable in saved conversation history.]
+  failure_evidence: [Sanitized event summaries, browser assertions and database fingerprints.]
+  cleanup: [Delete only uniquely owned Skill and conversation and remove private auth files.]
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services: [model-provider]
+    timeout_seconds: 900
+  acceptance:
+  - id: AC-01
+    description: Generated and saved artifact files remain readable after history reload with owned cleanup.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

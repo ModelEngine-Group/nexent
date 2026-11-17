@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the v1.4 planing methods on CoreAgent.
 
 Scope is narrow: only the plan-related instance methods
@@ -25,7 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def _mock_module(name):
     m = ModuleType(name)
-    m.__path__ = []
+    package_path = REPO_ROOT / "sdk" / name.replace(".", "/")
+    m.__path__ = [str(package_path)] if package_path.is_dir() else []
     sys.modules[name] = m
     return m
 
@@ -109,7 +111,7 @@ mock_smolagents.AgentText = type("AgentText", (), {})
 mock_smolagents.handle_agent_output_types = mock_agents.handle_agent_output_types
 mock_smolagents.CodeAgent = mock_agents.CodeAgent
 
-# -- sdk.nexent sub-tree ---------------------------------------------
+# -- nexent sub-tree ---------------------------------------------
 def _sdk_pkg(name):
     parts = name.split(".")
     result = None
@@ -126,7 +128,7 @@ def _sdk_pkg(name):
     return result
 
 
-agent_model_mod = _sdk_pkg("sdk.nexent.core.agents.agent_model")
+agent_model_mod = _sdk_pkg("nexent.core.agents.contracts.config")
 
 
 class _AgentVerificationConfig:
@@ -155,7 +157,7 @@ agent_model_mod.PROTOCOL_HTTP_JSON = "HTTP+JSON"
 agent_model_mod.PROTOCOL_GRPC = "GRPC"
 
 # plan_repo stub
-plan_repo_mod = _sdk_pkg("sdk.nexent.core.agents.plan_repo")
+plan_repo_mod = _sdk_pkg("nexent.core.agents.cores.smolagents.plan_repo")
 
 
 class _PlanRepo:
@@ -176,7 +178,7 @@ class _PlanRepo:
 plan_repo_mod.PlanRepo = _PlanRepo
 
 # observer stub
-observer_mod = _sdk_pkg("sdk.nexent.core.utils.observer")
+observer_mod = _sdk_pkg("nexent.core.utils.observer")
 
 
 class _ProcessType:
@@ -205,21 +207,23 @@ observer_mod.MessageObserver = MessageObserver
 observer_mod.ProcessType = _ProcessType
 
 # context_runtime contracts stub
-contracts_mod = _sdk_pkg("sdk.nexent.core.context_runtime.contracts")
+contracts_mod = _sdk_pkg("nexent.core.agents.cores.smolagents.context_contracts")
 contracts_mod.UnconfiguredContextRuntime = type("UnconfiguredContextRuntime", (), {})
 contracts_mod.ContextRuntime = type("ContextRuntime", (), {})
+contracts_mod.native_context_messages = lambda messages: messages
+contracts_mod.native_context_rebuild = lambda context: context
 
 # token_estimation stub
-token_mod = _sdk_pkg("sdk.nexent.core.utils.token_estimation")
+token_mod = _sdk_pkg("nexent.core.utils.token_estimation")
 token_mod.msg_token_count = lambda *a, **k: 0
 
 # Agent prompt composer stub
-prompt_mod = _sdk_pkg("sdk.nexent.core.agents.prompt")
+prompt_mod = _sdk_pkg("nexent.core.agents.prompt")
 prompt_mod.__path__ = [str(REPO_ROOT / "sdk/nexent/core/agents/prompt")]
 prompt_mod.AgentPromptComposer = MagicMock()
 
 # context budget helper stub
-budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")
+budget_mod = _sdk_pkg("nexent.core.agents.context.budget")
 budget_mod.message_role = lambda message: getattr(message, "role", "")
 
 # Execution history is not configured in this planning-only fixture.
@@ -227,7 +231,7 @@ execution_history_mod = _sdk_pkg("sdk.nexent.core.agents.context.execution_histo
 execution_history_mod.ExecutionHistory = type("ExecutionHistory", (), {})
 
 # verification stub
-verification_mod = _sdk_pkg("sdk.nexent.core.agents.verification")
+verification_mod = _sdk_pkg("nexent.core.agents.cores.smolagents.verification")
 
 
 class _AutoResult:
@@ -281,49 +285,53 @@ verification_mod.render_guardrail_refusal = lambda decision, messages: ""
 verification_mod.render_tool_input_refusal = lambda decision, messages, tool_name: ""
 
 # monitor stub
-monitor_mod = _sdk_pkg("sdk.nexent.monitor")
+monitor_mod = _sdk_pkg("nexent.monitor")
 monitor_mod.get_monitoring_manager = MagicMock(return_value=MagicMock())
 
 
 # ---- Load core_agent under controlled sys.modules -----------------
-OUTPUT_PROTOCOL_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "output_protocol.py"
-OUTPUT_PROTOCOL_NAME = "sdk.nexent.core.agents.output_protocol"
+OUTPUT_PROTOCOL_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "cores" / "smolagents" / "output_protocol.py"
+OUTPUT_PROTOCOL_NAME = "nexent.core.agents.cores.smolagents.output_protocol"
 output_protocol_spec = importlib.util.spec_from_file_location(OUTPUT_PROTOCOL_NAME, OUTPUT_PROTOCOL_PATH)
 output_protocol_module = importlib.util.module_from_spec(output_protocol_spec)
 sys.modules[OUTPUT_PROTOCOL_NAME] = output_protocol_module
-agents_mod = sys.modules["sdk.nexent.core.agents"]
+agents_mod = sys.modules["nexent.core.agents"]
 # Let relative imports resolve real sibling modules such as clarification.
-agents_mod.__path__ = [str(OUTPUT_PROTOCOL_PATH.parent)]
+agents_mod.__path__ = [str(REPO_ROOT / "sdk/nexent/core/agents")]
 agents_mod.output_protocol = output_protocol_module
 assert output_protocol_spec and output_protocol_spec.loader
-sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk/nexent/core")]
-sys.modules["sdk.nexent.core"].__spec__ = importlib.machinery.ModuleSpec("sdk.nexent.core", loader=None, is_package=True)
+sys.modules["nexent.core"].__path__ = [str(REPO_ROOT / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 output_protocol_spec.loader.exec_module(output_protocol_module)
 
-CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
-CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
-sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
+CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "cores" / "smolagents" / "core_agent.py"
+CORE_AGENT_NAME = "nexent.core.agents.cores.smolagents.core_agent"
+sys.modules["nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
 
-# ``sdk.nexent.core.agents`` is an isolated shim with an empty ``__path__``
+# ``nexent.core.agents`` is an isolated shim with an empty ``__path__``
 # above, so Python cannot discover sibling modules during relative imports.
 # Register the real MCP error helper before loading ``core_agent.py``.
 MCP_ERRORS_PATH = REPO_ROOT / "sdk" / "nexent" / "consts" / "mcp_errors.py"
-MCP_ERRORS_NAME = "sdk.nexent.consts.mcp_errors"
+MCP_ERRORS_NAME = "nexent.consts.mcp_errors"
 mcp_errors_spec = importlib.util.spec_from_file_location(MCP_ERRORS_NAME, MCP_ERRORS_PATH)
 mcp_errors_module = importlib.util.module_from_spec(mcp_errors_spec)
 sys.modules[MCP_ERRORS_NAME] = mcp_errors_module
-consts_mod = sys.modules.setdefault("sdk.nexent.consts", ModuleType("sdk.nexent.consts"))
+consts_mod = sys.modules.setdefault("nexent.consts", ModuleType("nexent.consts"))
 consts_mod.__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "consts")]
 consts_mod.mcp_errors = mcp_errors_module
 assert mcp_errors_spec is not None
 assert mcp_errors_spec.loader is not None
 mcp_errors_spec.loader.exec_module(mcp_errors_module)
-sys.modules["sdk.nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
+sys.modules["nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
 sys.modules[CORE_AGENT_NAME] = core_agent_module
 agents_mod.core_agent = core_agent_module
 assert spec and spec.loader
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
+sys.modules["nexent.core.agents.cores.smolagents.verification"] = verification_mod
+sys.modules["nexent.core.agents.cores.smolagents.plan_repo"] = plan_repo_mod
+sys.modules["nexent.core.agents.cores.smolagents.output_protocol"] = output_protocol_module
 spec.loader.exec_module(core_agent_module)
 
 # The shim is needed only while loading the isolated CoreAgent module. Remove

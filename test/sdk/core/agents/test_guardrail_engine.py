@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for the guardrail engine, severity resolver, and refusal rendering.
 
 Complements ``test_guardrail_checkpoints.py`` (which drives the real ``_guardrail_wrap_one``
@@ -14,17 +15,8 @@ diff stays above the coverage target:
 
 import pytest
 
-from nexent.core.agents.agent_model import GuardrailConfig, GuardrailRule
-from nexent.core.agents.verification import (
-    GuardrailDecision,
-    GuardrailEngine,
-    SeverityResolver,
-    VerificationResult,
-    _guardrail_locale,
-    latest_user_message_text,
-    render_guardrail_refusal,
-    render_tool_input_refusal,
-)
+from nexent.core.agents.contracts.config import GuardrailConfig, GuardrailRule
+from nexent.core.agents.cores.smolagents.verification import GuardrailDecision, GuardrailEngine, SeverityResolver, VerificationResult, _guardrail_locale, latest_user_message_text, render_guardrail_refusal, render_tool_input_refusal
 
 KEYWORD = "机密信息"
 PATTERN = KEYWORD

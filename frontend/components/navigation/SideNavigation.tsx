@@ -15,6 +15,7 @@ import Link from "next/link";
 import { Button, Tooltip } from "antd";
 import {
   Bell,
+  Activity,
   BookOpen,
   Blocks,
   Bot,
@@ -32,7 +33,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { isOperationsOnly } from "@/lib/roles";
+import { hasRole, isOperationsOnly } from "@/lib/roles";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -154,6 +155,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 9,
     parentKey: null,
     isSection: false,
+  },
+  {
+    path: "/observability",
+    Icon: Activity,
+    labelKey: "sidebar.observability",
+    order: 12.5,
+    parentKey: null,
   },
   {
     path: "/resource-manage",
@@ -324,10 +332,11 @@ export function SideNavigation({
     return ROUTE_CONFIG.filter(
       (route) =>
         !route.isSection &&
+        (route.path !== "/observability" || hasRole(user, "OPS", "SU")) &&
         !(route.path === "/" && hideHomePage) &&
         isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
+  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage, user]);
 
   const getRouteNavigationPath = (route: RouteConfig) => {
     const routePath = route.navigationPath || route.path;

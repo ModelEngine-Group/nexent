@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   speed: true,
   push: vi.fn(),
   routes: ["/agents", "/models"],
+  user: null as { role: string; roles?: string[] } | null,
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -28,7 +29,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
-  useAuthorizationContext: () => ({ accessibleRoutes: state.routes }),
+  useAuthorizationContext: () => ({
+    accessibleRoutes: state.routes,
+    user: state.user,
+  }),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
   useAuthenticationContext: () => ({
@@ -84,6 +88,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   state.speed = true;
   state.routes = ["/agents", "/models"];
+  state.user = null;
   useGlobalConfigStore.getState().setConfig({});
 });
 
@@ -300,3 +305,28 @@ test("shows only the unified repository even when legacy routes are authorized",
     expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
   }
 });
+
+test.each([
+  ["OPS", undefined, true],
+  ["SU", undefined, true],
+  ["ADMIN", ["ADMIN", "OPS"], true],
+  ["DEV", ["DEV", "OPS"], true],
+  ["ADMIN", undefined, false],
+  ["DEV", undefined, false],
+  ["USER", undefined, false],
+  ["SU", [], false],
+  ["ADMIN", ["ADMIN"], false],
+  ["SU", ["SU", "OPS"], false],
+])(
+  "gates the trajectory menu by effective roles (%s, %j)",
+  (role, roles, allowed) => {
+    state.user = { role, roles };
+    state.routes = ["/observability"];
+    render(<SideNavigation />);
+    const link = screen.queryByRole("button", {
+      name: "sidebar.observability",
+    });
+    if (allowed) expect(link).toBeInTheDocument();
+    else expect(link).not.toBeInTheDocument();
+  }
+);

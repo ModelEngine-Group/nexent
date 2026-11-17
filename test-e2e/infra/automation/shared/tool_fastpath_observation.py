@@ -14,7 +14,12 @@ from shared.asset_registry import AssetDependencyError
 from shared.config import load_secret_env, repo_root
 
 
-SOURCES = ("core/agents/nexent_agent.py", "core/agents/tool_fastpath.py", "core/agents/sandbox.py")
+SOURCES = (
+    "core/agents/cores/smolagents/agent.py", "core/agents/cores/smolagents/tool_fastpath.py",
+    "core/agents/resources/workspace.py", "core/agents/sandbox/__init__.py",
+    "core/agents/sandbox/config.py", "core/agents/sandbox/execution.py",
+    "core/agents/sandbox/compatibility.py", "core/agents/sandbox/tls.py",
+)
 
 
 def docker_command(*arguments):
@@ -42,7 +47,7 @@ def verify_deployment(cfg):
     script = (
         "import hashlib,json; from pathlib import Path; import nexent; "
         "from contracts.constants.environment import AGENT_WORKSPACE_ROOT,NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT; "
-        "from nexent.core.agents.sandbox_workspace import SandboxWorkspace; "
+        "from nexent.core.agents.resources.workspace import SandboxWorkspace; "
         "root=Path(nexent.__file__).parent; "
         f"sources={{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in {SOURCES!r}}}; "
         "mapping=SandboxWorkspace(Path(AGENT_WORKSPACE_ROOT),NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT); "

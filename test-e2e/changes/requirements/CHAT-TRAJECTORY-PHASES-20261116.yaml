@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-PHASES-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-PHASES-20261116
+  title: 采集并展示记忆和沙箱准备阶段
+  description: 保留实际时间与层级，准备事实归入同次执行；阶段不增加模型工具调用。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 准备事实原时间与层级、请求隔离及根耗时。
+    - 实际记忆和沙箱阶段、错误/取消/回退与无新增调用。
+    - 阶段冷读、计数不变、前端筛选及指标。
+    reason: 现有预热UT覆盖远端SPAN，但没有本地准备归档与阶段DTO证明；复用D2/D3/D4，不新增D1。
+    test_selectors:
+    - test/sdk/core/agents/observability/test_phase_capture.py
+    - test/sdk/core/agents/observability/test_sandbox_warmup.py
+    - test/backend/agents/test_create_agent_info.py::TestCreateAgentConfig::test_memory_phase_boundaries_keep_original_calls_and_fallback
+    - test/backend/agents/test_create_agent_info.py::TestCreateAgentConfig::test_create_agent_config_runs_fixed_search_once_without_exposing_tool
+    - test/backend/services/trajectory/test_phase_nodes.py
+    - frontend/tests/component/trajectoryPhases.test.tsx
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: SPEC changes/chat-trajectory-phases；runtime责任域，沿用现有私有资源及清理。正式集成验收依用户要求暂缓。

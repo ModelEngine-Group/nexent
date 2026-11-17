@@ -12,6 +12,9 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    "agent/core_policy.py",
+    "model/runtime_options.py",
+    "model/legacy_snapshot.py",
     'agent/creation.py',
     'agent/lifecycle.py',
     'agent/background.py',
