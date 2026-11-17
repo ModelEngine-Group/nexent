@@ -211,6 +211,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
       filters: [
         { text: t("trajectory.success"), value: "success" },
         { text: t("trajectory.error"), value: "error" },
+        { text: t("trajectory.businessStatus.cancelled"), value: "cancelled" },
         {
           text: t("trajectory.availability.not_captured"),
           value: "not_captured",

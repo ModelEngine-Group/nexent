@@ -28,16 +28,29 @@ def test_local_tool_schema_and_call_identity_are_captured(spans, monkeypatch):
     assert observer.current_tool_call_id is None
 
 
-@pytest.mark.parametrize('outcome,expected', [('completed', 'completed'), ('stopped', 'cancelled'), ('failed', 'failed')])
-def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, expected):
+@pytest.mark.parametrize('outcome,boundary,expected', [
+    ('completed', False, 'completed'),
+    ('stopped', None, 'cancelled'),
+    ('stopped', False, 'cancelled'),
+    ('stopped', True, 'cancelled'),
+    ('stopped', 'true', 'cancelled'),
+    ('stopped', 1, 'cancelled'),
+    ('failed', True, 'failed'),
+    ('failed', False, 'failed'),
+    (None, True, 'interrupted'),
+])
+def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, boundary, expected):
     module = importlib.import_module('nexent.core.agents.run_agent')
     monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
     info = SimpleNamespace(agent_config=None, query='q', model_config_list=[], history=[], attempt_outcome=None)
+    if boundary is not None:
+        info.observer = SimpleNamespace(boundary_reached=boundary)
     monkeypatch.setattr(module, '_agent_run_thread', lambda run: setattr(run, 'attempt_outcome', outcome))
     module.agent_run_thread(info)
     root = next(span for span in spans.exporter.get_finished_spans() if span.name == 'agent.run')
     assert root.attributes['nexent.business_status'] == expected
     assert root.attributes['nexent.cancelled'] == (expected == 'cancelled')
+    assert info.attempt_outcome == outcome
 
 
 @pytest.mark.parametrize("request_query", ["原始用户问题", "", None])

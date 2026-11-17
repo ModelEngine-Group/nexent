@@ -33,6 +33,52 @@ def snapshot(runtime, client):
                            params={'trajectory_id': run['trajectory_id']}, headers={'Authorization': 'admin'}))
 
 
+@pytest.mark.parametrize('creator', [False, True], ids=['clarification', 'creator-card'])
+def test_capture_interactive_card_preserves_stop_status(runtime, creator):
+    from ops.services.trajectory.projection import execution_values
+    from services.nl2agent_service import _Nl2AgentBoundaryObserver
+
+    payload = {'subtype': 'requirement_clarification', 'questions': [{
+        'question_id': 'scope', 'question_type': 'text', 'title': 'Which region?',
+        'required': True, 'options': [], 'allow_other': False, 'other_input_expanded': False,
+    }]}
+    wrapper = '<nl2a>' + json.dumps(payload) + '</nl2a>'
+    code = (f'print({wrapper!r})' if creator else
+            "ask_user(questions=[{'id': 'scope', 'type': 'text', 'title': 'Which region?'}])")
+
+    def reply(request, number, emit):
+        emit(f'<code>{code}</code>')
+        emit(usage={'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13})
+        emit(done=True)
+
+    factory = (lambda stop: _Nl2AgentBoundaryObserver(lang='en', stop_event=stop)) if creator else None
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base, observer_factory=factory)
+        assert len(requests) == 1
+    assert info.attempt_outcome == ('stopped' if creator else 'completed')
+    events = [json.loads(item) for item in info.observer.get_cached_message()]
+    cards = [event for event in events if event['type'] == ('nl2a' if creator else 'human_interaction')]
+    assert len(cards) == 1
+    assert not any(event['type'] == 'error' for event in events)
+    if creator:
+        assert info.observer.boundary_reached is True and info.stop_event.is_set()
+        assert json.loads(cards[0]['content']) == payload
+    root_span = next(span for span in runtime.spans() if span['name'] == 'agent.run')
+    expected = 'cancelled' if creator else 'completed'
+    assert attrs(root_span)['nexent.business_status'] == expected
+    assert attrs(root_span)['nexent.cancelled'] is creator
+    meta = json.loads(next(runtime.root.rglob('meta.json')).read_text())
+    run = meta['runs'][-1]
+    assert run['business_status'] == expected and run['capture_state'] == 'ready'
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+        root = next(node for node in result['nodes'] if node['parent_id'] is None)
+        assert root['status'] == expected
+        assert execution_values(123, run, result['nodes'], root['id'])['status'] == (
+            'cancelled' if creator else 'success'
+        )
+
+
 def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime):
     def reply(request, number, emit):
         emit(reasoning='Reasoning for ')

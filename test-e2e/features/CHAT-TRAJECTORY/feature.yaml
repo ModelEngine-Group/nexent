@@ -11,6 +11,7 @@ feature:
   business_rules:
   - rule_id: TRJ-RULE-001
     description: 复用OTel埋点，物理模型attempt、工具及Agent为实际Span，完整输入输出/失败片段/思考在属性和Events保留，聊天回滚兼容。
+      stop_event结束（含有效交互卡片后的主动停止）统一cancelled，摘要与列表独立显示已取消并支持筛选；正文可读且累计指标保持，正常完成及错误保持。
       系统内置 NL2Agent/NL2Skill/工作台在查询DTO中固定显示1/V1，按SYSTEM来源及稳定system_key确认；归档实际版本保持。
       根和子Agent分别保存实际version_no及可用版本名称，0为草稿、缺失为未知，历史查询不查当前版本。 流式思考、回答和工具参数在内存合并，结束时保存最终内容；失败或取消保存合并后的已接收部分，活动快照仅保留输入和结构信息，最终文件不保存逐块SSE或deltas。
       智能体input.value只记录本次用户query，子智能体记录本次任务；配置与上下文快照独立保存，模型请求正文保持完整，预览与分块正文一致。

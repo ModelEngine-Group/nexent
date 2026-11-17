@@ -7,7 +7,7 @@ export interface TrajectoryFilters {
   conversation_id?: string;
   id_query?: string;
   model?: string;
-  status?: "success" | "error" | "not_captured" | "expired";
+  status?: "success" | "error" | "cancelled" | "not_captured" | "expired";
   started_from?: string;
   started_to?: string;
 }
@@ -56,7 +56,7 @@ export interface TrajectoryRecord {
   root_agent_version_no: number | null;
   root_agent_version_name: string | null;
   models: string[];
-  status: "success" | "error" | null;
+  status: "success" | "error" | "cancelled" | null;
   business_status: string | null;
   availability: string;
   started_at: string | null;

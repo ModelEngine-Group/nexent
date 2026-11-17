@@ -953,6 +953,70 @@ def test_trj_query_effective_operations_roles(harness, monkeypatch, roles, allow
         assert response.json() == {"detail": {"code": "administrator_required"}}
 
 
+def test_trj_query_su_all_routes_use_platform_identity_recheck(harness, monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from ops.db.trajectory import catalog as database
+    from ops.services.trajectory import cleanup_schedule as settings
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.orm import Session
+
+    active = [True]
+    statements = []
+
+    @contextmanager
+    def session_scope():
+        with Session() as session:
+            yield session
+
+    def lookup(query):
+        statement = query.statement.compile(dialect=postgresql.dialect())
+        statements.append(str(statement))
+        # The controlled PG membership belongs to t2; the authenticated context is t1.
+        tenant = statement.params.get("tenant_id_1")
+        user = statement.params["user_id_1"]
+        member_tenant = "t2" if user == "su" else "t1"
+        return (user,) if active[0] and tenant in (None, member_tenant) else None
+
+    monkeypatch.setattr(database, "_session", session_scope)
+    monkeypatch.setattr("sqlalchemy.orm.Query.first", lookup)
+    monkeypatch.setattr(harness.catalog, "actor_active", database.TrajectoryCatalog().actor_active)
+    monkeypatch.setattr(settings, "TrajectoryCatalog", lambda: harness.catalog)
+    policy = {"enabled": False, "retention_days": 30}
+    repository = SimpleNamespace(
+        read=lambda tenant: dict(policy),
+        save=lambda tenant, value, actor: policy.update(value),
+    )
+    monkeypatch.setattr(settings, "CleanupScheduleRepository", lambda: repository)
+
+    harness.add_conversation("124", tenant="t2", owner="u2")
+    remote = harness.add_run("124")
+    assert data(get(harness, "/trajectory/records", actor="su"))["total"] == 2
+    assert data(get(harness, "/trajectory/conversations/124/snapshot", actor="su", tenant_id="t2", trajectory_id=remote.id))["nodes"]
+    assert get(harness, "/trajectory/conversations/124", actor="admin").status_code == 404
+    for facet in ("tenants", "users", "agents", "conversations", "models"):
+        assert data(get(harness, "/trajectory/records", actor="su", facet=facet))["items"]
+    assert data(get(harness, "/trajectory/conversations/123", actor="su"))["executions"]
+    view = data(get(harness, "/trajectory/conversations/123/snapshot", actor="su", trajectory_id=harness.run.id))
+    content_id = next(node for node in view["nodes"] if node["kind"] == "tool")["output"]["content_id"]
+    content_path = "/trajectory/conversations/123/contents/" + content_id
+    assert data(get(harness, content_path, actor="su"))["text"]
+    for suffix in ("", "/agent:7/conversations"):
+        assert data(get(harness, "/conversation/agent_groups" + suffix, actor="su", view="trajectory", target_user_id="u1"))["items"]
+    path = "/trajectory/cleanup/schedule"
+    assert data(get(harness, path, actor="su", tenant_id="t2"))["tenant_id"] == "t2"
+    saved = harness.client.put(path, json={"tenant_id": "t2", "enabled": True, "retention_days": 7}, headers={"Authorization": "su"})
+    assert data(saved)["retention_days"] == 7
+    cleaned = harness.client.post("/trajectory/cleanup", json={"before_days": 30}, headers={"Authorization": "su"})
+    assert data(cleaned)["done"] is True
+    assert statements and all("user_account_t.user_roles" in sql for sql in statements)
+    active[0] = False
+    assert get(harness, content_path, actor="su").status_code == 403
+    assert get(harness, path, actor="su", tenant_id="t2").status_code == 403
+    assert get(harness, "/trajectory/records", actor="user").status_code == 403
+
+
 def test_trj_query_private_validation_under_api_root(harness):
     harness.app.root_path = "/api"
     response = get(
@@ -967,7 +1031,8 @@ def test_trj_query_private_validation_under_api_root(harness):
 
 @pytest.mark.parametrize("missing_input", [False, True])
 @pytest.mark.parametrize("builtin", [False, True])
-def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch, missing_input, builtin):
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monkeypatch, missing_input, builtin, cancelled):
     """Controlled PG results cross the real HTTP boundary; detail still opens the actual archive."""
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -977,7 +1042,10 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     from ops.services.trajectory.cache import ByteCache
     from ops.services.trajectory.projection import execution_values
 
+    if cancelled:
+        harness.run = harness.add_run(status="cancelled")
     original_manifest = harness.service.archive.manifest
+    original_load = harness.service.load
     row = harness.catalog.resolve(["t1"], "123")
     meta = original_manifest(row)
     from ops.services.trajectory.access import Actor
@@ -985,7 +1053,9 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
     nodes, root, _ = harness.service.load(
         Actor("admin", "t1", "OPS"), row, harness.run.id, harness.service.budget()
     )
-    values = execution_values("123", meta["runs"][0], nodes, root)
+    run = next(run for run in meta["runs"] if run["trajectory_id"] == harness.run.id)
+    values = execution_values("123", run, nodes, root)
+    assert values["status"] == ("cancelled" if cancelled else "success")
     projected = ExecutionCatalog._dto(
         {
             **row,
@@ -1035,10 +1105,14 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
             "/trajectory/records",
             view="conversation",
             id_query="123",
+            status=values["status"],
             page_size=1,
         )
     )
     assert first["items"][0]["conversation_id"] == "123" and first["summary"] == summary
+    assert first["items"][0]["status"] == values["status"]
+    assert first["items"][0]["trajectory_id"] == harness.run.id
+    assert first["items"][0]["availability"] == "available"
     assert first["items"][0]["root_agent_version_no"] == (1 if builtin else values["agent_version_no"])
     usage = first["items"][0]["usage"]
     assert usage == {
@@ -1055,6 +1129,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
             "/trajectory/records",
             view="conversation",
             id_query="123",
+            status=values["status"],
             page=2,
             query_id=first["query_id"],
             page_size=1,
@@ -1072,6 +1147,10 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
         data(get(harness, "/trajectory/records", facet="models"))["items"][0]["id"]
         == "m"
     )
+    monkeypatch.setattr(harness.service.archive, "manifest", original_manifest)
+    monkeypatch.setattr(harness.service, "load", original_load)
+    detail = data(get(harness, "/trajectory/conversations/123", query_id=first["query_id"]))
+    assert [run["trajectory_id"] for run in detail["executions"]] == [harness.run.id]
     catalog.validate.side_effect = QueryError("snapshot_reset", 409)
     assert (
         get(
@@ -1079,6 +1158,7 @@ def test_trj_query_pg_list_uses_snapshot_without_opening_archives(harness, monke
             "/trajectory/records",
             view="conversation",
             id_query="123",
+            status=values["status"],
             query_id=first["query_id"],
         ).status_code
         == 409

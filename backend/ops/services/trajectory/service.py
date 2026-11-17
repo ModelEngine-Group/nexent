@@ -376,7 +376,7 @@ class TrajectoryService:
                 raise QueryError("invalid_reference")
             if cached.get("pg"):
                 self.execution_catalog.validate([row["tenant_id"]], [member])
-                readable = {r["id"] for r in member["_runs"] if r["status"] in {"success", "error", "partial"}}
+                readable = {r["id"] for r in member["_runs"] if r["status"] in {"success", "error", "cancelled", "partial"}}
                 state.update(run_ids=list(readable), matching_runs=[r["id"] for r in member["_runs"] if r["matches"]])
             elif member["cleanup"] != (meta or {}).get("cleanup_version", 0):
                 raise QueryError("snapshot_reset", 409)

@@ -45,6 +45,8 @@ def execution_values(conversation_id, run, nodes=(), root=None):
         if state != "ready"
         else "success"
         if run["business_status"] == "completed"
+        else "cancelled"
+        if run["business_status"] == "cancelled"
         else "error"
     )
     root_node = next((n for n in nodes if n["id"] == root), {})
@@ -175,7 +177,7 @@ class Projector:
                     values["status"] = "expired"
                 elif corrupt:
                     values["status"] = "corrupt"
-                elif not complete and values["status"] in {"success", "error"}:
+                elif not complete and values["status"] in {"success", "error", "cancelled"}:
                     values["status"] = "partial"
                 self.repository.sync(identity, values)
             self._versions.put(key, True, 512)

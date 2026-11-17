@@ -15,6 +15,16 @@ service = collection_fixtures.service
 ACTOR = Actor("admin", "t", "OPS")
 
 
+def test_latest_cancelled_round_is_not_grouped_with_failed_rounds(service):
+    meta = service.archive.manifest.return_value
+    meta["runs"][-1]["business_status"] = "cancelled"
+    response = records(service, ACTOR, {"status": "cancelled"}, view="conversation")
+    assert response["total"] == 1 and response["items"][0]["status"] == "cancelled"
+    assert response["items"][0]["duration_ms"] == 30
+    assert response["items"][0]["usage"]["total"] == 15
+    assert records(service, ACTOR, {"status": "error"}, view="conversation")["total"] == 0
+
+
 def test_conversation_view_aggregates_all_rounds_but_summarizes_matches(service):
     meta = service.archive.manifest.return_value
     meta["runs"][0]["business_status"] = "failed"

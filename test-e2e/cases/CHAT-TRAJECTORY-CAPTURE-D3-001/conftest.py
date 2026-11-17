@@ -250,12 +250,13 @@ def runtime(tmp_path, monkeypatch):
         assert active_provider[0].force_flush(timeout_millis=3000)
 
     def run(base, *, config=None, query='Controlled question', agent_id=7, submit_only=False, sampled=True,
-            models=None, preparation=None):
+            models=None, preparation=None, observer_factory=None):
         current = active_provider[0]
         delegate = ALWAYS_ON if sampled else ALWAYS_OFF
         current.sampler = local.wrap_sampler(delegate) if manager._config.provider != 'otlp' else delegate
         manager._tracer = current.get_tracer('capture-fixture', str(uuid4()))
-        observer = MessageObserver()
+        stop = threading.Event()
+        observer = observer_factory(stop) if observer_factory is not None else MessageObserver()
         observer.capture_first_output = threading.Event()
         original_add_token = observer.add_model_new_token
 
@@ -268,7 +269,6 @@ def runtime(tmp_path, monkeypatch):
         observers.append(observer)
         config = config or AgentConfig(name='root', description='Controlled Agent', tools=[],
                                        model_name='model', max_steps=2)
-        stop = threading.Event()
         info = AgentRunInfo(query=query, observer=observer, agent_config=config,
                             model_config_list=models or [ModelConfig(cite_name='model', model_name='model',
                                                                      url=base, api_key='synthetic')],

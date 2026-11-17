@@ -42,19 +42,19 @@ class TrajectoryCatalog:
 
     def actor_active(self, actor):
         with _session() as session:
-            return (
+            query = (
                 session.query(UserTenant.user_id)
                 .join(UserAccount, UserAccount.user_id == UserTenant.user_id)
                 .filter(
                     UserTenant.user_id == actor.user_id,
-                    UserTenant.tenant_id == actor.tenant_id,
                     UserTenant.delete_flag == "N",
                     UserAccount.delete_flag == "N",
-                    UserTenant.roles.contains([actor.role]),
+                    UserAccount.user_roles.contains([actor.role]),
                 )
-                .first()
-                is not None
             )
+            if actor.role != "SU":
+                query = query.filter(UserTenant.tenant_id == actor.tenant_id)
+            return query.first() is not None
 
     @staticmethod
     def _query(session, tenants):

@@ -143,7 +143,13 @@ describe("directory names", () => {
         { wrapper }
       );
       fireEvent.mouseDown(screen.getByRole("combobox"));
-      await userEvent.click(await screen.findByText("展示名称"));
+      const candidate = await screen.findByText("展示名称");
+      if (facet === "users") {
+        expect(screen.queryByText("示例租户")).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText("示例租户")).toBeInTheDocument();
+      }
+      await userEvent.click(candidate);
       expect(onChange).toHaveBeenCalledWith(
         expect.objectContaining({ id: "internal-id" })
       );
@@ -156,6 +162,9 @@ describe("directory names", () => {
         />
       );
       expect(within(view.container).getByTitle("展示名称")).toBeVisible();
+      expect(
+        within(view.container).queryByText("示例租户")
+      ).not.toBeInTheDocument();
       expect(screen.queryByText("internal-id")).not.toBeInTheDocument();
     }
   );
@@ -262,6 +271,37 @@ describe("documented execution information", () => {
 });
 
 describe("admin list display", () => {
+  it("shows cancelled executions and submits a distinct cancellation filter", async () => {
+    const page = recordsPage();
+    page.items = [
+      { ...record, root_agent_name: "cancelled-agent", status: "cancelled" },
+    ];
+    api.records.mockResolvedValue(page);
+    render(
+      <ObservabilityCenter
+        user={{ id: "operator", role: "OPS", tenantId: "tenant" } as User}
+      />,
+      { wrapper }
+    );
+    expect(
+      await screen.findByText("trajectory.businessStatus.cancelled")
+    ).toBeVisible();
+    expect(screen.queryByText("trajectory.error")).not.toBeInTheDocument();
+    const header = screen.getByRole("columnheader", {
+      name: /trajectory.status/,
+    });
+    await userEvent.click(within(header).getByRole("button"));
+    await userEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "trajectory.businessStatus.cancelled",
+      })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() =>
+      expect(api.records.mock.calls.at(-1)?.[0].status).toBe("cancelled")
+    );
+  });
+
   it.each([
     ["OPS", ["OPS"], "OPS"],
     ["SU", ["SU"], "SU"],

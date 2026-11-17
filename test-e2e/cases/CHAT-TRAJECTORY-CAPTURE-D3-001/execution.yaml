@@ -8,6 +8,7 @@ acceptance_bindings:
   AC-01:
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
   AC-02:
+  - test_capture_interactive_card_preserves_stop_status
   - test_capture_versions_are_frozen_per_execution_and_cold_read
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry

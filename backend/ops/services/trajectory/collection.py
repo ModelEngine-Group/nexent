@@ -23,7 +23,9 @@ def _run_matches(run, filters):
     status = (
         "success"
         if business == "completed"
-        else ("error" if business in {"failed", "cancelled", "interrupted"} else None)
+        else "cancelled"
+        if business == "cancelled"
+        else ("error" if business in {"failed", "interrupted"} else None)
     )
     if filters.get("status") and status != filters["status"]:
         return False
@@ -89,7 +91,9 @@ def _row(service, row, meta, run, nodes, root, coverage, *, publication=None):
         "models": sorted({node["model"] for node in nodes if node["model"]}),
         "status": "success"
         if business == "completed"
-        else ("error" if business in {"failed", "cancelled", "interrupted"} else None),
+        else "cancelled"
+        if business == "cancelled"
+        else ("error" if business in {"failed", "interrupted"} else None),
         "business_status": business,
         "availability": service.archive.available(run)
         if run

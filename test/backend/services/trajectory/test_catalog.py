@@ -52,7 +52,8 @@ def test_catalog_ownership_filter_and_limit_are_pushed_to_pg(catalog):
 
 
 @pytest.mark.parametrize("role", ["OPS", "SU"])
-def test_actor_authority_uses_membership_role_array(catalog, mocker, role):
+@pytest.mark.parametrize("active", [False, True])
+def test_actor_authority_uses_account_roles_and_su_is_not_tenant_bound(catalog, mocker, role, active):
     from ops.services.trajectory.access import Actor
 
     service, statements = catalog
@@ -61,12 +62,20 @@ def test_actor_authority_uses_membership_role_array(catalog, mocker, role):
         statements.append(str(query.statement.compile(
             dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
         )))
+        return ("operator",) if active else None
 
     mocker.patch("sqlalchemy.orm.Query.first", first)
-    assert not service.actor_active(Actor("operator", "tenant", role))
+    assert service.actor_active(Actor("operator", "tenant", role)) is active
     assert "user_account_t.user_roles" in statements[-1]
     assert f"@> ARRAY['{role}']" in statements[-1]
     assert "user_account_t.user_role =" not in statements[-1]
+    assert "user_account_t.delete_flag = 'N'" in statements[-1]
+    assert "user_tenant_t.delete_flag = 'N'" in statements[-1]
+    assert "user_tenant_t.user_id = 'operator'" in statements[-1]
+    if role == "SU":
+        assert "user_tenant_t.tenant_id =" not in statements[-1]
+    else:
+        assert "user_tenant_t.tenant_id = 'tenant'" in statements[-1]
 
 
 def test_ops_scope_does_not_enumerate_other_tenants(catalog):

@@ -14,7 +14,7 @@ from management.db.trajectory.repository import scope_uuid
 from ops.db.trajectory.catalog import _session
 
 
-READABLE = "('success','error','partial')"
+READABLE = "('success','error','cancelled','partial')"
 BASE = """
 SELECT e.*, c.created_by AS user_id, c.conversation_title,
        u.user_email AS user_name, ut.tenant_id
@@ -124,7 +124,7 @@ class ExecutionCatalog:
     @staticmethod
     def _dto(row, view):
         status = row["status"]
-        known = status in {"success", "error", "partial"}
+        known = status in {"success", "error", "cancelled", "partial"}
         prefix = "cumulative_" if view == "conversation" else ""
         tokens = {
             key: row.get(prefix + key + "_tokens")
@@ -148,9 +148,9 @@ class ExecutionCatalog:
             "root_agent_version_no": row["agent_version_no"],
             "root_agent_version_name": None,
             "models": sorted(row.get("all_models", row["models"])),
-            "status": status if status in {"success", "error"} else None,
+            "status": status if status in {"success", "error", "cancelled"} else None,
             "business_status": None,
-            "availability": "available" if status in {"success", "error"} else status,
+            "availability": "available" if status in {"success", "error", "cancelled"} else status,
             "started_at": _iso(row["started_at"]),
             "finished_at": _iso(row["finished_at"]),
             "duration_ms": row.get("cumulative_duration_ms", row["duration_ms"]),

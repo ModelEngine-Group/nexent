@@ -23,7 +23,7 @@ class RecordsQuery(BaseModel):
     agent_id: str | None = None
     conversation_id: str | None = None
     model: str | None = Field(None, max_length=200)
-    status: Literal["success", "error", "not_captured", "expired"] | None = None
+    status: Literal["success", "error", "cancelled", "not_captured", "expired"] | None = None
     started_from: str | None = None
     started_to: str | None = None
     id_query: str = Field("", max_length=200)

@@ -114,9 +114,13 @@ export function DirectoryFilter({
         label: (
           <div className="py-1">
             <div>{displayName(option)}</div>
-            {option.tenant_name && option.tenant_name !== option.tenant_id && (
-              <div className="text-xs text-gray-500">{option.tenant_name}</div>
-            )}
+            {facet !== "users" &&
+              option.tenant_name &&
+              option.tenant_name !== option.tenant_id && (
+                <div className="text-xs text-gray-500">
+                  {option.tenant_name}
+                </div>
+              )}
           </div>
         ),
       }))}

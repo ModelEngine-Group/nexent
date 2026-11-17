@@ -333,9 +333,30 @@ def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(moc
     assert duration_statistics(["t"], datetime.now(UTC))["conversation_count"] == 3
     sql = str(session.execute.call_args_list[1].args[0])
     assert "percentile_cont(0.99)" in sql
-    assert "status IN ('success','error','partial')" in sql
+    assert "status IN ('success','error','cancelled','partial')" in sql
     assert "count(*)=count(duration_ms)" in sql
     assert "update_time<=:asof" in sql
+
+
+def test_statistics_archive_query_includes_cancelled_with_bound_pagination(mocker):
+    from datetime import UTC, datetime
+
+    from ops.db.trajectory.statistics import archive_rows
+
+    session = Mock()
+    session.execute.return_value.mappings.return_value = []
+
+    @contextmanager
+    def scoped():
+        yield session
+
+    mocker.patch("ops.db.trajectory.statistics.get_db_session", scoped)
+    assert list(archive_rows(["t"], datetime.now(UTC), batch=7)) == []
+    query, params = session.execute.call_args.args
+    sql = str(query)
+    assert "e.status IN ('success','error','cancelled','partial')" in sql
+    assert params["tenants"] == ["t"] and params["limit"] == 7
+    assert "e.trajectory_id>:after" in sql and "e.update_time<=:asof" in sql
 
 
 def test_pruned_latest_expired_fact_is_backfilled_without_fabricated_metrics(
