@@ -8,6 +8,7 @@ from contextlib import suppress
 
 from contracts.constants.environment import RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
+from infrastructure.nexent_output import adapt_nexent_stream
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
@@ -130,9 +131,8 @@ async def start_creation_turn(
         ) or state.get("generation")
         if generation:
             request.__dict__["_creator_generation"] = generation
-        return await resume_creator(
-            request.conversation_id, user_id
-        ), request.conversation_id
+        subscriber = await resume_creator(request.conversation_id, user_id)
+        return adapt_nexent_stream(subscriber), request.conversation_id
     effective = request.model_copy(
         update={"target": ConversationTarget.model_validate(target) if target else None}
     )
@@ -262,7 +262,7 @@ async def start_creation_turn(
             user_id=user_id,
             reservation=reservation,
         )
-        return subscriber, conversation_id
+        return adapt_nexent_stream(subscriber), conversation_id
     except BaseException:
         control.cancel()
         if stream is not None:

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for sdk.nexent.core.agents.core_agent module.
+Unit tests for sdk.nexent.core.agents.cores.smolagents.core_agent module.
 
 This module tests CoreAgent class and its helper functions:
 - parse_code_blobs
@@ -254,7 +254,7 @@ def _load_core_agent_module():
     # __file__ is C:\Project\nexent\test\sdk\core\agents\test_core_agent.py
     # We need to go up 5 levels to get to C:\Project\nexent
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-    core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+    core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "cores", "smolagents", "core_agent.py")
 
     # Create full package hierarchy
     sys.modules["sdk"] = ModuleType("sdk")
@@ -293,27 +293,36 @@ def _load_core_agent_module():
     token_estimation_mod.msg_token_count = MagicMock(return_value=0)
     sys.modules["sdk.nexent.core.utils.token_estimation"] = token_estimation_mod
 
-    agent_context_mod = ModuleType("sdk.nexent.core.agents.agent_context")
+    agent_context_mod = ModuleType("sdk.nexent.core.agents.context")
+    agent_context_mod.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents", "context")]
     agent_context_mod.ContextManager = MagicMock()
     agent_context_mod.ContextManagerConfig = MagicMock()
-    sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
+    sys.modules["sdk.nexent.core.agents.context"] = agent_context_mod
 
-    context_runtime_pkg = ModuleType("sdk.nexent.core.context_runtime")
-    context_runtime_contracts_mod = ModuleType("sdk.nexent.core.context_runtime.contracts")
+    context_runtime_pkg = ModuleType("sdk.nexent.core.agents.cores.smolagents.context_contracts")
+    context_runtime_contracts_mod = ModuleType("sdk.nexent.core.agents.cores.smolagents.context_contracts")
     context_runtime_contracts_mod.ContextRuntime = MagicMock()
     context_runtime_contracts_mod.UnconfiguredContextRuntime = MagicMock()
-    sys.modules["sdk.nexent.core.context_runtime"] = context_runtime_pkg
-    sys.modules["sdk.nexent.core.context_runtime.contracts"] = context_runtime_contracts_mod
+    context_runtime_contracts_mod.native_context_messages = lambda messages: messages
+    context_runtime_contracts_mod.native_context_rebuild = lambda context: context
+    sys.modules["sdk.nexent.core.agents.cores.smolagents.context_contracts"] = context_runtime_pkg
+    sys.modules["sdk.nexent.core.agents.cores.smolagents.context_contracts"] = context_runtime_contracts_mod
+    sys.modules["sdk.nexent.core.agents.cores.smolagents.context_contracts"] = context_runtime_contracts_mod
 
     monitor_mod = ModuleType("sdk.nexent.monitor")
     monitor_mod.get_monitoring_manager = MagicMock()
     sys.modules["sdk.nexent.monitor"] = monitor_mod
 
+    # Mirror isolated dependency doubles to the canonical implementation namespace.
+    for key, value in list(sys.modules.items()):
+        if key.startswith("sdk.nexent"):
+            sys.modules[key.removeprefix("sdk.")] = value
+
     # Load the module
-    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.core_agent", core_agent_path)
+    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.cores.smolagents.core_agent", core_agent_path)
     module = importlib.util.module_from_spec(spec)
     module.__package__ = "sdk.nexent.core.agents"
-    sys.modules["sdk.nexent.core.agents.core_agent"] = module
+    sys.modules["sdk.nexent.core.agents.cores.smolagents.core_agent"] = module
 
     # Override some functions with mock implementations
     def mock_truncate_content(content, max_length=1000):
@@ -331,7 +340,7 @@ def _load_core_agent_module():
 core_agent_module = _load_core_agent_module()
 
 # Import ProcessType and MessageObserver for tests
-ProcessType = _module_mocks["sdk.nexent.core.utils.observer"].ProcessType
+ProcessType = core_agent_module.ProcessType
 MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserver
 
 
@@ -1878,7 +1887,7 @@ class TestRunStreamRealExecution:
     @pytest.fixture(autouse=True)
     def _stub_sandbox_context(self, monkeypatch):
         """Keep executor tests independent of the sandbox's external imports."""
-        sandbox_module = ModuleType(f"{core_agent_module.__package__}.sandbox")
+        sandbox_module = ModuleType("nexent.core.agents.sandbox.execution")
         sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
         monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 
@@ -2054,6 +2063,10 @@ class TestRunStreamRealExecution:
         mock_observer.ProcessType = RealProcessType
         mock_modules['sdk.nexent.core.utils.observer'] = mock_observer
 
+        # Match canonical absolute lookup sites used by the migrated implementation.
+        mock_modules.update({key.removeprefix("sdk."): value for key, value in list(mock_modules.items())
+                             if key.startswith("sdk.nexent")})
+
         # Save original modules
         original_modules = {}
         for name in mock_modules:
@@ -2068,7 +2081,7 @@ class TestRunStreamRealExecution:
             # Find the core_agent.py file
             test_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(test_dir))))
-            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "cores", "smolagents", "core_agent.py")
             _register_sdk_consts_package(project_root)
 
             # Load the module
@@ -2076,7 +2089,7 @@ class TestRunStreamRealExecution:
             module = importlib.util.module_from_spec(spec)
             module.__package__ = "sdk.nexent.core.agents"
 
-            sys.modules["sdk.nexent.core.agents.core_agent"] = module
+            sys.modules["sdk.nexent.core.agents.cores.smolagents.core_agent"] = module
 
             # Execute
             spec.loader.exec_module(module)

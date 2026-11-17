@@ -1,5 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.sandbox.config import SandboxConfig
 
 
 def test_bind_requires_posix_container_root():

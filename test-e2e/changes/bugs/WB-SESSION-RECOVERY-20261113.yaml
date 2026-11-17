@@ -32,6 +32,7 @@ change:
     test_selectors:
     - test/backend/services/test_nl2agent_boundary_delivery.py
     - test/backend/services/test_creator_session_recovery.py
+    - test/backend/services/test_creator_native_recovery.py
     - test/backend/services/test_creator_generation_guards.py
     - test/backend/services/test_creator_execution.py
     - test/backend/database/test_creator_checkpoints.py
@@ -43,3 +44,7 @@ change:
     D2 verifies the actual creator HTTP/lifecycle contract with controlled external boundaries;
     D4 adds browser re-entry/submission evidence beyond UT. Existing readonly history remains regression.
     Both added Cases are self-contained and must release all owned tasks, gates, clients and browser routes.
+    Integration with the current develop preserves native execution envelopes in durable
+    checkpoints and adapts both initial and resumed subscriptions to the public wire
+    protocol. Native completed, failed and stopped outcomes have independent replay UT;
+    the existing D2/D4 Cases remain the controlled creator lifecycle and UI proofs.

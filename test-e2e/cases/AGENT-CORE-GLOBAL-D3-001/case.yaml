@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: AGENT-CORE-GLOBAL-D3-001
+  feature_id: AGENT-CORE-CONFIG
+  requirement_ids:
+  - AGENT-CORE-GLOBAL-20261105
+  - JIUWEN-SKILL-HISTORY-20261109
+  - JIUWEN-NL2AGENT-CARD-20261109
+  business_rule_ids:
+  - AGENT-CORE-CONFIG-RULE-001
+  - AGENT-CORE-CONFIG-RULE-004
+  title: Global Core policy reaches the real local execution boundary
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove global config compilation and real Jiuwen/ModelService execution
+    with controlled external protocols.
+  preconditions:
+  - Installed compatible Jiuwen dependency and shared ModelService; controlled loopback
+    HTTP/SSE provider and fixture tools.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Compile a conflicting saved Core and execute the effective Jiuwen adapter
+      in native/text modes.
+    expected: The effective root and child Core follow deployment; saved values and
+      model bindings remain intact.
+  - order: 2
+    action: Run tool actions and Skill artifact output through actual Jiuwen and a
+      controlled provider.
+    expected: Real results return once; artifact code remains data and all owned resources
+      close. Native/text Skill business streams pass through actual creation persistence
+      and PostgreSQL to the public history service with exact nonempty file contents,
+      including old wrappers without record rewrites. Direct MCP creator cards and
+      draft state are recognized in native/text modes; after a card there are no further
+      model requests or tool side effects and the terminal awaits input.
+  expected_results:
+  - The effective root and child Core follow deployment; saved values and model bindings
+    remain intact.
+  - Real results return once; artifact code remains data and all owned resources close.
+    Live and saved creator files remain identical without native-envelope misclassification.
+    MCP creator cards survive public history loading and stop at the interactive boundary.
+  forbidden_side_effects:
+  - No native Jiuwen provider HTTP or CodeAgent loop; no unauthorized executable bindings,
+    credentials or duplicate effects.
+  acceptance:
+  - id: AC-01
+    description: Global policy and runtime/resource contract are exercised.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  integration_boundary:
+  - Nexent factory/worker to Jiuwen to ModelService to real HTTP/SSE to controlled
+    execution.
+  observations:
+  - Provider request capture, execution counter, native events and terminal outcome.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and
+    HTTP response.

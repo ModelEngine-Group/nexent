@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from management.services.conversation import creation_history
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.utils.observer import ProcessType
 from services.nl2agent_service import _Nl2AgentBoundaryObserver
 

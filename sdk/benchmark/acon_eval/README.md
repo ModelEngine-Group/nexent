@@ -113,7 +113,7 @@ class WikipediaSearchTool(Tool):
 
 ### 工具注册
 
-`register_acon_tools()` 将 `WikipediaSearchTool` 注入到 `nexent.core.tools` 和 `nexent.core.agents.nexent_agent` 模块的命名空间，使 `NexentAgent.create_local_tool()` 能通过 `globals()` 找到它。`get_acon_tool_configs(port)` 返回对应的 `ToolConfig` 列表。
+`register_acon_tools()` 将 `WikipediaSearchTool` 注入到 `nexent.core.tools` 和 `nexent.core.agents.cores.smolagents.agent` 模块的命名空间，使 `NexentAgent.create_local_tool()` 能通过 `globals()` 找到它。`get_acon_tool_configs(port)` 返回对应的 `ToolConfig` 列表。
 
 ```python
 from tools import register_acon_tools, get_acon_tool_configs

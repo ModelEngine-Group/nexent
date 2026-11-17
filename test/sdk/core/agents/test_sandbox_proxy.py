@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise real websocket-client proxy selection without external network I/O."""
 
 import base64
@@ -10,9 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents import sandbox as sb
-from nexent.core.agents.sandbox_tls import SandboxTLSClient
-from nexent.core.agents.sandbox_tls_bootstrap import generate_identity
+from nexent.core.agents.sandbox import execution as sb
+from nexent.core.agents.sandbox.tls import SandboxTLSClient
+from nexent.core.agents.sandbox.tls_bootstrap import generate_identity
 from websocket import WebSocketException
 from websocket import _core, _http
 from websocket._url import get_proxy_info

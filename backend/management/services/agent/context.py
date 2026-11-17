@@ -8,8 +8,7 @@ from zoneinfo import ZoneInfo
 
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
-from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.context_input import ContextInput
+from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
     has_current_time_marker,

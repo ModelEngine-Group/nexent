@@ -150,7 +150,8 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
 
     monkeypatch.setattr(agent_run, "build_memory_context", MagicMock(return_value="memory"))
     monkeypatch.setattr(agent_run, "create_agent_run_info", create_run)
-    monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=None))
+    monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=41))
+    monkeypatch.setattr(agent_run, "load_historical_context", MagicMock(return_value=SimpleNamespace(turns=[], summaries=[], items=[])))
     monkeypatch.setattr(agent_run, "build_authorized_context_input", MagicMock(return_value="context"))
     monkeypatch.setattr(agent_run.agent_run_manager, "register_agent_run", register)
     workbench = ModuleType("management.services.agent.workbench")

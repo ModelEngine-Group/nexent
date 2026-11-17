@@ -16,6 +16,7 @@ from contracts.errors.exceptions import (
 )
 from infrastructure.concurrency import runtime_thread_manager
 from infrastructure.streaming.channels import streaming_channel_manager
+from infrastructure.runtime_output import is_runtime_event
 from management.db.conversation.repository import (
     checkpoint_creator_message,
     get_conversation_history,
@@ -26,7 +27,7 @@ from management.services.agent.lifecycle import (
     agent_run_manager,
 )
 from management.services.agent.run_state import runtime_state_service
-from nexent.core.agents.run_agent import DeferredAgentRun
+from nexent.core.agents.orchestration.entry import DeferredAgentRun
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, run_blocking
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
 
@@ -204,12 +205,16 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
                     user_id, conversation_id, control.generation
                 ):
                     raise asyncio.CancelledError()
-                if any(
-                    json.loads(line[6:]).get("type") == "error"
-                    for line in event.splitlines()
-                    if line.startswith("data: ")
-                ):
-                    status = "failed"
+                for line in event.splitlines():
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = json.loads(line[6:])
+                    if chunk.get("type") == "error":
+                        status = "failed"
+                    elif (is_runtime_event(chunk) and chunk.get("type") == "run_terminal"
+                          and not chunk.get("invocation_id")
+                          and chunk.get("status") in {"completed", "failed", "stopped"}):
+                        status = chunk["status"]
                 await channel.publish(event)
         except asyncio.CancelledError:
             status = "stopped"
@@ -284,20 +289,23 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
 def unit_event(unit):
     kind = unit["unit_type"]
     content = unit.get("unit_content") or ""
-    if kind in {
+    envelope_types = {
         "model_attempt_control",
         "agent_new_run",
         "skill_body",
         "file_content",
         "target_files",
         "done",
-    }:
-        try:
-            event = json.loads(content)
-            if isinstance(event, dict):
-                return {**event, "unit_index": unit["unit_index"]}
-        except (TypeError, json.JSONDecodeError):
-            pass
+    }
+    try:
+        event = json.loads(content)
+        if isinstance(event, dict) and (
+            kind in envelope_types
+            or is_runtime_event(event) and event.get("type") == kind
+        ):
+            return {**event, "unit_index": unit["unit_index"]}
+    except (TypeError, json.JSONDecodeError):
+        pass
     return {
         "type": kind,
         "content": content,

@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 
+from infrastructure.runtime_output import is_runtime_event
 from management.db.conversation.repository import checkpoint_creator_message
 from nexent.core.concurrency import run_blocking
 
@@ -70,7 +71,7 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                     chunk["content"] = content
                 if not isinstance(content, str):
                     content = json.dumps(content, ensure_ascii=False)
-                if kind in {
+                if is_runtime_event(chunk) or kind in {
                     "skill_body",
                     "file_content",
                     "agent_new_run",
@@ -93,6 +94,12 @@ async def checkpoint_creator_stream(stream, *, message_id, conversation_id, user
                     answer.append(str(chunk.get("content") or ""))
                 if kind == "error":
                     status = "failed"
+                if is_runtime_event(chunk) and kind == "run_terminal" and not chunk.get("invocation_id"):
+                    outcome = chunk.get("status")
+                    if outcome in {"completed", "failed", "stopped"}:
+                        status = outcome
+                    if outcome == "completed":
+                        answer[:] = [str(chunk.get("final_content") or "")]
                 chunks.append(chunk)
             # Persist boundaries before publishing; token-only checkpoints are batched.
             if (

@@ -5,7 +5,7 @@
 import pytest
 from types import SimpleNamespace
 
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from contracts.errors.exceptions import ModelOutletValidationError
 
 from management.services.agent.preparation.run import apply_root_model_preferences

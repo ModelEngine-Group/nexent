@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D5-002
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  - JIUWEN-STORAGE-UNIFY-20261116
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-003
+  title: Trusted model snapshot migration and transactional management lifecycle
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove standard ModelService storage without a Jiuwen schema extension, safe optional legacy snapshot
+    migration and transactional isolation.
+  preconditions:
+  - Docker and a locally available PostgreSQL image; an isolated disposable database with no production data.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: A database without the transitional column supports standard model writes and runtime reads; the existing
+      migration handles absent/present old columns, dry-run, idempotent apply and canonical-row precedence without
+      DDL.
+  - order: 2
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: Management create/update persist complete profiles atomically with optimistic revision conflicts and
+      rollback; saved declarations and capabilities remain frozen without catalog lookup.
+  - order: 3
+    action: Exercise standard model storage and optional historical snapshot migration in an owned PostgreSQL database.
+    expected: Legacy snapshot migration preserves frozen parameters, identity and credentials; stale, corrupt or
+      cross-tenant snapshots fail closed without fallback, partial writes or exposure.
+  expected_results:
+  - A database without the transitional column supports standard model writes and runtime reads; the existing migration
+    handles absent/present old columns, dry-run, idempotent apply and canonical-row precedence without DDL.
+  - Management create/update persist complete profiles atomically with optimistic revision conflicts and rollback;
+    saved declarations and capabilities remain frozen without catalog lookup.
+  - Legacy snapshot migration preserves frozen parameters, identity and credentials; stale, corrupt or cross-tenant
+    snapshots fail closed without fallback, partial writes or exposure.
+  forbidden_side_effects:
+  - No credential in saved snapshot, cross-tenant mutation, partial configuration commit or writes to an existing
+    application database.
+  acceptance:
+  - id: AC-01
+    description: Prove persisted trusted outlet lifecycle and isolation.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 90
+  risk_type: DEPLOYMENT
+  risk: Partial model/profile writes or stale migration snapshots route requests incorrectly.
+  condition:
+  - Legacy LLM rows with and without historical envelopes, repeated import, rejected tenant/revision updates and
+    a failed transaction.
+  metrics:
+  - Row count, canonical revisions, profile equality, rollback and absence of transitional SQL in ordinary operations.
+  thresholds:
+  - Zero data loss or partial writes; no cross-tenant update; snapshot contains no raw credential.
+  recovery_expectations:
+  - Retry succeeds; next turn reads the new snapshot.
