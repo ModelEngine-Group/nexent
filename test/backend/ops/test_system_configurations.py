@@ -130,6 +130,43 @@ def test_patch_only_returns_saved_values_and_notification_degradation(mocker):
     authorize.assert_called_once_with(OPS_USER, "ops.configuration:update")
 
 
+def test_patch_permission_denied_uses_safe_error(mocker):
+    from fastapi import HTTPException
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations",
+        side_effect=HTTPException(status_code=403, detail="Operations permission required"),
+    )
+
+    response = _client().patch(
+        "/system_configurations",
+        json={"changes": {"MAX_TENANT_COUNT": 5}},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "FORBIDDEN"
+
+
+def test_patch_database_failure_is_a_safe_503(mocker):
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations",
+        return_value="ops-user",
+    )
+    mocker.patch(
+        "ops.api.system_configurations.save_system_configurations",
+        side_effect=RuntimeError("postgres://user:secret@example.invalid"),
+    )
+
+    response = _client().patch(
+        "/system_configurations",
+        json={"changes": {"MAX_TENANT_COUNT": 5}},
+    )
+
+    assert response.status_code == 503
+    assert "secret" not in response.text
+    assert "example.invalid" not in response.text
+
+
 @pytest.mark.parametrize(
     "role,expected_status",
     [("OPS", 200), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
@@ -211,6 +248,38 @@ def test_current_numeric_parameters_have_no_recommendation(mocker, key):
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "RECOMMENDATION_UNAVAILABLE"
     assert "value" not in response.json()["detail"]
+
+
+def test_recommendation_permission_denied_uses_safe_error(mocker):
+    from fastapi import HTTPException
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations",
+        side_effect=HTTPException(status_code=403, detail="Operations permission required"),
+    )
+
+    response = _client().post(
+        "/system_configurations/recommendations",
+        json={"key": "MAX_TENANT_COUNT"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "FORBIDDEN"
+
+
+def test_unknown_recommendation_key_maps_to_400(mocker):
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations",
+        return_value="ops-user",
+    )
+
+    response = _client().post(
+        "/system_configurations/recommendations",
+        json={"key": "UNKNOWN_SETTING"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "INVALID_CONFIGURATION_KEY"
 
 
 def test_authorizer_requires_explicit_route_permission(mocker):

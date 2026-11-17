@@ -25,6 +25,7 @@ change:
     - test/backend/configuration/test_runtime.py
     - test/backend/configuration/test_consumers.py
     - test/backend/app/test_config_app.py
+    - test/backend/app/test_runtime_application_lifespan.py
     - test/backend/database/test_conversation_activity.py
     - test/backend/database/test_conversation_branch_db.py
     - test/backend/database/test_conversation_branch_selection.py
