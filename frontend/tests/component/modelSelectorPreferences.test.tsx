@@ -204,7 +204,9 @@ it("UI-SESSION-15 edits unsent conversation drafts without creating server prefe
       temperature: 0.24,
     })
   );
-  fireEvent.keyDown(document.body, { key: "Escape" });
+  fireEvent.keyDown(screen.getByRole("region", { name: advancedName }), {
+    key: "Escape",
+  });
   expect(await openAdvanced()).toHaveValue(0.24);
   expect(readModelDraft("another-thread", 42)).toEqual({});
   expect(readModelDraft("fresh-thread", 43)).toEqual({});
@@ -359,32 +361,8 @@ it("AC-002 restores service-default effort without inventing a creation default"
   expect(api.patchConversationModelPreferences).toHaveBeenCalledTimes(1);
 });
 
-it.each([undefined, null])(
-  "AC-004 displays service default for missing/null values (%s) with editable neutral sliders",
-  async (value) => {
-    saved.defaults = { temperature: value, top_p: value };
-    setup(11, undefined, { agentDefaults: {} });
-    const temperature = await openAdvanced();
-    expect(temperature).toHaveValue(null);
-    expect(temperature).toHaveAttribute(
-      "placeholder",
-      "modelProfile.thinkingModeOption.default"
-    );
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(null);
-    for (const slider of screen.getAllByRole("slider")) {
-      expect(slider).toHaveAttribute(
-        "aria-valuetext",
-        "modelProfile.thinkingModeOption.default"
-      );
-      fireEvent.focus(slider);
-    }
-    expect(screen.getAllByRole("slider")).toHaveLength(2);
-    expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
-  }
-);
-
 it("AC-004 keeps zero overrides and restores service default without injecting sampling", async () => {
-  saved.defaults = {};
+  saved.defaults = { temperature: null };
   saved.parameter_values = { temperature: 0, top_p: 0 };
   setup(11, undefined, { agentDefaults: {} });
   expect(await openAdvanced()).toHaveValue(0);

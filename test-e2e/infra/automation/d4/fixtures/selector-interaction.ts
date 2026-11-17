@@ -2,6 +2,13 @@
 
 import { expect, type Locator, type Page } from "playwright/test";
 
+/** Keep standard effort controls compact while checking the actual rendered label. */
+export async function expectCompactDegree(control: Locator, text: string) {
+  await expectReadableLabel(control, text);
+  await expect.poll(async () => (await control.boundingBox())?.width ?? Infinity)
+    .toBeLessThanOrEqual(128);
+}
+
 /** Check the rendered control instead of relying on its declared CSS width. */
 export async function expectReadableLabel(control: Locator, text: string) {
   const label = control.getByText(text, { exact: true });

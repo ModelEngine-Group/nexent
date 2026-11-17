@@ -53,7 +53,7 @@ export function ModelParameterField({
       <Select
         className={
           inModelSelector
-            ? "!w-full min-w-0 [&.ant-select-disabled]:!bg-transparent"
+            ? "!w-auto min-w-28 max-w-full [&.ant-select-disabled]:!bg-transparent"
             : undefined
         }
         variant={inModelSelector ? "borderless" : "outlined"}
@@ -69,7 +69,7 @@ export function ModelParameterField({
                 popup: {
                   root: {
                     zIndex: 1200,
-                    minWidth: 160,
+                    minWidth: 112,
                     maxWidth: "calc(100vw - 24px)",
                   },
                 },
@@ -192,7 +192,7 @@ export function ModelParameterField({
       <div
         className={
           inModelSelector
-            ? "flex min-h-8 min-w-0 items-center justify-end gap-2 [&>.ant-select]:flex-1 [&>.ant-switch]:shrink-0"
+            ? "flex min-h-8 min-w-0 items-center gap-2 [&>.ant-select]:shrink-0 [&>.ant-switch]:shrink-0"
             : "flex min-h-8 items-center gap-2 [&>.ant-select]:w-full [&>.ant-switch]:shrink-0"
         }
       >

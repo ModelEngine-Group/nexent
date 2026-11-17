@@ -29,7 +29,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    modified: [CHAT-MODEL-CONTROLS-D4-001, CHAT-MODEL-CONTROLS-D4-003, CHAT-MODEL-CONTROLS-D4-002]
-    added: []
+    modified: []
+    added: [CHAT-MODEL-CONTROLS-D4-004]
     retired: []
-  notes: Approved SPEC in nexent-doc/docs/Developing/model-access-native-agent/followups/20261110-selector-interaction-fixes. Six entries share these controls. Existing ownership routing remains applicable. D4 preparation is self-contained with mock HTTP identities, page-local state and isolated browser contexts; no shared factories, anchors, special assets or real provider calls. Runner teardown releases contexts/routes; verify cleanup during execution. Runtime proof uses disposable resources and Phoenix; preserve baseline users/models. No new duplicate D1 or unrelated coverage reconstruction. Implementation and execution evidence remain pending.
+  notes: Approved SPEC in nexent-doc/docs/Developing/model-access-native-agent/followups/20261110-selector-interaction-fixes. A focused Workbench case covers the shared menu at the affected viewport in Chinese and English. Existing D4-001/002/003 retain their lifecycle and runtime contracts outside this change's selection. The case uses page-local HTTP fixtures and browser teardown, without shared preparation resources.
