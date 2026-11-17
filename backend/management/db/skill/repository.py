@@ -2,10 +2,6 @@
 
 """Skill instance and skill info database operations."""
 
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
-from management.utils.skill_params import strip_params_comments_for_db
-from contracts.constants.constants import SKILL_DESCRIPTION_MAX_LENGTH
 import json
 import logging
 from datetime import datetime
@@ -14,15 +10,15 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_, update as sa_update
 from sqlalchemy.orm import defer
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from management.db.client import get_db_session
-from management.utils.orm import filter_property, as_dict
-from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, SKILL_DESCRIPTION_MAX_LENGTH
 from contracts.constants.environment import MAX_SKILLS_PER_TENANT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.utils.skill_params import strip_params_comments_for_db
+from management.db.client import get_db_session
+from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
+from management.utils.orm import filter_property, as_dict
 from management.utils.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.skill_params import strip_params_comments_for_db
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +281,25 @@ def _get_tool_ids(session, skill_id: int) -> List[int]:
     return [r.tool_id for r in relations]
 
 
+def _get_tool_ids_by_skill_ids(session, skill_ids: list[int]) -> dict[int, list[int]]:
+    """Batch the same relation rows used by the single-skill lookup."""
+    if not skill_ids:
+        return {}
+    relations = session.query(SkillToolRelation).filter(SkillToolRelation.skill_id.in_(skill_ids)).all()
+    result = {skill_id: [] for skill_id in skill_ids}
+    for relation in relations:
+        result[relation.skill_id].append(relation.tool_id)
+    return result
+
+
+def get_tool_ids_by_skill_ids(skill_ids: list[int]) -> dict[int, list[int]]:
+    """Fetch relations only for skills already selected by the caller."""
+    if not skill_ids:
+        return {}
+    with get_db_session() as session:
+        return _get_tool_ids_by_skill_ids(session, skill_ids)
+
+
 def _build_skill_update_values(
     skill_data: Dict[str, Any],
     updated_by: Optional[str],
@@ -363,26 +378,34 @@ def _normalize_skill_tags(tags: Any) -> List[str]:
     return []
 
 
-def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
+def list_skills(
+    tenant_id: str, *, include_tool_ids: bool = True, include_content: bool = True
+) -> List[Dict[str, Any]]:
     """List all skills for a tenant from database.
 
     Args:
         tenant_id: Tenant ID for filtering skills
+        include_tool_ids: Include the batched tool relations.
+        include_content: Load and return skill bodies; retained by default for internal callers.
     """
     with get_db_session() as session:
-        skills = (
+        query = (
             session.query(SkillInfo)
             .filter(SkillInfo.tenant_id == tenant_id, SkillInfo.delete_flag != "Y")
             .order_by(
                 SkillInfo.create_time.desc(),
                 SkillInfo.skill_id.desc(),
             )
-            .all()
         )
+        if not include_content:
+            query = query.options(defer(SkillInfo.skill_content, raiseload=True))
+        skills = query.all()
+        tool_ids = _get_tool_ids_by_skill_ids(session, [s.skill_id for s in skills]) if include_tool_ids else {}
         results = []
         for s in skills:
-            result = _to_dict(s)
-            result["tool_ids"] = _get_tool_ids(session, s.skill_id)
+            result = _to_dict(s, include_content=include_content)
+            if include_tool_ids:
+                result["tool_ids"] = tool_ids.get(s.skill_id, [])
             results.append(result)
         return results
 

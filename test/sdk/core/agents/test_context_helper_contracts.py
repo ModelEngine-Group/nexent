@@ -309,9 +309,9 @@ def test_renderer_current_action_without_raw_messages():
     message = ContextItemRenderer().render([action])[0]
     assert message["role"] == "assistant"
     text = message["content"][0]["text"]
-    assert '<CODE_EXEC_RESULT>' in text
-    assert "index: 1" not in text
-    assert "<RETURN_VALUE>done</RETURN_VALUE>" in text
+    assert '<completed_action>' in text
+    assert "index: 1" in text
+    assert "recorded_result:\ndone" in text
     assert "Step 1:" not in text
     assert not text.lstrip().startswith("{")
 
@@ -341,11 +341,11 @@ def test_renderer_current_action_compact_with_tool_calls():
     )
     message = ContextItemRenderer().render([action])[0]
     text = "\n".join(m["content"][0]["text"] for m in ContextItemRenderer().render([action]))
-    assert "index: 3" not in text
-    assert "<TOOL_RECORD>" in text and "<code>" not in text
-    assert '"name": "search"' in unescape(text) and '"q": "foo"' in unescape(text)
-    assert "<OUTPUT>found 5 results</OUTPUT>" in text
-    assert "<RETURN_VALUE>answer is 42</RETURN_VALUE>" in text
+    assert "index: 3" in text
+    assert "input:\n" in text and "<code>" not in text
+    assert 'tool: search' in text and '"q": "foo"' in unescape(text)
+    assert "outcome:\nfound 5 results" in text
+    assert "recorded_result:\nanswer is 42" in text
     assert "Called tool" not in text
     assert not text.lstrip().startswith("{")
 
@@ -362,8 +362,8 @@ def test_renderer_current_action_compact_with_single_tool_call_dict():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "<TOOL_RECORD>" in text and "<code>" not in text
-    assert '"name": "execute"' in unescape(text) and '"code": "print(1)"' in unescape(text)
+    assert "input:\n" in text and "<code>" not in text
+    assert 'tool: execute' in text and '"code": "print(1)"' in unescape(text)
 
 
 def test_renderer_current_action_preserves_string_tool_arguments():
@@ -384,8 +384,8 @@ def test_renderer_current_action_preserves_string_tool_arguments():
     text = message["content"][0]["text"]
 
     assert message["role"] == "assistant"
-    assert "<code>" in text
-    assert "result = search(query='GAIA')\nprint(result)" in text
+    assert "<code>" not in text
+    assert "result = search(query=" in text and "GAIA" in text and "print(result)" in text
     assert "python_interpreter'()" not in text
 
 
@@ -402,9 +402,9 @@ def test_renderer_current_action_without_step_number():
     text = "\n".join(m["content"][0]["text"] for m in ContextItemRenderer().render([action]))
 
     assert "index:" not in text
-    assert "<TOOL_RECORD>" in text and '"name": "search"' in unescape(text)
+    assert 'tool: search\ninput:\n' in text
     assert "<code>" not in text
-    assert "<RETURN_VALUE>done</RETURN_VALUE>" in text
+    assert "recorded_result:\ndone" in text
 
 
 def test_renderer_summary_legacy_dict_renders_markdown():
@@ -478,7 +478,7 @@ def test_renderer_current_action_compact_non_standard_tool_calls():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "<TOOL_RECORD>" in text
+    assert "tool_record:" in text
 
 
 def test_renderer_current_action_compact_list_tool_call_non_dict():
@@ -493,7 +493,7 @@ def test_renderer_current_action_compact_list_tool_call_non_dict():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "<TOOL_RECORD>" in text
+    assert "tool_record:" in text
 
 
 def test_context_manager_management_and_diagnostic_helpers():

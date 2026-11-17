@@ -1,0 +1,61 @@
+schema_version: '1.0'
+change:
+  change_id: IMPLICIT-OUTPUT-CAP-20261113
+  change_type: bugfix
+  bug_id: IMPLICIT-OUTPUT-CAP-20261113
+  title: Do not send an implicit completion cap for an absent output reserve
+  description: Separate the implicit internal context planning reserve from an explicitly
+    configured provider output cap.
+  observed_behavior: A missing default_output_reserve_tokens becomes max_tokens=4096
+    at dispatch and can exhaust reasoning before visible output.
+  expected_behavior: Omit the implicit wire cap when the resolved default reserve
+    is absent, preserving internal context accounting and explicit budgets.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Existing dispatch tests require snapshot caps but lack a null resolved
+      reserve end-to-end component variant.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - F-183
+    added: []
+    modified:
+    - F-171
+    retired: []
+  affected_cases:
+    existing:
+    - UT-SDK-AUTO-5DD3BD24C1EF4718
+    - UT-SDK-AUTO-9B9B36B05DA14338
+    - UT-SDK-AUTO-FD74C47E39BAE2FC
+    - UT-SDK-AUTO-2EBD3B18F61B382A
+    - UT-SDK-AUTO-C80B9042CCD2DE71
+    - UT-SDK-AUTO-85A0FBE8116B9F9A
+    - UT-SDK-AUTO-0704DCE86C3E5C77
+    added: []
+    modified:
+    - UT-SDK-AUTO-74430BEE8438F486
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Absent reserves omit only implicit wire caps
+    - Explicit budgets and legacy calls retain existing caps
+    - Fingerprint and caller-override rejection precede dispatch
+    - Empty reserve preserves context budgeting, compression, final-fit and overflow
+      recovery
+    test_selectors:
+    - test/sdk/core/models/test_implicit_output_cap.py
+    - test/sdk/core/models/test_openai_llm.py
+    - test/sdk/core/models/test_capacity_budget.py
+    - test/sdk/core/models/test_capacity_resolver.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    reason: Focused UT prove branch/error boundaries; the existing D1 adds actual
+      resolver-to-budget-to-adapter serialization evidence with a controlled HTTP
+      boundary.
+  notes: SPEC ../nexent-doc/docs/Developing/context-budget/request-budget-recovery/changes/implicit-output-cap/design.md.
+    No new D1; strengthen the existing component case and preserve all migrated Cases.
+    Reuse budget, fingerprint, compaction, overflow and migration D1 as adjacent context
+    regressions. No product HTTP/browser/deployment change, so D2-D5 are not selected.
+    Internal planning reserve is not a provider output guarantee when max_tokens is
+    omitted.

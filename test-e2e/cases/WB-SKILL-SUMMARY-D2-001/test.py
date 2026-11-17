@@ -31,17 +31,27 @@ def test_skill_mount_summary_http_contract(monkeypatch):
         config_schemas=[{"name": "region", "required": True, "type": "string"}],
         config_values={"region": "west"}, content="instructions " * 10000, tool_ids=[9],
     ) for index in (1, 2)]
-    calls = {"full": 0, "mount": 0}
+    calls = {"full": 0, "mount": 0, "tools": 0}
 
     def authorize(value):
         if value != "Bearer fixture-session":
             raise HTTPException(status_code=401, detail="Unauthorized")
         return "viewer", "tenant-a"
 
-    def full_list(tenant_id):
+    def full_list(tenant_id, *, include_tool_ids=True, include_content=True):
         assert tenant_id == "tenant-a"
         calls["full"] += 1
-        return deepcopy(rows)
+        excluded = set()
+        if not include_tool_ids:
+            excluded.add("tool_ids")
+        if not include_content:
+            excluded.add("content")
+        return [{key: deepcopy(value) for key, value in row.items() if key not in excluded} for row in rows]
+
+    def tool_relations(skill_ids):
+        assert skill_ids == [1], "Only visible skills may load tool associations"
+        calls["tools"] += 1
+        return {1: [9]}
 
     def mount_list(tenant_id):
         assert tenant_id == "tenant-a"
@@ -51,6 +61,7 @@ def test_skill_mount_summary_http_contract(monkeypatch):
     monkeypatch.setattr(skill_api, "get_current_user_id", authorize)
     monkeypatch.setattr(skill_api, "resource_read_tenant", lambda request, shared: None)
     monkeypatch.setattr(skill_service.skill_db, "list_skills", full_list)
+    monkeypatch.setattr(skill_service.skill_db, "get_tool_ids_by_skill_ids", tool_relations)
     monkeypatch.setattr(skill_service.skill_db, "list_skill_mount_summaries", mount_list)
     monkeypatch.setattr(skill_service, "_get_user_role", lambda user_id: "USER")
     monkeypatch.setattr(skill_service, "query_group_ids_by_user", lambda user_id: [])
@@ -73,11 +84,17 @@ def test_skill_mount_summary_http_contract(monkeypatch):
         assert server.started
         with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
             headers = {"Authorization": "Bearer fixture-session"}
-            full = client.get("/skills", headers=headers)
+            default = client.get("/skills", headers=headers)
+            full = client.get("/skills", params={"include_content": "true"}, headers=headers)
             summary = client.get("/skills", params={"view": "mount"}, headers=headers)
-            assert full.status_code == summary.status_code == 200
-            assert calls == {"full": 1, "mount": 1}
+            summary_with_content = client.get(
+                "/skills", params={"view": "mount", "include_content": "true"}, headers=headers
+            )
+            assert default.status_code == full.status_code == summary.status_code == summary_with_content.status_code == 200
+            assert calls == {"full": 2, "mount": 2, "tools": 2}
             full_rows, mount_rows = full.json()["skills"], summary.json()["skills"]
+            assert default.json()["skills"] == [{key: value for key, value in row.items() if key != "content"} for row in full_rows]
+            assert summary_with_content.json()["skills"] == mount_rows
             assert [row["skill_id"] for row in mount_rows] == [1]
             assert mount_rows == [{key: value for key, value in row.items() if key not in {"content", "tool_ids"}} for row in full_rows]
             assert mount_rows[0]["config_values"] == {"region": "west"}

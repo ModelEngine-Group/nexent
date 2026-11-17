@@ -3919,3 +3919,31 @@ def test_list_published_agents_impl_model_not_found(monkeypatch):
     assert result[0]["model_ids"] == []
     assert result[0]["model_names"] == []
     assert result[0]["model_name"] is None
+
+
+@pytest.fixture(autouse=True)
+def batch_list_collaborators(monkeypatch):
+    """Keep legacy service assertions isolated from the new repository batch API."""
+    svc = agent_version_service_module
+    monkeypatch.setattr(svc, "query_version_lists", lambda ids, tenant: {
+        aid: svc.query_version_list(agent_id=aid, tenant_id=tenant) for aid in ids
+    })
+    monkeypatch.setattr(svc, "query_agent_snapshots", lambda versions, tenant: {
+        aid: svc.query_agent_snapshot(agent_id=aid, tenant_id=tenant, version_no=no)
+        for aid, no in versions.items()
+    })
+
+    class Context:
+        def model_cache(self):
+            return {}
+
+        def valid_model_ids(self, ids):
+            return svc.get_valid_model_ids(ids, current_tenant[0])
+
+    current_tenant = [None]
+
+    def context(agents, tenant):
+        current_tenant[0] = tenant
+        return Context()
+
+    monkeypatch.setattr(svc, "load_agent_list_context", context)

@@ -24,6 +24,7 @@ from contracts.identity import (
     InvitationUpdateRequest,
 )
 from gateway.authentication.auth import get_current_user_id
+from management.utils.managed_read import managed_read
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.invitations import (
@@ -42,7 +43,8 @@ router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
 @router.post("/list")
-async def list_invitations_endpoint(
+@managed_read
+def list_invitations_endpoint(
     request: InvitationListRequest, authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """

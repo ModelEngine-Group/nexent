@@ -512,6 +512,23 @@ def search_tools_for_sub_agent(agent_id, tenant_id, version_no: int = 0):
         return tools_list
 
 
+def query_agent_tools_for_list(agent_ids: List[int], tenant_id: str):
+    """Load draft tool instances and definitions for list availability in two reads."""
+    if not agent_ids:
+        return [], {}
+    with get_db_session() as session:
+        instances = session.query(ToolInstance).filter(
+            ToolInstance.agent_id.in_(agent_ids),
+            ToolInstance.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+            ToolInstance.version_no == 0,
+            ToolInstance.delete_flag != "Y",
+            ToolInstance.enabled,
+        ).all()
+        tool_ids = {row.tool_id for row in instances}
+        definitions = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(tool_ids)).all() if tool_ids else []
+        return [as_dict(row) for row in instances], {row.tool_id: as_dict(row) for row in definitions}
+
+
 def check_tool_is_available(tool_id_list: List[int]):
     """
     Check if the tool is available

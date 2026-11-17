@@ -4,8 +4,8 @@
 
 Covers the V2 ``context_budget_snapshot`` field rename from the legacy
 ``safe_input_budget_snapshot`` across serialization, parse validation, and the
-trusted provider dispatch boundary. Pure in-memory tests; no network, no real
-model, no production credentials.
+trusted provider dispatch boundary. In-memory and controlled HTTP-transport tests; no external network, real
+model or production credentials.
 """
 from __future__ import annotations
 
@@ -265,3 +265,63 @@ def test_w2_context_budget_snapshot_rename_and_dispatch_boundary():
     assert attrs["context.compaction_target_tokens"] == trace_snapshot["compaction_target_tokens"]
     assert attrs["w2.requested_output_tokens"] == trace_snapshot["requested_output_tokens"]
     assert OpenAIModel._context_budget_trace_attributes(None) == {}
+
+
+@pytest.mark.case_id("UT-SDK-AUTO-74430BEE8438F486")
+@pytest.mark.stage("D1")
+@pytest.mark.parametrize("default_reserve", [None, 4096, 8192])
+def test_implicit_output_budget_preserves_context_and_wire_contract(default_reserve):
+    """Compose real capacity, Agent and dispatch contracts at a controlled HTTP boundary."""
+    import json
+
+    import httpx
+    from openai import OpenAI
+
+    from nexent.core.models.capacity_budget import CapacityReservePolicy, ContextBudgetCalculator
+    from nexent.core.models.capacity_resolver import resolve_capacity
+
+    overrides = {"context_window_tokens": 32768, "max_output_tokens": 16384}
+    if default_reserve is not None:
+        overrides["default_output_reserve_tokens"] = default_reserve
+    capacity = resolve_capacity(model_id="gpt-4o-mini", provider="openai", capability_profiles={},
+                                operator_overrides=overrides)
+    budget = ContextBudgetCalculator().calculate_context_budget(
+        capacity_snapshot=capacity, reserve_policy=CapacityReservePolicy()
+    )
+    agent = _make_agent_config(budget.model_dump())
+    parsed = parse_context_budget_snapshot(agent.model_dump()["context_budget_snapshot"])
+    reserve = 4096 if default_reserve is None else default_reserve
+    assert parsed.requested_output_tokens == reserve
+    assert parsed.effective_input_limit_tokens == 32768 - reserve
+    assert parsed.compaction_trigger_threshold_tokens == int((32768 - reserve) * 0.8)
+    assert parsed.compaction_target_tokens == int((32768 - reserve) * 0.6)
+    assert parsed.uncertainty_reserve_tokens > 0
+    assert parsed.fingerprint == budget.fingerprint
+    captured = []
+
+    def provider(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "id": "fixture-completion", "object": "chat.completion", "created": 0,
+            "model": "gpt-4o-mini", "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+            ],
+        })
+
+    model = _bare_model()
+    model.context_budget_snapshot = parsed
+    projection = {"capacity_fingerprint": capacity.fingerprint, "provider": capacity.provider,
+                  "model_name": capacity.model_name, "default_output_reserve_tokens": default_reserve}
+    with OpenAI(api_key="fixture-only", base_url="http://provider.invalid/v1",
+                http_client=httpx.Client(transport=httpx.MockTransport(provider))) as client:
+        model.client = client
+        response = model._dispatch_chat_completion(
+            context_budget_snapshot=model.context_budget_snapshot, capacity_snapshot=projection,
+            model="gpt-4o-mini", messages=[{"role": "user", "content": "hello"}],
+        )
+    assert response.choices[0].message.content == "ok" and len(captured) == 1
+    if default_reserve is None:
+        assert "max_tokens" not in captured[0]
+    else:
+        assert captured[0]["max_tokens"] == default_reserve
+    assert model.context_budget_snapshot == parsed

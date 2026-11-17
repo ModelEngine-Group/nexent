@@ -1,20 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run-scoped aggregation for one evidence record per agent loop."""
 
 from __future__ import annotations
 
-import json
-import logging
-from dataclasses import asdict, replace
+from dataclasses import replace
 from threading import Lock
 
 from ...context_runtime.contracts import ContextEvidence
 
 
-logger = logging.getLogger("context_evidence")
-
-
 class ContextEvidenceCollector:
-    """Collect internal model-call snapshots and emit one final loop record."""
+    """Collect internal model-call snapshots into one final loop record."""
 
     def __init__(self) -> None:
         self._lock = Lock()
@@ -79,17 +75,6 @@ class ContextEvidenceCollector:
                     model_call_count=len(self._calls),
                     loop_status=status,
                 )
-            payload = asdict(self._finalized)
-        logger.info(
-            "Agent loop context evidence:\n%s",
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                default=str,
-                indent=2,
-                sort_keys=True,
-            ),
-        )
         return self._finalized
 
     @property

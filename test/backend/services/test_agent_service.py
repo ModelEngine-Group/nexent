@@ -18531,3 +18531,28 @@ async def test_import_agent_with_skills_rejects_parameters_before_dependency_wri
         await management.import_agent_with_skills_impl(snapshot, [], AuthenticatedIdentity('user', 'tenant'))
     skill_service.assert_not_called()
     import_agents.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def batch_list_read_boundary(monkeypatch):
+    """Retain standalone projection assertions with isolated batch collaborators."""
+    from management.services.agent import read as read_service
+
+    class Context:
+        tools = {}
+        definitions = {}
+        models = {}
+
+        def model_cache(self):
+            return {}
+
+        def valid_model_ids(self, ids):
+            return read_service.get_valid_model_ids(ids, current_tenant[0])
+
+    current_tenant = [None]
+
+    def context(agents, tenant):
+        current_tenant[0] = tenant
+        return Context()
+
+    monkeypatch.setattr(agent_management, "load_agent_list_context", context)
