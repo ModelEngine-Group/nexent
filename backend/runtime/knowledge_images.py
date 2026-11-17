@@ -2,37 +2,41 @@
 """Actor-bound KB image sources using the shared Runtime CLIP/size decision."""
 
 import asyncio
-import base64
 import logging
 from time import monotonic
-from urllib.parse import urlsplit
 from uuid import uuid4
 
-from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
+from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.errors.exceptions import RuntimeUpstreamError
+from nexent.core.concurrency import get_current_thread_manager
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.concurrency.errors import ThreadManagerError
 from nexent.multi_modal.image_codec import decode_image_bytes
-from nexent.multi_modal.utils import parse_s3_url
-from nexent.storage.errors import DeadlineExceeded, StorageError
+from nexent.storage.errors import StorageError
 from nexent.storage.models import OperationContext
 from runtime.images import web_image_filter
-
-from infrastructure.file_processing.image_sources import read_object_image
-from infrastructure.object_storage.read_access import validate_s3_url_access
-from infrastructure.web_images import load_web_image
+from runtime.knowledge_base.content import KnowledgeContentReader
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeImageFilter:
-    def __init__(self, actor, *, selector=None):
+    def __init__(self, actor, client, *, selector=None):
         self.actor = actor
+        self.reader = KnowledgeContentReader(client, actor)
         self.selector = web_image_filter() if selector is None else selector
 
-    def __call__(self, urls, query, *, cancellation_scope=None):
+    def __call__(self, references, query, *, cancellation_scope=None):
         manager = get_current_thread_manager()
         if manager is None:
             raise RuntimeError("KB image filtering requires managed tool execution")
+        if any(
+            not isinstance(ref, KnowledgeContentRequest) or ref.image_ref is None
+            for ref in references
+        ):
+            raise ValueError(
+                "KB image filtering requires pinned file and image references"
+            )
 
         async def execute():
             loop, task = asyncio.get_running_loop(), asyncio.current_task()
@@ -40,39 +44,46 @@ class KnowledgeImageFilter:
             if cancellation_scope is not None:
                 if cancellation_scope.cancelled:
                     raise RunTerminated()
-                token = cancellation_scope.register_closer(lambda: loop.call_soon_threadsafe(task.cancel))
+                token = cancellation_scope.register_closer(
+                    lambda: loop.call_soon_threadsafe(task.cancel)
+                )
 
-            async def load(session, url):
-                if urlsplit(url).scheme.lower() != "s3":
-                    if url.startswith("data:image"):
-                        return decode_image_bytes(base64.b64decode(url.split(",", 1)[1]))
-                    return await load_web_image(session, url)
-                _, key = parse_s3_url(url)
-                validate_s3_url_access(key, self.actor.user_id, self.actor.tenant_id)
-                deadline = monotonic() + self.selector.image_seconds
+            decoded = set()
 
-                def read(cancel_event):
-                    context = OperationContext("kb-image-" + uuid4().hex, deadline, cancelled=cancel_event)
-                    return read_object_image(url, user_id=self.actor.user_id, tenant_id=self.actor.tenant_id,
-                                             role="runtime", context=context)
-
+            async def load(session, reference):
                 try:
-                    raw = await manager.run(
-                        "control-io", ManagedTaskSpec(task_name="kb-image-source", owner="runtime.knowledge",
-                                                      deadline_monotonic=deadline, pass_cancel_event=True), read,
+                    raw, _ = await self.reader.read(
+                        reference,
+                        context=OperationContext(
+                            "kb-image-" + uuid4().hex,
+                            monotonic() + self.selector.image_seconds,
+                        ),
                     )
-                except DeadlineExceeded as error:
-                    raise TimeoutError("KB image deadline exceeded") from error
-                except (StorageError, ThreadManagerError) as error:
-                    logger.info("knowledge_image_failed exception_type=%s", type(error).__name__)
+                except (
+                    RuntimeUpstreamError,
+                    StorageError,
+                    ThreadManagerError,
+                ) as error:
+                    logger.info(
+                        "knowledge_image_failed exception_type=%s", type(error).__name__
+                    )
                     return None
-                return decode_image_bytes(raw)
+                image = decode_image_bytes(raw)
+                decoded.add(id(reference))
+                return image
 
             try:
-                result = await self.selector._filter(urls, query, image_loader=load, event_prefix="knowledge_image")
+                result = await self.selector._filter(
+                    references, query, image_loader=load, event_prefix="knowledge_image"
+                )
                 if cancellation_scope is not None and cancellation_scope.cancelled:
                     raise RunTerminated()
-                return result
+                # Preserve the existing all-empty importance behavior only for verified inputs.
+                return (
+                    result
+                    if result
+                    else [ref for ref in references if id(ref) in decoded]
+                )
             except asyncio.CancelledError:
                 if cancellation_scope is not None and cancellation_scope.cancelled:
                     raise RunTerminated() from None

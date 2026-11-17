@@ -70,7 +70,8 @@ def test_typed_image_and_file_metadata_are_kept_in_search_event():
     tool = KnowledgeBaseSearchTool(index_names=["kb"])
     ref = {"space": "files", "key": "images/a.png", "version": "v1", "sha256": "a" * 64}
     tool.searcher = lambda **kwargs: {"results": [{"content": "image", "filename": "image.png", "score": .5,
-                                                  "image_ref": ref, "file_ref": {"file_id": "f" * 32}}]}
+                                                  "image_ref": ref, "file_ref": {"knowledge_id": 1, "file_id": "f" * 32, "file_version": 0}}]}
+    tool.image_filterer = lambda refs, *args, **kwargs: refs
     tool.observer = SimpleNamespace(add_message=lambda *event: events.append(event))
     assert "image" in tool.forward("query")
     content, = [event for event in events if event[1] == ProcessType.SEARCH_CONTENT]

@@ -13,5 +13,5 @@ feature:
   - rule_id: DPR-WEB-IMAGE-RULE-02
     description: Runtime owns bounded image reads and decisions in the current managed tool worker and closes resources.
   - rule_id: DPR-WEB-IMAGE-RULE-03
-    description: KB search preserves scope, references and existing empty-filter events while using Runtime-owned scoped S3 and inline sources without the old task HTTP adapter.
+    description: KB search preserves scope and citation identities using signed versioned file/image grants and Runtime read-only ObjectStore. Existing all-empty importance behavior applies only to verified images; rejected or timed-out images cannot be restored. KB URL/inline inputs are retired; web tools retain their independent web-source contract.
   required_test_stages: [D3]

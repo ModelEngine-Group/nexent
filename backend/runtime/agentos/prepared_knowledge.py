@@ -130,7 +130,7 @@ def _materialize_knowledge_search_tool(binding, actor, catalog_name):
         **binding.description.model_dump(),
         params=binding.model_dump(include={"index_names", "top_k", "search_mode"}),
         metadata={
-            "image_filterer": KnowledgeImageFilter(actor),
+            "image_filterer": KnowledgeImageFilter(actor, service.client),
             "allowed_index_names": allowed,
             "display_name_to_index_map": binding.display_name_to_index,
             "knowledge_searcher": RuntimeKnowledgeTool(backend, rerank_model=(

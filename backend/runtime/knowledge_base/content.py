@@ -3,6 +3,8 @@
 
 import asyncio
 import logging
+from dataclasses import replace
+from threading import Event
 
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
@@ -17,6 +19,12 @@ class KnowledgeContentReader:
         self.client, self.actor = client, actor
 
     async def read(self, request, *, context):
+        owned_cancel = Event() if context.cancelled is None else None
+        read_context = (
+            replace(context, cancelled=owned_cancel)
+            if owned_cancel is not None
+            else context
+        )
         try:
             async with asyncio.timeout(context.remaining()):
                 grant = await self.client.authorize_knowledge_content(
@@ -37,7 +45,7 @@ class KnowledgeContentReader:
                     read_knowledge_content,
                     self.actor,
                     grant,
-                    context=context,
+                    context=read_context,
                     lane="control-io",
                     owner="runtime.knowledge_base",
                 )
@@ -55,3 +63,6 @@ class KnowledgeContentReader:
                 type(error).__name__,
             )
             raise TimeoutError("Knowledge content deadline exceeded") from error
+        finally:
+            if owned_cancel is not None:
+                owned_cancel.set()

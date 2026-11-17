@@ -46,7 +46,10 @@ async def test_reader_rechecks_grant_and_reuses_caller_deadline(setup):
     service, request, _, client, read = setup
     context = OperationContext("read", monotonic() + 1)
     assert await service.read(request, context=context) == (b"content", "source.txt")
-    assert read.call_count == 1 and read.call_args.kwargs["context"] is context
+    assert read.call_count == 1
+    bound = read.call_args.kwargs["context"]
+    assert bound.deadline == context.deadline and bound.operation_id == context.operation_id
+    assert bound.cancelled.is_set()
     assert client.authorize_knowledge_content.await_count == 2
     assert all(
         call.args == (request, "user", "tenant")

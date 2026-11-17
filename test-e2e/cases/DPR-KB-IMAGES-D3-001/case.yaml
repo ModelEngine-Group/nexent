@@ -6,7 +6,7 @@ case:
   feature_id: DPR-WEB-IMAGE
   requirement_ids: [DPR-004, DPR-006]
   business_rule_ids: [DPR-WEB-IMAGE-RULE-02, DPR-WEB-IMAGE-RULE-03]
-  title: Runtime KB tool emits images through actual HTTP and scoped object reads
+  title: Runtime KB tool emits versioned images through signed grants and scoped object reads
   type: INTEGRATION
   priority: P1
   status: active
@@ -15,35 +15,35 @@ case:
   preconditions:
   - Docker, cached MinIO and the configured Python dependencies are available.
   test_data:
-    resources: Owned MinIO, HTTP image listener and managed tool/control lanes.
-    fixtures: Large and small PNGs, owned and foreign attachment keys, controlled vector hits and a synthetic actor.
+    resources: Owned MinIO, signed AgentOS authorization HTTP listener and managed tool/control lanes.
+    fixtures: Large and small PNGs, invalid bytes, pinned object versions, controlled standard search hits, grant decisions and a synthetic actor.
     execution: Image filtering is explicitly disabled for CLIP, retaining the real size gate; native CLIP is a separate D5 regression.
   steps:
   - order: 1
-    action: Run the actual KB SDK forward on its managed tool lane with HTTP, S3 and inline image hits and a restricted document list.
-    expected: Search/citation output and ordered image events include permitted large images; small and document-filtered images are excluded.
+    action: Run the actual Runtime KB tool forward on its managed lane with versioned image/file hits and a restricted configured KB scope. Read image bytes using signed content grants and the Runtime ObjectStore.
+    expected: Search/citation output retains the configured KB scope and stable indices; images_ref contains only the permitted large image and its exact file/image identity.
   - order: 2
-    action: Include a foreign attachment and invalid source in the same result set and observe actual image requests.
-    expected: No foreign image is read or emitted; invalid images are omitted and no task endpoint is called.
+    action: Include a rejected file reference and invalid image bytes in the same result set and observe real signed grants and object reads.
+    expected: The rejected file has no object read or image event. Every allowed object has one byte read and exactly two grants for authorization before and after reading; invalid images are omitted and no task endpoint is called.
   - order: 3
     action: Close HTTP clients/listener, drain tool/control workers and remove only the owned MinIO resources.
     expected: No owned resources remain and original source objects were not deleted during filtering.
   expected_results:
-  - Actual SDK response and observer projection preserve document scope and citation numbering with the local Runtime filter.
-  - Source reads enforce the existing owner guard and exact ObjectStore while keeping failure behavior local and bounded.
+  - Actual Runtime tool response and observer projection preserve configured scope, typed image identities and citation numbering with the local Runtime filter.
+  - Source reads enforce signed file grants and exact versioned ObjectStore bindings while keeping rejection local, bounded and without replay.
   - Owned resources close without old service traffic or source mutation.
   forbidden_side_effects:
   - No application data, model provider, arbitrary filesystem path, old task endpoint, retry or unscoped object access.
   integration_boundary:
-  - Real SDK tool, Runtime image filter, ThreadManager, Infrastructure HTTP/ObjectStore and owned MinIO.
-  - Search hits and actor identity are controlled fixtures; vector query semantics, Gateway signatures and historical KB ACL are not proved here.
+  - Real Runtime tool, content reader, image filter, ThreadManager, AgentOS signatures, Infrastructure ObjectStore and owned MinIO.
+  - Search hits, grant policy and actor identity are controlled fixtures; vector query semantics, Gateway signatures and Management PG authorization are not proved here. DPR-KB-WORKER-D3-001 proves the production PG content policy separately.
   observations:
   - SDK search/citation response, picture_web payload, actual HTTP requests, scoped source presence and managed cleanup.
   cleanup:
   - Stop owned listener and handlers, drain both lanes and remove only unique-label MinIO resources.
   acceptance:
   - id: AC-01
-    description: Real SDK forward preserves document scope and image/reference projection.
+    description: Real Runtime tool forward preserves configured KB scope and typed image/reference projection.
     steps: [1]
     expected_results: [1]
     forbidden_side_effects: [1]

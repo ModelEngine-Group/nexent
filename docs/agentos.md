@@ -140,7 +140,9 @@ FileCleanse 的 submit、inspect、cancel、release 分别位于 `/internal/agen
 
 文本清洗执行链已经迁移。通用SDK加载器原有MinIO调用、历史附件及共享知识库的旧URL权限策略仍需后续整改；当前没有扩大读取范围，不能据此声称StorageInterface全覆盖或data-process完整退役。
 
-KB 搜索图片由 Runtime 在知识工具绑定恢复后注入本地 image_filterer，并传入当前运行的取消 scope。尺寸与 CLIP 判定复用网页工具的 Runtime 实例，S3 使用 Runtime 角色的单键只读 ObjectStore。该过程在 Runtime 内执行，不增加 AgentOS HTTP 操作；索引和文档范围、引用编号及原有图片事件格式保持。SDK 的旧图片 HTTP 适配和旧服务图片路由均已删除。
+KB 搜索图片由 Runtime 注入本地 image_filterer，并传入当前运行的取消 scope。筛选只接受 KnowledgeContentRequest，经 AgentOS authorize-content 获取实时授权，再通过单键、单版本只读 ObjectStore 读取。旧 KB URL/inline 读取和对象 ACL 直查已经移除，网页工具仍使用自己的网页图片读取能力。每张图沿用两秒总预算及原尺寸/CLIP 判定；取消会终止活动请求并向本次拥有的存储 worker 发出取消信号。
+
+KB 的 PICTURE_WEB 返回 images_url 空数组及 images_ref 列表，每项保存 file_ref、image_ref、cite_index 和 tool_sign。原先筛选全空时展示原图的行为仅应用于本次成功授权并解码的图片，撤权/超时引用不能被恢复。前端与历史来源记录仍需接入新字段，本轮不能视作完整图片展示迁移。
 
 ## Memory 与反向回调
 

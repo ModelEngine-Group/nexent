@@ -31,7 +31,7 @@ change:
     - test/sdk/core/agents/test_nexent_agent.py
     - test/sdk/multi_modal/test_image_codec.py
     - test/sdk/multi_modal/test_image_filter.py
-    - test/backend/services/test_knowledge_image_filter.py
+    - test/backend/services/test_knowledge_reference_images.py
     - test/backend/services/test_web_image_filter.py
     - test/backend/services/test_image_sources.py
     - test/backend/services/test_image_content.py

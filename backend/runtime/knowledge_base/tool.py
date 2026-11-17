@@ -3,6 +3,7 @@ import json
 import logging
 from typing import List, Optional
 
+from contracts.agentos_knowledge import KnowledgeContentRequest
 from contracts.knowledge_tool import knowledge_tool_info
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.utils.pydantic_utils import unwrap_field_info
@@ -49,9 +50,7 @@ class KnowledgeBaseSearchTool(Tool):
         top_k: int = Field(
             description="Maximum number of search results", default=3, ge=1, le=100
         ),
-        index_names: List[str] = Field(
-            description="The list of index names to search"
-        ),
+        index_names: List[str] = Field(description="The list of index names to search"),
         search_mode: str = Field(
             description="the search mode, optional values: hybrid, accurate, semantic",
             default="hybrid",
@@ -61,12 +60,16 @@ class KnowledgeBaseSearchTool(Tool):
         ),
         display_name_to_index_map: dict = Field(
             description="Mapping from display_name (knowledge_name) to index_name",
-            default_factory=dict, exclude=True),
+            default_factory=dict,
+            exclude=True,
+        ),
         # Defense-in-depth whitelist populated by the backend when it builds the ToolConfig.
         # If set, forward() will silently drop any index_name not in this list so that even
         # a fabricated LLM argument cannot reach a KB the chatting user is not allowed to read.
         allowed_index_names: Optional[List[str]] = Field(
-            description="Internal: read-permission whitelist for index_names", default=None, exclude=True,
+            description="Internal: read-permission whitelist for index_names",
+            default=None,
+            exclude=True,
         ),
     ):
         """Initialize the KBSearchTool.
@@ -89,7 +92,9 @@ class KnowledgeBaseSearchTool(Tool):
         self.image_filterer = None
         self.cancellation_scope = None
         self.searcher = None
-        self.display_name_to_index_map = unwrap_field_info(display_name_to_index_map) or {}
+        self.display_name_to_index_map = (
+            unwrap_field_info(display_name_to_index_map) or {}
+        )
         # `allowed_index_names` is `exclude=True`; unwrap in case smolagents passed FieldInfo.
         raw_allowed = unwrap_field_info(allowed_index_names)
         self._allowed_index_names: Optional[set] = (
@@ -170,9 +175,7 @@ class KnowledgeBaseSearchTool(Tool):
             scope_was_specified,
         )
 
-    def _resolve_search_scope(
-        self, index_names: Optional[List[str]]
-    ):
+    def _resolve_search_scope(self, index_names: Optional[List[str]]):
         configured_scope = self._convert_to_index_names(list(self.index_names))
         if self._allowed_index_names is not None:
             available_scope = [
@@ -227,8 +230,12 @@ class KnowledgeBaseSearchTool(Tool):
             search_index_names,
         )
 
-        kb_search_data = self._run_search(query=query, index_names=search_index_names,
-                                          search_mode=search_mode, top_k=self.top_k)
+        kb_search_data = self._run_search(
+            query=query,
+            index_names=search_index_names,
+            search_mode=search_mode,
+            top_k=self.top_k,
+        )
         kb_search_results = kb_search_data["results"]
 
         if not kb_search_results:
@@ -249,14 +256,14 @@ class KnowledgeBaseSearchTool(Tool):
         (
             search_results_json,
             search_results_return,
-            images_list_url,
+            image_references,
         ) = self._build_search_results(kb_search_results)
 
         self.record_ops += len(search_results_return)
 
         self._record_search_results(
             search_results_json=search_results_json,
-            images_list_url=images_list_url,
+            image_references=image_references,
             query=query,
         )
 
@@ -277,11 +284,20 @@ class KnowledgeBaseSearchTool(Tool):
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
         )
 
-    def _run_search(self, query: str, index_names: List[str], search_mode: str, top_k: int):
+    def _run_search(
+        self, query: str, index_names: List[str], search_mode: str, top_k: int
+    ):
         if not callable(self.searcher):
-            raise RuntimeError("Runtime knowledge search requires its bound standard backend")
-        return self.searcher(query=query, index_names=index_names, search_mode=search_mode, top_k=top_k,
-                             cancellation_scope=self.cancellation_scope)
+            raise RuntimeError(
+                "Runtime knowledge search requires its bound standard backend"
+            )
+        return self.searcher(
+            query=query,
+            index_names=index_names,
+            search_mode=search_mode,
+            top_k=top_k,
+            cancellation_scope=self.cancellation_scope,
+        )
 
     @staticmethod
     def _normalize_source_type(source_type: str) -> str:
@@ -290,7 +306,7 @@ class KnowledgeBaseSearchTool(Tool):
     def _build_search_results(self, kb_search_results):
         search_results_json = []
         search_results_return = []
-        images_list_url = []
+        image_references = []
 
         for index, single_search_result in enumerate(kb_search_results):
             source_type = self._normalize_source_type(
@@ -313,34 +329,32 @@ class KnowledgeBaseSearchTool(Tool):
                 tool_sign=self.tool_sign,
             )
 
-            image_url = self._extract_image_url(single_search_result)
-            if image_url:
-                images_list_url.append(image_url)
-
             stored = search_result_message.to_dict()
             for field in ("file_ref", "image_ref", "location"):
                 if field in single_search_result:
                     stored[field] = single_search_result[field]
+            if single_search_result.get("image_ref") is not None:
+                reference = KnowledgeContentRequest(
+                    **single_search_result["file_ref"],
+                    image_ref=single_search_result["image_ref"],
+                )
+                image_references.append(
+                    {
+                        "file_ref": reference.model_dump(exclude={"image_ref"}),
+                        "image_ref": reference.image_ref.model_dump(),
+                        "cite_index": self.record_ops + index,
+                        "tool_sign": self.tool_sign,
+                    }
+                )
             search_results_json.append(stored)
             search_results_return.append(search_result_message.to_model_dict())
 
-        return search_results_json, search_results_return, images_list_url
-
-    @staticmethod
-    def _extract_image_url(single_search_result):
-        if single_search_result.get("process_source") != "UniversalImageExtractor":
-            return None
-        try:
-            meta_data = json.loads(single_search_result.get("content"))
-        except (json.JSONDecodeError, TypeError):
-            logger.error("Failed to parse image metadata")
-            return None
-        return meta_data.get("image_url", None)
+        return search_results_json, search_results_return, image_references
 
     def _record_search_results(
         self,
         search_results_json: List[dict],
-        images_list_url: List[str],
+        image_references: List[dict],
         query: str,
     ) -> None:
         if not self.observer:
@@ -349,22 +363,42 @@ class KnowledgeBaseSearchTool(Tool):
         search_results_data = json.dumps(search_results_json, ensure_ascii=False)
         self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
 
-        if not images_list_url:
+        if not image_references:
             return
 
-        filtered_images = images_list_url
         image_filter = self.image_filterer
-        if callable(image_filter):
-            try:
-                maybe_filtered = image_filter(images_list_url, query, cancellation_scope=self.cancellation_scope)
-                if maybe_filtered:
-                    filtered_images = maybe_filtered
-            except Exception as e:
-                logger.warning("knowledge_image_filter_failed exception_type=%s", type(e).__name__)
+        if not callable(image_filter):
+            raise RuntimeError(
+                "Runtime knowledge images require their bound content reader"
+            )
+        references = [
+            KnowledgeContentRequest(**image["file_ref"], image_ref=image["image_ref"])
+            for image in image_references
+        ]
+        try:
+            selected = image_filter(
+                references, query, cancellation_scope=self.cancellation_scope
+            )
+        except Exception as error:
+            logger.warning(
+                "knowledge_image_filter_failed exception_type=%s", type(error).__name__
+            )
+            return
+        if not isinstance(selected, list) or any(
+            ref not in references for ref in selected
+        ):
+            raise ValueError(
+                "Knowledge image selection exceeds the retrieved file scope"
+            )
+        filtered_images = [
+            image
+            for image, ref in zip(image_references, references, strict=True)
+            if ref in selected
+        ]
 
         if filtered_images:
             search_images_list_json = json.dumps(
-                {"images_url": filtered_images}, ensure_ascii=False
+                {"images_url": [], "images_ref": filtered_images}, ensure_ascii=False
             )
             self.observer.add_message(
                 "", ProcessType.PICTURE_WEB, search_images_list_json

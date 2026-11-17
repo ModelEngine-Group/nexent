@@ -15,7 +15,7 @@ import pytest
 def test_knowledge_images(record_property):
     run_id = uuid4().hex
     try:
-        result = subprocess.run([sys.executable, str(Path(__file__).with_name("probe.py")), run_id],
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("reference_probe.py")), run_id],
                                 capture_output=True, text=True, timeout=80, check=False)
     finally:
         matches = subprocess.check_output(["docker", "ps", "-aq", "--filter", "label=nexent.test_run=" + run_id],
@@ -26,6 +26,6 @@ def test_knowledge_images(record_property):
                                            text=True, timeout=15).strip()
     assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads(result.stdout.splitlines()[-1])
-    for key in ("sdk_projection", "owner_scope", "http_once", "source_preserved", "workers_reclaimed", "owned_cleanup"):
+    for key in ("sdk_projection", "owner_scope", "bounded_grants", "source_preserved", "workers_reclaimed", "owned_cleanup"):
         assert evidence[key] is True
     record_property("knowledge_images", json.dumps(evidence, sort_keys=True))

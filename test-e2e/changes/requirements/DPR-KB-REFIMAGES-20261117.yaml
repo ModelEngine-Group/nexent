@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-REFIMAGES-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Consume versioned knowledge images through AgentOS
+  description: Replace Runtime KB URL/inline image reads with pinned content grants, preserve verified image selection and citation events, and retire the obsolete image URL parser. Management source persistence and browser consumption remain subsequent batch-two work.
+  affected_features:
+    existing: [DPR-WEB-IMAGE, DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-WEB-IMAGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-IMAGES-D3-001, DPR-KB-WORKER-D3-001, DPR-WEB-IMAGE-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: []
+    modified: [DPR-KB-IMAGES-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - KB image inputs require fixed file/image versions and no longer accept URL or inline strings.
+    - Signed content reads retain one deadline, close decoded images and signal owned worker cancellation.
+    - Existing all-empty importance behavior only restores successfully authorized and decoded images; rejected and timed-out inputs remain absent.
+    - Search and picture events retain typed references, citation numbering and configured KB scope without the legacy image URL parser.
+    reason: Existing URL-based UT move to reference-input tests while retaining ownership, close and cancellation assertions. The existing image D3 migrates its obsolete VDB fixture to a standard callback and adds real signed grants and versioned MinIO reads. Worker D3 separately proves PG policy and file-scoped query behavior; web D3 retains external URL coverage. Cases own labelled containers/listeners and drain workers in finally; no duplicate formal D1 is introduced.
+    test_selectors:
+    - test/backend/services/test_knowledge_reference_images.py
+    - test/backend/services/test_knowledge_image_injection.py
+    - test/backend/services/test_knowledge_content_reader.py
+    - test/backend/services/test_runtime_knowledge_tool_scope.py
+    - test/backend/services/test_runtime_knowledge_tool.py
+    - test/backend/app/test_agentos_prepared_knowledge.py
+    - test/backend/services/test_knowledge_tool_search.py
