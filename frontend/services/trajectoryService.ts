@@ -33,17 +33,22 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
-  cleanupSchedule: (tenantId: string, signal?: AbortSignal) =>
+  cleanupSchedule: (
+    tenantId?: string,
+    signal?: AbortSignal,
+    allTenants = false
+  ) =>
     read<CleanupSchedule>(
       queryUrl(API_ENDPOINTS.trajectory.cleanupSchedule, {
-        tenant_id: tenantId,
+        ...(allTenants ? { all_tenants: true } : { tenant_id: tenantId }),
       }),
       signal
     ),
   async saveCleanupSchedule(
-    tenantId: string,
+    tenantId: string | undefined,
     policy: Pick<CleanupSchedule, "enabled" | "retention_days">,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    allTenants = false
   ): Promise<CleanupSchedule> {
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.trajectory.cleanupSchedule,
@@ -51,7 +56,7 @@ export const trajectoryService = {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tenant_id: tenantId,
+          ...(allTenants ? { all_tenants: true } : { tenant_id: tenantId }),
           enabled: policy.enabled,
           retention_days: policy.retention_days,
         }),
@@ -132,7 +137,8 @@ export const trajectoryService = {
   async cleanup(
     beforeDays: number,
     cursor?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    tenantId?: string
   ): Promise<CleanupResult> {
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.trajectory.cleanup,
@@ -141,6 +147,7 @@ export const trajectoryService = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           before_days: beforeDays,
+          ...(tenantId ? { tenant_id: tenantId } : {}),
           ...(cursor ? { cursor } : {}),
         }),
         signal,

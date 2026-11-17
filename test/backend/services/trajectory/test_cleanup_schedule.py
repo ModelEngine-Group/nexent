@@ -2,11 +2,13 @@
 """Tenant cleanup settings validation, authorization and persistence boundaries."""
 
 import pytest
+from pydantic import ValidationError
+
+# isort: split
 from contracts.trajectory import CleanupScheduleRequest
 from ops.services.trajectory import cleanup_schedule as schedule
 from ops.services.trajectory.access import Actor
 from ops.services.trajectory.primitives import QueryError
-from pydantic import ValidationError
 
 
 @pytest.fixture
@@ -134,3 +136,59 @@ def test_su_can_configure_only_authorized_tenants(repository):
     with pytest.raises(QueryError) as raised:
         schedule.read_schedule(actor, "unknown")
     assert raised.value.status == 404
+
+
+def test_su_reads_mixed_scope_and_atomically_synchronizes_all_tenants(repository):
+    actor = Actor("operator", "tenant", "SU")
+    repository.read_all.return_value = {
+        "tenant": {"enabled": True, "retention_days": 1},
+        "other": {"enabled": False, "retention_days": 30},
+    }
+    result = schedule.read_schedule(actor, all_tenants=True)
+    assert result["mixed"] and result["all_tenants"]
+    assert result["tenant_id"] is None and result["tenant_count"] == 2
+    saved = schedule.save_schedule(actor, True, 7, all_tenants=True)
+    repository.save_many.assert_called_once_with(
+        ["tenant", "other"], {"enabled": True, "retention_days": 7}, "operator"
+    )
+    repository.save.assert_not_called()
+    assert not saved["mixed"] and saved["tenant_count"] == 2
+
+
+def test_su_reads_equal_effective_policies_including_defaults(repository, mocker):
+    mocker.patch.object(schedule.config, "TRAJECTORY_CLEANUP_ENABLED", False)
+    mocker.patch.object(schedule.config, "TRAJECTORY_RETENTION_DAYS", 30)
+    repository.read_all.return_value = {"tenant": {"enabled": False, "retention_days": 30}}
+    result = schedule.read_schedule(Actor("su", "tenant", "SU"), all_tenants=True)
+    assert not result["mixed"] and result["retention_days"] == 30 and not result["enabled"]
+
+
+@pytest.mark.parametrize("role", ["OPS", "ADMIN", "USER"])
+def test_only_su_can_read_or_write_all_tenants(repository, role):
+    actor = Actor("actor", "tenant", role)
+    for operation in [
+        lambda: schedule.read_schedule(actor, all_tenants=True),
+        lambda: schedule.save_schedule(actor, True, 7, all_tenants=True),
+    ]:
+        with pytest.raises(QueryError) as raised:
+            operation()
+        assert raised.value.status == 403
+    repository.read_all.assert_not_called()
+    repository.save_many.assert_not_called()
+
+
+def test_all_tenant_scope_cannot_be_combined_with_one_tenant():
+    with pytest.raises(ValidationError):
+        CleanupScheduleRequest(enabled=True, retention_days=7, tenant_id="tenant", all_tenants=True)
+
+
+def test_revoked_su_and_storage_failure_never_report_global_save_success(repository):
+    actor = Actor("su", "tenant", "SU")
+    schedule.TrajectoryCatalog.return_value.actor_active.return_value = False
+    with pytest.raises(QueryError):
+        schedule.save_schedule(actor, True, 7, all_tenants=True)
+    repository.save_many.assert_not_called()
+    schedule.TrajectoryCatalog.return_value.actor_active.return_value = True
+    repository.save_many.side_effect = ConnectionError("unavailable")
+    with pytest.raises(ConnectionError):
+        schedule.save_schedule(actor, True, 7, all_tenants=True)

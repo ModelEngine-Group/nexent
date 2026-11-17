@@ -144,3 +144,36 @@ def test_unauthorized_manual_request_does_not_cleanup_or_emit_accepted_audit(
         cleanup(service, ACTOR, 7)
     service.archive.store.cleanup.assert_not_called()
     assert audit_events(caplog) == []
+
+
+def test_su_manual_cleanup_uses_selected_tenant_and_binds_continuation(service, caplog):
+    actor = Actor("su", "tenant", "SU")
+    service.catalog.tenants.return_value = ["tenant", "other"]
+    service.catalog.cleanup_candidates.return_value[0]["tenant_id"] = "other"
+    service.archive.store.cleanup.return_value["next_turn"] = 2
+    first = cleanup(service, actor, 7, tenant_id="other")
+    service.catalog.cleanup_candidates.assert_called_once_with("other", 0, limit=1001)
+    assert audit_events(caplog)[0]["tenant_id"] == "other"
+    service.archive.store.cleanup.reset_mock()
+    with pytest.raises(QueryError):
+        cleanup(service, actor, 7, first["next_cursor"], tenant_id="tenant")
+    service.archive.store.cleanup.assert_not_called()
+    service.catalog.actor_active.return_value = False
+    with pytest.raises(QueryError):
+        cleanup(service, actor, 7, first["next_cursor"], tenant_id="other")
+    service.archive.store.cleanup.assert_not_called()
+
+
+@pytest.mark.parametrize("role,target", [("SU", None), ("OPS", "other"), ("SU", "unknown")])
+def test_manual_cleanup_requires_an_explicit_authorized_target(service, role, target):
+    with pytest.raises(QueryError):
+        cleanup(service, Actor("actor", "tenant", role), 7, tenant_id=target)
+    service.archive.store.cleanup.assert_not_called()
+    service.catalog.cleanup_candidates.assert_not_called()
+
+
+def test_manual_cleanup_rejects_a_candidate_outside_the_selected_scope(service):
+    service.catalog.cleanup_candidates.return_value[0]["tenant_id"] = "other"
+    with pytest.raises(QueryError):
+        cleanup(service, ACTOR, 7)
+    service.archive.store.cleanup.assert_not_called()

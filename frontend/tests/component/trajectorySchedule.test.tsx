@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "antd";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -33,7 +34,7 @@ function wrapper({ children }: { children: ReactNode }) {
         })
       }
     >
-      {children}
+      <App>{children}</App>
     </QueryClientProvider>
   );
 }
@@ -52,7 +53,7 @@ beforeEach(() => {
   api.cleanupSchedule.mockResolvedValue(policy);
   api.saveCleanupSchedule.mockImplementation(async (tenant, settings) => ({
     ...policy,
-    tenant_id: tenant,
+    tenant_id: tenant ?? null,
     ...settings,
   }));
 });
@@ -184,5 +185,79 @@ describe("tenant cleanup schedule", () => {
     const signal = api.saveCleanupSchedule.mock.calls[0][2];
     view.unmount();
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("SU cleanup schedule synchronization", () => {
+  function openAll() {
+    return render(
+      <CleanupScheduleDialog scope="su" allTenants onClose={vi.fn()} />,
+      { wrapper }
+    );
+  }
+
+  it("requires confirmation before syncing all tenants and preserves edits on cancel", async () => {
+    api.cleanupSchedule.mockResolvedValue({
+      ...policy,
+      tenant_id: null,
+      all_tenants: true,
+      mixed: true,
+      tenant_count: 2,
+    });
+    openAll();
+    const input = await screen.findByRole("spinbutton");
+    await waitFor(() =>
+      expect(screen.getByText("trajectory.scheduleMixed")).toBeVisible()
+    );
+    expect(api.cleanupSchedule).toHaveBeenCalledWith(
+      undefined,
+      expect.any(AbortSignal),
+      true
+    );
+    fireEvent.change(input, { target: { value: "7" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "trajectory.syncAllTenants" })
+      ).toBeVisible()
+    );
+    expect(api.saveCleanupSchedule).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(input).toHaveValue("7");
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "trajectory.syncAllTenants" })
+    );
+    await screen.findByText("trajectory.scheduleSynced");
+    expect(api.saveCleanupSchedule).toHaveBeenCalledWith(
+      undefined,
+      { enabled: true, retention_days: 7 },
+      expect.any(AbortSignal),
+      true
+    );
+  });
+
+  it("retains values when the all-tenant save fails", async () => {
+    api.saveCleanupSchedule.mockRejectedValueOnce({
+      code: "query_unavailable",
+    });
+    openAll();
+    const input = await screen.findByRole("spinbutton");
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.saveSchedule" })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "trajectory.syncAllTenants" })
+    );
+    await screen.findByText("trajectory.errors.query_unavailable");
+    expect(input).toHaveValue("9");
+    expect(
+      screen.queryByText("trajectory.scheduleSynced")
+    ).not.toBeInTheDocument();
   });
 });

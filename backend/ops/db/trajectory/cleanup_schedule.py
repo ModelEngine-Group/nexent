@@ -72,3 +72,35 @@ class CleanupScheduleRepository:
             row.user_id = actor_id
             row.updated_by = actor_id
             row.update_time = func.current_timestamp()
+
+    def save_many(self, tenant_ids, policy, actor_id):
+        """Apply one policy atomically, sharing the locks used by tenant saves."""
+        targets = sorted(set(tenant_ids))
+        if not targets or len(targets) > 1000 or any(not target.strip() for target in targets):
+            raise ValueError("Invalid cleanup tenant scope")
+        value = json.dumps(CleanupPolicy.model_validate(policy).model_dump(), separators=(",", ":"))
+        with get_db_session() as session:
+            session.execute(text("SET LOCAL statement_timeout = '2000ms'"))
+            session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock(hashtext(key)) FROM "
+                    "(SELECT unnest(CAST(:keys AS text[])) AS key ORDER BY key) AS ordered_keys"
+                ),
+                {"keys": [f"{SCHEDULE_KEY}:{tenant}" for tenant in targets]},
+            )
+            rows = session.scalars(self._statement().where(TenantConfig.tenant_id.in_(targets))).all()
+            latest = {}
+            for row in rows:
+                latest.setdefault(row.tenant_id, row)
+            for tenant in targets:
+                row = latest.get(tenant)
+                if row is None:
+                    row = TenantConfig(
+                        tenant_id=tenant, config_key=SCHEDULE_KEY, value_type="single",
+                        created_by=actor_id, delete_flag="N",
+                    )
+                    session.add(row)
+                row.config_value = value
+                row.user_id = actor_id
+                row.updated_by = actor_id
+                row.update_time = func.current_timestamp()

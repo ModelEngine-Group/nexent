@@ -1008,7 +1008,7 @@ def test_trj_query_su_all_routes_use_platform_identity_recheck(harness, monkeypa
     assert data(get(harness, path, actor="su", tenant_id="t2"))["tenant_id"] == "t2"
     saved = harness.client.put(path, json={"tenant_id": "t2", "enabled": True, "retention_days": 7}, headers={"Authorization": "su"})
     assert data(saved)["retention_days"] == 7
-    cleaned = harness.client.post("/trajectory/cleanup", json={"before_days": 30}, headers={"Authorization": "su"})
+    cleaned = harness.client.post("/trajectory/cleanup", json={"before_days": 30, "tenant_id": "t1"}, headers={"Authorization": "su"})
     assert data(cleaned)["done"] is True
     assert statements and all("user_account_t.user_roles" in sql for sql in statements)
     active[0] = False
@@ -1503,3 +1503,62 @@ def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
     )
     assert selected["source"]["span_id"] == expected_span["spanId"]
     assert selected["source"]["trace_id"] == "b" * 32
+
+
+def test_trj_query_su_syncs_schedule_for_all_tenants_with_explicit_scope(harness, monkeypatch):
+    from types import SimpleNamespace
+
+    from ops.services.trajectory import cleanup_schedule as settings
+
+    values = {"t1": {"enabled": True, "retention_days": 1}, "t2": {"enabled": False, "retention_days": 30}}
+    repository = SimpleNamespace(
+        read=lambda tenant: values.get(tenant),
+        read_all=lambda: dict(values),
+        save_many=lambda tenants, policy, actor: values.update({tenant: dict(policy) for tenant in tenants}),
+    )
+    monkeypatch.setattr(settings, "CleanupScheduleRepository", lambda: repository)
+    monkeypatch.setattr(settings, "TrajectoryCatalog", lambda: harness.catalog)
+    path = "/trajectory/cleanup/schedule"
+    original = dict(values)
+    mixed = data(get(harness, path, actor="su", all_tenants="true"))
+    assert mixed["mixed"] and mixed["tenant_count"] == 2 and mixed["tenant_id"] is None
+    payload = {"all_tenants": True, "enabled": True, "retention_days": 7}
+    for actor in ("admin", "user"):
+        assert get(harness, path, actor=actor, all_tenants="true").status_code == 403
+        assert harness.client.put(path, json=payload, headers={"Authorization": actor}).status_code == 403
+    assert values == original
+    assert get(harness, path, actor="su", all_tenants="true", tenant_id="t1").status_code == 422
+    assert harness.client.put(path, json={**payload, "tenant_id": "t1"}, headers={"Authorization": "su"}).status_code == 422
+    saved = harness.client.put(path, json=payload, headers={"Authorization": "su"})
+    result = data(saved)
+    assert saved.headers["cache-control"] == "private,no-store"
+    assert result["tenant_count"] == 2 and result["all_tenants"] and not result["mixed"]
+    assert values == {tenant: {"enabled": True, "retention_days": 7} for tenant in ("t1", "t2")}
+    assert data(get(harness, path, actor="su", all_tenants="true")) == result
+    assert data(get(harness, path))["retention_days"] == 7
+    repository.save_many = lambda *args: (_ for _ in ()).throw(ConnectionError("private details"))
+    unavailable = harness.client.put(path, json={**payload, "retention_days": 9}, headers={"Authorization": "su"})
+    assert unavailable.status_code == 503 and "private details" not in unavailable.text
+    assert data(get(harness, path))["retention_days"] == 7
+    harness.catalog.actors.pop("su")
+    assert harness.client.put(path, json=payload, headers={"Authorization": "su"}).status_code == 403
+
+
+def test_trj_query_su_manual_cleanup_deletes_only_the_selected_tenant(harness):
+    harness.add_run(age_days=8)
+    harness.add_conversation("124", "t2", "u2")
+    harness.add_run("124", age_days=8)
+    before = data(get(harness, "/trajectory/conversations/123", actor="su"))
+    target = data(get(harness, "/trajectory/conversations/124", actor="su", tenant_id="t2"))
+    assert any(row["availability"] == "available" for row in target["executions"])
+    path = "/trajectory/cleanup"
+    assert harness.client.post(path, json={"before_days": 7}, headers={"Authorization": "su"}).status_code == 422
+    assert harness.client.post(path, json={"before_days": 7, "tenant_id": "t2"}, headers={"Authorization": "admin"}).status_code == 404
+    result = data(harness.client.post(path, json={"before_days": 7, "tenant_id": "t2"}, headers={"Authorization": "su"}))
+    assert result["deleted_runs"] == 1 and result["done"]
+    after = data(get(harness, "/trajectory/conversations/123", actor="su"))
+    assert [(row["trajectory_id"], row["availability"]) for row in after["executions"]] == [
+        (row["trajectory_id"], row["availability"]) for row in before["executions"]
+    ]
+    cleaned = data(get(harness, "/trajectory/conversations/124", actor="su", tenant_id="t2"))
+    assert all(row["availability"] != "available" for row in cleaned["executions"])

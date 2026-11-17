@@ -5,14 +5,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CleanupSchedule } from "@/types/trajectory";
 import { trajectoryService } from "@/services/trajectoryService";
 
-export function useCleanupSchedule(scope: string, tenantId: string) {
+export function useCleanupSchedule(
+  scope: string,
+  tenantId?: string,
+  allTenants = false
+) {
   const client = useQueryClient();
   const controller = useRef<AbortController | null>(null);
-  const key = ["trajectory-cleanup-schedule", scope, tenantId];
+  const key = [
+    "trajectory-cleanup-schedule",
+    scope,
+    allTenants ? "all" : tenantId,
+  ];
   const query = useQuery({
     queryKey: key,
     queryFn: ({ signal }) =>
-      trajectoryService.cleanupSchedule(tenantId, signal),
+      allTenants
+        ? trajectoryService.cleanupSchedule(undefined, signal, true)
+        : trajectoryService.cleanupSchedule(tenantId, signal),
     retry: false,
     gcTime: 0,
     refetchOnWindowFocus: false,
@@ -24,15 +34,29 @@ export function useCleanupSchedule(scope: string, tenantId: string) {
       controller.current?.abort();
       const request = new AbortController();
       controller.current = request;
-      const result = await trajectoryService.saveCleanupSchedule(
-        tenantId,
-        policy,
-        request.signal
-      );
+      const result = allTenants
+        ? await trajectoryService.saveCleanupSchedule(
+            undefined,
+            policy,
+            request.signal,
+            true
+          )
+        : await trajectoryService.saveCleanupSchedule(
+            tenantId,
+            policy,
+            request.signal
+          );
       if (request.signal.aborted) throw new Error("Aborted");
       return result;
     },
-    onSuccess: (result) => client.setQueryData(key, result),
+    onSuccess: (result) => {
+      if (allTenants)
+        client.removeQueries({
+          queryKey: ["trajectory-cleanup-schedule", scope],
+          type: "inactive",
+        });
+      client.setQueryData(key, result);
+    },
     retry: false,
   });
   useEffect(() => () => controller.current?.abort(), []);

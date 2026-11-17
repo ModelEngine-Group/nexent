@@ -151,9 +151,10 @@ async def list_records(request: Request, authorization: str | None = Header(None
 async def get_cleanup_schedule(
     request: Request, authorization: str | None = Header(None),
     tenant_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+    all_tenants: bool = False,
 ):
     return await dispatch(
-        request, authorization, lambda service, actor: read_schedule(actor, tenant_id), needs_service=False,
+        request, authorization, lambda service, actor: read_schedule(actor, tenant_id, all_tenants), needs_service=False,
     )
 
 
@@ -162,7 +163,9 @@ async def put_cleanup_schedule(
     request: Request, body: CleanupScheduleRequest, authorization: str | None = Header(None),
 ):
     return await dispatch(
-        request, authorization, lambda service, actor: save_schedule(actor, body.enabled, body.retention_days, body.tenant_id),
+        request, authorization, lambda service, actor: save_schedule(
+            actor, body.enabled, body.retention_days, body.tenant_id, body.all_tenants,
+        ),
         needs_service=False,
     )
 
@@ -250,6 +253,6 @@ async def cleanup_trajectories(request: Request, body: CleanupRequest, authoriza
     return await dispatch(
         request,
         authorization,
-        lambda service, actor: cleanup(service, actor, body.before_days, body.cursor),
+        lambda service, actor: cleanup(service, actor, body.before_days, body.cursor, body.tenant_id),
         lane="trajectory-cleanup",
     )

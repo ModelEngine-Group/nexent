@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -113,17 +114,32 @@ describe("observability role gate", () => {
       expect.any(AbortSignal)
     );
   });
-  it("requires SU to select a tenant before opening schedule settings", () => {
+  it("allows SU to open all-tenant schedule settings without a tenant filter", async () => {
+    api.cleanupSchedule.mockResolvedValue({
+      tenant_id: null,
+      enabled: true,
+      retention_days: 30,
+      cleanup_time: "00:00",
+      timezone: "Asia/Shanghai",
+      all_tenants: true,
+      mixed: false,
+      tenant_count: 2,
+    });
     render(
       <ObservabilityCenter
         user={{ id: "su", role: "SU", tenantId: "tenant" } as never}
       />,
       { wrapper }
     );
-    expect(
+    fireEvent.click(
       screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
-    ).toBeDisabled();
-    expect(api.cleanupSchedule).not.toHaveBeenCalled();
+    );
+    await screen.findByRole("spinbutton");
+    expect(api.cleanupSchedule).toHaveBeenCalledWith(
+      undefined,
+      expect.any(AbortSignal),
+      true
+    );
   });
   it.each(["ADMIN", "USER", "DEV", "SPEED", "ASSET_OWNER"])(
     "denies %s without fetching protected content",
@@ -809,13 +825,48 @@ describe("administrator page and cleanup confirmation", () => {
     ).toHaveValue("");
     expect(api.records.mock.calls.at(-1)?.[0].conversation_id).toBeUndefined();
   });
-  it("does not enable cross-tenant cleanup just because SU can list tenants", async () => {
+  it("requires SU to choose a tenant in the manual cleanup dialog and keeps every batch scoped", async () => {
+    api.facets.mockResolvedValue({
+      items: [{ id: "other", tenant_id: "other", name: "Other Tenant" }],
+      next_cursor: null,
+    });
+    const result = {
+      cutoff_at: "2026-11-03T00:00:00Z",
+      scanned_runs: 1,
+      deleted_runs: 1,
+      deleted_bytes: 10,
+      skipped_active: 0,
+      pending_runs: 0,
+      failed_runs: 0,
+    };
+    api.cleanup
+      .mockResolvedValueOnce({ ...result, done: false, next_cursor: "next" })
+      .mockResolvedValueOnce({ ...result, done: true, next_cursor: null });
     render(<ObservabilityCenter user={{ ...admin, role: USER_ROLES.SU }} />, {
       wrapper,
     });
+    fireEvent.click(screen.getByRole("button", { name: "trajectory.cleanup" }));
+    const dialog = await screen.findByRole("dialog");
     expect(
-      screen.getByRole("button", { name: "trajectory.cleanup" })
+      within(dialog).getByRole("button", { name: "trajectory.confirmCleanup" })
     ).toBeDisabled();
+    expect(api.cleanup).not.toHaveBeenCalled();
+    fireEvent.mouseDown(
+      within(dialog).getByRole("combobox", { name: "trajectory.tenants" })
+    );
+    fireEvent.click(await screen.findByText("Other Tenant"));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "trajectory.confirmCleanup" })
+    );
+    await waitFor(() => expect(api.cleanup).toHaveBeenCalledTimes(2));
+    expect(api.cleanup.mock.calls.map((call) => call[3])).toEqual([
+      "other",
+      "other",
+    ]);
+    expect(api.cleanup.mock.calls[1][1]).toBe("next");
+    expect(
+      within(dialog).queryByRole("combobox", { name: "trajectory.tenants" })
+    ).not.toBeInTheDocument();
   });
   it.each(["0", "31", ""])(
     "blocks manual cleanup for invalid %s days",

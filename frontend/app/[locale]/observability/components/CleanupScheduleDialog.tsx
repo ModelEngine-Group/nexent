@@ -4,21 +4,25 @@ import { useState } from "react";
 import { Alert, InputNumber, Spin, Switch, Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { useCleanupSchedule } from "@/hooks/trajectory/useCleanupSchedule";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TrajectoryError } from "./TrajectoryFeedback";
 
 interface CleanupScheduleDialogProps {
   scope: string;
-  tenantId: string;
+  tenantId?: string;
+  allTenants?: boolean;
   onClose: () => void;
 }
 
 export function CleanupScheduleDialog({
   scope,
   tenantId,
+  allTenants = false,
   onClose,
 }: CleanupScheduleDialogProps) {
   const { t } = useTranslation();
-  const { query, mutation } = useCleanupSchedule(scope, tenantId);
+  const { query, mutation } = useCleanupSchedule(scope, tenantId, allTenants);
+  const { confirm } = useConfirmModal();
   const [editedDays, setEditedDays] = useState<number | null | undefined>();
   const [editedEnabled, setEditedEnabled] = useState<boolean | undefined>();
   const days =
@@ -55,7 +59,17 @@ export function CleanupScheduleDialog({
             disabled={
               !valid || !query.data || query.isError || mutation.isPending
             }
-            onClick={save}
+            onClick={() => {
+              if (allTenants) {
+                confirm({
+                  title: t("trajectory.confirmScheduleAll"),
+                  content: t("trajectory.scheduleAllHelp"),
+                  okText: t("trajectory.syncAllTenants"),
+                  danger: false,
+                  onOk: save,
+                });
+              } else save();
+            }}
           >
             {t(
               mutation.isPending
@@ -76,6 +90,13 @@ export function CleanupScheduleDialog({
         )}
         {query.data && !query.isError && (
           <>
+            {allTenants && query.data.mixed && (
+              <Alert
+                type="warning"
+                showIcon
+                title={t("trajectory.scheduleMixed")}
+              />
+            )}
             <label className="flex items-center justify-between gap-3">
               <span>{t("trajectory.scheduleEnabled")}</span>
               <Switch
@@ -111,7 +132,11 @@ export function CleanupScheduleDialog({
               type="info"
               showIcon
               title={t("trajectory.scheduleTime")}
-              description={t("trajectory.scheduleHelp")}
+              description={t(
+                allTenants
+                  ? "trajectory.scheduleAllHelp"
+                  : "trajectory.scheduleHelp"
+              )}
             />
           </>
         )}
@@ -122,7 +147,14 @@ export function CleanupScheduleDialog({
           <Alert
             type="success"
             showIcon
-            title={t("trajectory.scheduleSaved")}
+            title={t(
+              allTenants
+                ? "trajectory.scheduleSynced"
+                : "trajectory.scheduleSaved",
+              {
+                count: mutation.data?.tenant_count ?? 0,
+              }
+            )}
           />
         )}
       </div>

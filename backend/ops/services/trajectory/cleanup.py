@@ -16,12 +16,14 @@ from .archive import identity, storage_error
 from .primitives import QueryError
 
 
-def cleanup(service, actor, before_days, cursor=None):
-    if type(before_days) is not int or not 1 <= before_days <= 3650:
+def cleanup(service, actor, before_days, cursor=None, tenant_id=None):
+    if type(before_days) is not int or not 1 <= before_days <= 30:
         raise QueryError("invalid_before_days")
-    # The authenticated current tenant is the only cleanup target; filters never select it.
-    authorize(service.catalog, actor, actor.tenant_id)
-    binding = {"actor": actor.binding, "tenant": actor.tenant_id, "days": before_days}
+    if actor.role == "SU" and not tenant_id:
+        raise QueryError("cleanup_tenant_required")
+    tenant = tenant_id or actor.tenant_id
+    authorize(service.catalog, actor, tenant)
+    binding = {"actor": actor.binding, "tenant": tenant, "days": before_days}
     state = (
         service.references.resolve(cursor, "cleanup", **binding)
         if cursor
@@ -48,13 +50,13 @@ def cleanup(service, actor, before_days, cursor=None):
     with cleanup_audit(
         source="manual",
         actor_id=actor.user_id,
-        tenant_id=actor.tenant_id,
+        tenant_id=tenant,
         before_days=before_days,
         cutoff_at=state["cutoff"],
         counts=result,
     ):
         candidates = service.catalog.cleanup_candidates(
-            actor.tenant_id, state["conversation_after"], limit=1001
+            tenant, state["conversation_after"], limit=1001
         )
         deadline, progressed, next_state = time.monotonic() + 2, False, None
         store = service.archive.store
@@ -71,6 +73,8 @@ def cleanup(service, actor, before_days, cursor=None):
                     ):
                         next_state = state
                         break
+                    if row["tenant_id"] != tenant:
+                        raise QueryError("trajectory_not_found", 404)
                     service.recheck(actor, row)
                     meta = service.archive.manifest(row)
                     if meta:

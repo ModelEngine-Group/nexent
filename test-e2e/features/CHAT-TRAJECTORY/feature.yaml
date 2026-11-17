@@ -32,7 +32,7 @@ feature:
       引用状态在服务端有界缓存保存，随机ID逐次核验类型及身份/资源绑定，部署无需轨迹密钥，失效后重新查询。
   - rule_id: TRJ-RULE-006
     description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。
-      OPS可保存本租户定时清理开关与1至30天天数、SU可管理授权租户，固定每天北京时间00:00执行，后台30秒刷新；管理员可主动清理当前可信租户1至30天以前的轨迹；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
+      OPS可保存本租户定时清理开关与1至30天天数；SU确认后在一个事务同步全部现有有效租户，手动清理须显式选择一个授权租户，游标绑定该租户；固定每天北京时间00:00执行，后台30秒刷新；管理员可主动清理当前可信租户1至30天以前的轨迹；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
       单个/批量删除会话确认成功后立即向受管文件线程提交定向清理；会话与执行摘要在同一PG事务软删除；只清理实际删除会话的全部轮次，失败/占用重试且独立于定期清理开关。
   - rule_id: TRJ-RULE-007
     description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file仅写本地且关闭远端导出，默认目录/mnt/nexent-data/trajectory，查询固定30秒，启动自动初始化且无需根UUID，SDK仅接参数，单节点/共享卷验证。
@@ -49,6 +49,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
     - CHAT-TRAJECTORY-BODY-WRAP-20261117
     - CHAT-TRAJECTORY-CODE-DISPLAY-20261117
     - CHAT-TRAJECTORY-BUILTIN-VERSION-20261116

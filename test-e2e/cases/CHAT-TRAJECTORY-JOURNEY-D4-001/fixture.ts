@@ -173,10 +173,14 @@ export async function installTrajectoryFixture(
           });
           return;
         }
-        state.schedules[payload.tenant_id] = {
-          enabled: payload.enabled,
-          retention_days: payload.retention_days,
-        };
+        for (const tenant of payload.all_tenants
+          ? ["tenant", "other"]
+          : [payload.tenant_id]) {
+          state.schedules[tenant] = {
+            enabled: payload.enabled,
+            retention_days: payload.retention_days,
+          };
+        }
       }
       const tenant =
         request.method() === "PUT"
@@ -188,6 +192,25 @@ export async function installTrajectoryFixture(
         cleanup_time: "00:00",
         timezone: "Asia/Shanghai",
       };
+      const allTenants =
+        request.method() === "PUT"
+          ? request.postDataJSON().all_tenants
+          : url.searchParams.get("all_tenants") === "true";
+      if (allTenants) {
+        const policies = ["tenant", "other"].map(
+          (id) => state.schedules[id] ?? { enabled: true, retention_days: 30 },
+        );
+        const mixed =
+          JSON.stringify(policies[0]) !== JSON.stringify(policies[1]);
+        data = {
+          ...(data as object),
+          tenant_id: null,
+          all_tenants: true,
+          mixed,
+          tenant_count: 2,
+          ...(mixed ? { enabled: true, retention_days: 30 } : policies[0]),
+        };
+      }
     } else if (path.endsWith("/trajectory/records")) {
       state.records.push(url);
       const facet = url.searchParams.get("facet");

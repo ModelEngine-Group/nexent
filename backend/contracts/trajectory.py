@@ -99,9 +99,17 @@ class CleanupPolicy(BaseModel):
 
 class CleanupScheduleRequest(CleanupPolicy):
     tenant_id: str | None = Field(None, min_length=1, max_length=128)
+    all_tenants: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_scope(self):
+        if self.all_tenants and self.tenant_id is not None:
+            raise ValueError("Choose a tenant or all tenants")
+        return self
 
 
 class CleanupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     before_days: StrictInt = Field(ge=1, le=30)
     cursor: str | None = Field(None, max_length=8192)
+    tenant_id: str | None = Field(None, min_length=1, max_length=128)

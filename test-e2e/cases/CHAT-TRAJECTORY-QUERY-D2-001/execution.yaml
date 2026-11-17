@@ -12,6 +12,9 @@ preparation:
 notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and product OTLP file storage/reader.
   The tenant-facet variants execute actual catalog ORM on owned in-memory SQLite membership rows, dispose the engine,
   and assert the connection is released; PostgreSQL syntax is covered separately by traditional UT compilation.
+  Global schedule tests control only the configuration persistence boundary; repository transaction/lock
+  assertions remain traditional UT and do not establish live PostgreSQL atomicity. Manual scope tests
+  delete real owned tenant files and verify another tenant remains readable.
   Only PG authority/catalog and existing unrelated directory services are controlled; no live PG, provider or deployed
   multiworker proof is claimed. Each fixture owns its temporary root and TestClient, shuts down the managed workers
   in finally and asserts zero active workers. No shared preparation family, deployment, browser or business asset
@@ -47,6 +50,7 @@ acceptance_bindings:
   - test_trj_query_facets_and_only_declared_trajectory_routes
   - test_trj_query_private_validation_under_api_root
   AC-05:
+  - test_trj_query_su_manual_cleanup_deletes_only_the_selected_tenant
   - test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry
   - test_trj_query_cleanup_batches_and_cursor_scope
   - test_trj_query_managed_lane_capacity_rejection
@@ -65,6 +69,7 @@ acceptance_bindings:
   AC-10:
   - test_trj_query_pg_list_uses_snapshot_without_opening_archives
   AC-11:
+  - test_trj_query_su_syncs_schedule_for_all_tenants_with_explicit_scope
   - test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes
   AC-12:
   - test_trj_query_builtin_versions_preserve_archived_values

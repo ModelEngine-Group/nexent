@@ -2,11 +2,13 @@
 """Existing tenant configuration rows are saved under a transaction-scoped lock."""
 
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
+# isort: split
 from ops.db.trajectory import cleanup_schedule as database
 
 
@@ -115,3 +117,44 @@ def test_corrupt_persisted_policy_is_rejected(session, raw):
     session.scalars.return_value.first.return_value = SimpleNamespace(config_value=raw)
     with pytest.raises(ValueError):
         database.CleanupScheduleRepository().read("tenant")
+
+
+def test_bulk_save_locks_sorted_targets_in_one_session_and_preserves_creators(session):
+    old = SimpleNamespace(tenant_id="a", created_by="creator")
+    session.scalars.return_value.all.return_value = [old]
+    factory = database.get_db_session
+    database.CleanupScheduleRepository().save_many(
+        ["z", "a"], {"enabled": True, "retention_days": 7}, "su"
+    )
+    factory.assert_called_once_with()
+    lock = session.execute.call_args_list[1]
+    assert "pg_advisory_xact_lock" in str(lock.args[0]) and "ORDER BY" in str(lock.args[0])
+    assert lock.args[1]["keys"] == [f"{database.SCHEDULE_KEY}:a", f"{database.SCHEDULE_KEY}:z"]
+    assert old.created_by == "creator" and old.updated_by == "su"
+    assert json.loads(old.config_value) == {"enabled": True, "retention_days": 7}
+    (new,) = [call.args[0] for call in session.add.call_args_list]
+    assert new.tenant_id == "z" and new.created_by == new.updated_by == "su"
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_bulk_failure_escapes_shared_transaction_owner(session, mocker):
+    failed = []
+
+    @contextmanager
+    def transaction():
+        try:
+            yield session
+        except Exception as error:
+            failed.append(error)
+            raise
+
+    mocker.patch.object(database, "get_db_session", transaction)
+    session.scalars.return_value.all.return_value = []
+    session.add.side_effect = [None, ConnectionError("write failed")]
+    with pytest.raises(ConnectionError):
+        database.CleanupScheduleRepository().save_many(
+            ["a", "b"], {"enabled": True, "retention_days": 7}, "su"
+        )
+    assert len(failed) == 1
+    session.commit.assert_not_called()

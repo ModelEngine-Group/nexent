@@ -312,8 +312,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       }),
     ).toBeVisible();
     expect(state.cleanups).toEqual([
-      { before_days: 7 },
-      { before_days: 7, cursor: "cleanup-next" },
+      { before_days: 7, tenant_id: "tenant" },
+      { before_days: 7, cursor: "cleanup-next", tenant_id: "tenant" },
     ]);
     await page
       .getByRole("dialog")
@@ -417,21 +417,15 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await page.goto(`${base}/zh/observability`);
     await expect(
       page.getByRole("button", { name: "定时清理", exact: true }),
-    ).toBeDisabled();
-    await page.getByRole("combobox", { name: "租户", exact: true }).click();
-    await page
-      .getByRole("option")
-      .filter({ hasText: "Fixture Tenant" })
-      .click();
-    await page.getByRole("button", { name: "定时清理", exact: true }).click();
-    await expect(page.getByRole("spinbutton")).toHaveValue("7");
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "关闭", exact: true })
-      .last()
-      .click();
+    ).toBeEnabled();
     await page.getByRole("button", { name: "定时清理", exact: true }).click();
     const reopened = page.getByRole("dialog");
+    await expect(
+      reopened.getByText(
+        "各租户的设置不同，当前显示默认值；保存后将统一所有租户。",
+      ),
+    ).toBeVisible();
+    await reopened.getByRole("spinbutton").fill("7");
     await expect(reopened.getByRole("switch")).toBeChecked();
     await reopened.getByRole("switch").click();
     await expect(reopened.getByRole("spinbutton")).toBeDisabled();
@@ -439,9 +433,16 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await reopened
       .getByRole("button", { name: "保存设置", exact: true })
       .click();
-    await expect(reopened.getByText("设置已保存")).toBeVisible();
+    const writesBeforeConfirm = state.scheduleSaves.length;
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+    expect(state.scheduleSaves).toHaveLength(writesBeforeConfirm);
+    await reopened
+      .getByRole("button", { name: "保存设置", exact: true })
+      .click();
+    await page.getByRole("button", { name: "确认并同步", exact: true }).click();
+    await expect(reopened.getByText("已同步到 2 个租户")).toBeVisible();
     expect(state.scheduleSaves.at(-1)).toEqual({
-      tenant_id: "tenant",
+      all_tenants: true,
       enabled: false,
       retention_days: 7,
     });
@@ -458,13 +459,37 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .last()
       .click();
     expect(state.cleanups).toHaveLength(deleted);
+    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    const manual = page.getByRole("dialog");
+    await expect(
+      manual.getByRole("button", { name: "确认清理", exact: true }),
+    ).toBeDisabled();
+    await manual.getByRole("combobox", { name: "租户", exact: true }).click();
+    await page
+      .getByRole("option")
+      .filter({ hasText: "Fixture Tenant" })
+      .click();
+    await manual.getByRole("button", { name: "确认清理", exact: true }).click();
+    await expect.poll(() => state.cleanups.length).toBeGreaterThan(deleted);
+    await expect(
+      manual.getByRole("combobox", { name: "租户", exact: true }),
+    ).toHaveCount(0);
+    expect(
+      state.cleanups
+        .slice(deleted)
+        .every((payload) => payload.tenant_id === "tenant"),
+    ).toBe(true);
+    await manual
+      .getByRole("button", { name: "关闭", exact: true })
+      .last()
+      .click();
   });
   for (const id of contract.expectedIds("assertions")) {
     await contract.assertion(id, async () => {
       expect(
         state.cleanups.every((payload) =>
           Object.keys(payload).every((key) =>
-            ["before_days", "cursor"].includes(key),
+            ["before_days", "cursor", "tenant_id"].includes(key),
           ),
         ),
       ).toBe(true);

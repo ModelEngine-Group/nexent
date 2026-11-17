@@ -131,3 +131,30 @@ describe("trajectory HTTP adapter", () => {
     await expect(trajectoryService.records({})).rejects.toBe(error);
   });
 });
+
+it("serializes global schedule scope and an explicit manual cleanup tenant", async () => {
+  request.mockImplementation(
+    async () => new Response(JSON.stringify({ code: 0, data: {} }))
+  );
+  await trajectoryService.cleanupSchedule(undefined, undefined, true);
+  const url = new URL(String(request.mock.calls[0][0]), "http://localhost");
+  expect(url.searchParams.get("all_tenants")).toBe("true");
+  expect(url.searchParams.has("tenant_id")).toBe(false);
+  await trajectoryService.saveCleanupSchedule(
+    undefined,
+    { enabled: true, retention_days: 7 },
+    undefined,
+    true
+  );
+  expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({
+    all_tenants: true,
+    enabled: true,
+    retention_days: 7,
+  });
+  await trajectoryService.cleanup(7, "next", undefined, "other");
+  expect(JSON.parse(String(request.mock.calls[2][1]?.body))).toEqual({
+    before_days: 7,
+    cursor: "next",
+    tenant_id: "other",
+  });
+});

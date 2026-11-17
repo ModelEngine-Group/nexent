@@ -124,7 +124,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
     records.refresh();
   };
   const tenant = filters.tenant_id;
-  const canCleanup = !!tenant && tenant === user.tenantId;
+  const canCleanup = isSuperAdmin || (!!tenant && tenant === user.tenantId);
   const sortOrder = (field: RecordsRequest["sort_by"]) =>
     sorting.sort_by === field
       ? sorting.sort_order === "asc"
@@ -375,11 +375,15 @@ export function ObservabilityCenter({ user }: { user: User }) {
           >
             {t("common.refresh")}
           </Button>
-          <Tooltip title={tenant ? "" : t("trajectory.scheduleSelectTenant")}>
+          <Tooltip
+            title={
+              isSuperAdmin || tenant ? "" : t("trajectory.scheduleSelectTenant")
+            }
+          >
             <span>
               <Button
                 icon={<Clock3 size={14} />}
-                disabled={!tenant}
+                disabled={!isSuperAdmin && !tenant}
                 onClick={() => setScheduling(true)}
               >
                 {t("trajectory.scheduledCleanup")}
@@ -594,16 +598,19 @@ export function ObservabilityCenter({ user }: { user: User }) {
       )}
       {cleaning && canCleanup && (
         <CleanupDialog
-          key={tenant}
+          key={scope}
+          selectTenant={isSuperAdmin}
+          tenantId={isSuperAdmin ? undefined : user.tenantId}
           onClose={() => setCleaning(false)}
           onComplete={refresh}
         />
       )}
-      {scheduling && tenant && (
+      {scheduling && (isSuperAdmin || tenant) && (
         <CleanupScheduleDialog
-          key={tenant}
+          key={isSuperAdmin ? "all" : tenant}
           scope={scope}
-          tenantId={tenant}
+          tenantId={isSuperAdmin ? undefined : tenant}
+          allTenants={isSuperAdmin}
           onClose={() => setScheduling(false)}
         />
       )}

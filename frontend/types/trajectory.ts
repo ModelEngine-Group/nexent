@@ -165,11 +165,14 @@ export interface ContentChunk {
   char_count: number;
 }
 export interface CleanupSchedule {
-  tenant_id: string;
+  tenant_id: string | null;
   cleanup_time: string;
   timezone: string;
   enabled: boolean;
   retention_days: number;
+  all_tenants?: boolean;
+  mixed?: boolean;
+  tenant_count?: number;
 }
 
 export interface CleanupResult {

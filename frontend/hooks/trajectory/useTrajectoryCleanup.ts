@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { trajectoryService } from "@/services/trajectoryService";
 import type { CleanupResult } from "@/types/trajectory";
 
-export function useTrajectoryCleanup(onComplete: () => void) {
+export function useTrajectoryCleanup(
+  onComplete: () => void,
+  tenantId?: string
+) {
   const controller = useRef<AbortController | null>(null);
   const continuation = useRef<{ days: number; cursor?: string } | null>(null);
   const [running, setRunning] = useState(false);
@@ -40,7 +43,8 @@ export function useTrajectoryCleanup(onComplete: () => void) {
         const batch = await trajectoryService.cleanup(
           days,
           cursor,
-          request.signal
+          request.signal,
+          tenantId
         );
         if (request.signal.aborted) return;
         accumulated = {

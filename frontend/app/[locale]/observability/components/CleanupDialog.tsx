@@ -6,24 +6,37 @@ import { useTranslation } from "react-i18next";
 import { useTrajectoryCleanup } from "@/hooks/trajectory/useTrajectoryCleanup";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
+import { DirectoryFilter } from "./DirectoryFilter";
+import type { DirectoryOption } from "@/types/trajectory";
 
 export function CleanupDialog({
   onClose,
   onComplete,
+  tenantId,
+  selectTenant = false,
 }: {
   onClose: () => void;
   onComplete: () => void;
+  tenantId?: string;
+  selectTenant?: boolean;
 }) {
   const { t } = useTranslation();
   const [days, setDays] = useState<number | null>(30);
-  const cleanup = useTrajectoryCleanup(onComplete);
+  const [tenant, setTenant] = useState<DirectoryOption>();
+  const target = selectTenant ? tenant?.id : tenantId;
+  const cleanup = useTrajectoryCleanup(onComplete, target);
   const close = () => {
     cleanup.cancel();
     onClose();
   };
   const result = cleanup.result;
   const valid =
-    days != null && Number.isInteger(days) && days >= 1 && days <= 30;
+    days != null &&
+    Number.isInteger(days) &&
+    days >= 1 &&
+    days <= 30 &&
+    (!selectTenant || !!target);
+  const tenantLocked = cleanup.running || !!cleanup.result || !!cleanup.error;
   const partial =
     !!result && (result.pending_runs > 0 || result.failed_runs > 0);
   return (
@@ -58,9 +71,31 @@ export function CleanupDialog({
         <Alert
           type="warning"
           showIcon
-          title={t("trajectory.cleanupScope")}
+          title={t(
+            selectTenant
+              ? tenant
+                ? "trajectory.cleanupSelectedScope"
+                : "trajectory.selectCleanupTenant"
+              : "trajectory.cleanupScope",
+            { tenant: tenant?.name }
+          )}
           description={t("trajectory.cleanupWarning")}
         />
+        {selectTenant && (
+          <div className="flex items-center gap-3">
+            <span>{t("trajectory.tenants")}</span>
+            {tenantLocked ? (
+              <span>{tenant?.name || t("trajectory.unnamedOption")}</span>
+            ) : (
+              <DirectoryFilter
+                facet="tenants"
+                filters={{}}
+                value={tenant?.id}
+                onChange={setTenant}
+              />
+            )}
+          </div>
+        )}
         <label>
           {t("trajectory.beforeDays")}{" "}
           <InputNumber
