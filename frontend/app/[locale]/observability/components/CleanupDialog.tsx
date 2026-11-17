@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { Alert, InputNumber, Button, Modal } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTrajectoryCleanup } from "@/hooks/trajectory/useTrajectoryCleanup";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
@@ -39,6 +39,10 @@ export function CleanupDialog({
   const tenantLocked = cleanup.running || !!cleanup.result || !!cleanup.error;
   const partial =
     !!result && (result.pending_runs > 0 || result.failed_runs > 0);
+  const completed = !!result?.done && !partial;
+  useEffect(() => {
+    if (completed && !cleanup.running && !cleanup.error) onClose();
+  }, [completed, cleanup.running, cleanup.error, onClose]);
   return (
     <Modal
       open

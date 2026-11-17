@@ -864,9 +864,7 @@ describe("administrator page and cleanup confirmation", () => {
       "other",
     ]);
     expect(api.cleanup.mock.calls[1][1]).toBe("next");
-    expect(
-      within(dialog).queryByRole("combobox", { name: "trajectory.tenants" })
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
   it.each(["0", "31", ""])(
     "blocks manual cleanup for invalid %s days",
@@ -881,7 +879,86 @@ describe("administrator page and cleanup confirmation", () => {
       expect(api.cleanup).not.toHaveBeenCalled();
     }
   );
-  it("requires confirmation, validates days and shows partial batch completion", async () => {
+  it.each([0, 3])(
+    "closes after all batches finish with %s deletions and refreshes the list",
+    async (deleted) => {
+      const result = {
+        cutoff_at: "2026-11-03T01:00:00Z",
+        scanned_runs: deleted,
+        deleted_runs: deleted,
+        deleted_bytes: deleted * 100,
+        skipped_active: 0,
+        pending_runs: 0,
+        failed_runs: 0,
+        done: true,
+        next_cursor: null,
+      };
+      let finish!: (value: typeof result) => void;
+      api.cleanup
+        .mockResolvedValueOnce({ ...result, done: false, next_cursor: "next" })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            })
+        );
+      render(<ObservabilityCenter user={admin} />, { wrapper });
+      await waitFor(() => expect(api.records).toHaveBeenCalledOnce());
+      fireEvent.click(
+        screen.getByRole("button", { name: "trajectory.cleanup" })
+      );
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name: "trajectory.confirmCleanup",
+        })
+      );
+      await waitFor(() => expect(api.cleanup).toHaveBeenCalledTimes(2));
+      expect(dialog).toBeVisible();
+      expect(
+        within(dialog).getByRole("button", {
+          name: "trajectory.confirmCleanup",
+        })
+      ).toBeDisabled();
+      expect(api.records).toHaveBeenCalledOnce();
+      await act(async () => finish(result));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+      );
+      await waitFor(() => expect(api.records).toHaveBeenCalledTimes(2));
+    }
+  );
+  it("keeps the dialog open after a request error and closes after a successful retry", async () => {
+    api.cleanup
+      .mockRejectedValueOnce({ code: "storage_busy" })
+      .mockResolvedValueOnce({
+        cutoff_at: "2026-11-03T01:00:00Z",
+        scanned_runs: 0,
+        deleted_runs: 0,
+        deleted_bytes: 0,
+        skipped_active: 0,
+        pending_runs: 0,
+        failed_runs: 0,
+        done: true,
+        next_cursor: null,
+      });
+    const onClose = vi.fn();
+    render(<CleanupDialog onClose={onClose} onComplete={vi.fn()} />, {
+      wrapper,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "trajectory.confirmCleanup" })
+    );
+    await waitFor(() =>
+      expect(screen.getByText("trajectory.errors.storage_busy")).toBeVisible()
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "trajectory.retry" })[0]
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+  it("requires confirmation, validates days and keeps partial batch completion visible", async () => {
     api.cleanup.mockResolvedValue({
       cutoff_at: "2026-11-03T01:00:00Z",
       scanned_runs: 5,
@@ -894,7 +971,8 @@ describe("administrator page and cleanup confirmation", () => {
       next_cursor: null,
     });
     const complete = vi.fn();
-    render(<CleanupDialog onClose={vi.fn()} onComplete={complete} />, {
+    const onClose = vi.fn();
+    render(<CleanupDialog onClose={onClose} onComplete={complete} />, {
       wrapper,
     });
     expect(api.cleanup).not.toHaveBeenCalled();
@@ -915,5 +993,6 @@ describe("administrator page and cleanup confirmation", () => {
     ).not.toBeInTheDocument();
     expect(api.cleanup.mock.calls[0][0]).toBe(7);
     expect(complete).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

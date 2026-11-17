@@ -15,6 +15,7 @@ export async function installTrajectoryFixture(
     writes: [] as string[],
     failure: "",
     cleanupPaused: false,
+    cleanupPartial: true,
     multiRound: false,
     schedules: {} as Record<
       string,
@@ -345,8 +346,8 @@ export async function installTrajectoryFixture(
         deleted_runs: 1,
         deleted_bytes: 100,
         skipped_active: 0,
-        pending_runs: payload.cursor ? 1 : 0,
-        failed_runs: payload.cursor ? 1 : 0,
+        pending_runs: payload.cursor && state.cleanupPartial ? 1 : 0,
+        failed_runs: payload.cursor && state.cleanupPartial ? 1 : 0,
         next_cursor: payload.cursor ? null : "cleanup-next",
         done: !!payload.cursor,
       };

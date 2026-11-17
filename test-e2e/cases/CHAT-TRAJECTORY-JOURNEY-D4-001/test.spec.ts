@@ -320,15 +320,23 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .getByRole("button", { name: "关闭", exact: true })
       .last()
       .click();
+    state.cleanupPartial = false;
+    const refreshed = state.records.length;
+    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await page.getByRole("button", { name: "确认清理", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect.poll(() => state.cleanups.length).toBe(4);
+    await expect.poll(() => state.records.length).toBeGreaterThan(refreshed);
+    state.cleanupPartial = true;
     state.cleanupPaused = true;
     await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
     await page.getByRole("button", { name: "确认清理", exact: true }).click();
-    await expect.poll(() => state.cleanups.length).toBe(3);
+    await expect.poll(() => state.cleanups.length).toBe(5);
     await page
       .getByRole("button", { name: "停止后续批次", exact: true })
       .click();
     await page.goto("about:blank");
-    expect(state.cleanups).toHaveLength(3);
+    expect(state.cleanups).toHaveLength(5);
   });
   await contract.step(steps[6], async () => {
     state.multiRound = true;
