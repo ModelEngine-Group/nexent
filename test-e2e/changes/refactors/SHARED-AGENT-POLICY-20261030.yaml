@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: SHARED-AGENT-POLICY-20261030
+  change_type: refactor
+  title: Share Agent behavior prompts and delegation policy across Cores
+  description: Separate shared business rules and run-local delegation from native
+    and Python execution protocols.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    modified:
+    - JIUWEN-RESOURCES
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-RESOURCES-D5-003
+    modified:
+    - JIUWEN-DELEGATION-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both Cores consume the same protocol-neutral policy and preserve configured
+      business prompts.
+    - Shared current-query delegation requires successful authorized dispatch with
+      bounded correction.
+    - Smolagents blocks direct actions and premature finals; Jiuwen native and text
+      paths retain semantics.
+    - No forced delegation for negation quotation capability inquiries history or
+      ordinary follow-up.
+    reason: Unit policy and protocol gaps complement existing real runtime and strengthened
+      two-Core browser proof.
+    test_selectors:
+    - test/sdk/core/agents/test_shared_agent_policy.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_jiuwen_delegation.py
+    - test/sdk/core/agents/test_agent_prompt_composer.py
+    - test/sdk/core/agents/test_nexent_agent_context_runtime_factory.py
+    - test/sdk/core/agents/test_direct_prompt_resources.py
+  notes: Owning SPEC SP-001 through SP-003. No new D1, SQL, model migration or frontend
+    product fork.

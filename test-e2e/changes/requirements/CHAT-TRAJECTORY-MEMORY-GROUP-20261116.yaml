@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-MEMORY-GROUP-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-MEMORY-GROUP-20261116
+  title: 每个智能体的记忆准备合并为一个轨迹节点
+  description: 保留内部步骤详情、实际时间范围和错误，树与详情展示所属智能体，业务调用次数保持。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 同一智能体五项与内部检索合并，跨智能体/批次隔离，总耗时按范围且错误/取消保留。
+    - 正文保留脱敏步骤和父子顺序，单次导出不重复，未知归属与远端行为保持。
+    - Ops提供归属名称，前端树与详情标题/搜索一致，阶段指标与计数保持。
+    reason: 现有UT证明单个phase计时与层级，缺少按智能体归并断言；复用并加强既有D3，不新增D1。
+    test_selectors:
+    - test/sdk/core/agents/observability/test_memory_preparation.py
+    - test/sdk/core/agents/observability/test_phase_capture.py
+    - test/backend/services/trajectory/test_phase_nodes.py
+    - test/backend/agents/test_create_agent_info.py::TestCreateAgentConfig::test_create_agent_config_runs_fixed_search_once_without_exposing_tool
+    - frontend/tests/component/trajectoryPhases.test.tsx
+  notes: SPEC changes/chat-trajectory-phases AC-02/03；runtime责任域。D3沿用独占HTTP、文件、客户端及受管线程清理，无共享准备资产；完整PG/部署验收仍暂缓。

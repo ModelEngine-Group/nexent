@@ -77,6 +77,7 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
@@ -114,6 +115,7 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
@@ -229,6 +231,7 @@ services:
       - HTTP_BACKEND=http://nexent-gateway:5013
       - WS_BACKEND=ws://nexent-gateway:5013
       - RUNTIME_HTTP_BACKEND=http://nexent-gateway:5013
+      - OPS_HTTP_BACKEND=http://nexent-ops:${OPS_PORT:-5016}
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}

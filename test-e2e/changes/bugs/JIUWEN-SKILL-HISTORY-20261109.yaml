@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-SKILL-HISTORY-20261109
+  change_type: bugfix
+  bug_id: JIUWEN-SKILL-HISTORY-20261109
+  title: Separate creator artifact events from native runtime envelopes
+  description: Keep Skill files and terminal meaning intact through business stream persistence and history restoration.
+  observed_behavior: Native metadata inherited by file events triggers missing-terminal errors and empty files on history load.
+  expected_behavior: Skill artifact events retain their business JSON shape without native runtime discriminators; old records project read-only.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing creator tests prove configuration and runtime artifact output, not the parsed business stream through persistence and public history UI.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AGENT-CORE-CONFIG, JIUWEN-OUTPUT]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [AGENT-CORE-GLOBAL-D3-001]
+    added: [JIUWEN-SKILL-CREATOR-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Native-derived Skill/file events preserve exact content and tracing while shedding native-envelope discriminators.
+    - Legacy saved artifacts restore without record mutation only in creator context; malformed and ordinary records stay unchanged.
+    - Failure, cancellation, attempt rollback and selected-file constraints remain effective.
+    reason: Unit protocol and read-boundary checks complement actual runtime, persistence and real browser proof; no duplicate D1.
+    test_selectors: [test/backend/services/test_nl2skill_history_protocol.py]
+  notes: >-
+    SPEC runtime-agent-core-factory design AC-SH-01..03. D3 owns isolated PostgreSQL, loopback model and managed tasks.
+    D4 uses an operator-selected Local Jiuwen deployment and real provider, owns only its new Skill/conversation,
+    and verifies pre-existing records are unchanged. No shared preparation families or deployment switching inside Cases.

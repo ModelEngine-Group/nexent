@@ -87,12 +87,14 @@ from management.db import models
 from management.db.base import SimpleTableBase, TableBase
 classes = {value for value in vars(models).values()
            if isinstance(value, type) and hasattr(value, '__tablename__')}
-assert len(classes) == 74
-assert len(TableBase.metadata.tables) == 69
+assert len(classes) == 76
+assert len(TableBase.metadata.tables) == 71
 assert len(SimpleTableBase.metadata.tables) == 5
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
 assert models.ModelMonitoringRecord.__module__ == 'management.db.monitoring.models'
+assert models.TrajectoryExecution.__module__ == 'management.db.trajectory.models'
+assert models.TrajectoryStatistics.__module__ == 'management.db.trajectory.models'
 assert all(value.metadata is TableBase.metadata or value.metadata is SimpleTableBase.metadata
            for value in classes)
 assert 'management.db.client' not in sys.modules
@@ -110,4 +112,4 @@ print(json.dumps({'tables': len(classes), 'client_loaded': False}))
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == {"tables": 74, "client_loaded": False}
+    assert json.loads(result.stdout) == {"tables": 76, "client_loaded": False}

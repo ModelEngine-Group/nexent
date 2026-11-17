@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Whole-action admission must exclude arbitrary host Python execution."""
 
 import json
@@ -5,8 +6,8 @@ from types import ModuleType
 
 import pytest
 
-from nexent.core.agents import tool_fastpath
-from nexent.core.agents.tool_fastpath import is_simple_whitelisted_action
+from nexent.core.agents.cores.smolagents import tool_fastpath
+from nexent.core.agents.cores.smolagents.tool_fastpath import is_simple_whitelisted_action
 
 
 @pytest.mark.parametrize("code", [

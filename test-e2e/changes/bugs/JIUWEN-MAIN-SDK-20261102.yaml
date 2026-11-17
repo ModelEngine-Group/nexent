@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-MAIN-SDK-20261102
+  change_type: bugfix
+  bug_id: JIUWEN-MAIN-SDK-20261102
+  title: Include SDK implementation before building the main image package
+  description: Copy the complete SDK into the builder before its non-editable installation.
+  observed_behavior: The main Dockerfile copied SDK metadata without implementation sources before package installation.
+  expected_behavior: The installed SDK contains the current canonical implementation and packaged prompt resources.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: Existing real deployed journeys reject missing SDK imports. A targeted Dockerfile regression now
+      catches the source-copy omission before an expensive image build.
+  feature_contract_changed: false
+  no_case_change_reason: Reuse existing real deployed journeys and audit actual installed file hashes; no new formal
+    Case or duplicate D1 is needed for this packaging correction.
+  affected_features:
+    existing:
+    - JIUWEN-RELEASE
+    - JIUWEN-OUTPUT
+    - JIUWEN-RESOURCES
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-REAL-UI-D4-001
+    - JIUWEN-SKILL-FILES-D4-001
+    - JIUWEN-RESOURCES-D3-003
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Full SDK implementation must be copied before the installed package is built; metadata-only copying fails.
+    reason: The structural unit regression detects the missing build input; real image imports and exact installed
+      source/resource hashes prove the resulting artifact. No application success or exception contract is changed.
+    test_selectors:
+    - test/backend/deployment/test_main_image_sdk_sources.py
+  notes: Existing runtime-agent-core-factory SPEC task.md records the merged revision, failed-before/fixed UT,
+    exact build manifest and deployed image audits. External MCP availability remains a separate environment blocker;
+    a non-MCP diagnostic slice never counts as the complete resource Case passing. Account data repair is explicitly
+    authorized local deployment recovery, with backups, no credential fabrication and no product auth-policy changes.

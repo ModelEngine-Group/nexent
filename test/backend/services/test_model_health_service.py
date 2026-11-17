@@ -37,7 +37,7 @@ _MOCKED_MODULE_NAMES = (
     "nexent",
     "nexent.core",
     "nexent.core.agents",
-    "nexent.core.agents.agent_model",
+    "nexent.core.agents.contracts.config",
     "nexent.core.models",
     "nexent.core.models.embedding_model",
     "nexent.core.models.rerank_model",
@@ -80,7 +80,7 @@ install_shared_contract_stub(MockModule(), 'provider')
 sys.modules['nexent'] = MockModule()
 sys.modules['nexent.core'] = MockModule()
 sys.modules['nexent.core.agents'] = MockModule()
-sys.modules['nexent.core.agents.agent_model'] = MockModule()
+sys.modules['nexent.core.agents.contracts.config'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
 

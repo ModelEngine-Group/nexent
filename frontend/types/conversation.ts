@@ -95,6 +95,11 @@ export interface ConversationListPage {
 }
 
 export interface ApiMessageItem {
+  answer_phase?: "delta" | "complete";
+  step_id?: string;
+  reclassify_step?: boolean;
+  is_error?: boolean;
+  provider_call_id?: string;
   type: string;
   content: string;
   unit_index?: number;

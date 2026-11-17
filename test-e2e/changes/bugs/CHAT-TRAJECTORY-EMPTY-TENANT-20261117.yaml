@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-EMPTY-TENANT-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-EMPTY-TENANT-20261117
+  title: SU租户搜索排除空租户ID
+  description: 在共用catalog数据库查询中排除空租户ID。
+  observed_behavior: 有效成员关系的tenant_id为空时，SU租户facet返回空选项。
+  expected_behavior: 数据库在去重排序和预算前排除NULL、空字符串与纯空格；合法租户及OPS范围保持。
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: 已有facet测试未输入空租户成员，catalog UT未验证空值过滤。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - SU空值过滤在SQL预算之前；合法无名称租户保留；OPS范围保持；预算与数据库异常继续可见。
+    reason: SQL条件与预算由UT证明，真实HTTP加ORM候选读取由既有D2加强。
+    test_selectors:
+    - test/backend/services/trajectory/test_catalog.py
+  notes: SPEC empty-tenant-fix.md；加强QUERY-D2/AC-07，两种查询路径均验证。自包含内存数据库及既有文件/HTTP/线程fixture负责清理，责任域保持智能体运行。真实PG与部署验收暂缓。

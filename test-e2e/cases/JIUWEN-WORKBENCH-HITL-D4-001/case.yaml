@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-WORKBENCH-HITL-D4-001
+  feature_id: JIUWEN-MODEL-BRIDGE
+  requirement_ids: [JIUWEN-CLARIFICATION-20261105]
+  business_rule_ids: [JIUWEN-MODEL-BRIDGE-RULE-005]
+  title: Real Workbench clarification submits once and survives history refresh
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove ordinary Workbench ask_user with the real configured model, distinct from creator wrappers.
+  preconditions:
+  - The operator-selected Local deployment uses Jiuwen and the authorized Workbench account has a usable real model. The Case never deploys or modifies saved models or Agents.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Request a meeting notice without its essential date, time and place in ordinary Workbench chat.
+    expected: Exactly one real human_interaction ends completed/awaiting_input; no generated-Agent result or draft action appears.
+  - order: 2
+    action: Reopen the pending conversation, fill the actual clarification controls and submit once.
+    expected: History loading starts no run or database rewrite. The request carries the saved form identity and answers, and the real model completes the notice.
+  - order: 3
+    action: Refresh submitted history, ask a follow-up using the saved facts, then reclaim owned data.
+    expected: Submitted values restore read-only; follow-up retains the supplied facts without another clarification. Only the new marked conversation is deleted and original records are unchanged.
+  expected_results:
+  - A real Jiuwen terminal ask_user card is visible in ordinary Workbench chat without creator results.
+  - Pending and submitted history preserve exact response identity and answers without automatic runs.
+  - Real continuation and follow-up use supplied facts, and owned cleanup protects original records.
+  forbidden_side_effects:
+  - No provider or endpoint substitution, source configuration mutation, fake terminal, credential output or unowned deletion.
+  actor: Authorized Workbench user
+  journey: [Ask with missing facts, Reload pending card, Submit facts, Refresh history, Continue and clean up]
+  final_business_result:
+  - The user answers a real clarification and continues the same Workbench conversation after refresh.
+  failure_evidence:
+  - Browser assertions, sanitized event summaries and database fingerprints.
+  cleanup:
+  - Delete only the marked new conversation, verify original Agent/history hashes and remove private auth files.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services: [model-provider]
+    timeout_seconds: 900
+  acceptance:
+  - id: AC-01
+    description: Real terminal clarification, exact persisted response and history continuation preserve ownership.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

@@ -35,7 +35,7 @@ nexent_core_agents = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents'] = nexent_core_agents
 
 
-nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.contracts.config')
 
 
 class MockToolConfig:
@@ -52,7 +52,7 @@ class MockAgentVerificationConfig:
 
 nexent_core_agents_agent_model.ToolConfig = MockToolConfig
 nexent_core_agents_agent_model.AgentVerificationConfig = MockAgentVerificationConfig
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
+sys.modules['nexent.core.agents.contracts.config'] = nexent_core_agents_agent_model
 nexent_nexent_vector_database = types.ModuleType('nexent.vector_database')
 sys.modules['nexent.vector_database'] = nexent_nexent_vector_database
 nexent_nexent_vector_database = types.ModuleType('nexent.vector_database.base')

@@ -74,7 +74,7 @@ export function CollaborativeAgentList({
       <span
         className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${toneClasses.badge}`}
       >
-        {label} · {agents.length}
+        {label} 路 {agents.length}
       </span>
       {agents.map((agent) => (
         <span

@@ -1,0 +1,23 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-SKILL-FIXTURE-20261102
+  change_type: test-fix
+  title: Compare saved Skill authorization independently of database row order
+  description: Preserve exact Skill membership and multiplicity while removing an unstated export ordering assumption.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - JIUWEN-SKILL-FILES-D4-001
+    added: []
+    retired: []
+  notes: The source and owned clone contain the same five enabled Skills in different row orders. The Case requires
+    equivalent authorized configuration, not Skill priority ordering. Sort both name lists for equality, retaining
+    duplicate detection and exact prompt/model/tool assertions. Actual Skill loading, controlled execution, document
+    download, no replay, history rendering, source hashes and cleanup assertions remain unchanged. No product behavior,
+    acceptance obligation or traditional UT is changed; rerun the existing real D4 rather than adding a duplicate Case.
