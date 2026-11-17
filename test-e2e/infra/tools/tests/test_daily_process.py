@@ -113,7 +113,6 @@ def test_supervisor_accounts_for_worker_exit_and_always_calls_notifier(tmp_path,
     runtime = home / "runtime/test-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
-    monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "sync_checkout", lambda *a, **k: "head")
 
     def execute(repo, home, directory, *args):
