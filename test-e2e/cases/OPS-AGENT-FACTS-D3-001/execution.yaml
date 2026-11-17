@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: OPS-AGENT-FACTS-D3-001
+timeout_seconds: 90
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_agent_start_finish_and_replay
+acceptance_bindings:
+  AC-01: [test_agent_start_finish_and_replay]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace through the isolated Ops test profile. The fixture owns the sample tenant rows and monitoring indices and templates created during execution and cleans them up.

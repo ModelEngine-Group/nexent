@@ -107,8 +107,8 @@ those dates.
 Unconfirmed failed Elasticsearch batches mark affected query scopes stale until
 they recover and the replacement statistics are published.
 
-For MCP, Agent and Skill, define a `MonitoringKind` with the typed fact,
-daily reducer and Elasticsearch fields. Add it to `MONITORING_KINDS` in
+Define a `MonitoringKind` with the typed fact and Elasticsearch fields. Supply
+a reducer when daily publication is available. Add the kind to `MONITORING_KINDS` in
 `ops.monitoring.runtime`. Ops installs the compatible mappings on its shared
 indices at startup. The two monitoring tables are shared, with date state and
 publication tracked per tenant and kind. SDK callers submit sanitized events
@@ -125,6 +125,48 @@ The first implementation starts each tenant's coverage at its first observed fac
 It uses a single source generation and page-number queries. Configure fact
 retention and coordinate PostgreSQL and Elasticsearch snapshots at deployment.
 Snapshot-bound pagination is follow-up work.
+
+## Main Agent fact sample
+
+With the monitoring producer configured, submit an execution's revisions through
+the same SDK entry point. Keep the execution ID, start timestamp, initiating
+groups and resource identity stable across revisions. This sample crosses a UTC
+month boundary, so both revisions belong in the October facts index.
+
+```python
+from uuid import uuid4
+
+from nexent.monitor.facts import emit_fact
+
+run_id = str(uuid4())
+started = {
+    "tenant_id": "sample-tenant",
+    "fact_kind": "agent",
+    "fact_id": run_id,
+    "call_context_id": run_id,
+    "root_run_id": run_id,
+    "agent_run_id": run_id,
+    "agent_id": 21,
+    "agent_version_no": 3,
+    "is_root": True,
+    "initiator_group_ids": [12, 13],
+    "started_at": "2026-10-31T23:59:59.800Z",
+    "record_revision": 1,
+    "outcome": "started",
+}
+finished = dict(
+    started, record_revision=2, outcome="succeeded",
+    ended_at="2026-11-01T00:00:00.150Z", duration_ms=350,
+)
+emit_fact(started)
+emit_fact(finished)
+emit_fact(finished)
+```
+
+The fixed case `OPS-AGENT-FACTS-D3-001` sends these revisions in separate
+batches and reads back the same ES document after each write. Agent is
+registered for source facts. Its daily publisher activates when an Agent
+reducer is configured.
 
 ## Storage and process resources
 

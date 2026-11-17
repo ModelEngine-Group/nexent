@@ -1,0 +1,37 @@
+schema_version: '1.0'
+stage: D3
+module: OPS-PLATFORM
+case:
+  case_id: OPS-AGENT-FACTS-D3-001
+  feature_id: OPS-AGENT-FACTS
+  requirement_ids: [OPS-AGENT-FACTS-20261117]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01]
+  title: Main Agent start, end and replay share one searchable fact
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the real producer, Ops PostgreSQL control store and Elasticsearch source writes with a main Agent sample.
+  integration_boundary: [Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch]
+  observations: [Confirmed batches, Elasticsearch document identity and source fields]
+  cleanup: [Close producer and clients, Remove sample tenant rows and test-owned Elasticsearch indices and templates]
+  preconditions: [A disposable migrated Ops database and a clean isolated Elasticsearch instance]
+  test_data: {workload: Main Agent execution crossing a UTC month boundary with a 350 ms duration}
+  steps:
+  - order: 1
+    action: Send the start sample and apply its batch through the shared writer.
+    expected: Exactly one searchable start document is present in the start month's partition.
+  - order: 2
+    action: Send the terminal revision using the same execution ID and apply its batch.
+    expected: The same document now reports succeeded and a duration of 350 ms.
+  - order: 3
+    action: Replay the terminal event as a separate batch and inspect Elasticsearch.
+    expected: All batches are confirmed and the same single document retains its terminal fields and write version.
+  expected_results: [The same document ID and index hold revisions 1 and 2, The terminal replay retains revision 2 and the original terminal write version]
+  forbidden_side_effects: [An extra fact document or a document in the end month's partition]
+  acceptance:
+  - id: AC-01
+    description: Main Agent observations update one source fact and replay is idempotent.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]

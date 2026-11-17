@@ -67,10 +67,10 @@ class Fact(BaseModel):
 
 @dataclass(frozen=True)
 class MonitoringKind:
-    """A fact schema, daily reducer, and optional fields for the shared indices."""
+    """A fact schema and fields for the shared indices, with optional daily publication."""
 
     fact_model: type[Fact]
-    aggregate: Callable[[Iterable[dict]], Iterable[tuple[str, dict]]]
+    aggregate: Callable[[Iterable[dict]], Iterable[tuple[str, dict]]] | None = None
     fact_fields: Mapping[str, str] = field(default_factory=dict)
     daily_fields: Mapping[str, str] = field(default_factory=dict)
 

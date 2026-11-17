@@ -28,6 +28,7 @@ from contracts.constants.environment import (
 )
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor.facts import set_fact_sink
+from ops.monitoring.agent import AGENT_MONITORING
 from ops.monitoring.contracts import MonitoringKind
 from ops.monitoring.model import MODEL_MONITORING
 from ops.monitoring.search import install_templates
@@ -37,7 +38,7 @@ from ops.monitoring.store import ControlStore
 
 logger = logging.getLogger(__name__)
 LANE = "monitoring"
-MONITORING_KINDS = {"model": MODEL_MONITORING}
+MONITORING_KINDS = {"model": MODEL_MONITORING, "agent": AGENT_MONITORING}
 
 
 def control_store():

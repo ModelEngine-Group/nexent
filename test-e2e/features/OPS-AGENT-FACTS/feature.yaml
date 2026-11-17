@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-AGENT-FACTS
+  name: Agent monitoring source facts
+  status: active
+  description: Write Agent execution observations to the shared monitoring source index.
+  business_rules:
+  - rule_id: OPS-AGENT-FACTS-RULE-01
+    description: A main Agent's start, end and terminal replay share one Elasticsearch document routed by the execution start time.
+  required_test_stages: [D3]
+  source:
+    requirement_ids: [OPS-AGENT-FACTS-20261117]
+    notes: Agent collection contract and shared Ops monitoring pipeline.
