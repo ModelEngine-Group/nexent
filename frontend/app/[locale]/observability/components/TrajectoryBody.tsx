@@ -1,13 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Segmented, Spin } from "antd";
+import { App, Button, Segmented, Spin } from "antd";
 import {
   ChevronDown,
   ChevronRight,
   Copy,
   Maximize2,
   Minimize2,
+  WrapText,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { trajectoryService } from "@/services/trajectoryService";
@@ -55,6 +56,7 @@ function TrajectoryBodyContent({
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState("json");
+  const [wordWrap, setWordWrap] = useState(false);
   const [chunk, setChunk] = useState<{
     offset: number;
     next: number;
@@ -199,6 +201,20 @@ function TrajectoryBodyContent({
               { label: "JSON", value: "json" },
             ]}
           />
+          <Button
+            type={wordWrap ? "primary" : "text"}
+            size="small"
+            icon={<WrapText size={14} />}
+            aria-label={t(
+              wordWrap ? "trajectory.unwrapLines" : "trajectory.wrapLines"
+            )}
+            title={t(
+              wordWrap ? "trajectory.unwrapLines" : "trajectory.wrapLines"
+            )}
+            aria-pressed={wordWrap}
+            disabled={reference.availability !== "available"}
+            onClick={() => setWordWrap((value) => !value)}
+          />
           <button
             className="trajectory-icon-button"
             aria-label={t("trajectory.copy")}
@@ -273,11 +289,12 @@ function TrajectoryBodyContent({
                       onWheel={(event) => {
                         if (event.deltaY > 0) loadAtBottom(event.currentTarget);
                       }}
-                      className={
+                      className={[
                         expanded
                           ? "trajectory-body-full"
-                          : "trajectory-body-preview"
-                      }
+                          : "trajectory-body-preview",
+                        wordWrap ? "is-wrapped" : "",
+                      ].join(" ")}
                     >
                       <span className="trajectory-line-numbers" aria-hidden>
                         {lineNumbers}

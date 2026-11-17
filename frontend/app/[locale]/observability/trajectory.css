@@ -765,6 +765,20 @@
 .trajectory-body pre code {
   font: inherit;
 }
+.trajectory-body pre.is-wrapped {
+  display: block;
+  padding-left: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.trajectory-body pre.is-wrapped code {
+  display: block;
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+.trajectory-body pre.is-wrapped .trajectory-line-numbers {
+  display: none;
+}
 .trajectory-line-numbers {
   color: #999;
   min-width: 32px;

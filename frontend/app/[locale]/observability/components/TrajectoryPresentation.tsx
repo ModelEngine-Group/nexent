@@ -18,12 +18,11 @@ import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 
 export function trajectoryNodeName(node: TrajectoryNode, t: TFunction): string {
-  if (node.kind === "tool" && node.name === "python_interpreter")
-    return t("trajectory.tools.python_interpreter", {
-      defaultValue: node.name,
-    });
-  if (node.kind === "tool" && node.name === "code")
-    return t("trajectory.tools.code", { defaultValue: node.name });
+  if (
+    node.kind === "tool" &&
+    ["python_interpreter", "code", "parallel_executor"].includes(node.name)
+  )
+    return t(`trajectory.tools.${node.name}`, { defaultValue: node.name });
   if (node.kind !== "phase") return node.name;
   const label = t(`trajectory.phases.${node.name}`, {
     defaultValue: node.name,

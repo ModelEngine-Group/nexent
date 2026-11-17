@@ -214,6 +214,30 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toHaveCount(0);
     const body = page.locator(".trajectory-body pre").first();
     await expect(body.locator("code")).toContainText("aaaa");
+    const inputSection = page.locator(".trajectory-body").first();
+    const outputSection = page.locator(".trajectory-body").nth(1);
+    const originalBody = await body.locator("code").textContent();
+    await inputSection
+      .getByRole("button", { name: "自动换行", exact: true })
+      .click();
+    await expect(
+      inputSection.getByRole("button", { name: "取消自动换行", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      outputSection.getByRole("button", { name: "自动换行", exact: true }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(body).toHaveCSS("white-space", "pre-wrap");
+    await expect(body).toHaveCSS("overflow-wrap", "anywhere");
+    expect(await body.locator("code").textContent()).toBe(originalBody);
+    expect(
+      await body.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await inputSection
+      .getByRole("button", { name: "取消自动换行", exact: true })
+      .click();
+    await expect(body).toHaveCSS("white-space", "pre");
     const readStart = state.reads.length;
     await body.hover();
     await page.mouse.wheel(0, 600);
@@ -356,7 +380,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     const dialog = page.getByRole("dialog");
     const input = dialog.getByRole("spinbutton");
     await expect(input).toHaveValue("30");
-    await expect(dialog.getByText("每天北京时间 00:00 执行")).toBeVisible();
+    await expect(dialog.getByText("每天 00:00 执行")).toBeVisible();
     await input.fill("31");
     await expect(
       dialog.getByRole("button", { name: "保存设置", exact: true }),
@@ -411,7 +435,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(reopened.getByRole("switch")).toBeChecked();
     await reopened.getByRole("switch").click();
     await expect(reopened.getByRole("spinbutton")).toBeDisabled();
-    await expect(reopened.getByText("每天北京时间 00:00 执行")).toBeVisible();
+    await expect(reopened.getByText("每天 00:00 执行")).toBeVisible();
     await reopened
       .getByRole("button", { name: "保存设置", exact: true })
       .click();

@@ -25,7 +25,9 @@ vi.mock("react-i18next", () => ({
               ? "代码执行"
               : key === "trajectory.tools.code"
                 ? "Python 调用"
-                : (options?.defaultValue ?? key),
+                : key === "trajectory.tools.parallel_executor"
+                  ? "并行执行"
+                  : (options?.defaultValue ?? key),
   }),
 }));
 
@@ -43,11 +45,11 @@ const phase = traceNode({
 
 describe("trajectory preparation phases", () => {
   it.each([
-    ["zh", zh, "代码执行", "Python 调用"],
-    ["en", en, "Code execution", "Python call"],
+    ["zh", zh, "代码执行", "Python 调用", "并行执行"],
+    ["en", en, "Code execution", "Python call", "Parallel execution"],
   ] as const)(
     "uses real %s names consistently",
-    (_locale, dictionary, group, call) => {
+    (_locale, dictionary, group, call, parallel) => {
       const translate = ((key: string) =>
         dictionary[key as keyof typeof dictionary] ?? key) as TFunction;
       expect(
@@ -67,6 +69,12 @@ describe("trajectory preparation phases", () => {
       ).toBe(call);
       expect(
         trajectoryNodeName(
+          traceNode({ kind: "tool", name: "parallel_executor" }),
+          translate
+        )
+      ).toBe(parallel);
+      expect(
+        trajectoryNodeName(
           traceNode({ kind: "tool", name: "read_skill_md" }),
           translate
         )
@@ -74,46 +82,52 @@ describe("trajectory preparation phases", () => {
     }
   );
 
-  it("localizes the Python tool for the tree, search and detail while selecting the original DTO", () => {
-    const tool = traceNode({
-      id: "python",
-      parent_id: "root",
-      kind: "tool",
-      name: "python_interpreter",
-    });
-    const select = vi.fn();
-    const view = render(
-      <App>
-        <TrajectoryTimeline
-          nodes={[traceNode(), tool]}
-          complete
-          cache={new BodyCache()}
-          onSelect={select}
-        />
-      </App>
-    );
-    fireEvent.change(screen.getByRole("textbox"), {
-      target: { value: "代码执行" },
-    });
-    const item = screen.getByRole("treeitem", { name: /代码执行/ });
-    expect(item.querySelector(".lucide-code-xml")).toBeTruthy();
-    fireEvent.click(item);
-    expect(select).toHaveBeenCalledWith(tool);
-    expect(screen.getByRole("treeitem", { name: /Root Agent/ })).toBeTruthy();
-    view.unmount();
-    render(
-      <App>
-        <TrajectoryNodeDetail
-          node={select.mock.calls[0][0]}
-          conversationId="123"
-          cache={new BodyCache()}
-          onParent={vi.fn()}
-          onLoaded={vi.fn()}
-        />
-      </App>
-    );
-    expect(screen.getByRole("heading", { name: "代码执行" })).toBeTruthy();
-  });
+  it.each([
+    ["python_interpreter", "代码执行", ".lucide-code-xml"],
+    ["parallel_executor", "并行执行", ".lucide-wrench"],
+  ])(
+    "localizes %s for tree, search and detail while selecting the original DTO",
+    (name, label, icon) => {
+      const tool = traceNode({
+        id: "python",
+        parent_id: "root",
+        kind: "tool",
+        name,
+      });
+      const select = vi.fn();
+      const view = render(
+        <App>
+          <TrajectoryTimeline
+            nodes={[traceNode(), tool]}
+            complete
+            cache={new BodyCache()}
+            onSelect={select}
+          />
+        </App>
+      );
+      fireEvent.change(screen.getByRole("textbox"), {
+        target: { value: label },
+      });
+      const item = screen.getByRole("treeitem", { name: new RegExp(label) });
+      expect(item.querySelector(icon)).toBeTruthy();
+      fireEvent.click(item);
+      expect(select).toHaveBeenCalledWith(tool);
+      expect(screen.getByRole("treeitem", { name: /Root Agent/ })).toBeTruthy();
+      view.unmount();
+      render(
+        <App>
+          <TrajectoryNodeDetail
+            node={select.mock.calls[0][0]}
+            conversationId="123"
+            cache={new BodyCache()}
+            onParent={vi.fn()}
+            onLoaded={vi.fn()}
+          />
+        </App>
+      );
+      expect(screen.getByRole("heading", { name: label })).toBeTruthy();
+    }
+  );
 
   it("shows code execution duration separately from sandbox initialization", () => {
     render(
