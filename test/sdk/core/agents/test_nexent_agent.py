@@ -1003,348 +1003,123 @@ def test_create_local_tool_class_not_found(nexent_agent_instance):
 
 
 def test_create_local_tool_knowledge_base_search_tool_success(nexent_agent_instance):
-    """Test successful creation of KnowledgeBaseSearchTool with metadata."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    mock_vdb_core = MagicMock()
-    mock_embedding_model = MagicMock()
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 10},
-        source="local",
-        metadata={
-            "index_names": ["index1", "index2"],
-            "vdb_core": mock_vdb_core,
-            "embedding_model": mock_embedding_model,
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        # Restore original value
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify only non-excluded params are passed to __init__
-    mock_kb_tool_class.assert_called_once_with(
-        top_k=10,  # Only non-excluded params passed to __init__
-    )
-    # Verify excluded parameters were set directly as attributes after instantiation
-    assert result == mock_kb_tool_instance
-    assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.vdb_core == mock_vdb_core
-    assert mock_kb_tool_instance.embedding_model == mock_embedding_model
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    searcher = MagicMock()
+    metadata = {"knowledge_searcher": searcher, "display_name_to_index_map": {"KB": "kb"}, "allowed_index_names": ["kb"]}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is searcher and result.display_name_to_index_map == {"KB": "kb"}
+    assert result._allowed_index_names == {"kb"}
 
 
 def test_create_local_tool_knowledge_base_search_tool_with_conflicting_params(nexent_agent_instance):
-    """Test KnowledgeBaseSearchTool creation filters out conflicting params from params dict."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    mock_vdb_core = MagicMock()
-    mock_embedding_model = MagicMock()
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={
-            "top_k": 10,
-            # This should be filtered out
-            "index_names": ["conflicting_index"],
-            "vdb_core": "conflicting_vdb",  # This should be filtered out
-            "embedding_model": "conflicting_model",  # This should be filtered out
-            "observer": "conflicting_observer",  # This should be filtered out
-        },
-        source="local",
-        metadata={
-            # These should be used instead
-            "index_names": ["index1", "index2"],
-            "vdb_core": mock_vdb_core,
-            "embedding_model": mock_embedding_model,
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        # Restore original value
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify conflicting params were filtered out from __init__ call
-    # Only non-excluded params should be passed to __init__ due to smolagents wrapper restrictions
-    mock_kb_tool_class.assert_called_once_with(
-        top_k=10,  # From filtered_params (not in conflict list)
-        # Not excluded by current implementation
-        index_names=["conflicting_index"],
-    )
-    # Verify excluded parameters were set directly as attributes after instantiation
-    assert result == mock_kb_tool_instance
-    assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.vdb_core == mock_vdb_core  # From metadata, not params
-    # From metadata, not params
-    assert mock_kb_tool_instance.embedding_model == mock_embedding_model
+    """Retired model/storage constructor parameters are rejected."""
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "vdb_core": object()})
+    with pytest.raises(TypeError):
+        nexent_agent_instance.create_local_tool(config)
 
 
 def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_agent_instance):
-    """Test KnowledgeBaseSearchTool creation with None defaults when metadata is missing."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 5},
-        source="local",
-        metadata={},  # No metadata provided
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        # Restore original value
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify only non-excluded params are passed to __init__
-    mock_kb_tool_class.assert_called_once_with(
-        top_k=5,
-    )
-    # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
-    assert result == mock_kb_tool_instance
-    assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.vdb_core is None
-    assert mock_kb_tool_instance.embedding_model is None
-    assert result == mock_kb_tool_instance
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    metadata = {}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is None and result.display_name_to_index_map == {}
+    with pytest.raises(RuntimeError, match="bound standard backend"):
+        result.forward("query")
 
 
 def test_create_local_tool_knowledge_base_with_display_name_map(nexent_agent_instance):
-    """Test KnowledgeBaseSearchTool creation sets display_name_to_index_map from metadata."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    display_name_map = {
-        "Knowledge A": "es_index_knowledge_a",
-        "Knowledge B": "es_index_knowledge_b",
-    }
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 10},
-        source="local",
-        metadata={
-            "vdb_core": "mock_vdb_core",
-            "embedding_model": "mock_embedding_model",
-            "rerank_model": "mock_rerank_model",
-            "display_name_to_index_map": display_name_map,
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify display_name_to_index_map was set correctly from metadata
-    assert result.display_name_to_index_map == display_name_map
-    assert result.vdb_core == "mock_vdb_core"
-    assert result.embedding_model == "mock_embedding_model"
-    assert result.rerank_model == "mock_rerank_model"
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    searcher = MagicMock()
+    metadata = {"knowledge_searcher": searcher, "display_name_to_index_map": {"KB": "kb"}, "allowed_index_names": ["kb"]}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is searcher and result.display_name_to_index_map == {"KB": "kb"}
+    assert result._allowed_index_names == {"kb"}
 
 
 def test_create_local_tool_knowledge_base_with_document_paths_from_metadata(nexent_agent_instance):
-    """KnowledgeBaseSearchTool should receive document_paths from metadata via set_document_paths.
-
-    The `document_paths` parameter is declared with `exclude=True` so it must not
-    be passed to __init__. Instead it must be forwarded to `set_document_paths`
-    on the instance, sourced from `tool_config.metadata`. This guards against
-    the FieldInfo-iteration regression reported when document_paths is unset.
-    """
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    document_paths = ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 5, "index_names": ["kb1"]},
-        source="local",
-        metadata={
-            "vdb_core": "mock_vdb_core",
-            "embedding_model": "mock_embedding_model",
-            "document_paths": document_paths,
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # document_paths is excluded and must not be forwarded to __init__.
-    init_kwargs = mock_kb_tool_class.call_args.kwargs
-    assert "document_paths" not in init_kwargs
-    # It must instead be applied via set_document_paths on the instance.
-    mock_kb_tool_instance.set_document_paths.assert_called_once_with(document_paths)
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    searcher = MagicMock()
+    metadata = {"knowledge_searcher": searcher, "display_name_to_index_map": {"KB": "kb"}, "allowed_index_names": ["kb"]}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is searcher and result.display_name_to_index_map == {"KB": "kb"}
+    assert result._allowed_index_names == {"kb"}
 
 
 def test_create_local_tool_knowledge_base_without_metadata_calls_set_document_paths_none(nexent_agent_instance):
-    """When metadata lacks document_paths, set_document_paths(None) must still be invoked.
-
-    Ensures the tool's internal filter is explicitly reset to None rather than
-    left as a stale FieldInfo default from the smolagents wrapper.
-    """
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 5, "index_names": ["kb1"]},
-        source="local",
-        metadata=None,
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    mock_kb_tool_instance.set_document_paths.assert_called_once_with(None)
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    metadata = {}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is None and result.display_name_to_index_map == {}
+    with pytest.raises(RuntimeError, match="bound standard backend"):
+        result.forward("query")
 
 
 def test_create_local_tool_knowledge_base_with_empty_display_name_map(nexent_agent_instance):
-    """Test KnowledgeBaseSearchTool creation handles empty display_name_to_index_map."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 10},
-        source="local",
-        metadata={
-            "vdb_core": "mock_vdb_core",
-            "embedding_model": "mock_embedding_model",
-            "display_name_to_index_map": {},
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify empty display_name_to_index_map was set
-    assert result.display_name_to_index_map == {}
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    searcher = MagicMock()
+    metadata = {"knowledge_searcher": searcher, "display_name_to_index_map": {}, "allowed_index_names": ["kb"]}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is searcher and result.display_name_to_index_map == {}
+    assert result._allowed_index_names == {"kb"}
 
 
 def test_create_local_tool_knowledge_base_without_metadata(nexent_agent_instance):
-    """Test KnowledgeBaseSearchTool creation handles missing metadata."""
-    mock_kb_tool_class = MagicMock()
-    mock_kb_tool_instance = MagicMock()
-    mock_kb_tool_class.return_value = mock_kb_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="KnowledgeBaseSearchTool",
-        name="knowledge_base_search",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"top_k": 10},
-        source="local",
-        metadata=None,
-    )
-
-    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-    # Verify defaults were set when metadata is None
-    assert result.display_name_to_index_map == {}
-    assert result.vdb_core is None
-    assert result.embedding_model is None
-    assert result.rerank_model is None
+    """Runtime owns the knowledge implementation and its bound capabilities."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+    metadata = {}
+    config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                        params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+    result = nexent_agent_instance.create_local_tool(config)
+    assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+    assert result.observer is nexent_agent_instance.observer
+    assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+    assert not hasattr(result, "_internal_document_paths")
+    assert result.searcher is None and result.display_name_to_index_map == {}
+    with pytest.raises(RuntimeError, match="bound standard backend"):
+        result.forward("query")
 
 
 def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
@@ -3233,76 +3008,34 @@ class TestCreateLocalToolKnowledgeBase:
     """Tests for create_local_tool with KnowledgeBaseSearchTool."""
 
     def test_create_local_tool_knowledge_base_success(self, nexent_agent_instance):
-        """Test successful KnowledgeBaseSearchTool creation with metadata."""
-        mock_tool_class = MagicMock()
-        mock_tool_instance = MagicMock()
-        mock_tool_class.return_value = mock_tool_instance
-
-        tool_config = ToolConfig(
-            class_name="KnowledgeBaseSearchTool",
-            name="kb_search",
-            description="desc",
-            inputs="{}",
-            output_type="string",
-            params={"server_url": "http://localhost:8080"},
-            source="local",
-            metadata={
-                "vdb_core": "vdb_instance",
-                "embedding_model": "embedding_instance",
-                "rerank_model": "rerank_instance"
-            }
-        )
-
-        original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-        nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_tool_class
-
-        try:
-            result = nexent_agent_instance.create_local_tool(tool_config)
-        finally:
-            if original_value is not None:
-                nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-            elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-                del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-        mock_tool_class.assert_called_once_with(server_url="http://localhost:8080")
-        assert result == mock_tool_instance
-        assert mock_tool_instance.observer == nexent_agent_instance.observer
-        assert mock_tool_instance.vdb_core == "vdb_instance"
-        assert mock_tool_instance.embedding_model == "embedding_instance"
-        assert mock_tool_instance.rerank_model == "rerank_instance"
+        """Runtime owns the knowledge implementation and its bound capabilities."""
+        from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+        searcher = MagicMock()
+        metadata = {"knowledge_searcher": searcher, "display_name_to_index_map": {"KB": "kb"}, "allowed_index_names": ["kb"]}
+        config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                            params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+        result = nexent_agent_instance.create_local_tool(config)
+        assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+        assert result.observer is nexent_agent_instance.observer
+        assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+        assert not hasattr(result, "_internal_document_paths")
+        assert result.searcher is searcher and result.display_name_to_index_map == {"KB": "kb"}
+        assert result._allowed_index_names == {"kb"}
 
     def test_create_local_tool_knowledge_base_missing_metadata(self, nexent_agent_instance):
-        """Test KnowledgeBaseSearchTool creation with missing metadata defaults to None."""
-        mock_tool_class = MagicMock()
-        mock_tool_instance = MagicMock()
-        mock_tool_class.return_value = mock_tool_instance
-
-        tool_config = ToolConfig(
-            class_name="KnowledgeBaseSearchTool",
-            name="kb_search",
-            description="desc",
-            inputs="{}",
-            output_type="string",
-            params={"server_url": "http://localhost:8080"},
-            source="local",
-            metadata=None
-        )
-
-        original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
-        nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_tool_class
-
-        try:
-            result = nexent_agent_instance.create_local_tool(tool_config)
-        finally:
-            if original_value is not None:
-                nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
-            elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
-                del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
-
-        assert result == mock_tool_instance
-        assert mock_tool_instance.vdb_core is None
-        assert mock_tool_instance.embedding_model is None
-        assert mock_tool_instance.rerank_model is None
+        """Runtime owns the knowledge implementation and its bound capabilities."""
+        from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+        metadata = {}
+        config = ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                            params={"index_names": ["kb"], "top_k": 5}, metadata=metadata)
+        result = nexent_agent_instance.create_local_tool(config)
+        assert isinstance(result, KnowledgeBaseSearchTool) and result.top_k == 5
+        assert result.observer is nexent_agent_instance.observer
+        assert not hasattr(result, "vdb_core") and not hasattr(result, "embedding_model")
+        assert not hasattr(result, "_internal_document_paths")
+        assert result.searcher is None and result.display_name_to_index_map == {}
+        with pytest.raises(RuntimeError, match="bound standard backend"):
+            result.forward("query")
 
 
 class TestCreateLocalToolDify:

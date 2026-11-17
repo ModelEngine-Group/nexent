@@ -6,7 +6,7 @@ import binascii
 from enum import Enum
 from typing import Annotated, Literal
 
-from contracts.agentos_knowledge import KnowledgeOperation
+from contracts.agentos_knowledge import KnowledgeFileReference, KnowledgeOperation
 from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
 from pydantic import (
@@ -188,6 +188,11 @@ class AgentToolInvocation(RunSpecModel):
 
 class AgentToolResult(RunSpecModel):
     result: JsonValue
+
+
+class KnowledgeToolInput(RunSpecModel):
+    query: str = Field(min_length=1)
+    index_names: list[str] | None = Field(default=None, max_length=100)
 
 
 class ParallelExecutorBinding(RunSpecModel):
@@ -461,12 +466,12 @@ class KnowledgeSearchBinding(RunSpecModel):
     index_names: list[str]
     allowed: list[KnowledgeSearchIndexBinding]
     display_name_to_index: dict[str, str]
-    document_paths: list[str] | None = None
+    file_refs: list[KnowledgeFileReference] | None = None
     top_k: int = 3
     search_mode: Literal["accurate", "hybrid", "semantic"] = "hybrid"
     rerank: bool = False
     rerank_model_name: str = ""
-    embedding: RevisionedModelBinding | None = None
+    embedding_models: dict[str, RevisionedModelBinding] = Field(default_factory=dict)
     reranker: RevisionedModelBinding | None = None
     default_reranker: RevisionedModelBinding | None = None
     usage: str | None = None
@@ -705,6 +710,7 @@ class EvaluationAgentResult(BaseModel):
 
 class ModelOperation(str, Enum):
     GET = NAMESPACE + "v1/model/get"
+    LIST = NAMESPACE + "v1/model/list"
     INVOKE = NAMESPACE + "v1/model/invoke"
 
 
@@ -891,6 +897,21 @@ class ModelMetadata(ModelReference):
     display_name: str | None
     revision: str
     profile_version: str | None = None
+
+
+class ModelListQuery(RunSpecModel):
+    model_type: Literal["llm", "chat", "embedding", "multi_embedding", "rerank", "tts", "asr"] | None = None
+    page_size: int = Field(default=100, ge=1, le=1000)
+    cursor: str | None = Field(default=None, max_length=4096)
+
+
+class ModelCatalogEntry(ModelMetadata):
+    qualified_name: str | None = None
+
+
+class ModelCatalogPage(RunSpecModel):
+    models: list[ModelCatalogEntry]
+    next_cursor: str | None = None
 
 
 class ModelResult(BaseModel):

@@ -28,6 +28,34 @@ def payload(tool_id="analyze_text_file"):
 
 
 @pytest.mark.asyncio
+async def test_knowledge_trial_accepts_only_query_inputs_and_releases_scope(mocker):
+    from contracts.errors.exceptions import RuntimeUpstreamError
+
+    mocker.patch.object(environment, "JWT_SECRET", "synthetic-tool-test")
+    manager = MagicMock()
+    scopes = []
+
+    async def run(lane, spec, action, request, actor, scope):
+        scopes.append(scope)
+        assert request.tool.version == "2" and actor.tenant_id == "tenant-a"
+        return AgentToolResult(result="found")
+
+    manager.run = AsyncMock(side_effect=run)
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(tools.create_tool_router(manager))
+    api = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=httpx.ASGITransport(app), **kwargs))
+    request = AgentToolInvocation(run_id="a" * 32, tool=ToolBinding(tool_id="knowledge_base_search", version="2"),
+                                  inputs={"query": "question"})
+    assert (await api.invoke_tool(request, "user-a", "tenant-a")).result == "found"
+    assert scopes[0].cancelled
+    request.inputs["file_ids"] = ["f" * 32]
+    with pytest.raises(RuntimeUpstreamError) as error:
+        await api.invoke_tool(request, "user-a", "tenant-a")
+    assert error.value.status_code == 422 and manager.run.await_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["success", "unsupported", "timeout"])
 async def test_tool_router_scope_deadline_and_allowed_binding(mocker, caplog, mode):
     mocker.patch.object(environment, "JWT_SECRET", "synthetic-tool-test")

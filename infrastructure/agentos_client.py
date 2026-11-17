@@ -24,6 +24,7 @@ from contracts.agentos import (
     EvaluationAgentResult,
     ManagementOperation,
     MemoryOperation,
+    ModelCatalogPage,
     ModelInvocation,
     ModelMetadata,
     ModelOperation,
@@ -258,6 +259,10 @@ class AgentOSClient:
         payload = ModelReference(model_id=model_id)
         result = await self._post_json(ModelOperation.GET, payload, user_id, tenant_id)
         return self._validate_result(ModelMetadata, result)
+
+    async def list_models(self, payload, user_id: str, tenant_id: str):
+        result = await self._post_json(ModelOperation.LIST, payload, user_id, tenant_id)
+        return self._validate_result(ModelCatalogPage, result)
 
     async def invoke_model(self, payload: ModelInvocation, user_id: str, tenant_id: str) -> ModelResult:
         result = await self._post_json(ModelOperation.INVOKE, payload, user_id, tenant_id, _MODEL_TIMEOUT)

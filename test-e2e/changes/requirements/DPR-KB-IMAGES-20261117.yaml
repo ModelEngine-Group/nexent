@@ -25,8 +25,9 @@ change:
     - Remove no-caller service image route and methods without affecting remaining task APIs.
     reason: Existing SDK UT already proves search and projection; replace old HTTP mocks with capability assertions. Real HTTP/MinIO D3 adds protocol and managed-worker evidence, not a duplicate D1. Case preparation owns its labelled MinIO, sockets and workers without shared factories. Historical KB ACL and presigned HTTP migration remain pending.
     test_selectors:
-    - test/sdk/core/tools/test_knowledge_base_search_tool.py
-    - test/sdk/core/tools/test_knowledge_image_injection.py
+    - test/backend/services/test_runtime_knowledge_tool.py
+    - test/backend/services/test_runtime_knowledge_tool_scope.py
+    - test/backend/services/test_knowledge_image_injection.py
     - test/sdk/core/agents/test_nexent_agent.py
     - test/sdk/multi_modal/test_image_codec.py
     - test/sdk/multi_modal/test_image_filter.py

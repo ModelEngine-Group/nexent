@@ -1,33 +1,42 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.errors.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
-from contracts.tool import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Body, Query, Request
-from fastapi.responses import JSONResponse
-from nexent.core.concurrency import run_blocking
-
-from contracts.errors.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
-from contracts.tool import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
-from management.services.tool.configuration import (
-    search_tool_info_impl,
-    update_tool_info_impl,
-    update_tool_list,
-    list_all_tools,
-    load_last_tool_config_impl,
-    validate_tool_impl,
-    import_openapi_service,
-    list_openapi_services,
-    delete_openapi_service,
-    _refresh_openapi_services_in_mcp,
+from contracts.errors.exceptions import (
+    AgentDraftEditError,
+    AppException,
+    MCPConnectionError,
+    NotFoundException,
+    ResourceBindingError,
+    RuntimeServiceTimeoutError,
+    TokenExpiredError,
+    ValidationError,
 )
-from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
+from contracts.tool import (
+    ToolInstanceInfoRequest,
+    ToolInstanceSearchRequest,
+    ToolValidateRequest,
+)
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from management.db.identity.user_tenant import get_user_email_map
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.session import get_current_user_id
+from management.services.tool.configuration import (
+    _refresh_openapi_services_in_mcp,
+    delete_openapi_service,
+    import_openapi_service,
+    list_all_tools,
+    list_openapi_services,
+    load_last_tool_config_impl,
+    search_tool_info_impl,
+    update_tool_info_impl,
+    update_tool_list,
+    validate_tool_impl,
+)
+from nexent.core.concurrency import run_blocking
 from permissions.resource_access import resource_read_tenant
 
 router = APIRouter(prefix="/tool")
@@ -178,6 +187,8 @@ async def validate_tool(request: ToolValidateRequest, authorization: Optional[st
         result = await validate_tool_impl(request, tenant_id, user_id)
 
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except MCPConnectionError as e:
         logger.error(f"MCP connection failed: {e}")
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e))

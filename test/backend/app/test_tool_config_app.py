@@ -43,6 +43,16 @@ app.include_router(router)
 client = TestClient(app)
 
 
+def test_knowledge_validation_timeout_returns_504_without_error_log(mocker, caplog):
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError
+
+    mocker.patch.object(tool_config_app, "get_current_user_id", return_value=("user", "tenant"))
+    validate = mocker.patch.object(tool_config_app, "validate_tool_impl", side_effect=RuntimeServiceTimeoutError("Timed out"))
+    response = client.post("/tool/validate", json={"name": "knowledge_base_search", "source": "local"})
+    assert response.status_code == 504 and validate.await_count == 1
+    assert not [record for record in caplog.records if record.name == "tool_config_app" and record.levelname == "ERROR"]
+
+
 class TestListToolsAPI:
     """Test endpoint for listing tools"""
 

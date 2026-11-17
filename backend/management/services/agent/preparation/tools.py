@@ -16,15 +16,6 @@ from contracts.constants.environment import (
 )
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
-from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
-from infrastructure.local_tool_execution import (
-    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_CLASS_NAMES,
-    LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA,
-)
-from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
-from infrastructure.object_storage.client import minio_client
-from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, restrict_aidp_access, shared_aidp_parameters
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
@@ -41,6 +32,23 @@ from management.services.model.resolver import get_rerank_model
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.concurrency import run_blocking
+
+from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
+from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
+from infrastructure.local_tool_execution import (
+    LOCAL_PARAMETER_OVERRIDES_METADATA,
+    LOCAL_RERANK_TOOL_CLASSES,
+    LOCAL_SDK_CLASS_NAMES,
+    LOCAL_SEARCH_TUNING_FIELDS,
+    LOCAL_SEARCH_TUNING_METADATA,
+)
+from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
+from infrastructure.object_storage.client import minio_client
+from infrastructure.shared_aidp_tool import (
+    SCOPED_SHARED_AIDP_CATALOG_ID,
+    restrict_aidp_access,
+    shared_aidp_parameters,
+)
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -509,7 +517,9 @@ async def create_tool_config_list(
                 document_paths = kb_overrides.get("document_paths")
 
         if (portable_evaluation or tool_config.class_name == "AnalyzeTextFileTool") and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
-            from management.services.agent.preparation.analysis import prepare_analysis_tool
+            from management.services.agent.preparation.analysis import (
+                prepare_analysis_tool,
+            )
 
             if prepare_analysis_tool(tool_config, tenant_id):
                 tool_config_list.append(tool_config)
@@ -520,9 +530,11 @@ async def create_tool_config_list(
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
             if portable_evaluation:
-                from management.services.agent.preparation.knowledge_search import prepare_knowledge_search
+                from management.services.agent.preparation.knowledge_search import (
+                    prepare_knowledge_search,
+                )
 
-                if prepare_knowledge_search(tool_config, user_id, tenant_id, document_paths):
+                if await prepare_knowledge_search(tool_config, user_id, tenant_id, document_paths):
                     tool_config_list.append(tool_config)
                     continue
             rerank = tool_config.params.get("rerank", False)

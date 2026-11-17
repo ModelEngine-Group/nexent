@@ -3,22 +3,18 @@ import json
 import logging
 from typing import List, Optional
 
-from pydantic import Field
-from smolagents.tools import Tool
-
-from ...vector_database.base import VectorDatabaseCore
-from ..gateway.modality import EmbeddingAdapter
-from ..gateway.modality import RerankAdapter
-from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
-from ..utils.observer import MessageObserver, ProcessType
-from ..utils.pydantic_utils import unwrap_field_info
-from ..utils.tools_common_message import (
+from contracts.knowledge_tool import knowledge_tool_info
+from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.core.utils.pydantic_utils import unwrap_field_info
+from nexent.core.utils.tools_common_message import (
     SearchResultTextMessage,
     ToolCategory,
     ToolSign,
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
+from pydantic import Field
+from smolagents.tools import Tool
 
 logger = logging.getLogger("knowledge_base_search_tool")
 
@@ -26,34 +22,12 @@ logger = logging.getLogger("knowledge_base_search_tool")
 class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
-    name = "knowledge_base_search"
-    is_user_selectable: bool = False
-    description = (
-        "Performs a local knowledge base search based on your query then returns the top search results. "
-        "A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. "
-        "Use this tool when users ask questions related to specialized knowledge, technical documentation, "
-        "domain expertise, personal notes, or any information that has been indexed in the knowledge base. "
-        "Suitable for queries requiring access to stored knowledge that may not be publicly available."
-    )
-    description_zh = "执行本地知识库检索并返回最相关的结果。"
-
-    inputs = {
-        "query": {
-            "type": "string",
-            "description": "The search query to perform.",
-            "description_zh": "要执行的搜索查询词"
-        },
-        "index_names": {
-            "type": "array",
-            "description": "The list of index names to search",
-            "description_zh": "要索引的知识库",
-            "nullable": True
-        },
-    }
-
-    # Internal parameter: restricts search results to specified document paths only.
-    # Not exposed to LLM, only settable via tool_params from /chat/run.
-    _internal_document_paths: Optional[List[str]] = None
+    _definition = knowledge_tool_info()
+    name = _definition.name
+    is_user_selectable = False
+    description = _definition.description
+    description_zh = _definition.description_zh
+    inputs = json.loads(_definition.inputs)
 
     init_param_descriptions = {
         "top_k": {
@@ -82,31 +56,12 @@ class KnowledgeBaseSearchTool(Tool):
             description="the search mode, optional values: hybrid, accurate, semantic",
             default="hybrid",
         ),
-        rerank: bool = Field(
-            description="Whether to enable reranking for search results",
-            default=False,
-        ),
-        rerank_model_name: str = Field(
-            description="The name of the rerank model to use", default=""
-        ),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        embedding_model: EmbeddingAdapter = Field(
-            description="The embedding model to use", default=None, exclude=True
-        ),
-        rerank_model: RerankAdapter = Field(
-            description="The rerank model to use", default=None, exclude=True
-        ),
-        vdb_core: VectorDatabaseCore = Field(
-            description="Vector database client", default=None, exclude=True),
         display_name_to_index_map: dict = Field(
             description="Mapping from display_name (knowledge_name) to index_name",
             default_factory=dict, exclude=True),
-        # Internal parameter: not exposed to LLM, only settable via tool_params from /chat/run.
-        document_paths: Optional[List[str]] = Field(
-            description="Internal: restrict results to documents with these path_or_urls", default=None, exclude=True
-        ),
         # Defense-in-depth whitelist populated by the backend when it builds the ToolConfig.
         # If set, forward() will silently drop any index_name not in this list so that even
         # a fabricated LLM argument cannot reach a KB the chatting user is not allowed to read.
@@ -128,21 +83,13 @@ class KnowledgeBaseSearchTool(Tool):
         """
         super().__init__()
         self.top_k = max(1, min(int(unwrap_field_info(top_k) or 3), 100))
-        self.observer = observer
-        self.vdb_core = vdb_core
-        self.index_names = [] if index_names is None else index_names
-        self.search_mode = search_mode
-        self.embedding_model = embedding_model
-        self.rerank = rerank
-        self.rerank_model_name = rerank_model_name
-        self.rerank_model = rerank_model
+        self.observer = unwrap_field_info(observer)
+        self.index_names = list(unwrap_field_info(index_names) or [])
+        self.search_mode = unwrap_field_info(search_mode)
         self.image_filterer = None
         self.cancellation_scope = None
-        self.display_name_to_index_map = display_name_to_index_map
-        # `document_paths` is declared with `exclude=True` so smolagents passes the
-        # raw FieldInfo default when no value is supplied. Unwrap it here so the
-        # internal filter is always a concrete list (or None), never a FieldInfo.
-        self._internal_document_paths = unwrap_field_info(document_paths)
+        self.searcher = None
+        self.display_name_to_index_map = unwrap_field_info(display_name_to_index_map) or {}
         # `allowed_index_names` is `exclude=True`; unwrap in case smolagents passed FieldInfo.
         raw_allowed = unwrap_field_info(allowed_index_names)
         self._allowed_index_names: Optional[set] = (
@@ -151,22 +98,11 @@ class KnowledgeBaseSearchTool(Tool):
 
         self.record_ops = 1
 
-    def set_document_paths(self, document_paths: Optional[List[str]]) -> None:
-        """Set the internal document_paths filter for access control.
-
-        This method is intended for internal use only, called via tool_params
-        from the /chat/run endpoint. It is NOT exposed to the LLM.
-
-        Args:
-            document_paths: List of allowed document path_or_urls. If None, no filtering is applied.
-        """
-        self._internal_document_paths = unwrap_field_info(document_paths)
-
     def set_allowed_index_names(self, index_names: Optional[List[str]]) -> None:
         """Install the backend-computed execution whitelist.
 
-        ``None`` preserves legacy SDK-only behavior. An empty list is an
-        installed deny-all whitelist and must not be treated as unset.
+        An empty list is an installed deny-all whitelist. The standard backend
+        independently authorizes every selected knowledge resource.
         """
         self._allowed_index_names = (
             None if index_names is None else {str(name) for name in index_names}
@@ -257,36 +193,6 @@ class KnowledgeBaseSearchTool(Tool):
             permission_tracking_enabled=self._allowed_index_names is not None,
         )
 
-    def _filter_by_document_paths(self, results: List[dict]) -> List[dict]:
-        """Filter search results by allowed document paths for access control.
-
-        If _internal_document_paths is set, only results whose path_or_url is in the
-        allowed list are returned. Results with no path_or_url field are discarded
-        when the filter is active.
-
-        Args:
-            results: List of search result dicts from VDB search
-
-        Returns:
-            Filtered list containing only results with allowed document paths
-        """
-        allowed_paths = unwrap_field_info(self._internal_document_paths)
-        if not allowed_paths:
-            return results
-
-        filtered = [
-            result for result in results
-            if result.get("path_or_url") in allowed_paths
-        ]
-
-        if filtered:
-            logger.info(
-                "Document paths filter applied: %d/%d results match allowed paths",
-                len(filtered),
-                len(results),
-            )
-        return filtered
-
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
         scope = self._resolve_search_scope(index_names)
         search_index_names = scope.used_scope
@@ -321,24 +227,9 @@ class KnowledgeBaseSearchTool(Tool):
             search_index_names,
         )
 
-        # Compute effective top_k for initial search:
-        # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
-        # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
-        effective_top_k = unwrap_field_info(self.top_k)
-        is_rerank = unwrap_field_info(self.rerank)
-        if is_rerank:
-            effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
-
-        kb_search_data = self._run_search(
-            query=query,
-            index_names=search_index_names,
-            search_mode=search_mode,
-            top_k=effective_top_k,
-        )
+        kb_search_data = self._run_search(query=query, index_names=search_index_names,
+                                          search_mode=search_mode, top_k=self.top_k)
         kb_search_results = kb_search_data["results"]
-
-        # Apply document_paths access control: filter out results not in allowed list
-        kb_search_results = self._filter_by_document_paths(kb_search_results)
 
         if not kb_search_results:
             logger.info(
@@ -353,13 +244,6 @@ class KnowledgeBaseSearchTool(Tool):
                 scope.unavailable_scope,
                 scope.fallback_to_all,
                 scope.scope_was_specified,
-            )
-
-        if self.rerank and self.rerank_model and kb_search_results:
-            kb_search_results = self._apply_rerank(
-                query=query,
-                kb_search_results=kb_search_results,
-                top_k=self.top_k,
             )
 
         (
@@ -394,59 +278,10 @@ class KnowledgeBaseSearchTool(Tool):
         )
 
     def _run_search(self, query: str, index_names: List[str], search_mode: str, top_k: int):
-        search_handlers = {
-            "hybrid": self.search_hybrid,
-            "accurate": self.search_accurate,
-            "semantic": self.search_semantic,
-        }
-        handler = search_handlers.get(search_mode)
-        if not handler:
-            raise Exception(
-                f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic"
-            )
-        return handler(query=query, index_names=index_names, top_k=top_k)
-
-    def _apply_rerank(
-        self,
-        query: str,
-        kb_search_results: List[dict],
-        top_k: int,
-    ) -> List[dict]:
-        try:
-            documents = [result.get("content", "") for result in kb_search_results]
-            reranked_results = self.rerank_model.rerank(
-                query=query,
-                documents=documents,
-                top_n=len(documents),
-            )
-            if not reranked_results:
-                return kb_search_results
-
-            original_results_map = {
-                i: kb_search_results[i] for i in range(len(kb_search_results))
-            }
-            reranked_top_results = []
-            for reranked_item in reranked_results[:top_k]:
-                orig_idx = reranked_item.get("index")
-                if orig_idx is None or orig_idx not in original_results_map:
-                    continue
-                result = original_results_map[orig_idx]
-                result["score"] = reranked_item.get(
-                    "relevance_score", result.get("score", 0)
-                )
-                reranked_top_results.append(result)
-
-            if reranked_top_results:
-                logger.info(
-                    "Reranking applied: selected top %s from %s candidates",
-                    top_k,
-                    len(documents),
-                )
-                return reranked_top_results
-            return kb_search_results
-        except Exception as e:
-            logger.warning("Reranking failed, using original results: %s", str(e))
-            return kb_search_results
+        if not callable(self.searcher):
+            raise RuntimeError("Runtime knowledge search requires its bound standard backend")
+        return self.searcher(query=query, index_names=index_names, search_mode=search_mode, top_k=top_k,
+                             cancellation_scope=self.cancellation_scope)
 
     @staticmethod
     def _normalize_source_type(source_type: str) -> str:
@@ -482,7 +317,11 @@ class KnowledgeBaseSearchTool(Tool):
             if image_url:
                 images_list_url.append(image_url)
 
-            search_results_json.append(search_result_message.to_dict())
+            stored = search_result_message.to_dict()
+            for field in ("file_ref", "image_ref", "location"):
+                if field in single_search_result:
+                    stored[field] = single_search_result[field]
+            search_results_json.append(stored)
             search_results_return.append(search_result_message.to_model_dict())
 
         return search_results_json, search_results_return, images_list_url
@@ -530,84 +369,3 @@ class KnowledgeBaseSearchTool(Tool):
             self.observer.add_message(
                 "", ProcessType.PICTURE_WEB, search_images_list_json
             )
-
-    @staticmethod
-    def _format_search_results(results: list, include_scores: bool) -> list:
-        """Format raw vector search results for tool output.
-
-        Copies each document before mutation, attaches score/index, and merges
-        score details plus retrieval highlight terms into ``score_details``.
-        """
-        formatted_results = []
-        for result in results:
-            doc = dict(result["document"])
-            doc["score"] = result["score"]
-            doc["index"] = result["index"]
-            score_details = dict(doc.get("score_details") or {})
-            if include_scores and result.get("scores"):
-                score_details.update(result["scores"])
-            if result.get("highlight_terms"):
-                score_details["retrieval_highlight_terms"] = result["highlight_terms"]
-            if score_details:
-                doc["score_details"] = score_details
-            formatted_results.append(doc)
-        return formatted_results
-
-    def search_hybrid(self, query, index_names, top_k):
-        try:
-            results = self.vdb_core.hybrid_search(
-                index_names=index_names,
-                query_text=query,
-                embedding_model=self.embedding_model,
-                top_k=top_k,
-            )
-
-            formatted_results = self._format_search_results(
-                results, include_scores=True
-            )
-
-            return {
-                "results": formatted_results,
-                "total": len(formatted_results),
-            }
-        except Exception as e:
-            raise Exception(f"Error during hybrid search: {str(e)}")
-
-    def search_accurate(self, query, index_names, top_k):
-        try:
-            results = self.vdb_core.accurate_search(
-                index_names=index_names,
-                query_text=query,
-                top_k=top_k,
-            )
-
-            formatted_results = self._format_search_results(
-                results, include_scores=False
-            )
-
-            return {
-                "results": formatted_results,
-                "total": len(formatted_results),
-            }
-        except Exception as e:
-            raise Exception(f"Error during accurate search: {str(e)}")
-
-    def search_semantic(self, query, index_names, top_k):
-        try:
-            results = self.vdb_core.semantic_search(
-                index_names=index_names,
-                query_text=query,
-                embedding_model=self.embedding_model,
-                top_k=top_k,
-            )
-
-            formatted_results = self._format_search_results(
-                results, include_scores=False
-            )
-
-            return {
-                "results": formatted_results,
-                "total": len(formatted_results),
-            }
-        except Exception as e:
-            raise Exception(f"Error during semantic search: {str(e)}")

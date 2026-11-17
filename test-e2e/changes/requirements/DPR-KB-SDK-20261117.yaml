@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-SDK-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Move knowledge tool execution into Runtime standard retrieval
+  description: Move required SDK knowledge execution into Runtime, serialize per-collection models and versioned files, use signed Model.get/list and standard tool invocation, and preserve neutral reference metadata.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001, AOS-TRANSPORT-D3-001, TFP-D1-004]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001, AOS-TRANSPORT-D3-001, TFP-D1-004, UT-SDK-AUTO-F2FC05F0ACCC25B1]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Export one immutable model per collection and Management-authorized versioned file references without credentials.
+    - Runtime assembly does not construct a legacy vector client or call models outside Model.invoke.
+    - Runtime knowledge tools use the injected standard backend and preserve reference numbering, typed source identity and score details.
+    - Cancellation terminates the active query and failures do not replay or query old indexes.
+    - Resource preparation and model catalog queries enforce one total deadline, cancel owned waits and redact timeout warnings.
+    reason: Necessary scope, citation, image and factory assertions move to Runtime tests with the implementation; no standalone SDK compatibility is retained. Focused UT proves callback injection and snapshot shape; the worker D3 proves actual standard retrieval, signed Management grants, model metadata, tool trials and owned stores. D5 proves packaging, not full public data cutover. Self-contained cases create uniquely labelled resources and clean them in finally.
+    test_selectors:
+    - test/backend/services/test_runtime_knowledge_tool.py
+    - test/backend/services/test_runtime_knowledge_tool_scope.py
+    - test/backend/services/test_knowledge_image_injection.py
+    - test/backend/services/test_knowledge_model_bindings.py
+    - test/backend/services/test_agentos_model_catalog.py
+    - test/backend/services/test_knowledge_tool_validation.py
+    - test/backend/infrastructure/test_model_metadata_port.py
+    - test/backend/app/test_agentos_prepared_knowledge.py
+    - test/backend/app/test_agentos_knowledge_legacy_parameters.py
+    - test/backend/app/test_agentos_tools.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_tool_fastpath_registry.py
+    - test/sdk/core/agents/test_nexent_agent_tool_fastpath_policy.py

@@ -9,8 +9,8 @@ import pytest
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.agents.nexent_agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunTerminated
-from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from nexent.core.utils.observer import ProcessType
+from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
 
 
 def tool(observer):

@@ -1,21 +1,68 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import pytest
-from fastapi import HTTPException
-
 from contracts.agentos import PreparedEvaluationRun
-from infrastructure.agent_model_config import create_model_config_from_record
-from infrastructure.agentos_identity import ServicePrincipal
+from fastapi import HTTPException
 from management.services.agent.preparation import evaluation_snapshot
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.nexent_agent import NexentAgent
 from runtime.agentos import prepared_evaluation
 
-from test.backend.app.test_agentos_prepared_evaluation import model_record
+from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agentos_identity import ServicePrincipal
+from test.backend.app.test_agentos_prepared_evaluation import (
+    model_record as legacy_model_record,
+)
+
+
+def model_record(**changes):
+    """Use a valid frozen LLM outlet; KB adapter records retain their own modality."""
+    import json
+    from pathlib import Path
+
+    from nexent.core.model_service.profiles.outlet_storage import (
+        encode_resolved_model_profile,
+    )
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    from nexent.core.model_service.registry import model_service_references
+
+    row = legacy_model_record(**changes)
+    if row["model_type"] != "llm":
+        return row
+    data = json.loads((Path(__file__).resolve().parents[2] / "sdk/core/model_service/fixtures/openai_protocol_profile.json").read_text())
+    references = model_service_references()
+    for name in ("auth", "code_converter", "native_converter"):
+        data["bindings"][name] = references[name][0].model_dump()
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = row["model_id"]
+    data["identity"]["tenant_id"] = row["tenant_id"]
+    row.update(encode_resolved_model_profile(ResolvedModelProfile.model_validate(data), registered_references=references))
+    return row
+
+
+@pytest.fixture(autouse=True)
+def metadata_client(mocker):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from contracts.agentos import ModelMetadata
+    from management.services.agent.preparation import knowledge_search
+
+    client = SimpleNamespace(get_model=AsyncMock(return_value=ModelMetadata(
+        model_id=12, model_type="embedding", display_name="Embedding", revision="revision-1")), list_models=AsyncMock())
+    mocker.patch.object(knowledge_search, "AgentOSClient", return_value=client)
+    async def blocking(name, method, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return method(*args, **kwargs)
+    mocker.patch.object(knowledge_search, "run_blocking", side_effect=blocking)
+    return client
 
 
 @pytest.fixture
-def knowledge_tool():
+def knowledge_tool(mocker):
+    from contracts.agentos_knowledge import KnowledgeFileReference
+    mocker.patch("management.services.agent.preparation.knowledge_search.prepare_tool_files", return_value=[
+        KnowledgeFileReference(knowledge_id=7, file_id="a" * 32, file_version=0)])
     return ToolConfig(
         name="knowledge_base_search", class_name="KnowledgeBaseSearchTool", source="local", usage="knowledge",
         params={"index_names": ["kb-authorized", "kb-denied"], "search_mode": "accurate", "top_k": 4},
@@ -26,7 +73,8 @@ def knowledge_tool():
     ("none", None), ("deny_all", None), ("revoked", 403), ("stale", 409), ("stale_model", 409), ("foreign", 404),
 ])
 @pytest.mark.parametrize("aliased", [False, True])
-def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, knowledge_tool, change, status, aliased):
+@pytest.mark.asyncio
+async def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, knowledge_tool, change, status, aliased, metadata_client):
     from management.services.agent.preparation import knowledge_search
     from runtime.agentos import prepared_knowledge
 
@@ -45,10 +93,13 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
     mocker.patch.object(knowledge_search, "resolve_knowledge_base_permissions", return_value={
         "kb-authorized": None if change == "deny_all" else "READ_ONLY", "kb-denied": None,
     })
-    model_lookup = mocker.patch.object(knowledge_search, "get_model_by_model_id", return_value=embedding)
-    knowledge_search.prepare_knowledge_search(knowledge_tool, "user-a", "tenant-a", ["reports/approved.txt"])
+    model_lookup = metadata_client.get_model
+    await knowledge_search.prepare_knowledge_search(knowledge_tool, "user-a", "tenant-a", ["reports/approved.txt"])
 
     llm = model_record(model_id=11)
+    mocker.patch("management.services.agent.preparation.model_bindings.get_model_by_model_id", return_value=llm)
+    mocker.patch("management.services.agent.preparation.model_bindings.read_agent_model_overrides", return_value={})
+    mocker.patch("runtime.model.parameters.read_agent_model_overrides", return_value={})
     selected = create_model_config_from_record(llm)
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation", description="", model_name=selected.cite_name,
@@ -64,20 +115,28 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
     if change == "deny_all":
         model_lookup.assert_not_called()
     else:
-        model_lookup.assert_called_once_with(12, "tenant-a")
+        model_lookup.assert_called_once_with(12, "user-a", "tenant-a")
 
     runtime_records = [] if change == "foreign" else [dict(index, embedding_model_id=13) if change == "stale" else index]
-    mocker.patch.object(prepared_knowledge, "read_knowledge_search_records", return_value=runtime_records)
-    mocker.patch.object(prepared_knowledge, "read_knowledge_search_actor", return_value=(
-        {"tenant_id": "tenant-a", "user_role": "USER"}, [],
-    ))
+    from contracts.agentos_knowledge import KnowledgeBaseGrant, KnowledgeSearchGrant
+    from contracts.errors.exceptions import RuntimeUpstreamError
+
+    from infrastructure.knowledge_search import knowledge_search_revision
+    def current_grant(binding, actor, client):
+        if change in {"revoked", "foreign"}:
+            raise RuntimeUpstreamError(status_code=403 if change == "revoked" else 404,
+                                       content=b'{"code":"DENIED"}', headers={})
+        return KnowledgeSearchGrant(knowledge_bases=[KnowledgeBaseGrant(
+            knowledge_id=row["knowledge_id"], collection=row["index_name"], embedding_model_id=row["embedding_model_id"],
+            revision=knowledge_search_revision(row)) for row in runtime_records])
+    mocker.patch.object(prepared_knowledge, "_current_grant", side_effect=current_grant)
     if change == "revoked":
         runtime_records[0] = dict(index, created_by="other", group_ids="99", ingroup_permission="PRIVATE")
     mocker.patch.object(prepared_knowledge, "get_model_by_model_id", return_value=(
         embedding | {"update_time": "revision-2"} if change == "stale_model" else embedding
     ))
     build_adapter = mocker.patch.object(prepared_knowledge, "build_adapter_fresh")
-    vector = mocker.patch.object(prepared_knowledge, "create_elasticsearch_core")
+    vector = mocker.patch("infrastructure.vdb.client.create_elasticsearch_core")
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=llm)
 
     payload = PreparedEvaluationRun.model_validate_json(encoded)
@@ -93,7 +152,7 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
         assert info.agent_config.tools[0].name == knowledge_tool.name
         tool = NexentAgent.create_local_tool(info, info.agent_config.tools[0])
         assert tool.name == "knowledge_base_search"
-        assert tool._internal_document_paths == ["reports/approved.txt"]
+        assert not hasattr(tool, "_internal_document_paths")
         denied_scope = tool._resolve_search_scope(["Denied"])
         assert denied_scope.permission_denied_scope == ["kb-denied"]
         assert "kb-denied" not in denied_scope.used_scope
@@ -103,17 +162,19 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
             vector.assert_not_called()
         else:
             assert tool._resolve_search_scope(["Authorized"]).used_scope == ["kb-authorized"]
-            assert tool.embedding_model is build_adapter.return_value
-            assert tool.vdb_core is vector.return_value
-            assert tool._filter_by_document_paths([
-                {"path_or_url": "reports/other.txt"}, {"path_or_url": "reports/approved.txt"},
-            ]) == [{"path_or_url": "reports/approved.txt"}]
+            assert not hasattr(tool, "embedding_model")
+            assert callable(tool.searcher)
+            build_adapter.assert_not_called()
+            assert not hasattr(tool, "vdb_core")
+            vector.assert_not_called()
+
 
 
 
 
 @pytest.mark.parametrize("named_available", [True, False])
-def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mocker, knowledge_tool, named_available):
+@pytest.mark.asyncio
+async def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mocker, knowledge_tool, named_available, metadata_client):
     from contracts.agentos import ToolBinding
     from management.services.agent.preparation import knowledge_search
     from runtime.agentos import prepared_knowledge
@@ -130,36 +191,42 @@ def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mocker, kn
 
     mocker.patch.object(knowledge_search, "read_knowledge_search_records", return_value=[index])
     mocker.patch.object(knowledge_search, "resolve_knowledge_base_permissions", return_value={"kb-authorized": "EDIT"})
-    mocker.patch.object(knowledge_search, "get_model_by_model_id", return_value=embedding)
-    mocker.patch.object(knowledge_search, "find_named_rerank_record", return_value=named)
-    mocker.patch.object(knowledge_search.tenant_config_manager, "get_model_config", return_value=default)
-    assert knowledge_search.prepare_knowledge_search(knowledge_tool, "user-a", "tenant-a", None)
-    binding = ToolBinding(tool_id=knowledge_tool.name, version="1", parameters=knowledge_tool.metadata["prepared_knowledge_search"])
+    from contracts.agentos import ModelCatalogEntry, ModelCatalogPage, ModelMetadata
+    def metadata(record):
+        return ModelMetadata(model_id=record["model_id"], model_type=record["model_type"],
+                             display_name=record["display_name"], revision="revision-1")
+    metadata_client.get_model.side_effect = lambda model_id, user, tenant: metadata(records[model_id])
+    metadata_client.list_models.return_value = ModelCatalogPage(models=[ModelCatalogEntry(
+        **metadata(named).model_dump(), qualified_name="repo/named")] if named_available else [])
+    mocker.patch.object(knowledge_search.tenant_config_manager, "get_app_config", return_value="14")
+    assert await knowledge_search.prepare_knowledge_search(knowledge_tool, "user-a", "tenant-a", None)
+    binding = ToolBinding(tool_id=knowledge_tool.name, version="2", parameters=knowledge_tool.metadata["prepared_knowledge_search"])
     assert "private-named-reranker" not in binding.model_dump_json()
     assert "private-default-reranker" not in binding.model_dump_json()
 
-    mocker.patch.object(prepared_knowledge, "read_knowledge_search_records", return_value=[index])
-    mocker.patch.object(prepared_knowledge, "read_knowledge_search_actor", return_value=(
-        {"tenant_id": "tenant-a", "user_role": "USER"}, [],
-    ))
+    from contracts.agentos_knowledge import KnowledgeBaseGrant, KnowledgeSearchGrant
+
+    from infrastructure.knowledge_search import knowledge_search_revision
+    mocker.patch.object(prepared_knowledge, "_current_grant", return_value=KnowledgeSearchGrant(knowledge_bases=[
+        KnowledgeBaseGrant(knowledge_id=7, collection="kb-authorized", embedding_model_id=12,
+                           revision=knowledge_search_revision(index))]))
     lookup = mocker.patch.object(prepared_knowledge, "get_model_by_model_id",
                                 side_effect=lambda model_id, tenant: records[model_id])
-    mocker.patch.object(prepared_knowledge, "create_elasticsearch_core")
+    mocker.patch("infrastructure.vdb.client.create_elasticsearch_core")
     adapter = mocker.patch.object(prepared_knowledge, "build_adapter_fresh", side_effect=[
         "embedding", "named" if named_available else ValueError("not configured"), "default",
     ])
     tools = prepared_knowledge.materialize_knowledge_search([binding], ServicePrincipal("user-a", "tenant-a"))
-    assert tools[knowledge_tool.name].metadata["rerank_model"] == ("named" if named_available else "default")
-    assert adapter.call_args_list[0].args[1:3] == ("multi_embedding", "multiEmbedding")
-    assert [call.args for call in lookup.call_args_list] == (
-        [(12, "tenant-a"), (13, "tenant-a")] + ([] if named_available else [(14, "tenant-a")])
-    )
+    assert tools[knowledge_tool.name].metadata["knowledge_searcher"].rerank_model.model_id == (13 if named_available else 14)
+    adapter.assert_not_called()
+    assert [call.args for call in lookup.call_args_list] == [(12, "tenant-a"), (13 if named_available else 14, "tenant-a")]
+
 
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [None, "override", "disabled", "native"])
-async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy_clients(mocker, mode):
+async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy_clients(mocker, mode, knowledge_tool):
     from types import SimpleNamespace
 
     from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -184,12 +251,9 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         "created_by": "user-a", "embedding_model_id": 12,
     }])
     mocker.patch.object(knowledge_search, "resolve_knowledge_base_permissions", return_value={"kb-one": "EDIT"})
-    mocker.patch.object(knowledge_search, "get_model_by_model_id", return_value=model_record(
-        model_id=12, model_type="embedding",
-    ))
 
     tool_params = ToolParamsRequest.model_validate({
-        "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
+        "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"], **({"top_k": 5} if mode == "override" else {})}}}},
     })
     compiler_options = {}
     if mode == "native":
@@ -260,8 +324,8 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
     descriptor = result.metadata["prepared_knowledge_search"]
     assert descriptor["top_k"] == (5 if mode == "override" else 3)
     assert descriptor["index_names"] == ["kb-one"]
-    assert descriptor["document_paths"] == ["report.txt"]
-    assert descriptor["embedding"] == {"model_id": 12, "revision": "revision-1"}
+    assert descriptor["file_refs"] == [{"knowledge_id": 7, "file_id": "a" * 32, "file_version": 0}]
+    assert descriptor["embedding_models"] == {"kb-one": {"model_id": 12, "revision": "revision-1"}}
     assert result.metadata["allowed_index_names"] == ["kb-one"]
     assert result.metadata["index_name_to_display_map"] == {"kb-one": "One"}
 
@@ -272,6 +336,9 @@ def test_prepared_model_revision_matches_database_list_and_id_formats(mocker):
 
     row = model_record(model_id=11, update_time=datetime(2026, 11, 10, 13, 40))
     selected = create_model_config_from_record(row)
+    mocker.patch("management.services.agent.preparation.model_bindings.get_model_by_model_id", return_value=row)
+    mocker.patch("management.services.agent.preparation.model_bindings.read_agent_model_overrides", return_value={})
+    mocker.patch("runtime.model.parameters.read_agent_model_overrides", return_value={})
     listed = row | {"update_time": "2026-11-10T13:40:00Z"}
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[listed])
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=row)
@@ -291,7 +358,7 @@ def test_knowledge_alias_shape_is_rejected_before_storage_access(mocker, binding
     from contracts.agentos import ToolBinding
     from runtime.agentos import prepared_knowledge
 
-    lookup = mocker.patch.object(prepared_knowledge, "read_knowledge_search_records")
+    lookup = mocker.patch.object(prepared_knowledge, "_current_grant")
     if len(binding_ids) == 1:
         params = {}
     else:
@@ -306,13 +373,14 @@ def test_knowledge_alias_shape_is_rejected_before_storage_access(mocker, binding
 
 def test_distinct_knowledge_catalog_aliases_keep_independent_sdk_configuration(mocker):
     from types import SimpleNamespace
+
     from contracts.agentos import ToolBinding
     from runtime.agentos import prepared_knowledge
 
-    storage = mocker.patch.object(prepared_knowledge, "read_knowledge_search_records")
+    storage = mocker.patch.object(prepared_knowledge, "_current_grant")
     models = mocker.patch.object(prepared_knowledge, "get_model_by_model_id")
-    vector = mocker.patch.object(prepared_knowledge, "create_elasticsearch_core")
-    references = [ToolBinding(tool_id="sdk_knowledge:" + name, version="1", parameters={
+    vector = mocker.patch("infrastructure.vdb.client.create_elasticsearch_core")
+    references = [ToolBinding(tool_id="sdk_knowledge:" + name, version="2", parameters={
         "description": {}, "index_names": [], "allowed": [], "display_name_to_index": {}, "top_k": top_k,
     }) for name, top_k in [("first", 3), ("second", 7)]]
     actual = prepared_knowledge.materialize_knowledge_search(references, ServicePrincipal("user-a", "tenant-a"))

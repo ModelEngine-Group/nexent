@@ -1,11 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Runtime's tenant-scoped model lookup and invocation."""
 
+import asyncio
+import logging
 from datetime import datetime
+from time import monotonic
+from uuid import uuid4
 
 from contracts.agentos import (
     ChatInvocation,
     EmbeddingInvocation,
+    ModelCatalogEntry,
+    ModelCatalogPage,
     ModelInvocation,
     ModelMetadata,
     ModelResult,
@@ -16,9 +22,14 @@ from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRe
 from nexent.core.gateway.modality.llm.llm_adapter import LLMRequest
 from nexent.core.gateway.modality.rerank.rerank_adapter import RerankRequest
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.models import OperationContext
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.agentos_identity import ServicePrincipal
+
+logger = logging.getLogger(__name__)
+MODEL_CATALOG_SECONDS = 10
 
 
 class ModelAccessError(Exception):
@@ -35,9 +46,10 @@ _MODEL_TYPES = {
 
 
 class ModelService:
-    def __init__(self, load_record, build_adapter):
+    def __init__(self, load_record, build_adapter, *, list_records=None):
         self.load_record = load_record
         self.build_adapter = build_adapter
+        self.list_records = list_records
 
     async def _load(self, model_id: int, actor: ServicePrincipal) -> tuple[dict, ModelMetadata]:
         record = await run_blocking(
@@ -64,6 +76,32 @@ class ModelService:
     async def get(self, model_id: int, actor: ServicePrincipal) -> ModelMetadata:
         _, metadata = await self._load(model_id, actor)
         return metadata
+
+    async def list(self, query, actor: ServicePrincipal):
+        if self.list_records is None:
+            raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
+        context = OperationContext("model-catalog-" + uuid4().hex, monotonic() + MODEL_CATALOG_SECONDS)
+        try:
+            async with asyncio.timeout(context.remaining()):
+                page = await run_blocking("agentos-model-catalog", self.list_records, query, actor, context=context,
+                                          lane="control-io", owner="runtime.model")
+                result = []
+                for row in page.items:
+                    if (row.get("tenant_id") != actor.tenant_id or row.get("delete_flag") != "N"
+                                or query.model_type is not None and row.get("model_type") != query.model_type):
+                        raise ModelAccessError(403, "MODEL_FORBIDDEN")
+                    revision = row.get("update_time") or row.get("create_time") or "legacy"
+                    result.append(ModelCatalogEntry(model_id=row["model_id"], model_type=row.get("model_type") or "",
+                                                    display_name=row.get("display_name"), revision=(
+                                                        revision.isoformat() if isinstance(revision, datetime) else revision),
+                                                    profile_version=row.get("capability_profile_version"), qualified_name=(
+                                                        f"{row['model_repo']}/{row['model_name']}" if row.get("model_repo")
+                                                        else row.get("model_name"))))
+                return ModelCatalogPage(models=result, next_cursor=page.next_cursor)
+        except (TimeoutError, DeadlineExceeded) as error:
+            logger.warning("agentos_model_catalog_timeout phase=records threshold_seconds=%s exception_type=%s",
+                           MODEL_CATALOG_SECONDS, type(error).__name__)
+            raise ModelAccessError(504, "MODEL_TIMEOUT") from error
 
     async def embedding_dimensions(self, binding, actor: ServicePrincipal) -> int:
         record, metadata = await self._load(binding.model_id, actor)

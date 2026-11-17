@@ -1,19 +1,52 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Export enabled SDK tool references from an authorized Agent configuration."""
 
+import logging
+
 from contracts.agentos import (
-    LocalSearchOverrides, ScopedSharedAidpBinding, ScopedSharedAidpOptions, SkillDerivedLocalToolBinding,
-    StoredLocalToolBinding, ToolBinding,
+    LocalSearchOverrides,
+    RevisionedModelBinding,
+    ScopedSharedAidpBinding,
+    ScopedSharedAidpOptions,
+    SkillDerivedLocalToolBinding,
+    StoredLocalToolBinding,
+    ToolBinding,
 )
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.model.resolver import find_named_rerank_record
+from nexent.core.agents.agent_model import ToolConfig
+
+from infrastructure.agent_model_config import model_record_revision
 from infrastructure.local_tool_execution import (
-    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_SEARCH_TUNING_METADATA, apply_local_parameter_overrides,
-    apply_local_search_overrides, build_local_tool, local_tool_binding_id, local_tool_rerank_name, local_tool_revision,
+    LOCAL_PARAMETER_OVERRIDES_METADATA,
+    LOCAL_SEARCH_TUNING_METADATA,
+    apply_local_parameter_overrides,
+    apply_local_search_overrides,
+    build_local_tool,
+    local_tool_binding_id,
+    local_tool_rerank_name,
+    local_tool_revision,
 )
 from infrastructure.local_tool_overrides import seal_tool_overrides
 from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool
-from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, scoped_shared_aidp_revision
-from management.services.agent.preparation.knowledge_search import _rerank_bindings
-from nexent.core.agents.agent_model import ToolConfig
+from infrastructure.shared_aidp_tool import (
+    SCOPED_SHARED_AIDP_CATALOG_ID,
+    scoped_shared_aidp_revision,
+)
+
+
+def _rerank_bindings(tenant_id, model_name):
+    """Preserve local SDK-tool preparation while KB tools use Runtime metadata."""
+    try:
+        selected = find_named_rerank_record(tenant_id, model_name)
+    except Exception:
+        logging.getLogger(__name__).warning("Unable to resolve named local-tool reranker", exc_info=True)
+        selected = None
+    default = tenant_config_manager.get_model_config("RERANK_ID", tenant_id=tenant_id)
+    if default.get("model_type") != "rerank":
+        default = None
+    return tuple(RevisionedModelBinding(model_id=row["model_id"], revision=model_record_revision(row))
+                 if row else None for row in (selected, default))
 
 
 def export_scoped_shared_aidp(

@@ -96,3 +96,8 @@ case:
     steps: [4]
     expected_results: [6]
     forbidden_side_effects: [1]
+  - id: AC-09
+    description: SDK knowledge search consumes the Runtime standard retrieval callback over actual visible data, preserves reference identity and never constructs a legacy ES client.
+    steps: [4]
+    expected_results: [6]
+    forbidden_side_effects: [1]

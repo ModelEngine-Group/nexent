@@ -4,13 +4,17 @@ import inspect
 import json
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
-from contracts.tool import ToolInfo, ToolSourceEnum
 from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS
+from contracts.constants.environment import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+)
+from contracts.knowledge_tool import knowledge_tool_info
+from contracts.tool import ToolInfo, ToolSourceEnum
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from management.db.mcp.remote import get_mcp_records_by_tenant
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from backend.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.tool.catalog import get_local_tools_classes
 from management.services.tool.common import (
@@ -19,6 +23,8 @@ from management.services.tool.common import (
 )
 from management.services.tool.langchain import discover_langchain_modules
 from pydantic_core import PydanticUndefined
+
+from backend.http.client import create_httpx_client
 
 
 def _get_user_selectability(
@@ -267,6 +273,7 @@ def get_local_tools() -> List[ToolInfo]:
             origin_name=getattr(tool_class, "name"),
         )
         tools_info.append(tool_info)
+    tools_info.append(knowledge_tool_info())
     return tools_info
 
 
@@ -410,12 +417,18 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 
 import jsonref
-from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
+from contracts.constants.environment import (
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_INTERNAL_TOKEN,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+)
 from contracts.errors.exceptions import MCPConnectionError
-from contracts.tool import ToolInfo, ToolSourceEnum
-from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url
+from contracts.tool import ToolInfo
 from fastmcp import Client
-from management.services.tool.common import logger
+from management.db.mcp.remote import (
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_custom_headers_by_name_and_url,
+)
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 
 

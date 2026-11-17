@@ -50,11 +50,15 @@ from nexent.storage.models import (
     StorageScope,
     VectorKey,
 )
+from runtime.agentos import prepared_knowledge
 from runtime.agentos.knowledge import create_knowledge_router
 from runtime.agentos.middleware import AgentOSMiddleware
+from runtime.agentos.model import create_model_router
+from runtime.agentos.tools import create_tool_router
 from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
 from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.knowledge_base.jobs import KnowledgeJobs
+from runtime.knowledge_base.sdk_tool import RuntimeKnowledgeTool
 from runtime.knowledge_base.search import KnowledgeSearchService
 from runtime.knowledge_base.service import KnowledgeService
 from runtime.knowledge_base.tool_search import KnowledgeToolSearch
@@ -80,6 +84,8 @@ from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
 from infrastructure.rdb.knowledge_jobs import FILES, JOBS, bind_knowledge_jobs
 from infrastructure.rdb.knowledge_search_records import KnowledgeRecord
+from infrastructure.rdb.model_metadata import read_model_metadata
+from infrastructure.rdb.model_record import ModelRecord
 
 
 def context():
@@ -113,6 +119,7 @@ def main(run_id):
                 KnowledgeRecord.__table__,
                 KnowledgeFileLifecycle.__table__,
                 cleanse_jobs,
+                ModelRecord.__table__,
             ):
                 table.create(connection)
             connection.exec_driver_sql(
@@ -144,6 +151,12 @@ def main(run_id):
                     delete_flag="N",
                 )
             )
+        with engine.begin() as connection:
+            for model_id, tenant, kind, deleted in ((2, "tenant-a", "embedding", "N"), (3, "tenant-a", "rerank", "N"),
+                                                      (4, "tenant-b", "embedding", "N"), (5, "tenant-a", "embedding", "Y")):
+                connection.execute(ModelRecord.__table__.insert().values(model_id=model_id, tenant_id=tenant,
+                    model_name=f"model-{model_id}", model_type=kind, display_name=f"Model {model_id}", delete_flag=deleted,
+                    api_key="catalog-must-not-return-this-secret"))
         content = b"Runtime owned worker integration"
         objects = bind_source_objects("tenant-a", "user-a", "source", "worker-files")
         owned.append(objects)
@@ -267,7 +280,7 @@ def main(run_id):
             assert modality == slot and modality in {"embedding", "rerank"} and tenant_id == "tenant-a"
             return Adapter(modality)
 
-        models = ModelService(load_record, build_adapter)
+        models = ModelService(load_record, build_adapter, list_records=read_model_metadata)
         app = FastAPI(root_path="/api")
         app.include_router(create_knowledge_authorization_router())
         listener = socket.socket()
@@ -289,6 +302,8 @@ def main(run_id):
             manager = ThreadManager(
                 service_name="kb-worker-proof",
                 lane_policies={
+                    "model-tool-io": LanePolicy(name="model-tool-io", max_workers=2, max_queue_size=2,
+                                                   queue_timeout_seconds=0, cancel_grace_seconds=2, shutdown_grace_seconds=5),
                     "control-io": LanePolicy(
                         name="control-io",
                         max_workers=4,
@@ -315,6 +330,11 @@ def main(run_id):
             health_app = FastAPI(root_path="/api", lifespan=lambda app: knowledge_lifespan(app, workers=workers))
             health_app.add_middleware(AgentOSMiddleware)
             health_app.include_router(create_knowledge_router(api))
+            health_app.include_router(create_model_router(models))
+            health_app.include_router(create_tool_router(manager))
+            # The model execution boundary is controlled; authorization and all storage remain real.
+            prepared_knowledge.get_model_by_model_id = load_record
+            prepared_knowledge.default_service = lambda: api
             install_health_contract(health_app)
             health_socket = socket.socket()
             health_socket.bind(("127.0.0.1", 0))
@@ -414,6 +434,45 @@ def main(run_id):
                 resolved_tool = KnowledgeToolSearch(search_service, actor, bindings, file_refs=refs)
                 selected_hits = await resolved_tool.search("worker", ["kb-worker"], search_mode="accurate")
                 assert len(selected_hits) == 1 and selected_hits[0].file_id == request.file_id
+                from nexent.core.agents.agent_model import ToolConfig
+                from nexent.core.agents.nexent_agent import NexentAgent
+                from nexent.core.utils.observer import ProcessType
+                captured = []
+                sdk = NexentAgent.create_local_tool(SimpleNamespace(
+                    observer=SimpleNamespace(add_message=lambda *event: captured.append(event)), cancellation_scope=None),
+                    ToolConfig(class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+                               params={"index_names": ["kb-worker"], "search_mode": "accurate", "top_k": 3},
+                               metadata={"knowledge_searcher": RuntimeKnowledgeTool(resolved_tool),
+                                         "allowed_index_names": ["kb-worker"]}))
+                rendered = await db(sdk.forward, "worker")
+                assert content.decode() in rendered and not hasattr(sdk, "vdb_core") and not hasattr(sdk, "embedding_model")
+                event, = [event for event in captured if event[1] == ProcessType.SEARCH_CONTENT]
+                reference, = json.loads(event[2])
+                assert reference["file_ref"] == {"knowledge_id": 1, "file_id": request.file_id, "file_version": 0}
+                assert reference["cite_index"] == 1 and reference["url"] == ""
+                evidence["sdk_standard_search"] = True
+                from contracts.agentos import (
+                    AgentToolInvocation,
+                    KnowledgeSearchBinding,
+                    ModelListQuery,
+                    ToolBinding,
+                )
+                catalog = await public.list_models(ModelListQuery(model_type="embedding"), actor.user_id, actor.tenant_id)
+                assert [entry.model_id for entry in catalog.models] == [2]
+                assert "catalog-must-not-return-this-secret" not in catalog.model_dump_json()
+                other_catalog = await public.list_models(ModelListQuery(model_type="rerank"), actor.user_id, "tenant-b")
+                assert other_catalog.models == []
+                evidence["model_metadata_catalog"] = True
+                descriptor = KnowledgeSearchBinding(description={}, index_names=["kb-worker"],
+                    allowed=[{"knowledge_id": 1, "index_name": "kb-worker", "revision": grant.knowledge_bases[0].revision}],
+                    display_name_to_index={}, file_refs=refs, embedding_models={"kb-worker": request.embedding_model.model_dump()},
+                    search_mode="accurate")
+                trial = await public.invoke_tool(AgentToolInvocation(run_id="c" * 32,
+                    tool=ToolBinding(tool_id="knowledge_base_search", version="2", parameters=descriptor.model_dump(mode="json")),
+                    inputs={"query": "worker"}), actor.user_id, actor.tenant_id)
+                assert content.decode() in trial.result
+                evidence["knowledge_trial_agentos"] = True
+
                 assert await db(resolve_tool_files, resources, actor.user_id, [1], ["unknown"], context=context()) == []
                 from nexent.storage.errors import ScopeDenied
                 try:

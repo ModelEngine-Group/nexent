@@ -1,14 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 
 import pytest
-
-from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from nexent.core.utils.tools_common_message import (
     KnowledgeSearchScope,
     SearchResultTextMessage,
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
+from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
 
 
 @pytest.mark.case_id("UT-SDK-AUTO-F2FC05F0ACCC25B1")

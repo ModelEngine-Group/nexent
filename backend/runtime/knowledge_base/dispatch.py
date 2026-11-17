@@ -76,7 +76,7 @@ async def serve(workers, *, owner_id, stop, poll_seconds=1):
 
 def default_workers():
     from contracts.constants import environment
-    from runtime.agentos.knowledge import default_service
+    from runtime.knowledge_base.composition import default_service
     from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
     from runtime.knowledge_base.worker import KnowledgeUploadWorker
 

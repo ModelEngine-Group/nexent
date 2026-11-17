@@ -1,38 +1,38 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from .sql_tools import MySqlTool, PostgreSqlTool, MsSqlTool
+from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
+from .analyze_audio_tool import AnalyzeAudioTool
+from .analyze_image_tool import AnalyzeImageTool
+from .analyze_text_file_tool import AnalyzeTextFileTool
+from .analyze_video_tool import AnalyzeVideoTool
+from .create_directory_tool import CreateDirectoryTool
+from .create_file_tool import CreateFileTool
+from .datamate_search_tool import DataMateSearchTool
 from .deepseek_search_tool import DeepSeekSearchTool
+from .delete_directory_tool import DeleteDirectoryTool
+from .delete_file_tool import DeleteFileTool
+from .dify_search_tool import DifySearchTool
+from .download_from_s3_tool import DownloadFromS3Tool
 from .exa_search_tool import ExaSearchTool
 from .get_email_tool import GetEmailTool
-from .knowledge_base_search_tool import KnowledgeBaseSearchTool
-from .dify_search_tool import DifySearchTool
-from .datamate_search_tool import DataMateSearchTool
-from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
+from .idata_search_tool import IdataSearchTool
 from .ind_aidp_search_tool import IndependentAidpSearchTool
-from .ragflow_search_tool import RAGFlowSearchTool
-from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
-from .send_email_tool import SendEmailTool
-from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
-from .create_file_tool import CreateFileTool
-from .read_file_tool import ReadFileTool
-from .delete_file_tool import DeleteFileTool
-from .create_directory_tool import CreateDirectoryTool
-from .delete_directory_tool import DeleteDirectoryTool
-from .move_item_tool import MoveItemTool
 from .list_directory_tool import ListDirectoryTool
-from .terminal_tool import TerminalTool
-from .analyze_text_file_tool import AnalyzeTextFileTool
-from .analyze_image_tool import AnalyzeImageTool
-from .analyze_audio_tool import AnalyzeAudioTool
-from .analyze_video_tool import AnalyzeVideoTool
+from .move_item_tool import MoveItemTool
 from .parallel_executor import ParallelExecutorTool
-from .store_memory_tool import StoreMemoryTool
-from .search_memory_tool import SearchMemoryTool
-from .download_from_s3_tool import DownloadFromS3Tool
-from .upload_to_s3_tool import UploadToS3Tool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
+from .ragflow_search_tool import RAGFlowSearchTool
+from .read_file_tool import ReadFileTool
+from .search_memory_tool import SearchMemoryTool
+from .send_email_tool import SendEmailTool
+from .sql_tools import MsSqlTool, MySqlTool, PostgreSqlTool
+from .store_memory_tool import StoreMemoryTool
+from .tavily_search_tool import TavilySearchTool
+from .terminal_tool import TerminalTool
+from .upload_to_s3_tool import UploadToS3Tool
+
 
 __all__ = [
     "DeepSeekSearchTool",
@@ -40,7 +40,6 @@ __all__ = [
     "PostgreSqlTool",
     "MsSqlTool",
     "ExaSearchTool",
-    "KnowledgeBaseSearchTool",
     "DifySearchTool",
     "DataMateSearchTool",
     "IdataSearchTool",

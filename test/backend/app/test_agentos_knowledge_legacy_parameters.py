@@ -2,29 +2,38 @@
 """Export SDK-compatible knowledge parameters without constructing legacy clients."""
 
 import pytest
-
 from contracts.agentos import KnowledgeSearchBinding, ToolBinding
-from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import knowledge_search
 from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from runtime.agentos import prepared_knowledge
+from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 
 @pytest.mark.parametrize("raw,expected", [
     (None, 3), ("7", 7), (2.9, 2), (True, 1), (False, 3), ("0", 1), (0, 3), (200, 100), (-4, 1),
 ])
-def test_top_k_keeps_the_legacy_sdk_value_across_json_and_runtime(mocker, raw, expected):
+@pytest.mark.asyncio
+async def test_top_k_keeps_the_legacy_sdk_value_across_json_and_runtime(mocker, raw, expected):
     tool = ToolConfig(
         name="knowledge_base_search", class_name="KnowledgeBaseSearchTool", source="local",
         params={"index_names": [], "top_k": raw},
     )
     mocker.patch.object(knowledge_search, "read_knowledge_search_records", return_value=[])
     mocker.patch.object(knowledge_search, "resolve_knowledge_base_permissions", return_value={})
-    model = mocker.patch.object(knowledge_search, "get_model_by_model_id")
-    assert knowledge_search.prepare_knowledge_search(tool, "actor", "tenant", None)
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    model = AsyncMock()
+    mocker.patch.object(knowledge_search, "AgentOSClient", return_value=SimpleNamespace(get_model=model))
+    async def blocking(name, method, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return method(*args, **kwargs)
+    mocker.patch.object(knowledge_search, "run_blocking", side_effect=blocking)
+    assert await knowledge_search.prepare_knowledge_search(tool, "actor", "tenant", None)
     encoded = ToolBinding(
-        tool_id=tool.name, version="1", parameters=tool.metadata["prepared_knowledge_search"],
+        tool_id=tool.name, version="2", parameters=tool.metadata["prepared_knowledge_search"],
     ).model_dump_json()
     binding = ToolBinding.model_validate_json(encoded)
     assert KnowledgeSearchBinding.model_validate(binding.parameters).top_k == expected
@@ -65,13 +74,14 @@ async def test_portable_compiler_does_not_initialize_legacy_clients_for_valid_sd
 
 
 @pytest.mark.parametrize("raw", ["invalid", [2], {"value": 2}])
-def test_invalid_sdk_values_are_not_silently_replaced_or_authorized(mocker, raw):
+@pytest.mark.asyncio
+async def test_invalid_sdk_values_are_not_silently_replaced_or_authorized(mocker, raw):
     tool = ToolConfig(
         name="knowledge_base_search", class_name="KnowledgeBaseSearchTool", source="local",
         params={"index_names": [], "top_k": raw},
     )
     catalog = mocker.patch.object(knowledge_search, "read_knowledge_search_records")
-    assert knowledge_search.prepare_knowledge_search(tool, "actor", "tenant", None) is False
+    assert await knowledge_search.prepare_knowledge_search(tool, "actor", "tenant", None) is False
     with pytest.raises((ValueError, TypeError)):
         KnowledgeBaseSearchTool(top_k=raw, index_names=[])
     catalog.assert_not_called()

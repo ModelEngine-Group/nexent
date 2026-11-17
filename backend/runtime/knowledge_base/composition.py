@@ -39,3 +39,22 @@ def knowledge_jobs(actor, grant, *, context):
 
     with knowledge_runtime_ports(actor, context=context) as records:
         yield KnowledgeJobs(records, authorize=authorized)
+
+
+def default_service():
+    import httpx
+    from contracts.constants import environment
+    from runtime.knowledge_base.service import KnowledgeService
+    from runtime.model.service import ModelService
+
+    from infrastructure.agentos_client import AgentOSClient
+    from infrastructure.model_adapter import get_adapter_from_config
+    from infrastructure.rdb.model_records import get_model_by_model_id
+
+    return KnowledgeService(
+        AgentOSClient(
+            environment.MANAGEMENT_AGENTOS_URL,
+            lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
+        ),
+        ModelService(get_model_by_model_id, get_adapter_from_config),
+    )

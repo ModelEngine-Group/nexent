@@ -71,6 +71,7 @@ state = await client.stop_run(
 | 用途 | 路径 | 输入 |
 | --- | --- | --- |
 | 获取模型元数据 | `/model/get` | `ModelReference`，返回 ID、类型和 revision，不返回供应方密钥 |
+| 分页查询模型元数据 | `/model/list` | `ModelListQuery`，可按 model_type 筛选，返回 `ModelCatalogPage` |
 | 文本对话 | `/model/invoke` | `ChatInvocation`，operation 为 chat |
 | 向量化 | `/model/invoke` | `EmbeddingInvocation`，operation 为 embedding |
 | 重排 | `/model/invoke` | `RerankInvocation`，operation 为 rerank |
@@ -110,11 +111,11 @@ Runtime 的 KB 入库从已确认的清洗 manifest 读取钉住版本及 SHA256
 | 发现、列出供应方模型 | provider-discover、provider-list | ModelProviderDiscovery、ModelProviderList |
 | 检查已有模型、探测配置 | healthcheck、probe | ModelHealthcheck、ModelProbe |
 
-这些路径统一位于 `/internal/agentos/v1/model/`。当前没有单独通用的 `Model.list` AgentOS 操作；不要把设计中的抽象方法写成已存在的路由。
+这些路径统一位于 `/internal/agentos/v1/model/`。`client.list_models(ModelListQuery(...), user_id, tenant_id)` 查询 Runtime 权威模型目录，默认每页 100 条，上限 1000；后续页使用返回的 next_cursor。结果仅包含 ID、类型、展示名、限定模型名和版本，不返回 URL、凭据或 headers。游标受租户和查询范围限制，目录查询有 10 秒总截止。
 
 ## 文本工具试跑与清洗
 
-Management 的工具试跑先编译已有 `ToolBinding`，再调用 `/internal/agentos/v1/agent/tools/invoke`。输入包含服务端生成的 run_id、工具绑定、inputs 和 language。当前入口只接收 `analyze_text_file`，Runtime 校验模型 ID/revision 后在受管线程执行。请求断开或600秒总截止会取消当前 scope；该接口不创建普通会话消息，也不返回SSE。
+Management 的工具试跑先编译已有 `ToolBinding`，再调用 `/internal/agentos/v1/agent/tools/invoke`。输入包含服务端生成的 run_id、工具绑定、inputs 和 language。入口接受 `analyze_text_file` 及第 2 版知识工具绑定，Runtime 校验资源和模型版本后在受管线程执行。文本工具总截止 600 秒，知识工具总截止 180 秒；请求断开或超时会取消当前 scope。该接口不创建普通会话消息，也不返回 SSE。知识工具运行输入只允许 query 和可选 index_names，文件与模型范围由已授权绑定固定。
 
 ```python
 from uuid import uuid4
@@ -153,9 +154,11 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 `KnowledgeSearch.expected_revisions` 可钉住知识库配置快照。提供时必须包含全部请求知识库 ID 与 SHA256 版本；Runtime 在每次授权中比对，配置变化返回冲突。普通即时查询可省略该字段。`file_ids` 用于限制返回的稳定文件 ID。
 
-`KnowledgeSearch.file_versions` 可进一步固定文件版本，键必须与 `file_ids` 完全对应，值为非负整数。Runtime 在 top-k 前按文件 ID 和版本成对过滤，并核对结果。Management 的 `prepare_tool_files` 将精确对象路径解析为 `KnowledgeFileReference`；Runtime 工具组件使用 `file_refs` 接收这些引用，避免装配期间选中的文件被后续新版本替换。该装配路径仍待与旧 SDK 调用方同步切换。
+`KnowledgeSearch.file_versions` 可进一步固定文件版本，键必须与 `file_ids` 完全对应，值为非负整数。Runtime 在 top-k 前按文件 ID 和版本成对过滤，并核对结果。Management 的 `prepare_tool_files` 将精确对象路径解析为 `KnowledgeFileReference`；Runtime 工具组件使用 `file_refs` 接收这些引用，避免装配期间选中的文件被后续新版本替换。当前工具装配已使用此绑定，公开读写及历史数据仍按退役计划联合切换。
 
-Runtime 的 `KnowledgeToolSearch` 按每个知识库绑定的模型 ID 和版本调用标准检索服务。单模型沿用原分数，多模型按排名融合，统一 rerank 经一次 `Model.invoke` 执行。固定文件白名单为空时拒绝全部文件，未指定时仅受知识库权限约束。该组件返回 typed hit，保留文件版本、图片引用和位置；现有 SDK 入口尚未切换，需与公开写入及历史索引迁移同步完成。
+Runtime 的 `KnowledgeToolSearch` 按每个知识库绑定的模型 ID 和版本调用标准检索服务。单模型沿用原分数，多模型按排名融合，统一 rerank 经一次 `Model.invoke` 执行。固定文件白名单为空时拒绝全部文件，未指定时仅受知识库权限约束。必要知识工具实现位于 `runtime/knowledge_base/tool.py`，由 `sdk_tool.py` 注入标准检索能力；旧 SDK 知识工具文件已移除。Management 通过 contracts 获取纯目录信息，通过 Model.get/list 编译资源，Runtime 通过签名 AgentOS 重新核对 KB 授权。第 2 版绑定保存每库 embedding_models 和版本化 file_refs，拒绝第 1 版绑定。
+
+新工具事件保留 typed file_ref、image_ref 和位置。来源下载与图片展示消费者、公开写入切换及历史索引迁移尚未完成，生产切换须按退役 SPEC 联合执行。
 
 Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，文本检索及 rerank 已有标准接口。图片及 Management 对象清理仍在迁移，当前公开入库和旧 SDK 检索尚未切换。
 

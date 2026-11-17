@@ -8,69 +8,138 @@ from functools import cache, wraps
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from fastapi import HTTPException
-from pydantic_core import PydanticSerializationError
-
-from contracts.errors.exceptions import SnapshotCompilationError
-from contracts.conversation import format_annotations_for_llm
-from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
-from infrastructure.local_tool_execution import is_catalog_local_tool
-
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import (
     ANALYSIS_TOOL_BINDING_PREFIX,
     KNOWLEDGE_TOOL_BINDING_PREFIX,
-    AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
-    ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
-    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunAttachmentHistory, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
-    PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
-    WorkbenchSkillBinding, memory_context_requires_search,
+    AgentResource,
+    AgentRunReference,
+    AnalysisToolBinding,
+    EvaluationAgentOptions,
+    EvaluationAgentRun,
+    EvaluationAnalysisTool,
+    EvaluationFileTool,
+    EvaluationSkillTool,
+    ExternalA2AExecutionBinding,
+    FileToolDescription,
+    KnowledgeSearchBinding,
+    MCPExecutionBinding,
+    ModelBindings,
+    ParallelExecutorBinding,
+    PreparedAgentRun,
+    PreparedConversationHistory,
+    PreparedConversationScope,
+    PreparedEphemeralRun,
+    PreparedEvaluationRun,
+    PreparedHistoryCheckpoint,
+    PreparedMemorySearch,
+    RunAttachment,
+    RunAttachmentHistory,
+    RunHistoryMessage,
+    RunInput,
+    RunModelBinding,
+    RunModelOverrides,
+    SkillDerivedMCPBinding,
+    SkillExecutionBinding,
+    ToolBinding,
+    ToolCallerContext,
+    WorkbenchSkillBinding,
+    memory_context_requires_search,
 )
 from contracts.constants import environment
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.conversation import format_annotations_for_llm
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import (
-    AppException, ForbiddenError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, ValidationError,
+    AppException,
+    ForbiddenError,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    SnapshotCompilationError,
+    ValidationError,
 )
-from contracts.knowledge import ConversationKnowledgeScopeRequest, ResolvedKnowledgeScope
+from contracts.knowledge import (
+    ConversationKnowledgeScopeRequest,
+    ResolvedKnowledgeScope,
+)
 from contracts.runtime_metadata import validate_runtime_metadata
+from fastapi import HTTPException
+from management.db.conversation.repository import (
+    get_conversation,
+    get_historical_context,
+)
+from management.services.agent.context import prepend_current_time
+from management.services.agent.preparation.langchain_tool import export_langchain_tool
+from management.services.agent.preparation.local_tool import (
+    export_local_tool,
+    export_scoped_shared_aidp,
+)
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.configuration.user.memory import get_memory_switch
+from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
+from nexent.core.concurrency import run_blocking
+from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.multi_modal.utils import parse_s3_url
+from pydantic_core import PydanticSerializationError
+
 from infrastructure.a2a_execution import external_agent_execution_revision
-from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
+from infrastructure.agent_attachments import (
+    _build_internal_s3_url,
+    validate_attachment_references,
+)
 from infrastructure.agent_model_config import (
-    create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
+    create_model_config_from_record,
+    create_tenant_default_model_config,
+    model_record_revision,
+    normalize_model_revision,
 )
 from infrastructure.agent_model_overrides import (
-    apply_run_model_generation, get_provider_body_patch, merge_provider_body, provider_body_revision,
+    apply_run_model_generation,
+    get_provider_body_patch,
+    merge_provider_body,
+    provider_body_revision,
 )
 from infrastructure.agent_tool_config import (
-    AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, STORE_MEMORY_TOOL, build_automation_proposal_tool,
-    build_parallel_executor_tool_config, build_plan_tool_configs, build_store_memory_tool,
+    AUTOMATION_PROPOSAL_TOOL,
+    PLAN_TOOL_NAMES,
+    STORE_MEMORY_TOOL,
+    build_automation_proposal_tool,
+    build_parallel_executor_tool_config,
+    build_plan_tool_configs,
+    build_store_memory_tool,
 )
 from infrastructure.langchain_plugins import (
-    discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
+    discover_langchain_plugin_refs,
+    read_bound_langchain_tools,
+    read_skill_derived_langchain_tools,
 )
+from infrastructure.local_tool_execution import is_catalog_local_tool
 from infrastructure.mcp_execution import (
-    MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
-    mcp_execution_revision, select_mcp_server,
+    MCP_ARGUMENT_OVERRIDES,
+    apply_mcp_argument_overrides,
+    build_mcp_tool,
+    mcp_binding_identity,
+    mcp_execution_revision,
+    select_mcp_server,
 )
-from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
+from infrastructure.rdb.local_tool_records import (
+    read_bound_local_tools,
+    read_skill_derived_local_tools,
+)
 from infrastructure.rdb.mcp_execution_records import (
-    read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
+    read_bound_mcp_tools,
+    read_mcp_execution_servers,
+    read_skill_derived_mcp_tools,
 )
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
-from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
-from management.db.conversation.repository import get_conversation, get_historical_context
-from management.services.agent.context import prepend_current_time
-from management.services.configuration.tenant.settings import tenant_config_manager
-from management.services.configuration.user.memory import get_memory_switch
-from management.services.agent.preparation.langchain_tool import export_langchain_tool
-from management.services.agent.preparation.local_tool import export_local_tool, export_scoped_shared_aidp
-from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
-from nexent.core.concurrency import run_blocking
-from nexent.multi_modal.utils import parse_s3_url
+from infrastructure.skill_execution import (
+    capture_skill_files,
+    skill_execution_revision,
+    validate_skill_context,
+)
 
 if TYPE_CHECKING:
     from management.services.agent.workbench import PreparedWorkbench
@@ -175,9 +244,15 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     from management.db.agent.repository import search_agent_info_by_agent_id
     from management.services.agent.preparation.run import create_agent_run_info
     from management.services.agent.workbench import (
-        PreparedWorkbench, resolve_workbench_config, resolve_workbench_knowledge, runtime_skill_snapshot,
+        PreparedWorkbench,
+        resolve_workbench_config,
+        resolve_workbench_knowledge,
+        runtime_skill_snapshot,
     )
-    from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
+    from management.services.model.run_controls import (
+        preflight_agent_turn_controls,
+        validate_agent_model_selection,
+    )
 
     config = request.workbench
     if config is None:
@@ -209,7 +284,9 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     tools = None
     compile_options = {}
     if config.knowledge_scope is not None:
-        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+        from management.services.knowledge_base.scope import (
+            build_runtime_knowledge_resources,
+        )
 
         knowledge, tools = await run_blocking(
             "snapshot-debug-workbench-knowledge", resolve_workbench_knowledge, config, plan, request, user_id, tenant_id,
@@ -271,7 +348,9 @@ async def prepare_debug_snapshot(
     knowledge = None
     compile_options = {}
     if request.knowledge_scope is not None:
-        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+        from management.services.knowledge_base.scope import (
+            build_runtime_knowledge_resources,
+        )
 
         scope = await run_blocking(
             "snapshot-debug-knowledge", prepare_native_knowledge,
@@ -339,7 +418,9 @@ def prepare_native_knowledge(
     request: AgentRequest, conversation: dict | None, user_id: str, tenant_id: str,
 ) -> PreparedNativeKnowledge | None:
     from management.services.knowledge_base.scope import (
-        resolve_knowledge_scope, resolve_root_version, snapshot_runtime_knowledge_tree,
+        resolve_knowledge_scope,
+        resolve_root_version,
+        snapshot_runtime_knowledge_tree,
     )
 
     stored = conversation.get("knowledge_scope") if conversation is not None else None
@@ -377,9 +458,12 @@ async def prepare_conversation_snapshot(
     preserve_shared_reasoning: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
-    from management.services.agent.preparation.run import create_agent_run_info
-    from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
     from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.services.agent.preparation.run import create_agent_run_info
+    from management.services.model.run_controls import (
+        preflight_agent_turn_controls,
+        validate_agent_model_selection,
+    )
 
     if request.conversation_id != reference.conversation_id:
         raise ForbiddenError("Conversation does not match the admitted run")
@@ -427,7 +511,9 @@ async def prepare_conversation_snapshot(
             "prepared_workbench": workbench,
         }
         if workbench.knowledge is not None:
-            from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+            from management.services.knowledge_base.scope import (
+                build_runtime_knowledge_resources,
+            )
 
             request = request.model_copy(update={"tool_params": workbench.knowledge.tool_params})
             compile_options.update(
@@ -435,7 +521,9 @@ async def prepare_conversation_snapshot(
                 runtime_knowledge_context={"scope": build_runtime_knowledge_resources(workbench.knowledge)},
             )
     if native_knowledge is not None:
-        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+        from management.services.knowledge_base.scope import (
+            build_runtime_knowledge_resources,
+        )
 
         resolved = native_knowledge.resolution
         request = request.model_copy(update={"tool_params": resolved.tool_params, "version_no": native_knowledge.root_version})
@@ -443,7 +531,9 @@ async def prepare_conversation_snapshot(
             authorized_knowledge_tools=native_knowledge.authorized_tools,
             runtime_knowledge_context={"scope": build_runtime_knowledge_resources(resolved)},
         )
-    from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+    from nexent.core.model_service.profiles.protocol_parameters import (
+        without_outlet_token_limits,
+    )
 
     saved_preferences = conversation.get("model_parameter_preferences") or {}
     saved_preferences = {key: without_outlet_token_limits(value) if isinstance(value, dict) else value
@@ -738,7 +828,7 @@ def _export_resource(
         elif tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
             descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
             tool_id = tool.name if tool.name == "knowledge_base_search" else KNOWLEDGE_TOOL_BINDING_PREFIX + tool.name
-            binding = ToolBinding(tool_id=tool_id, version="1", parameters=descriptor.model_dump(mode="json"))
+            binding = ToolBinding(tool_id=tool_id, version="2", parameters=descriptor.model_dump(mode="json"))
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
             binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
         elif is_catalog_local_tool(tool):
@@ -806,7 +896,9 @@ def _export_model(
     selected = next((model for model in models if model.cite_name == alias), None)
     if (selected is not None and isinstance(selected.resolved_profile, ResolvedModelProfile)
             and root_generation is None and turn_generation is None):
-        from management.services.agent.preparation.model_bindings import export_resolved_model
+        from management.services.agent.preparation.model_bindings import (
+            export_resolved_model,
+        )
 
         return export_resolved_model(alias, selected, tenant_id, resource,
                                      model_parameter_preferences, catalog_model_versions)

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Restricted official-tool actions with deferred ordinary executor creation."""
 
 from __future__ import annotations
@@ -54,8 +56,9 @@ def official_fastpath_tools(
     configurations: Sequence[Any], tools: Sequence[Any], allowed_classes: Sequence[str],
 ) -> dict[str, Any]:
     """Bind exact official implementations created through trusted factory sources."""
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+
     from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchTool
-    from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
     from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
     from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
 

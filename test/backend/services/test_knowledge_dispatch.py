@@ -137,7 +137,7 @@ async def test_failed_lifespan_task_stays_failed_without_restart(cycle, caplog):
 
 def test_default_worker_reuses_existing_limits_and_model_authority(mocker):
     from contracts.constants import environment
-    from runtime.agentos import knowledge
+    from runtime.knowledge_base import composition as knowledge
 
     service = SimpleNamespace(client=Mock(), models=Mock())
     mocker.patch.object(knowledge, "default_service", return_value=service)

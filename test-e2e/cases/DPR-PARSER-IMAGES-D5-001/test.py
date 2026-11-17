@@ -20,6 +20,13 @@ def test_role_parser_images(record_property):
     containers = []
     sources = {
         "contracts.agentos": "backend/contracts/agentos.py",
+        "contracts.knowledge_tool": "backend/contracts/knowledge_tool.py",
+        "management.services.tool.knowledge_validation": "backend/management/services/tool/knowledge_validation.py",
+        "management.services.tool.discovery": "backend/management/services/tool/discovery.py",
+        "management.services.agent.preparation.knowledge_search": "backend/management/services/agent/preparation/knowledge_search.py",
+        "runtime.knowledge_base.sdk_tool": "backend/runtime/knowledge_base/sdk_tool.py",
+        "runtime.agentos.prepared_knowledge": "backend/runtime/agentos/prepared_knowledge.py",
+        "infrastructure.rdb.model_metadata": "infrastructure/rdb/model_metadata.py",
         "contracts.agentos_knowledge": "backend/contracts/agentos_knowledge.py",
         "infrastructure.file_processing.parser": "infrastructure/file_processing/parser.py",
         "management.services.file.cleanse": "backend/management/services/file/cleanse.py",
@@ -37,7 +44,7 @@ def test_role_parser_images(record_property):
         "runtime.knowledge_base.search": "backend/runtime/knowledge_base/search.py",
         "runtime.model.service": "backend/runtime/model/service.py",
         "infrastructure.knowledge_objects": "infrastructure/knowledge_objects.py",
-        "nexent.core.tools.knowledge_base_search_tool": "sdk/nexent/core/tools/knowledge_base_search_tool.py",
+        "runtime.knowledge_base.tool": "backend/runtime/knowledge_base/tool.py",
         "runtime.agentos.tools": "backend/runtime/agentos/tools.py",
         "nexent.core.tools.analyze_text_file_tool": "sdk/nexent/core/tools/analyze_text_file_tool.py",
         "management.services.tool.text_validation": "backend/management/services/tool/text_validation.py",

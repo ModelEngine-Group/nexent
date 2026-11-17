@@ -7,18 +7,29 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
-from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
-from contracts.tool import ToolSourceEnum, ToolValidateRequest
-from infrastructure.object_storage.client import minio_client
-from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
-from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_server_by_name_and_tenant
-from fastmcp import Client
-from management.services.file.service import validate_urls_access
-from management.services.knowledge_base.service import (
-    get_embedding_model_by_index_name,
-    get_vector_db_core,
+from contracts.constants.environment import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    LOCAL_MCP_SERVER,
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_INTERNAL_TOKEN,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
+from contracts.errors.exceptions import (
+    MCPConnectionError,
+    NotFoundException,
+    RuntimeServiceTimeoutError,
+    ToolExecutionException,
+)
+from contracts.tool import ToolSourceEnum, ToolValidateRequest
+from fastmcp import Client
+from management.db.mcp.remote import (
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_custom_headers_by_name_and_url,
+    get_mcp_server_by_name_and_tenant,
+)
+from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.model.adapter import get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
@@ -28,11 +39,15 @@ from management.services.tool.common import (
 from management.services.tool.langchain import discover_langchain_modules
 from nexent.core.concurrency import run_blocking
 from nexent.core.ext_components.aidp.constants import (
-    AIDP_SEARCH_TOOL_NAME, AIDP_SEARCH_TOOL_NAMES, INDEPENDENT_AIDP_SEARCH_TOOL_NAME,
+    AIDP_SEARCH_TOOL_NAME,
+    AIDP_SEARCH_TOOL_NAMES,
+    INDEPENDENT_AIDP_SEARCH_TOOL_NAME,
 )
 from nexent.core.ext_components.aidp.retrieval_config import validate_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
+
+from infrastructure.object_storage.client import minio_client
 
 
 async def _call_mcp_tool(
@@ -216,8 +231,6 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
-        runtime_inputs = dict(inputs or {})
-
         # Parse instantiation parameters first
         instantiation_params = dict(params or {})
         if tool_name == "deepseek_search":
@@ -244,57 +257,7 @@ def _validate_local_tool(
                 else:
                     instantiation_params[param_name] = param.default
 
-        if tool_name == "knowledge_base_search":
-            index_names = instantiation_params.get("index_names", [])
-            is_multimodal = instantiation_params.pop("multimodal", False)
-
-            # Must have embedding model for knowledge base search
-            if not index_names or not tenant_id:
-                raise ToolExecutionException(
-                    "Embedding model is required for knowledge_base_search but index_names or tenant_id is missing"
-                )
-
-            embedding_model, model_id, _ = get_embedding_model_by_index_name(
-                tenant_id, index_names[0]
-            )
-            if not embedding_model:
-                raise ToolExecutionException(
-                    f"No embedding model found for index '{index_names[0]}'. "
-                    f"Please configure an embedding model for this knowledge base."
-                )
-
-            vdb_core = get_vector_db_core()
-
-            # Get rerank configuration
-            rerank = instantiation_params.get("rerank", False)
-            rerank_model_name = instantiation_params.get("rerank_model_name", "")
-            rerank_model = None
-            if rerank and rerank_model_name:
-                rerank_model = get_rerank_model(
-                    tenant_id=tenant_id, model_name=rerank_model_name
-                )
-
-            # Build display_name to index_name mapping for LLM parameter conversion
-            display_name_to_index_map = {}
-            if index_names:
-                knowledge_name_map = get_knowledge_name_map_by_index_names(
-                    index_names,
-                    tenant_id=tenant_id,
-                )
-                for idx_name, kb_name in knowledge_name_map.items():
-                    display_name_to_index_map[kb_name] = idx_name
-
-            params = {
-                **instantiation_params,
-                "vdb_core": vdb_core,
-                "embedding_model": embedding_model,
-                "rerank_model": rerank_model,
-                "display_name_to_index_map": display_name_to_index_map,
-                # Internal access control: restrict results to specific document paths (path_or_urls)
-                "document_paths": instantiation_params.get("document_paths"),
-            }
-            tool_instance = tool_class(**params)
-        elif tool_name in ["dify_search", "datamate_search"]:
+        if tool_name in ["dify_search", "datamate_search"]:
             # Get rerank configuration for dify and datamate search tools
             rerank = instantiation_params.get("rerank", False)
             rerank_model_name = instantiation_params.get("rerank_model_name", "")
@@ -518,6 +481,11 @@ async def validate_tool_impl(
                     tool_name, inputs, usage, tenant_id
                 )
         elif source == ToolSourceEnum.LOCAL.value:
+            if tool_name == "knowledge_base_search":
+                from management.services.tool.knowledge_validation import (
+                    validate_knowledge_tool,
+                )
+                return await validate_knowledge_tool(request, tenant_id, user_id)
             if tool_name == "analyze_text_file":
                 from management.services.tool.text_validation import validate_text_tool
                 return await validate_text_tool(request, tenant_id, user_id)
@@ -544,6 +512,8 @@ async def validate_tool_impl(
         else:
             raise Exception(f"Unsupported tool source: {source}")
 
+    except RuntimeServiceTimeoutError:
+        raise
     except NotFoundException as e:
         logger.error(f"Tool not found: {e}")
         raise NotFoundException(str(e))

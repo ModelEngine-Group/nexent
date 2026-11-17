@@ -12,28 +12,10 @@ from contracts.agentos_knowledge import (
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
+from runtime.knowledge_base.composition import default_service
 from starlette.responses import JSONResponse
 
 from backend.http.server.knowledge_errors import knowledge_error
-
-
-def default_service():
-    import httpx
-    from contracts.constants import environment
-    from runtime.knowledge_base.service import KnowledgeService
-    from runtime.model.service import ModelService
-
-    from infrastructure.agentos_client import AgentOSClient
-    from infrastructure.model_adapter import get_adapter_from_config
-    from infrastructure.rdb.model_records import get_model_by_model_id
-
-    return KnowledgeService(
-        AgentOSClient(
-            environment.MANAGEMENT_AGENTOS_URL,
-            lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
-        ),
-        ModelService(get_model_by_model_id, get_adapter_from_config),
-    )
 
 
 def create_knowledge_router(service=None):

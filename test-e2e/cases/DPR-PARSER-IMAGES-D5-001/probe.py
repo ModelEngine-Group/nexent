@@ -209,13 +209,16 @@ else:
                "runtime.knowledge_base.tool_search", "runtime.knowledge_base.search",
                "runtime.model.service", "infrastructure.knowledge_objects",
                "runtime.text_cleanse", "runtime.knowledge_images", "runtime.agentos.tools",
-               "nexent.core.tools.analyze_text_file_tool", "nexent.core.tools.knowledge_base_search_tool"]
+               "nexent.core.tools.analyze_text_file_tool", "runtime.knowledge_base.tool",
+               "runtime.knowledge_base.sdk_tool", "runtime.agentos.prepared_knowledge",
+               "infrastructure.rdb.model_metadata"]
 
 if role == "management":
     modules.extend(["management.services.tool.text_validation", "management.services.file.image_content",
-                    "infrastructure.file_processing.image_sources"])
+                    "infrastructure.file_processing.image_sources", "management.services.tool.knowledge_validation",
+                    "management.services.tool.discovery", "management.services.agent.preparation.knowledge_search"])
 
-modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge"])
+modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge", "contracts.knowledge_tool"])
 
 evidence["source_hashes"] = {
     name: hashlib.sha256(
@@ -223,4 +226,7 @@ evidence["source_hashes"] = {
     ).hexdigest()
     for name in modules
 }
+if role == "management":
+    assert not any(name == "runtime" or name.startswith("runtime.") for name in sys.modules)
+assert importlib.util.find_spec("nexent.core.tools.knowledge_base_search_tool") is None
 print(json.dumps(evidence, sort_keys=True))

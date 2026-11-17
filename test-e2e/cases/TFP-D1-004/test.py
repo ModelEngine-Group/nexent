@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """TFP-D1-004: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -5,10 +7,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from shared.tool_fastpath import make_wrapper
-from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
-from smolagents.default_tools import FinalAnswerTool
-
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.agents.tool_fastpath import (
     OFFICIAL_FASTPATH_TOOL_CLASSES,
@@ -20,7 +18,9 @@ from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchTool
 from nexent.core.tools.ind_aidp_search_tool import IndependentAidpSearchTool
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 from nexent.core.utils.observer import MessageObserver
-
+from shared.tool_fastpath import make_wrapper
+from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
+from smolagents.default_tools import FinalAnswerTool
 
 pytestmark = [pytest.mark.case_id("TFP-D1-004"), pytest.mark.stage("D1")]
 
@@ -28,8 +28,8 @@ def test_tfp_d1_004(monkeypatch):
     """TFP-D1-004: exact official identity and trusted factory source are required."""
     wrapper, ordinary, _, acquisitions, _ = make_wrapper(monkeypatch, execute=False)
     official = wrapper._tools["read_skill_config"]
-    from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
     from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
+    from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
 
     for tool in (
         official, ReadSkillMdTool(),

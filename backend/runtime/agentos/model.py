@@ -3,12 +3,21 @@
 
 import logging
 
+from contracts.agentos import (
+    BODY_KEY,
+    PRINCIPAL_KEY,
+    ModelInvocation,
+    ModelListQuery,
+    ModelOperation,
+    ModelReference,
+)
 from fastapi import APIRouter, Request
+from nexent.storage.errors import StorageError
 from pydantic import TypeAdapter, ValidationError
+from runtime.model.service import ModelAccessError, ModelService
 from starlette.responses import JSONResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, ModelInvocation, ModelOperation, ModelReference
-from runtime.model.service import ModelAccessError, ModelService
+from backend.http.server.knowledge_errors import knowledge_error
 
 _INVOKE = TypeAdapter(ModelInvocation)
 logger = logging.getLogger(__name__)
@@ -29,6 +38,8 @@ def create_model_router(service: ModelService) -> APIRouter:
             return await action(payload, principal)
         except ModelAccessError as exc:
             return JSONResponse({"code": exc.code}, status_code=exc.status)
+        except StorageError as exc:
+            return knowledge_error(exc, prefix="MODEL")
         except Exception as exc:
             # Provider failures can contain credentials, prompts or connection details.
             logger.warning("AgentOS model request failed (%s)", type(exc).__name__)
@@ -44,5 +55,9 @@ def create_model_router(service: ModelService) -> APIRouter:
     @router.post(ModelOperation.INVOKE.value, include_in_schema=False)
     async def invoke_model(request: Request):
         return await dispatch(request, _INVOKE.validate_json, service.invoke)
+
+    @router.post(ModelOperation.LIST.value, include_in_schema=False)
+    async def list_models(request: Request):
+        return await dispatch(request, ModelListQuery.model_validate_json, service.list)
 
     return router

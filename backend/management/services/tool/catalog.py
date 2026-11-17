@@ -1,7 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib
 import inspect
-from typing import List, Dict
+import json
+from typing import Dict, List
 
 
 def get_local_tools_classes() -> List[type]:
@@ -96,4 +97,12 @@ def get_local_tools_description_zh() -> Dict[str, Dict]:
             "params": init_params_list,
             "inputs": inputs_complete
         }
+    from contracts.knowledge_tool import knowledge_tool_info
+
+    definition = knowledge_tool_info()
+    result[definition.name] = {
+        "description_zh": definition.description_zh,
+        "params": [{"name": item["name"], "description_zh": None} for item in definition.params],
+        "inputs": json.loads(definition.inputs),
+    }
     return result

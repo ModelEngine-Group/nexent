@@ -393,45 +393,23 @@ class NexentAgent:
     def create_local_tool(self, tool_config: ToolConfig):
         class_name = tool_config.class_name
         params = tool_config.params
-        tool_class = globals().get(class_name)
+        if class_name == "KnowledgeBaseSearchTool":
+            from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
+            tool_class = KnowledgeBaseSearchTool
+        else:
+            tool_class = globals().get(class_name)
         if tool_class is None:
             raise ValueError(f"{class_name} not found in local")
         else:
             if class_name == "KnowledgeBaseSearchTool":
-                # Filter out conflicting parameters from params to avoid conflicts.
-                # Parameters declared with exclude=True cannot be passed to __init__
-                # due to smolagents.tools.Tool wrapper restrictions; they are set as
-                # attributes on the instance after construction, sourced from metadata.
-                # `document_paths` is intentionally hidden from the LLM and only
-                # populated via tool_params from the northbound interface.
-                filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
-                # Create instance with only non-excluded parameters
-                tools_obj = tool_class(**filtered_params)
-                # Set excluded parameters directly as attributes after instantiation
-                # This bypasses smolagents wrapper restrictions
+                tools_obj = tool_class(**params)
                 tools_obj.observer = self.observer
-                tools_obj.image_filterer = (tool_config.metadata or {}).get("image_filterer")
+                metadata = tool_config.metadata or {}
+                tools_obj.searcher = metadata.get("knowledge_searcher")
+                tools_obj.image_filterer = metadata.get("image_filterer")
                 tools_obj.cancellation_scope = getattr(self, "cancellation_scope", None)
-                tools_obj.vdb_core = tool_config.metadata.get(
-                    "vdb_core", None) if tool_config.metadata else None
-                tools_obj.embedding_model = tool_config.metadata.get(
-                    "embedding_model", None) if tool_config.metadata else None
-                tools_obj.rerank_model = tool_config.metadata.get(
-                    "rerank_model", None) if tool_config.metadata else None
-                tools_obj.display_name_to_index_map = tool_config.metadata.get(
-                    "display_name_to_index_map", {}) if tool_config.metadata else {}
-                # Internal access control: restrict results to documents whose
-                # path_or_url is in the allow list. Only the northbound interface
-                # may populate this; never the LLM.
-                tools_obj.set_document_paths(
-                    tool_config.metadata.get(
-                        "document_paths") if tool_config.metadata else None
-                )
-                tools_obj.set_allowed_index_names(
-                    tool_config.metadata.get("allowed_index_names")
-                    if tool_config.metadata else None
-                )
+                tools_obj.display_name_to_index_map = metadata.get("display_name_to_index_map", {})
+                tools_obj.set_allowed_index_names(metadata.get("allowed_index_names"))
             elif class_name in {"ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"}:
                 filtered_params = {key: value for key, value in params.items() if key not in {"observer", "image_filterer"}}
                 image_filterer = (tool_config.metadata or {}).get("image_filterer")
