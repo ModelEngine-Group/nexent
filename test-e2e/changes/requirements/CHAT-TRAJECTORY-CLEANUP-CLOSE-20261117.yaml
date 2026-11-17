@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CLEANUP-CLOSE-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CLEANUP-CLOSE-20261117
+  title: 手动轨迹清理成功后自动关闭弹窗
+  description: 全部批次结束且无失败/待处理时关闭并刷新；运行、错误及部分完成保留可见状态。
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 手动多批清理结束后自动关闭并刷新，零删除同样关闭。
+    - 执行中不提前关闭，部分失败/待处理及请求错误保留弹窗，取消和重试沿用原机制。
+    reason: 仅前端完成状态展示变更，由组件和hook测试证明；无Python产品变更，正式浏览器边界复用既有D4。
+    test_selectors:
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: SPEC为changes/chat-trajectory-cleanup-scope的AC-04，基线a9520e2c7。runtime责任域，D4独占上下文与受控路由并清理，无共享准备资产。
+    后端接口及定时配置确认保持；完整浏览器/PG/部署验收延续既有暂缓安排，局部组件证明不等于完整Case通过。

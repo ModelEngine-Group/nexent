@@ -14,7 +14,9 @@ import pytest
 fake_consts = types.ModuleType("contracts.constants.environment")
 for name, value in {
     "ENABLE_TELEMETRY": False,
-    "MONITORING_PROVIDER": "",
+    "MONITORING_PROVIDER": "otlp",
+    "TRAJECTORY_READ_ENABLED": False,
+    "TRAJECTORY_CLEANUP_ENABLED": False,
     "MONITORING_PROJECT_NAME": "",
     "OTEL_SERVICE_NAME": "test-service",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
@@ -258,7 +260,9 @@ class TestMonitoringUtilsModule:
         backend_consts = types.ModuleType("backend.contracts.constants.environment")
         for name, value in {
             "ENABLE_TELEMETRY": False,
-            "MONITORING_PROVIDER": "",
+            "MONITORING_PROVIDER": "otlp",
+    "TRAJECTORY_READ_ENABLED": False,
+    "TRAJECTORY_CLEANUP_ENABLED": False,
             "MONITORING_PROJECT_NAME": "",
             "OTEL_SERVICE_NAME": "fallback-service",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",

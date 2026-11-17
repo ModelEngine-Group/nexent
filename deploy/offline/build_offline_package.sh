@@ -353,14 +353,11 @@ get_third_party_images() {
     echo_image_ref "nginx:alpine"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
+    if [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
+      echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
+    fi
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
       phoenix) echo_image_ref "arizephoenix/phoenix:15" ;;
-      grafana)
-        echo_image_ref "grafana/tempo:2.10.5"
-        echo_image_ref "grafana/grafana:12.4"
-        ;;
-      zipkin) echo_image_ref "openzipkin/zipkin:latest" ;;
       langfuse)
         for image in \
           "docker.io/langfuse/langfuse-worker:3" \

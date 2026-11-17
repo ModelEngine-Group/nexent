@@ -70,6 +70,8 @@ containers:
         mountPath: /mnt/nexent-data/memory-provider-plugins
       - name: nexent-logs
         mountPath: /mnt/nexent-data/logs
+      - name: nexent-trajectory
+        mountPath: {{ default "/mnt/nexent-data/trajectory" .Values.global.monitoring.trajectoryRootDir | quote }}
     resources:
       requests:
         memory: {{ .Values.resources.backend.requests.memory }}
@@ -102,4 +104,7 @@ volumes:
   - name: nexent-logs
     persistentVolumeClaim:
       claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}
+  - name: nexent-trajectory
+    persistentVolumeClaim:
+      claimName: {{ default "nexent-trajectory" (default dict .Values.global.sharedStorage.trajectory).existingClaim }}
 {{- end -}}

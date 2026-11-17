@@ -39,7 +39,7 @@ def _build_tool_input(callable_obj: Callable, args: tuple, kwargs: Dict[str, Any
         return tool_input
 
 
-def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str) -> Any:
+def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str, observer=None) -> Any:
     """Wrap smolagents tools and callables with a tool span."""
     if getattr(tool_obj, "_nexent_monitoring_wrapped", False):
         return tool_obj
@@ -49,13 +49,17 @@ def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str) -> Any:
     is_retriever_tool = _is_retriever_tool(tool_obj)
 
     def monitored_span(tool_input: Dict[str, Any]):
+        from nexent.monitor.run_capture import tool_capture_attributes
+
+        attributes = tool_capture_attributes(monitoring_manager, tool_obj, observer)
         if is_retriever_tool:
             return monitoring_manager.trace_retriever_call(
                 tool_name,
                 agent_name,
                 tool_input,
+                **attributes,
             )
-        return monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input)
+        return monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input, **attributes)
 
     def set_monitored_output(result: Any) -> None:
         if is_retriever_tool:

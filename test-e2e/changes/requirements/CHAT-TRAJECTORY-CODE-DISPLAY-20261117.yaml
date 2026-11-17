@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CODE-DISPLAY-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CODE-DISPLAY-20261117
+  title: 简化代码执行轨迹层级与名称
+  description: 按已确认设计归并成功Python/代码阶段包装层，具体工具原名与Python调用分别展示，保留错误与原始数据。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 成功包装归并、无沙箱提升工具、原生父/乱序/多子项、错误取消与历史兼容。
+    - 保留ID/正文/时间和子树汇总，重算展示直接子项数。
+    - 前端树搜索详情名称一致、中英文及代码图标。
+    reason: UT证明投影规则与展示组件；既有D2证明真实归档和HTTP，D4验证页面选择与父导航。
+    test_selectors:
+    - test/backend/services/trajectory/test_code_nodes.py
+    - test/backend/services/trajectory/test_phase_nodes.py
+    - frontend/tests/component/trajectoryPhases.test.tsx
+  notes: SPEC changes/chat-trajectory-code-display；runtime责任域，自包含HTTP/文件/线程与浏览器/路由清理。真实PG、部署及完整D4既有阻塞单列。
