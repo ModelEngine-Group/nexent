@@ -218,6 +218,7 @@ sys.modules["nexent.storage.storage_client_factory"] = MagicMock()
 sys.modules["nexent.storage.minio_config"] = MagicMock()
 sys.modules["nexent.monitor"] = MagicMock()
 sys.modules["nexent.monitor.monitoring"] = MagicMock()
+sys.modules["nexent.monitor.local_content"] = MagicMock()
 
 # Mock external dependencies
 sys.modules["boto3"] = MagicMock()

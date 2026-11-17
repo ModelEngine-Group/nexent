@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-AGENT-INPUT-20261116
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-AGENT-INPUT-20261116
+  title: 智能体输入只保存用户query
+  description: 分离用户query与安全执行快照，消除加载正文后输入变化和系统时间混入用户输入的问题。
+  observed_behavior: 根span预览来自query，local.input.value被执行配置/上下文快照覆盖；Management先注入当前时间再绑定上下文，使query混入系统时间。
+  expected_behavior: 修复后新执行的根智能体输入仅为本次用户query，子智能体为任务文本；预览与正文加载一致，中文长query按UTF-8分块后完整还原，模型节点仍保存实际请求。安全配置及上下文快照和指纹独立保存，调用次数和执行结果保持。
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: 现有采集UT要求根输入包含配置，D3未对账根输入预览与冷读正文；子智能体和模型路径复用已有覆盖。
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - query与执行快照分离，安全配置指纹保持，非法输入标记gap且远端不变。
+    - 请求query优先于执行加工后的query，空query有效，无上下文时回退。
+    - Management在注入当前时间前保留query，覆盖时区、语言、空输入及用户主动输入时间标记；模型执行仍带时间。
+    - 子智能体任务输入、真实模型请求及UTF-8分块读取复用既有回归。
+    reason: 强化现有SDK采集UT及真实worker到文件再到冷读API的D3，不新增D1。
+    test_selectors:
+    - test/sdk/core/model_service/test_run_capture.py
+    - test/sdk/core/agents/observability/test_local_capture.py
+    - test/backend/services/test_agent_trajectory_user_query.py
+  notes: SPEC design.md及proposal.md AC-AGENT-INPUT-01，证据见agent-input-fix.md。责任域继承CHAT-TRAJECTORY；D3沿用独占本地文件、HTTP
+    fixture及受管线程清理，无共享准备资产。旧文件不迁移。用户暂缓完整PG/部署验收。

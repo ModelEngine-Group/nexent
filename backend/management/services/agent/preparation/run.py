@@ -45,6 +45,7 @@ from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
+from nexent.monitor.phase_capture import capture_preparation
 from runtime.adapters.nexent.factory import build_run_info
 
 logger = logging.getLogger("create_agent_info")
@@ -222,6 +223,7 @@ async def preflight_mcp_header_passthrough(
     validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
 
 
+@capture_preparation
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -340,7 +342,9 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
-    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.outlet_storage import (
+        encode_resolved_model_profile,
+    )
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     captured_records = {}
     outlet_profiles = {}
@@ -422,7 +426,9 @@ async def create_agent_run_info(
                                     mc.reasoning_budget_tokens = v
                                 continue
                             if k == "__custom__" and isinstance(v, dict):
-                                from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+                                from nexent.core.model_service.profiles.protocol_parameters import (
+                                    without_outlet_token_limits,
+                                )
 
                                 for custom_key, custom_value in without_outlet_token_limits(v).items():
                                     # A null custom value is an explicit
@@ -610,7 +616,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
     """Give the root a private alias; never change a child Agent's model defaults."""
     if not preferences:
         return
-    from management.services.conversation.model_preferences import merge_model_preferences
+    from management.services.conversation.model_preferences import (
+        merge_model_preferences,
+    )
 
     for configured in model_list:
         profile = getattr(configured, "resolved_profile", None)
@@ -621,7 +629,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
             return
         original = (outlet_profiles or {}).get(profile.outlet_id)
         if original is not None:
-            from management.services.agent.model_parameters import merge_runtime_model_parameters
+            from management.services.agent.model_parameters import (
+                merge_runtime_model_parameters,
+            )
 
             resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
         else:

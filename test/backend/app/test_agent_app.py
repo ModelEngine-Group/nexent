@@ -29,6 +29,7 @@ from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCap
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -116,6 +117,8 @@ monitoring_stub.get_monitoring_manager = lambda: monitoring_manager_mock
 monitoring_stub.monitoring_manager = monitoring_manager_mock
 monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
+monitoring_stub.AgentRunMetadata = AgentRunMetadata
+monitoring_stub.agent_monitoring_context = agent_monitoring_context
 
 # Mock all external dependencies that agent_app.py imports
 # These must be in sys.modules BEFORE we import management.api.agent.agent
