@@ -1,0 +1,160 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Existing tenant configuration rows are saved under a transaction-scoped lock."""
+
+import json
+from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+# isort: split
+from ops.db.trajectory import cleanup_schedule as database
+
+
+@pytest.fixture
+def session(mocker):
+    session = Mock()
+    session.scalars.return_value.first.return_value = None
+    mocker.patch.object(
+        database, "get_db_session", side_effect=lambda: nullcontext(session)
+    )
+    return session
+
+
+def test_first_save_locks_tenant_key_before_insert_and_stamps_actor(session):
+    database.CleanupScheduleRepository().save(
+        "tenant", {"enabled": True, "retention_days": 1}, "admin"
+    )
+    assert (
+        str(session.execute.call_args_list[0].args[0])
+        == "SET LOCAL statement_timeout = '2000ms'"
+    )
+    lock = session.execute.call_args_list[1]
+    assert "pg_advisory_xact_lock" in str(lock.args[0])
+    assert lock.args[1] == {"key": f"{database.SCHEDULE_KEY}:tenant"}
+    assert [call[0] for call in session.mock_calls].index("execute") < [
+        call[0] for call in session.mock_calls
+    ].index("add")
+    row = session.add.call_args.args[0]
+    assert row.tenant_id == "tenant" and row.config_key == database.SCHEDULE_KEY
+    assert (
+        json.loads(row.config_value) == {"enabled": True, "retention_days": 1}
+        and row.created_by == row.updated_by == row.user_id == "admin"
+    )
+    assert row.value_type == "single" and row.delete_flag == "N"
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_repeat_save_updates_same_row_and_preserves_creator(session):
+    row = SimpleNamespace(
+        created_by="creator", config_value='{"enabled": true, "retention_days": 1}'
+    )
+    session.scalars.return_value.first.return_value = row
+    database.CleanupScheduleRepository().save(
+        "tenant", {"enabled": False, "retention_days": 30}, "admin"
+    )
+    assert row.created_by == "creator" and row.updated_by == row.user_id == "admin"
+    assert (
+        json.loads(row.config_value) == {"enabled": False, "retention_days": 30}
+        and row.update_time is not None
+    )
+    session.add.assert_not_called()
+    statement = session.scalars.call_args.args[0]
+    assert "tenant" in statement.compile().params.values()
+    assert "N" in statement.compile().params.values()
+
+
+def test_missing_read_returns_none_and_active_tenant_filter_is_applied(session):
+    assert database.CleanupScheduleRepository().read("tenant") is None
+    statement = session.scalars.call_args.args[0]
+    assert {"tenant", database.SCHEDULE_KEY, "N"}.issubset(
+        set(statement.compile().params.values())
+    )
+
+
+def test_batch_read_preserves_each_tenant_and_rejects_invalid_values(session):
+    rows = [
+        SimpleNamespace(
+            tenant_id="t1", config_value='{"enabled": true, "retention_days": 1}'
+        ),
+        SimpleNamespace(
+            tenant_id="t2", config_value='{"enabled": false, "retention_days": 30}'
+        ),
+    ]
+    session.scalars.return_value.all.return_value = rows
+    assert database.CleanupScheduleRepository().read_all() == {
+        "t1": {"enabled": True, "retention_days": 1},
+        "t2": {"enabled": False, "retention_days": 30},
+    }
+    rows[1].config_value = "bad"
+    with pytest.raises(ValueError):
+        database.CleanupScheduleRepository().read_all()
+
+
+def test_db_failure_is_propagated_without_manual_transaction_management(session):
+    session.execute.side_effect = ConnectionError("offline")
+    with pytest.raises(ConnectionError):
+        database.CleanupScheduleRepository().save(
+            "tenant", {"enabled": True, "retention_days": 7}, "admin"
+        )
+    session.add.assert_not_called()
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "60",
+        '{"enabled": 1, "retention_days": 7}',
+        '{"enabled": true, "retention_days": 31}',
+        '{"enabled": true, "retention_days": 1, "other": 1}',
+    ],
+)
+def test_corrupt_persisted_policy_is_rejected(session, raw):
+    session.scalars.return_value.first.return_value = SimpleNamespace(config_value=raw)
+    with pytest.raises(ValueError):
+        database.CleanupScheduleRepository().read("tenant")
+
+
+def test_bulk_save_locks_sorted_targets_in_one_session_and_preserves_creators(session):
+    old = SimpleNamespace(tenant_id="a", created_by="creator")
+    session.scalars.return_value.all.return_value = [old]
+    factory = database.get_db_session
+    database.CleanupScheduleRepository().save_many(
+        ["z", "a"], {"enabled": True, "retention_days": 7}, "su"
+    )
+    factory.assert_called_once_with()
+    lock = session.execute.call_args_list[1]
+    assert "pg_advisory_xact_lock" in str(lock.args[0]) and "ORDER BY" in str(lock.args[0])
+    assert lock.args[1]["keys"] == [f"{database.SCHEDULE_KEY}:a", f"{database.SCHEDULE_KEY}:z"]
+    assert old.created_by == "creator" and old.updated_by == "su"
+    assert json.loads(old.config_value) == {"enabled": True, "retention_days": 7}
+    (new,) = [call.args[0] for call in session.add.call_args_list]
+    assert new.tenant_id == "z" and new.created_by == new.updated_by == "su"
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_bulk_failure_escapes_shared_transaction_owner(session, mocker):
+    failed = []
+
+    @contextmanager
+    def transaction():
+        try:
+            yield session
+        except Exception as error:
+            failed.append(error)
+            raise
+
+    mocker.patch.object(database, "get_db_session", transaction)
+    session.scalars.return_value.all.return_value = []
+    session.add.side_effect = [None, ConnectionError("write failed")]
+    with pytest.raises(ConnectionError):
+        database.CleanupScheduleRepository().save_many(
+            ["a", "b"], {"enabled": True, "retention_days": 7}, "su"
+        )
+    assert len(failed) == 1
+    session.commit.assert_not_called()

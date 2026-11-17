@@ -278,6 +278,14 @@ class DeferredToolExecutor:
         }
 
     def __call__(self, code: str) -> Any:
+        return self.execute(code)
+
+    def execute_with_trace(self, code: str) -> Any:
+        """Expose code-only tracing without coupling the sandbox to an Agent Core."""
+        return self.execute(code, trace_execution=True)
+
+    def execute(self, code: str, *, trace_execution: bool = False) -> Any:
+        """Time only the selected code invocation after executor preparation."""
         from nexent.core.agents.sandbox.execution import _execute_with_tool_context
 
         with self._lock:
@@ -304,6 +312,8 @@ class DeferredToolExecutor:
                     for statement in statements:
                         import_names.update(_json_import_bindings(statement))
                     try:
+                        if trace_execution:
+                            return _execute_with_tool_context(self.local, code, trace_execution=True)
                         return self.local(code)
                     finally:
                         # Retain only bindings actually established before a local error.
@@ -330,6 +340,8 @@ class DeferredToolExecutor:
                     self._release_executor(executor)
                     raise
                 self.remote = executor
+            if trace_execution:
+                return _execute_with_tool_context(self.remote, code, trace_execution=True)
             return _execute_with_tool_context(self.remote, code)
 
     def cleanup(self) -> None:

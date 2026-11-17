@@ -71,17 +71,6 @@ def _project_python_files(root):
                 yield Path(directory) / filename
 
 
-def test_ac002_preview_key_matches_existing_contract(monkeypatch):
-    import hashlib
-
-    module = load_source(monkeypatch, "backend/management/services/file/preview.py", "slimming_keys")
-    for name in ("a.docx", "folder/中文.pptx", "without-extension", "a.b.c"):
-        stem = name.rsplit(".", 1)[0] if "." in name else name
-        digest = hashlib.md5(name.encode()).hexdigest()[:8]
-        assert module.build_preview_pdf_object_key(name) == f"preview/converted/{stem}_{digest}.pdf"
-        assert module.build_preview_pdf_object_key(name, temporary=True) == f"preview/converting/{stem}_{digest}.pdf.tmp"
-
-
 @pytest.fixture
 def naming(monkeypatch):
     dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})

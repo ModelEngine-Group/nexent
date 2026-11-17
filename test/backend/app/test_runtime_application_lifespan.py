@@ -125,9 +125,29 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
         _module(
             "nexent.core.concurrency",
             ManagedTaskSpec=lambda **kwargs: SimpleNamespace(**kwargs),
+            ManagedThreadSpec=lambda **kwargs: SimpleNamespace(**kwargs),
             ManagerState=manager_state,
             set_default_thread_manager=set_default,
             clear_default_thread_manager=clear_default,
+        ),
+    )
+
+    trajectory_processor = MagicMock()
+    conversation_deleted = MagicMock()
+    monkeypatch.setitem(
+        sys.modules,
+        "infrastructure.observability.bootstrap",
+        _module(
+            "infrastructure.observability.bootstrap",
+            local_trajectory_processor=trajectory_processor,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "infrastructure.observability.trajectory_runtime",
+        _module(
+            "infrastructure.observability.trajectory_runtime",
+            conversation_deleted=conversation_deleted,
         ),
     )
 
@@ -178,6 +198,13 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     start_configuration.assert_awaited_once()
     configuration_io = start_configuration.call_args.args[0]
     assert asyncio.run(configuration_io(lambda: "loaded")) == "loaded"
+    trajectory_processor.start.assert_called_once()
+    assert trajectory_processor.start.call_args.args[0] is manager
+    assert (
+        trajectory_processor.deleted_conversation_check is conversation_deleted
+    )
+    trajectory_processor.request_stop.assert_called_once_with()
+    trajectory_processor.shutdown.assert_called_once_with()
     scheduler.start.assert_awaited_once_with()
     cleanup.assert_called_once_with()
     scheduler.stop.assert_awaited_once_with()

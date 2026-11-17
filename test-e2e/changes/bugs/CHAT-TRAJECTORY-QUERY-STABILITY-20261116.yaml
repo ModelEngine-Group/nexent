@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-QUERY-STABILITY-20261116
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-QUERY-STABILITY-20261116
+  title: 轨迹查询锁竞争、失效归属与页面卡顿修复
+  description: 只读归档避免争用会话写锁，后台忽略失效归属，列表不将未核验显示成缺口，减少正文及树重算。
+  observed_behavior: 完成执行后仍出现owner授权错误、storage_busy和缺口提示，切换子项卡顿。
+  expected_behavior: 授权历史记录可并发读取，失效owner不写入摘要，数据库错误仍可见；列表状态准确、正文按需加载。
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: 已有QUERY测试覆盖权限与归档，未覆盖持有会话写锁时读取；前端UT未断言coverage未核验提示及无关渲染重算。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 后台失效owner跳过写入，登记仍严格授权；数据库错误不被吞掉。
+    - 实际会话写锁下可读取归档；路径归属、文件校验及过期清理保持。
+    - 列表不显示未核验缺口，正文64KiB且无关渲染复用格式化及树结构。
+    test_selectors:
+    - test/backend/services/trajectory/test_query_stability.py
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+    - frontend/tests/component/trajectoryBodyLoading.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+    reason: 复用现有查询与前端测试，新增针对竞争和渲染行为的回归；无新增D1。
+  notes: SPEC chat-local-file-trajectory/query-stability-fix.md. QUERY D2 retains
+    private runtime resources and cleanup. JOURNEY D4 remains blocked; integration
+    acceptance is deferred by the user. Previous builtin-version changes remain intact.

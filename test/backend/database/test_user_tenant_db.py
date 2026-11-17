@@ -104,6 +104,9 @@ sqlalchemy_mock.exc.SQLAlchemyError = MockSQLAlchemyError
 sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
+# Trajectory persistence is a collaborator of tenant membership writes.
+sys.modules['management.db.trajectory.repository'] = MagicMock()
+
 # Now import the functions to be tested
 from management.db.identity.user_tenant import (
     get_all_tenant_ids,

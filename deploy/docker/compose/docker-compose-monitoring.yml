@@ -34,52 +34,6 @@ services:
       - nexent
     restart: unless-stopped
 
-  tempo:
-    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}grafana/tempo:${TEMPO_VERSION:-2.10.5}
-    container_name: nexent-tempo
-    profiles: ["grafana"]
-    command: ["--config.file=/etc/tempo.yml"]
-    volumes:
-      - ../assets/monitoring/tempo.yml:/etc/tempo.yml:ro
-      - tempo-data:/var/tempo
-    ports:
-      - "${TEMPO_PORT:-3200}:3200"
-    networks:
-      - nexent
-    restart: unless-stopped
-
-  grafana:
-    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}grafana/grafana:${GRAFANA_VERSION:-12.4}
-    container_name: nexent-grafana
-    profiles: ["grafana"]
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent@4321}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_USERS_DEFAULT_LANGUAGE: ${GRAFANA_DEFAULT_LANGUAGE:-zh-Hans}
-      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ../assets/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../assets/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "${GRAFANA_PORT:-3002}:3000"
-    depends_on:
-      - tempo
-    networks:
-      - nexent
-    restart: unless-stopped
-
-  zipkin:
-    image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}openzipkin/zipkin:${ZIPKIN_VERSION:-latest}
-    container_name: nexent-zipkin
-    profiles: ["zipkin"]
-    ports:
-      - "${ZIPKIN_PORT:-9411}:9411"
-    networks:
-      - nexent
-    restart: unless-stopped
-
   langfuse-worker:
     image: ${NEXENT_IMAGE_REGISTRY_PREFIX:-}docker.io/langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
     container_name: nexent-langfuse-worker
@@ -264,5 +218,3 @@ volumes:
   langfuse-clickhouse-logs:
   langfuse-minio-data:
   langfuse-redis-data:
-  grafana-data:
-  tempo-data:

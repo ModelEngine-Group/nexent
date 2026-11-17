@@ -4,35 +4,48 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from contracts.constants import environment as config
 from fastapi import FastAPI
 from management.configuration.database import configuration_database
-from nexent.core.concurrency import LanePolicy, ThreadManager
+from ops.concurrency import create_thread_manager
 
-OPS_THREAD_SHUTDOWN_GRACE_SECONDS = 30.0
+
+def trajectory_enabled():
+    return config.TRAJECTORY_READ_ENABLED or config.MONITORING_PROVIDER == "local_file"
+
+
+def create_trajectory_workers():
+    from ops.services.trajectory.lifecycle import TrajectoryWorkers
+
+    return TrajectoryWorkers()
 
 
 @asynccontextmanager
 async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Own readiness, managed I/O workers and configuration connections."""
-    manager = ThreadManager(
-        service_name="ops",
-        lane_policies={
-            "control-io": LanePolicy(
-                name="control-io",
-                max_workers=4,
-                max_queue_size=32,
-                queue_timeout_seconds=0,
-                cancel_grace_seconds=2,
-                shutdown_grace_seconds=OPS_THREAD_SHUTDOWN_GRACE_SECONDS,
-            )
-        },
-    )
+    """Own readiness, managed I/O and all enabled operations resources."""
+    manager = create_thread_manager()
+    workers = None
     app.state.thread_manager = manager
     try:
         manager.start()
+        if trajectory_enabled():
+            workers = create_trajectory_workers()
+            workers.start(manager)
         app.state.ready = True
         yield
     finally:
         app.state.ready = False
-        await manager.shutdown(timeout=OPS_THREAD_SHUTDOWN_GRACE_SECONDS)
-        configuration_database.dispose()
+        try:
+            if workers is not None:
+                await workers.stop(manager)
+        finally:
+            try:
+                await manager.shutdown(
+                    timeout=config.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+                )
+            finally:
+                if trajectory_enabled():
+                    from ops.services.trajectory.runtime import reset_service
+
+                    reset_service()
+                configuration_database.dispose()

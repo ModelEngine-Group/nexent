@@ -50,7 +50,7 @@ spec:
             - name: RUNTIME_HTTP_BACKEND
               value: "http://nexent-runtime:5014"
             - name: OPS_HTTP_BACKEND
-              value: "http://nexent-ops:5016"
+              value: {{ default "http://nexent-ops:5016" .Values.config.opsHttpBackend | quote }}
             - name: MINIO_ENDPOINT
               value: "http://nexent-minio:9000"
             - name: DEPLOYMENT_VERSION

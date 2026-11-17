@@ -2283,6 +2283,7 @@ class TestCreateAgentConfig:
             mock_build_memory.return_value = Mock(
                 user_config=Mock(
                     memory_switch=memory_switch,
+                    external_provider_top_k=5,
                     agent_share_option="always",
                     disable_agent_ids=[],
                     disable_user_agent_ids=[],
@@ -2292,7 +2293,10 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_tool.return_value.forward.return_value = fixed_search_result
+            if isinstance(fixed_search_result, Exception):
+                mock_search_tool.return_value.forward.side_effect = fixed_search_result
+            else:
+                mock_search_tool.return_value.forward.return_value = fixed_search_result
             mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
@@ -2425,6 +2429,83 @@ class TestCreateAgentConfig:
                 "content": result_text,
             },
         ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("enabled,fail", [(False, False), (True, False), (True, True)])
+    async def test_memory_phase_boundaries_keep_original_calls_and_fallback(self, enabled, fail):
+        from contextlib import contextmanager
+
+        events = []
+
+        @contextmanager
+        def phase(name, **kwargs):
+            event = {"name": name, "attributes": kwargs.get("attributes"), "input": kwargs.get("input_value"), "output": None, "error": None}
+            events.append(event)
+            try:
+                yield types.SimpleNamespace(set_output=lambda value: event.update(output=value))
+            except BaseException as error:
+                event["error"] = type(error).__name__
+                raise
+
+        with patch('management.services.agent.preparation.compiler.trace_phase', phase), patch(
+            'management.services.agent.preparation.compiler._get_external_provider_service_for_search',
+            return_value=None,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True, prepared_prompt="", memory_switch=enabled,
+                fixed_search_result=RuntimeError("private") if fail else "Found 1 memory",
+            )
+        if not enabled:
+            assert events == []
+            mocks["search_tool"].assert_not_called()
+            return
+        search = mocks["search_tool"].return_value.forward
+        assert all(event["attributes"]["agent.name"] == "test_agent" for event in events)
+        assert all(event["attributes"]["agent.display_name"] == "知识助手" for event in events)
+        search.assert_called_once_with("test query", 5)
+        assert [event["name"] for event in events] == [
+            "memory.initialize", "memory.initialize", "memory.load_context", "memory.presearch",
+        ]
+        assert events[0]["error"] == "RuntimeError"
+        assert events[1]["output"] == {"service": "context", "ready": True}
+        assert events[2]["output"] == []
+        assert events[-1]["input"] == {"query": "test query", "top_k": 5}
+        assert events[-1]["error"] == ("RuntimeError" if fail else None)
+        assert events[-1]["output"] == (None if fail else "Found 1 memory")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fail", [False, True])
+    async def test_external_memory_phase_keeps_request_and_recoverable_error(self, fail):
+        from contextlib import contextmanager
+
+        events = []
+
+        @contextmanager
+        def phase(name, **kwargs):
+            event = {"name": name, "input": kwargs.get("input_value"), "output": None, "error": None}
+            events.append(event)
+            try:
+                yield types.SimpleNamespace(set_output=lambda value: event.update(output=value))
+            except BaseException as error:
+                event["error"] = type(error).__name__
+                raise
+
+        provider = types.SimpleNamespace(search_all_enabled=AsyncMock(
+            side_effect=RuntimeError("private") if fail else None, return_value=[],
+        ))
+        with patch('management.services.agent.preparation.compiler.trace_phase', phase), patch(
+            'management.services.agent.preparation.compiler._get_external_provider_service_for_search',
+            return_value=provider,
+        ), patch.object(preparation_compiler.memory_models, 'MemorySearchRequest', MagicMock(), create=True):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True, prepared_prompt="", memory_switch=True,
+            )
+        provider.search_all_enabled.assert_awaited_once()
+        event = next(e for e in events if e["name"] == "memory.external_search")
+        assert event["input"] == {"query": "test query", "top_k": 5}
+        assert event["error"] == ("RuntimeError" if fail else None)
+        assert event["output"] == (None if fail else [])
+        mocks["search_tool"].return_value.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):

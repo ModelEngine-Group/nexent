@@ -9,6 +9,10 @@ const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 const start = source.indexOf("function handleAllApiProxy(");
 const end = source.indexOf("// ======================", start);
 assert.ok(start >= 0 && end > start);
+const trajectoryHelperStart = source.indexOf(
+  "function isTrajectoryOpsRequest("
+);
+assert.ok(trajectoryHelperStart > end);
 
 function dispatch(method, pathname) {
   const calls = [];
@@ -29,7 +33,10 @@ function dispatch(method, pathname) {
     }),
     proxy: { web: (_req, _res, config) => calls.push(config) },
   });
-  vm.runInContext(source.slice(start, end), context);
+  vm.runInContext(
+    source.slice(start, end) + source.slice(trajectoryHelperStart),
+    context
+  );
   const req = { method, url: pathname };
   const handled = context.handleAllApiProxy(pathname, req, {});
   return { handled, calls, req };
@@ -46,6 +53,12 @@ for (const [method, path, target] of [
   ["POST", "/api/file/preprocess", "runtime"],
   ["POST", "/api/agent/run", "runtime"],
   ["GET", "/api/conversation/42", "runtime"],
+  ["GET", "/api/trajectory/records", "ops"],
+  ["GET", "/api/trajectory/conversations/42", "ops"],
+  ["GET", "/api/trajectory/conversations/42/snapshot", "ops"],
+  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "ops"],
+  ["POST", "/api/trajectory/cleanup", "ops"],
+  ["GET", "/api/trajectory_config", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
     const result = dispatch(method, path);
@@ -53,7 +66,9 @@ for (const [method, path, target] of [
     assert.equal(result.calls.length, 1);
     assert.equal(
       result.calls[0].target,
-      `http://${target}:${target === "config" ? 5010 : 5014}`
+      `http://${target}:${
+        target === "config" ? 5010 : target === "ops" ? 5016 : 5014
+      }`
     );
   });
 }

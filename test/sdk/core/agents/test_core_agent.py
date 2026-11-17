@@ -1888,7 +1888,7 @@ class TestRunStreamRealExecution:
     def _stub_sandbox_context(self, monkeypatch):
         """Keep executor tests independent of the sandbox's external imports."""
         sandbox_module = ModuleType("nexent.core.agents.sandbox.execution")
-        sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
+        sandbox_module._execute_with_tool_context = lambda executor, code, *, trace_execution=False: executor(code)
         monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 
     class _FakeActionStep:

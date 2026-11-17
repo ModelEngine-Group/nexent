@@ -835,6 +835,17 @@ function handleAllApiProxy(pathname, req, res) {
     return true;
   }
 
+  // Historical trajectory queries are owned by the operations service.
+  if (isTrajectoryOpsRequest(pathname, req.url)) {
+    proxy.web(req, res, {
+      target: OPS_HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+    return true;
+  }
+
   // 2. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
@@ -1004,4 +1015,16 @@ function getRuntimeProxyConfig(timeout) {
     proxyTimeout: timeout,
     timeout: timeout,
   };
+}
+
+/** Route only trajectory directories to ops; ordinary history stays on Runtime. */
+function isTrajectoryOpsRequest(pathname, requestUrl) {
+  if (pathname.startsWith("/api/trajectory/")) return true;
+  const directory =
+    /^\/api\/conversation\/agent_groups(?:\/[^/]+\/conversations)?\/?$/;
+  return (
+    directory.test(pathname) &&
+    new URL(requestUrl, "http://localhost").searchParams.get("view") ===
+      "trajectory"
+  );
 }
