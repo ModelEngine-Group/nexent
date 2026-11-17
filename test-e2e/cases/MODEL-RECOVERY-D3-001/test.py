@@ -134,9 +134,10 @@ def test_terminal_bounds_and_private_diagnostics(caplog, finish, tools, expected
 @pytest.mark.parametrize("scenario", ["recover_empty", "persistent_empty", "recover_malformed", "persistent_malformed"])
 def test_agent_keeps_empty_budget_and_repairs_nonempty_protocol(scenario, shared):
     """Exercise strict Agent recovery over real HTTP for both compatibility entry points."""
-    from nexent.core.agents.core_agent import CoreAgent
-    from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
-    from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig
+    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+    from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolExhaustedError
 
     empty = "empty" in scenario
     persistent = scenario.startswith("persistent")

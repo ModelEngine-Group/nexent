@@ -126,7 +126,7 @@ def local_content_value(value):
                     'implementation': f'{item.__module__}.{item.__qualname__}'}
         from smolagents.tools import BaseTool
 
-        from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper
+        from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 
         if isinstance(item, (BaseTool, SubAgentToolWrapper)):
             return {'type': 'tool_reference', 'name': str(item.name),

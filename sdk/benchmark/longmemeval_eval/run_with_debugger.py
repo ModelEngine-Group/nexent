@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run LongMemEval benchmark with ContextDebugger attached for Langfuse export.
 
 Usage:
@@ -51,7 +52,7 @@ os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 def _install_auto_attach():
     """Wrap CoreAgent.__init__ to auto-attach debugger."""
-    from nexent.core.agents.core_agent import CoreAgent  # noqa: I001
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent  # noqa: I001
     from ctx_debugger import attach_debugger
     from ctx_debugger.debugger import _wrap_compress_if_needed
     import logging

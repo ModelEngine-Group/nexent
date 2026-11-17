@@ -90,7 +90,7 @@ setattr(vector_db_module, "base", vector_db_base_module)
 setattr(vector_db_module, "elasticsearch_core", vector_db_es_module)
 
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization

@@ -66,7 +66,6 @@ from management.db.identity.user_tenant import (
     get_user_tenant_by_user_id,
     insert_user_tenant,
 )
-from management.db.model.repository import create_model_record
 from management.db.models import RolePermission, UserAccount
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,

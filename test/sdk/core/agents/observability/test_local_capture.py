@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from opentelemetry import trace
 
-from nexent.core.agents.nexent_agent import _wrap_tool_with_monitoring
+from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -40,7 +40,7 @@ def test_local_tool_schema_and_call_identity_are_captured(spans, monkeypatch):
     (None, True, 'interrupted'),
 ])
 def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, boundary, expected):
-    module = importlib.import_module('nexent.core.agents.run_agent')
+    module = importlib.import_module('nexent.core.agents.orchestration.entry')
     monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
     info = SimpleNamespace(agent_config=None, query='q', model_config_list=[], history=[], attempt_outcome=None)
     if boundary is not None:
@@ -57,7 +57,7 @@ def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, bo
 def test_worker_input_uses_original_request_query_with_prepared_fallback(spans, monkeypatch, request_query):
     from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
-    module = importlib.import_module('nexent.core.agents.run_agent')
+    module = importlib.import_module('nexent.core.agents.orchestration.entry')
     monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
     info = SimpleNamespace(agent_config=None, query='prepared question with attachment and time',
                            model_config_list=[], history=[], attempt_outcome='completed')

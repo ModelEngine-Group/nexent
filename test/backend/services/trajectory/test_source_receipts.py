@@ -77,7 +77,7 @@ def test_malformed_receipt_is_ignored(agent_request, receipt):
 
 def test_user_save_records_only_actual_committed_message_id(agent_request, mocker):
     service = importlib.import_module("management.services.conversation.service")
-    save = mocker.patch.object(service, "save_message", return_value=42)
+    save = mocker.patch.object(service, "append_conversation_user_message", return_value=(42, 0))
     assert service.save_conversation_user(agent_request, "u", "t") is None
     assert agent_request.__dict__["_trajectory_message_receipt"] == {
         "message_id": "42",
@@ -93,7 +93,7 @@ def test_unknown_save_receipt_clears_earlier_request_binding(
     agent_request, mocker, result
 ):
     service = importlib.import_module("management.services.conversation.service")
-    mocker.patch.object(service, "save_message", return_value=result)
+    mocker.patch.object(service, "append_conversation_user_message", return_value=(result, 0))
     service.save_conversation_user(agent_request, "u", "t")
     assert "_trajectory_message_receipt" not in agent_request.__dict__
 
@@ -101,12 +101,25 @@ def test_unknown_save_receipt_clears_earlier_request_binding(
 def test_failed_save_cannot_leave_a_stale_receipt(agent_request, mocker):
     service = importlib.import_module("management.services.conversation.service")
     save = mocker.patch.object(
-        service, "save_message", side_effect=RuntimeError("controlled write failure")
+        service, "append_conversation_user_message", side_effect=RuntimeError("controlled write failure")
     )
     with pytest.raises(RuntimeError, match="controlled write failure"):
         service.save_conversation_user(agent_request, "u", "t")
     assert "_trajectory_message_receipt" not in agent_request.__dict__
     save.assert_called_once()
+
+
+def test_retry_receipt_uses_verified_original_message_without_another_append(agent_request, mocker):
+    service = importlib.import_module("management.services.conversation.service")
+    agent_request.retry_user_message_id = 42
+    agent_request.retry_message_index = 6
+    resolve = mocker.patch.object(service, "resolve_conversation_retry_user", return_value=(42, 6))
+    append = mocker.patch.object(service, "append_conversation_user_message")
+    service.save_conversation_user(agent_request, "u", "t")
+    assert context.trajectory_source_message_id(agent_request, "u", "t") == "42"
+    assert agent_request._runtime_user_message_index == 6
+    resolve.assert_called_once_with(123, "u", 42, 6, "query", None)
+    append.assert_not_called()
 
 
 @pytest.mark.parametrize("sink", ["otlp", "local_file"])

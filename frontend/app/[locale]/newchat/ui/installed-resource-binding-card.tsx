@@ -55,6 +55,7 @@ import {
   knowledgeSelectionIds,
   mergeKnowledgeConfig,
 } from "./nl2agent-knowledge-config";
+import { formatNl2AgentActionSummary } from "./nl2agent-action-summary";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 
 type ConfigStatus = "unconfigured" | "valid" | "invalid";
@@ -711,10 +712,7 @@ export const InstalledResourceBindingCard: FC<{
       content: [
         {
           type: "text",
-          text: t(
-            "nl2agent.resourceBinding.submittedSummary",
-            "Resource selection completed"
-          ),
+          text: formatNl2AgentActionSummary(payload.subtype, t),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },

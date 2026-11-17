@@ -97,7 +97,7 @@ async def runtime_lifespan(_app):
             pending = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
             if pending:
                 logger.warning("Agent stream tasks exceeded shutdown grace pending=%s", pending)
-            from nexent.core.agents.sandbox import SandboxPoolManager
+            from nexent.core.agents.sandbox.execution import SandboxPoolManager
 
             sandbox_pool = SandboxPoolManager._instance
             if sandbox_pool is not None:

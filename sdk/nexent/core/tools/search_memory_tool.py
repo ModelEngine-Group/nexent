@@ -41,7 +41,7 @@ def _run_coroutine(coro):
         return asyncio.run(coro)
     manager = get_current_thread_manager()
     if manager is None:
-        from ..agents.run_agent import _get_default_agent_thread_manager
+        from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
 
         manager = _get_default_agent_thread_manager()
     return manager.run_sync(

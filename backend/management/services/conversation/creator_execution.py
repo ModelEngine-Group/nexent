@@ -4,6 +4,7 @@
 
 from contracts.constants.environment import APP_VERSION
 from contracts.conversation import ConversationTarget
+from infrastructure.nexent_output import adapt_nexent_stream
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (
@@ -114,7 +115,7 @@ async def start_creation_turn(request, *, kind, user_id, tenant_id, stream_facto
         conversation_id=conversation_id, query=request.query, is_debug=False,
         extra_metadata=extra_metadata,
     )
-    return _CreationStream(
+    return adapt_nexent_stream(_CreationStream(
         stream, metadata, conversation_id=conversation_id, assistant_index=index,
         user_id=user_id, tenant_id=tenant_id,
-    ), conversation_id
+    )), conversation_id

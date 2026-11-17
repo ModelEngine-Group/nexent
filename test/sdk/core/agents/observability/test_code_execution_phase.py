@@ -10,8 +10,8 @@ from unittest.mock import Mock
 import pytest
 from smolagents.default_tools import FinalAnswerTool
 
-from nexent.core.agents import sandbox
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.monitor import phase_capture
 
 from .test_phase_capture import local_spans as local_spans

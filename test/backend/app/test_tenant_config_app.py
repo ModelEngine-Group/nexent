@@ -47,6 +47,7 @@ const_mock.APP_VERSION = 'v1.2.3'
 const_mock.ENABLE_AIDP_KNOWLEDGE = False
 const_mock.ENABLE_AGENT_WORKBENCH = False
 const_mock.HIDE_HOME_PAGE = False
+const_mock.NEXENT_AGENT_CORE = 'jiuwen'
 
 sys.modules['services.tenant_config_service'] = services_mock
 sys.modules['gateway.authentication.auth'] = auth_mock
@@ -136,7 +137,8 @@ class TestTenantConfigApp(unittest.TestCase):
         self.assertIn("enable_aidp_knowledge", data)
         self.assertIs(data["enable_agent_workbench"], False)
         self.assertIs(data["hide_home_page"], False)
-        self.assertEqual(len(data.keys()), 6)
+        self.assertEqual(data["agent_core"], "jiuwen")
+        self.assertEqual(len(data.keys()), 7)
 
 
 if __name__ == '__main__':

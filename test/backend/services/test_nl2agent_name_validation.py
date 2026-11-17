@@ -8,7 +8,7 @@ import re
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from pydantic import ValidationError
 
 from management.services.agent.creation import build_nl2agent_system_prompt

@@ -55,7 +55,7 @@ async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     info = await prepare()
     assert calls == ["search"] and not exporter.get_finished_spans()
     record = next(r for r in info.preparation_trace if r["name"] == "memory.presearch")
-    module = importlib.import_module("nexent.core.agents.run_agent")
+    module = importlib.import_module("nexent.core.agents.orchestration.entry")
     info.agent_config = None
     info.query = "q"
     info.model_config_list = []
@@ -184,7 +184,7 @@ def test_actual_executor_creation_records_backend_and_failure(
     from .test_sandbox_warmup import config
 
     manager, exporter = local_spans
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor")
+    build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor")
     build.return_value = mocker.Mock(_nexent_backend=backend)
     if fail:
         build.side_effect = RuntimeError("private")
@@ -277,7 +277,7 @@ def test_deferred_executor_has_no_initialization_phase_until_acquired(
 
     manager, exporter = local_spans
     sandbox_factory.tool_fastpath_enabled = True
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor")
+    build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor")
     build.return_value = mocker.Mock(_nexent_backend="docker")
     with manager.start_agent_run():
         agent = sandbox_factory.create_single_agent(config())

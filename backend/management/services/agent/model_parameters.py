@@ -9,7 +9,7 @@ from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_par
 def merge_agent_model_parameters(profile, entry):
     """Read a current/historical entry at the boundary, then apply canonical values."""
     from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry))
+    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry, profile=profile))
 
 
 def _apply_agent_parameters(profile, entry):
@@ -32,7 +32,7 @@ def merge_runtime_model_parameters(profile, entry, preferences):
     if not isinstance(preferences, dict):
         from contracts.errors.exceptions import ModelOutletValidationError
         raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-    canonical = read_agent_parameter_entry(entry)
+    canonical = read_agent_parameter_entry(entry, profile=profile)
     from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
     preferences = without_outlet_token_limits(preferences)
     agent_view = _apply_agent_parameters(profile, canonical)

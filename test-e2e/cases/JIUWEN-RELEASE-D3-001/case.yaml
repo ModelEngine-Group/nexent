@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RELEASE-D3-001
+  feature_id: JIUWEN-RELEASE
+  requirement_ids:
+  - JIUWEN-M6-20261016
+  business_rule_ids:
+  - JIUWEN-RELEASE-RULE-001
+  title: Deployed real-model HTTP history and resource smoke
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove real provider execution on deployed source and persisted conversation
+    continuity.
+  preconditions:
+  - Current-source deployment, saved native/text real model outlets, authenticated
+    authorized test tenant; only run-owned temporary agents/conversations/resources
+    are created.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Execute deployed authenticated HTTP turns, publish configuration-side
+      Core changes, reload the same conversation and continue. Send empty client history
+      on follow-up to prove database-owned ordering.
+    expected: Both Core directions preserve earlier messages and remember the synthetic
+      marker without re-executing past tasks; snapshot and explicit terminal semantics
+      are valid.
+  - order: 2
+    action: On the deployed SDK use real saved model outlets and actual local/MCP/Skill/child/A2A
+      execution bridges with controlled harmless resources.
+    expected: Required resource effects and results are observed; native/text complete,
+      subsequent task-only questions do not replay effects, and owned fixtures/workers
+      are cleaned.
+  expected_results:
+  - Both Core directions preserve earlier messages and remember the synthetic marker
+    without re-executing past tasks; snapshot and explicit terminal semantics are
+    valid.
+  - Required resource effects and results are observed; native/text complete, subsequent
+    task-only questions do not replay effects, and owned fixtures/workers are cleaned.
+  forbidden_side_effects:
+  - No original user conversation/config mutation, credential output, model substitution
+    or false pass from HTTP 200 alone.
+  acceptance:
+  - id: AC-01
+    description: Real outlet execution and persisted published-Core conversation continuity.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 1200
+  integration_boundary:
+  - Deployed config/runtime HTTP and real PostgreSQL; installed deployed SDK/model
+    service, real provider and controlled harmless resource endpoints.
+  observations:
+  - Public events, result status, tool and invocation identities, saved envelopes
+    and cleanup.
+  cleanup:
+  - Delete only run-owned temporary API entities and fixture resources, close managers/clients;
+    preserve synthetic evidence IDs and sanitized results.

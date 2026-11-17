@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-001/002: admission and complete worker span lifetime."""
 
 import importlib
@@ -21,7 +22,8 @@ from nexent.monitor import (
 
 from .conftest import assert_child, by_name
 
-run_module = importlib.import_module("nexent.core.agents.run_agent")
+run_module = importlib.import_module("nexent.core.agents.orchestration.entry")
+runner_module = importlib.import_module("nexent.core.agents.cores.smolagents.runner")
 
 
 def test_ut_sdk_trace_001_deferred_binding_restores_request_and_worker_manager(spans, threads, monkeypatch):
@@ -113,10 +115,10 @@ def test_ut_sdk_trace_002_worker_span_includes_setup_and_cleanup(
         finally:
             phase("mcp-close")
 
-    monkeypatch.setattr(run_module, "NexentAgent", create)
-    monkeypatch.setattr(run_module, "ManagedMCPToolCollection", mcp)
+    monkeypatch.setattr(runner_module, "NexentAgent", create)
+    monkeypatch.setattr(runner_module, "ManagedMCPToolCollection", mcp)
     monkeypatch.setattr(run_module, "cleanup_run_workspace", lambda *a: phase("cleanup"))
-    monkeypatch.setattr(run_module, "_log_memory_value_assessment", lambda *a: None)
+    monkeypatch.setattr(runner_module, "_log_memory_value_assessment", lambda *a: None)
     with spans.tracer.start_as_current_span("request"), agent_monitoring_context(
         AgentRunMetadata(agent_id=1, tenant_id="tenant", conversation_id=42)
     ):

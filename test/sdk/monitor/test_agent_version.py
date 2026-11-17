@@ -1,12 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Resolved Agent versions belong to the executing Agent, never its parent."""
 
-import sys
+import importlib
 from contextlib import contextmanager
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from nexent.monitor.monitoring import AgentRunMetadata, MonitoringManager
@@ -49,15 +47,7 @@ def test_model_and_tool_spans_do_not_duplicate_agent_version(kind):
 
 @pytest.mark.parametrize("version", [3, 0, None])
 def test_worker_uses_final_config_instead_of_request_metadata(monkeypatch, version):
-    factory = ModuleType("nexent.core.agents.nexent_agent")
-    factory.NexentAgent = Mock()
-    factory.ProcessType = Mock()
-    factory.cleanup_run_workspace = Mock()
-    source = Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents/run_agent.py"
-    spec = spec_from_file_location("nexent.core.agents._version_worker_test", source)
-    run_agent = module_from_spec(spec)
-    with patch.dict(sys.modules, {"nexent.core.agents.nexent_agent": factory}):
-        spec.loader.exec_module(run_agent)
+    run_agent = importlib.import_module("nexent.core.agents.orchestration.entry")
 
     seen = []
 
@@ -81,7 +71,7 @@ def test_worker_uses_final_config_instead_of_request_metadata(monkeypatch, versi
 @pytest.mark.parametrize("version", [2, 1, 0, None])
 @pytest.mark.parametrize("failed", [False, True])
 def test_subagent_uses_own_version_and_preserves_call_outcome(monkeypatch, version, failed):
-    from nexent.core.agents import subagent_wrapper as module
+    from nexent.core.agents.resources import subagents as module
 
     seen = []
 

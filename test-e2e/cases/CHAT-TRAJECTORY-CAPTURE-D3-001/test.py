@@ -10,7 +10,7 @@ import pytest
 from opentelemetry import trace
 from smolagents import Tool
 
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
 
 
 pytestmark = [pytest.mark.case_id('CHAT-TRAJECTORY-CAPTURE-D3-001'), pytest.mark.stage('D3')]
@@ -181,7 +181,7 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
 
 
 def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monkeypatch):
-    from nexent.core.agents import nexent_agent as module
+    from nexent.core.agents.cores.smolagents import agent as module
 
     calls, barrier = [], threading.Barrier(2)
     large = '完整工具结果' * 55000
@@ -274,7 +274,7 @@ def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
 
 
 def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
-    from nexent.core.agents import nexent_agent as module
+    from nexent.core.agents.cores.smolagents import agent as module
 
     barrier, calls = threading.Barrier(2), []
 
@@ -497,7 +497,7 @@ def test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_rea
 
 
 def test_capture_rejected_protocol_retains_output_without_executing_code(runtime, monkeypatch):
-    from nexent.core.agents import nexent_agent as module
+    from nexent.core.agents.cores.smolagents import agent as module
 
     executed = []
 
@@ -564,7 +564,7 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
     from management.services.conversation import creation_history, creator_execution
     from services import nl2agent_service
 
-    from nexent.core.agents.agent_model import AgentRunInfo
+    from nexent.core.agents.contracts.run import AgentRunInfo
     from nexent.core.utils.observer import MessageObserver
     from nexent.monitor import get_agent_monitoring_context
 
@@ -602,6 +602,7 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
         async def build(**kwargs):
             info = AgentRunInfo(
                 query=kwargs['request'].query, observer=MessageObserver(),
+                stop_event=threading.Event(), thread_manager=runtime.threads,
                 agent_config=AgentConfig(name='nl2agent_main', agent_id=77, version_no=0,
                                          description='Controlled creator', model_name='model', tools=[], max_steps=2),
                 model_config_list=[ModelConfig(cite_name='model', model_name='model', url=base, api_key='synthetic')],

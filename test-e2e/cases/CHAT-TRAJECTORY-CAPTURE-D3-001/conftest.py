@@ -23,9 +23,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
-from nexent.core.agents.run_agent import agent_run_thread
-from nexent.core.agents.sandbox import SandboxConfig, SandboxPoolManager
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.orchestration.entry import agent_run_thread
+from nexent.core.agents.sandbox.config import SandboxConfig
+from nexent.core.agents.sandbox.execution import SandboxPoolManager
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
@@ -181,7 +183,7 @@ class Catalog:
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    from nexent.core.agents import nexent_agent as agent_module
+    from nexent.core.agents.cores.smolagents import agent as agent_module
 
     monkeypatch.setattr(SandboxPoolManager, '_instance', None)
     clients = []

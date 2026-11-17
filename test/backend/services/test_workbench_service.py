@@ -10,8 +10,8 @@ from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionC
 from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from threading import local
 from types import SimpleNamespace
 
@@ -296,7 +296,7 @@ def test_ut_be_wb_007_concurrent_mounts_are_request_isolated():
 
 def test_system_root_knowledge_mount_uses_the_executable_contract(mocker):
     """UT-BE-WB-023: external callers resolve knowledge without persisted Agent IDs."""
-    from nexent.core.agents.agent_model import ToolConfig
+    from nexent.core.agents.contracts.config import ToolConfig
 
     identity = workbench_service.RuntimeAgentIdentity("system:root", None, None, "system_root", "Root", "SYSTEM")
     config = AgentConfig(name="root", description="test", model_name="model", tools=[
