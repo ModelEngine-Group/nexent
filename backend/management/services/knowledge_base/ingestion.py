@@ -9,12 +9,17 @@ from threading import Event
 from time import monotonic
 from uuid import uuid4
 
+from contracts.constants.environment import UPLOAD_FOLDER
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
 )
 from contracts.errors.ingestion import classify_ingestion_exception
+from management.services.file.staged_local_binding import (
+    prepare_staged_binding,
+    publish_staged_binding,
+)
 from management.services.knowledge_base.ingestion_coordinator import (
     IngestionCancellation,
 )
@@ -106,14 +111,13 @@ async def submit_knowledge_files(
         with knowledge_resource_ports(
             actor.tenant_id, actor.user_id, context=bound, include_files=True
         ) as records:
-            return resolve_ingestion_file(
-                records,
-                actor,
-                index_name,
-                details,
-                destination=destination,
-                context=bound,
-            )
+            try:
+                return resolve_ingestion_file(records, actor, index_name, details,
+                                               destination=destination, context=bound)
+            except NotFound:
+                if destination != "local" or not isinstance(details, dict) or details.get("file_id"):
+                    raise
+                return prepare_staged_binding(records, details, actor, index_name, bound)
 
     try:
         try:
@@ -134,6 +138,9 @@ async def submit_knowledge_files(
                                 lane="control-io",
                                 owner="management.knowledge_base",
                             )
+                            if "stage_id" in selected:
+                                phase = "bind-local"
+                                selected = await publish_staged_binding(selected, index_name, actor, UPLOAD_FOLDER, bound)
                             phase = "admit"
                             row = await coordinator.accept(
                                 selected["file_id"],
@@ -158,7 +165,7 @@ async def submit_knowledge_files(
                         if (
                             isinstance(error, TimeoutError)
                             or isinstance(error, DeadlineExceeded)
-                            and phase == "select"
+                            and phase in {"select", "bind-local"}
                         ):
                             logger.warning(
                                 "knowledge_ingestion_submit_timeout operation_id=%s phase=%s threshold_seconds=10",

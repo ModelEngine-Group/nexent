@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from contracts.errors.codes import ErrorCode
 from management.services.knowledge_base.ingestion import submit_knowledge_files
-from nexent.storage.errors import OutcomeUnknown, ScopeDenied
+from nexent.storage.errors import NotFound, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import OperationContext
 
 
@@ -64,6 +64,37 @@ def submission(monkeypatch):
     return SimpleNamespace(**locals())
 
 
+async def test_local_staging_is_bound_before_admission_without_replacing_explicit_id(
+    submission, monkeypatch
+):
+    s = submission
+    s.selector.side_effect = NotFound()
+    prepare = Mock(return_value={"stage_id": "a" * 32})
+    publish = AsyncMock(
+        return_value={"file_id": "c" * 32, "original_filename": "source.txt"}
+    )
+    monkeypatch.setattr(s.module, "prepare_staged_binding", prepare)
+    monkeypatch.setattr(s.module, "publish_staged_binding", publish)
+    result = await submit_knowledge_files(
+        [{"path_or_url": "/owned/source.txt"}],
+        "kb-one",
+        s.actor,
+        destination="local",
+        coordinator=s.coordinator,
+    )
+    assert result == {"task_id": "c" * 32} and publish.await_count == 1
+    assert s.coordinator.accept.await_args.args == ("c" * 32, s.actor)
+    assert s.closed == [True]
+    result = await submit_knowledge_files(
+        s.files[:1], "kb-one", s.actor, destination="local", coordinator=s.coordinator
+    )
+    assert (
+        result["failed_count"] == 1
+        and prepare.call_count == 1
+        and publish.await_count == 1
+    )
+
+
 async def test_single_file_returns_opaque_task_id_and_original_actor(submission):
     s = submission
     result = await submit_knowledge_files(
@@ -73,6 +104,34 @@ async def test_single_file_returns_opaque_task_id_and_original_actor(submission)
     assert s.coordinator.accept.call_args.args == ("b" * 32, s.actor)
     assert s.coordinator.accept.call_args.kwargs["chunking_strategy"] == "basic"
     assert s.closed == [True]
+
+
+async def test_local_binding_timeout_signals_cancellation_without_admitting(
+    submission, monkeypatch
+):
+    s = submission
+    s.selector.side_effect = NotFound()
+    monkeypatch.setattr(
+        s.module, "prepare_staged_binding", Mock(return_value={"stage_id": "a" * 32})
+    )
+
+    async def stalled(*args):
+        await asyncio.sleep(10)
+
+    publish = AsyncMock(side_effect=stalled)
+    monkeypatch.setattr(s.module, "publish_staged_binding", publish)
+    context = OperationContext("binding-timeout", monotonic() + 1)
+    result = await submit_knowledge_files(
+        [{"path_or_url": "/owned/staged.txt"}],
+        "kb-one",
+        s.actor,
+        destination="local",
+        coordinator=s.coordinator,
+        context=context,
+    )
+    assert result["results"][0]["error_code"] == ErrorCode.SYSTEM_TIMEOUT.value
+    assert publish.await_count == 1 and not s.coordinator.accept.called
+    assert s.contexts[-1].cancelled.is_set()
 
 
 async def test_empty_submission_does_not_open_ports_or_start_accept(submission):

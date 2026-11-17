@@ -77,58 +77,8 @@ def fmu(monkeypatch, request):
 # -------------------- save_upload_file --------------------
 
 
-@pytest.mark.asyncio
-async def test_save_upload_file_success(tmp_path, fmu, monkeypatch):
-    written: Dict[str, bytes] = {}
-
-    class _FakeFile:
-        async def read(self) -> bytes:
-            return b"hello"
-
-    class _FakeAIOOpen:
-        def __init__(self, path, mode):
-            self.path = str(path)
-            self.mode = mode
-
-        async def __aenter__(self):
-            class _Writer:
-                async def write(_, b: bytes):  # noqa: N803
-                    written[self.path] = b
-
-            return _Writer()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    fake_aiofiles = types.SimpleNamespace(open=_FakeAIOOpen)
-    set_import_attribute(monkeypatch, fmu, "aiofiles", fake_aiofiles)
-
-    ok = await fmu.save_upload_file(_FakeFile(), tmp_path / "x.bin")
-    assert ok is True
-    assert written[str(tmp_path / "x.bin")] == b"hello"
 
 
-@pytest.mark.asyncio
-async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
-    class _ErrOpen:
-        def __init__(self, *a, **k):
-            pass
-
-        async def __aenter__(self):
-            raise RuntimeError("fail")
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    set_import_attribute(monkeypatch, fmu, "aiofiles", types.SimpleNamespace(open=_ErrOpen))
-
-    class _FakeFile:
-        filename = "x.bin"
-        async def read(self) -> bytes:
-            return b"data"
-
-    ok = await fmu.save_upload_file(_FakeFile(), tmp_path / "x.bin")
-    assert ok is False
 
 
 

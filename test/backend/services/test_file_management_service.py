@@ -25,6 +25,7 @@ sys.path.append(backend_dir)
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, QuotaExceededError
+from contracts.file import UploadFilesResult
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -137,8 +138,6 @@ def setup_patches():
         patch_import_context('management.services.file.service.transition_file_record',
               side_effect=_stub_transition_file_record),
         patch_import_context('management.services.file.service.get_file_size_from_minio', MagicMock(return_value=0)),
-        patch_import_context('management.services.file.service.save_upload_file', AsyncMock()),
-        patch_import_context('management.services.file.service.upload_semaphore', MagicMock()),
         patch_import_context('management.services.file.service.upload_dir',
               Path("/test/uploads")),
         patch_import_context('management.services.file.service.logger', MagicMock())
@@ -209,81 +208,52 @@ class TestUploadFilesImpl:
 
     @pytest.mark.asyncio
     async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
-        """Local knowledge-base uploads reject oversized files before save_upload_file."""
         set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
-        oversized_upload = MagicMock(size=2, filename="large.pdf")
-        save_upload = AsyncMock(return_value=True)
-
-        with patch_import_object_context(file_management_service, "save_upload_file", save_upload):
-            with pytest.raises(AppException) as exc_info:
-                await upload_files_impl(
-                    destination="local",
-                    file=[oversized_upload],
-                    folder="knowledge_base",
-                )
-
-        assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
-        save_upload.assert_not_awaited()
+        upload = MagicMock(size=2, filename="large.pdf")
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock) as stage:
+            with pytest.raises(AppException) as error:
+                await upload_files_impl(destination="local", file=[upload], folder="knowledge_base")
+        assert error.value.error_code == ErrorCode.FILE_TOO_LARGE
+        stage.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_local_success(self):
-        """Test successful local file upload"""
-        # Create mock UploadFile
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
-        mock_file.read = AsyncMock(return_value=b"test content")
-        mock_file.seek = AsyncMock()
-
-        with patch_import_context('management.services.file.service.save_upload_file', AsyncMock(return_value=True)) as mock_save:
-            # Execute
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="local", file=[mock_file])
-
-            # Assertions
-            assert errors == []
-            assert len(uploaded_paths) == 1
-            assert len(uploaded_names) == 1
-            assert uploaded_names[0] == "test.txt"
-            mock_save.assert_called_once()
+        """Delegate local source publication with the trusted uploading actor."""
+        upload = MagicMock(filename="test.txt")
+        expected = UploadFilesResult([], ["/owned/id/test.txt"], ["test.txt"])
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock, return_value=expected) as stage:
+            actual = await upload_files_impl(destination="local", file=[upload], user_id="u", uploader_tenant_id="t")
+        assert actual == expected
+        stage.assert_awaited_once()
+        args = stage.await_args.args
+        assert args[0] == [upload] and (args[1].user_id, args[1].tenant_id) == ("u", "t")
+        assert actual.file_records == []
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_local_failure(self):
-        """Test local file upload failure"""
-        # Create mock UploadFile
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
-
-        with patch_import_context('management.services.file.service.save_upload_file', AsyncMock(return_value=False)) as mock_save:
-            # Execute
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="local", file=[mock_file])
-
-            # Assertions
-            assert len(errors) == 1
-            assert "Failed to save file: test.txt" in errors[0]
-            assert uploaded_paths == []
-            assert uploaded_names == []
+        """Delegate local source publication with the trusted uploading actor."""
+        upload = MagicMock(filename="test.txt")
+        expected = UploadFilesResult(["Failed to save file: test.txt"], [], [])
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock, return_value=expected) as stage:
+            actual = await upload_files_impl(destination="local", file=[upload], user_id="u", uploader_tenant_id="t")
+        assert actual == expected
+        stage.assert_awaited_once()
+        args = stage.await_args.args
+        assert args[0] == [upload] and (args[1].user_id, args[1].tenant_id) == ("u", "t")
+        assert actual.file_records == []
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_local_empty_file(self):
-        """Test local upload with empty or invalid file"""
-        # Create mock UploadFile with no filename
-        mock_file = MagicMock()
-        mock_file.filename = None
-
-        with patch_import_context('management.services.file.service.save_upload_file', AsyncMock(return_value=True)) as mock_save:
-            # Execute
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="local", file=[mock_file])
-
-            # Assertions
-            assert errors == []
-            assert len(uploaded_paths) == 1
-            assert len(uploaded_names) == 1
-            assert uploaded_names[0] == ""
-            # Path ends with uploads directory
-            assert uploaded_paths[0].endswith("uploads")
-            mock_save.assert_called_once()
+        """Delegate local source publication with the trusted uploading actor."""
+        upload = MagicMock(filename=None)
+        expected = UploadFilesResult(["Failed to save file: test.txt"], [], [])
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock, return_value=expected) as stage:
+            actual = await upload_files_impl(destination="local", file=[upload], user_id="u", uploader_tenant_id="t")
+        assert actual == expected
+        stage.assert_awaited_once()
+        args = stage.await_args.args
+        assert args[0] == [upload] and (args[1].user_id, args[1].tenant_id) == ("u", "t")
+        assert actual.file_records == []
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_minio_success(self):
@@ -492,6 +462,23 @@ class TestUploadFilesImpl:
                 patch_import_context("management.services.file.service.ElasticSearchService.list_files", AsyncMock(return_value=list_files_payload)), \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
             yield
+
+    async def test_staged_target_id_is_created_once_with_existing_quota_checks(self):
+        target = "b" * 32
+        records = [{"file_id": target, "object_name": "knowledge_base/a.txt", "original_filename": "a.txt", "status": "UPLOADING"}]
+        context = SimpleNamespace(tenant_id="t", knowledge_id=7, index_name="kb", bucket_name="files", ingroup_permission="SHARED")
+        upload = MagicMock(filename="a.txt", size=4)
+        with self._minio_kb_upload_patches(records=records,
+                minio_results=[{"success": True, "file_name": "a.txt", "object_name": "knowledge_base/a.txt", "file_size": 4, "file_id": target}],
+                list_files_payload={"files": []}, transitions=[], context=context):
+            result = await upload_files_impl(destination="minio", file=[upload], folder="knowledge_base", index_name="kb",
+                                             user_id="u", uploader_tenant_id="t", lifecycle_file_ids=[target])
+            file_management_service.create_file_records.assert_called_once()
+            spec = file_management_service.create_file_records.call_args.args[0][0]
+            assert spec["file_id"] == target and spec["tenant_id"] == "t" and spec["knowledge_id"] == 7
+            quota = sys.modules["management.services.knowledge_base.quota"].QuotaService.return_value
+            quota.check_hard_limit.assert_called_once_with(4, index_name="kb")
+            assert result[0] == [] and result.file_records[0]["file_id"] == target
 
     async def test_upload_files_impl_syncs_effective_name_to_successful_lifecycle_record(self):
         """Conflict renaming updates only successful lifecycle rows in a partial batch."""
@@ -2291,24 +2278,16 @@ class TestEdgeCasesAndErrorHandling:
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_with_none_file(self):
-        """Test upload_files_impl with None file in list"""
-        # Create mock UploadFile
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
-        mock_file.read = AsyncMock(return_value=b"test content")
-        mock_file.seek = AsyncMock()
-
-        with patch_import_context('management.services.file.service.save_upload_file', AsyncMock(return_value=True)) as mock_save:
-            # Execute with None file in the list
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="local", file=[mock_file, None])
-
-            # Assertions
-            assert errors == []
-            assert len(uploaded_paths) == 1  # Only one file processed
-            assert len(uploaded_names) == 1
-            assert uploaded_names[0] == "test.txt"
-            mock_save.assert_called_once()
+        """Delegate local source publication with the trusted uploading actor."""
+        upload = MagicMock(filename="test.txt")
+        expected = UploadFilesResult([], ["/owned/id/test.txt"], ["test.txt"])
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock, return_value=expected) as stage:
+            actual = await upload_files_impl(destination="local", file=[upload, None], user_id="u", uploader_tenant_id="t")
+        assert actual == expected
+        stage.assert_awaited_once()
+        args = stage.await_args.args
+        assert args[0] == [upload, None] and (args[1].user_id, args[1].tenant_id) == ("u", "t")
+        assert actual.file_records == []
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_with_empty_file_list(self):
@@ -2374,58 +2353,26 @@ class TestConcurrencyAndFileTypes:
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_semaphore_usage(self):
-        """Test that upload_files_impl uses semaphore for local uploads"""
-        # Create mock UploadFile
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
-        mock_file.read = AsyncMock(return_value=b"test content")
-        mock_file.seek = AsyncMock()
-
-        with patch_import_context('management.services.file.service.save_upload_file', AsyncMock(return_value=True)) as mock_save, \
-             patch_import_context('management.services.file.service.upload_semaphore') as mock_semaphore:
-
-            # Mock semaphore context manager
-            mock_semaphore.__aenter__ = AsyncMock()
-            mock_semaphore.__aexit__ = AsyncMock()
-
-            # Execute
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="local", file=[mock_file])
-
-            # Assertions
-            assert errors == []
-            assert len(uploaded_paths) == 1
-            assert len(uploaded_names) == 1
-            mock_save.assert_called_once()
-            # Verify semaphore was used
-            mock_semaphore.__aenter__.assert_called_once()
-            mock_semaphore.__aexit__.assert_called_once()
+        """Delegate local source publication with the trusted uploading actor."""
+        upload = MagicMock(filename="test.txt")
+        expected = UploadFilesResult([], ["/owned/id/test.txt"], ["test.txt"])
+        with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock, return_value=expected) as stage:
+            actual = await upload_files_impl(destination="local", file=[upload], user_id="u", uploader_tenant_id="t")
+        assert actual == expected
+        stage.assert_awaited_once()
+        args = stage.await_args.args
+        assert args[0] == [upload] and (args[1].user_id, args[1].tenant_id) == ("u", "t")
+        assert actual.file_records == []
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_no_semaphore_for_minio(self):
-        """Test that upload_files_impl doesn't use semaphore for MinIO uploads"""
-        # Create mock UploadFile
-        mock_file = MagicMock()
-        mock_file.filename = "test.txt"
-        mock_file.read = AsyncMock(return_value=b"test content")
-        mock_file.seek = AsyncMock()
-
-        with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=[
-            {"success": True, "file_name": "test.txt", "object_name": "folder/test.txt"}
-        ])) as mock_upload, \
-             patch_import_context('management.services.file.service.upload_semaphore') as mock_semaphore:
-
-            # Execute
-            errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="minio", file=[mock_file], folder="folder")
-
-            # Assertions
-            assert errors == []
-            assert len(uploaded_paths) == 1
-            mock_upload.assert_called_once()
-            # Verify semaphore was NOT used for MinIO
-            mock_semaphore.__aenter__.assert_not_called()
-            mock_semaphore.__aexit__.assert_not_called()
+        """MinIO upload does not enter local staging."""
+        upload = MagicMock(filename="test.txt", read=AsyncMock(return_value=b"data"), seek=AsyncMock())
+        with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=[{"success": True, "file_name": "test.txt", "object_name": "folder/test.txt"}])) as put, patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock) as stage:
+            result = await upload_files_impl(destination="minio", file=[upload], folder="folder")
+        assert result[0] == [] and result[1] == ["folder/test.txt"]
+        put.assert_awaited_once()
+        stage.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_with_none_folder(self):

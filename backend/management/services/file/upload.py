@@ -5,27 +5,13 @@
 import logging
 import os
 import subprocess
-from pathlib import Path
-import aiofiles
 import requests
-from fastapi import UploadFile
 from nexent.core.concurrency import run_blocking
 from contracts.constants.environment import LIBREOFFICE_PROFILE_DIR
 from management.db.file.attachment import get_file_size_from_minio
 
 logger = logging.getLogger("file_management_utils")
 
-
-
-async def save_upload_file(file: UploadFile, upload_path: Path) -> bool:
-    try:
-        async with aiofiles.open(upload_path, 'wb') as out_file:
-            content = await file.read()
-            await out_file.write(content)
-        return True
-    except Exception as e:
-        logger.error(f"Error saving file {file.filename}: {str(e)}")
-        return False
 
 
 def get_file_size(source_type: str, path_or_url: str) -> int:

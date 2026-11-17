@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import asyncio
 import logging
 
 from management.services.file.preview import build_preview_pdf_object_key
@@ -18,7 +17,7 @@ from nexent.multi_modal.utils import parse_s3_url
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
-from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
+from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, OFFICE_MIME_TYPES
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
@@ -28,7 +27,6 @@ from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
-from management.services.file.upload import save_upload_file
 from contracts.errors.ingestion import ingestion_error_fields
 from infrastructure.trace.knowledge import trace_knowledge_operation
 from management.services.file.source_upload import upload_knowledge_source
@@ -38,7 +36,6 @@ from nexent.storage.errors import OutcomeUnknown
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
 upload_dir.mkdir(exist_ok=True)
-upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
 # Per-file locks prevent duplicate conversions of the same file
 
@@ -237,6 +234,7 @@ async def upload_files_impl(
     user_id: Optional[str] = None,
     uploader_tenant_id: Optional[str] = None,
     upload_owner_service: Optional[str] = None,
+    lifecycle_file_ids: list[str] | None = None,
 ) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
@@ -249,6 +247,7 @@ async def upload_files_impl(
         user_id: User ID for attachment path isolation
         uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
         upload_owner_service: Service responsible for recovering interrupted uploads
+        lifecycle_file_ids: Trusted preallocated IDs for an already reserved local binding
 
     Returns:
         UploadFilesResult: Three-item tuple-compatible result with quota metadata
@@ -258,6 +257,8 @@ async def upload_files_impl(
     errors = []
     quota_status = None
     lifecycle_records = []
+    if not file:
+        return UploadFilesResult([], [], [])
     if destination == "local" and index_name:
         await _validate_knowledge_file_sizes(file)
         from functools import partial
@@ -276,22 +277,13 @@ async def upload_files_impl(
     if destination == "local":
         if _is_knowledge_base_upload(folder, index_name):
             await _validate_knowledge_file_sizes(file)
-        async with upload_semaphore:
-            for f in file:
-                if not f:
-                    continue
+        from management.services.file.staged_local_source import (
+            upload_staged_local_files,
+        )
 
-                safe_filename = os.path.basename(f.filename or "")
-                upload_path = upload_dir / safe_filename
-                absolute_path = upload_path.absolute()
+        from infrastructure.agentos_identity import ServicePrincipal
 
-                # Save file
-                if await save_upload_file(f, upload_path):
-                    uploaded_filenames.append(safe_filename)
-                    uploaded_file_paths.append(str(absolute_path))
-                    logger.info(f"Successfully saved file: {safe_filename}")
-                else:
-                    errors.append(f"Failed to save file: {f.filename}")
+        return await upload_staged_local_files(file, ServicePrincipal(user_id, uploader_tenant_id), upload_dir)
 
     elif destination == "minio":
         if _is_knowledge_base_upload(folder, index_name):
@@ -302,6 +294,15 @@ async def upload_files_impl(
         from management.services.knowledge_base.storage import resolve_storage_context
 
         storage_context = resolve_storage_context(index_name, uploader_tenant_id)
+        if lifecycle_file_ids is not None:
+            import re
+
+            if (not storage_context or len(lifecycle_file_ids) != len(file)
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{32}", value) for value in lifecycle_file_ids)
+                    or len(set(lifecycle_file_ids)) != len(lifecycle_file_ids)):
+                from nexent.storage.errors import InvalidInput
+
+                raise InvalidInput()
         lifecycle_records_by_index = {}
         if storage_context:
             lifecycle_record_indices = []
@@ -314,6 +315,7 @@ async def upload_files_impl(
                     original_filename, prefix=actual_folder)
                 lifecycle_record_indices.append(file_index)
                 lifecycle_record_specs.append({
+                    **({"file_id": lifecycle_file_ids[file_index]} if lifecycle_file_ids is not None else {}),
                     "tenant_id": storage_context.tenant_id,
                     "knowledge_id": storage_context.knowledge_id,
                     "index_name": storage_context.index_name,
