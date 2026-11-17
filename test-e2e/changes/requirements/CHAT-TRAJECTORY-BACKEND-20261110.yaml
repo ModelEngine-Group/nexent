@@ -1,0 +1,101 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-BACKEND-20261110
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-BACKEND-20261110
+  title: 依据最新设计完善轨迹后端查询与清理
+  description: 延续已实现OTLP存储和TTFT，实施可观测中心授权集合/全量统计、会话覆盖、静态节点快照与正文分块，以及管理员目录和主动清理。继续补齐实际模型物理请求、结构化输出、重试关联与安全部分输出；完整采集与风险验收依既有设计逐项核对。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    - CHAT-TRAJECTORY-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-TTFT-D3-001
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-DEPLOYMENT-D5-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 模型物理请求安全快照、结构化响应/思考/工具建议、逐次重试关联、取消与失败前输出、默认远端兼容及TTFT不重复计数。
+    - 签名引用/游标、参数边界与权限/撤权/期限错误。
+    - 增量OTLP字符串解码、Unicode码点/UTF8字节、片段归并与完整子树指标。
+    - 集合全量筛选/稳定分页/分位数/facet/有界预算；会话消息keyset和hash。
+    - 管理员目录默认兼容与分批清理/固定截止/互斥/配额。
+    - smolagents根执行的授权配置/上下文快照、取消终态、上下文压缩前后及工具call_id/schema关联。
+    - 并行工具对象保存安全引用，上下文Enum/dataclass转换为DTO；未知运行时对象拒绝序列化，原始传输对象剔除。
+    - 旧模型在取消时主动中断底层HTTP读取，关闭一次并保留部分输出；正常结束沿用原关闭路径。
+    - 本地安全正文清除消息/工具结果和物理请求中的签名URL凭证、URL用户信息与嵌套代理签名，保留资源路径及普通参数且不修改业务对象。
+    - OTLP正文/预览/事件/Links/资源/Scope及错误信息统一执行URL脱敏；根Span序列化失败仍保留实际业务终态，采集完整性独立标记。
+    - 读取游标使用设计中的TRAJECTORY_CURSOR_SECRET专用密钥，兼容原SIGNING_KEY配置名但不回退JWT密钥。
+    - 列表占位和会话详情区分尚未归档、过期与未采集；活跃执行不读取正文、不混入指标，旧快照不纳入后来发布的执行，无法证实的筛选条件不返回占位行。
+    - 会话分别返回聊天、有效保留窗口和整个会话的源完整性，扫描固定发布范围内的全部执行状态而不只看当前页；自然到期与主动清理/采集缺口分开，has_more不代替源完整性，响应总量遵守2MiB预算。
+    - 服务端用户消息回执绑定租户/owner/会话，经根Span到执行清单关联source_message_id；PG标量ID对账证明首轮、识别停采缺口，重试去重、软删除与墓碑回收不消除缺口；来源失败/旧数据/未知关联和预算上限保守处理，普通聊天与远端保持兼容。
+    - 本地根/子Agent的invocation_id及parent_invocation_id沿实际父Span传递，技术链路不生成额外Agent调用，模型/工具保留所属调用，子Agent优先保留框架调用ID，远端字段保持原样。
+    - 耗时优先使用已采集单调值，本地根/工具Span补齐生命周期计时，TTFT及吞吐量使用同一有效耗时；墙钟回拨不改变单调值，非法/不可用保持未知且有效零值保留；旧文件兼容起止差，未结束片段不产生终态耗时，远端原字段保持。
+    - 主动/定时清理审计记录可信身份、固定截止、批次统计及安全错误码；pending/failed与成功区分，日志故障不改变业务结果，正文/凭证/游标/路径不进入日志。
+    - 定时清理同主动清理使用2秒工作截止；当前文件删除原子步骤完成后让出，待删项保持撤引用，后续调度继续，恰好截止与超时均不继续删除新文件。
+    - 聊天正文块响应前以同一授权消息的零长度切片复核当前有效行和hash，修改/删除返回snapshot_reset；无关消息保持，版本查询失败及撤权保持原错误，无额外正文传输；兼容已有NULL/空聊天正文的零字节读取。
+    - 部署模式默认single_node，仅接受single_node/shared_directory，环境读取集中后端并传入采集/读取/清理；根登记绑定模式和UUID，旧无模式根兼容single_node，非法或冲突拒绝且原文件保持。
+    reason: 现有UT覆盖写入和TTFT，缺读取服务单元边界；HTTP协议由既有QUERY-D2扩展，不增设重复D1。 网页代理复用frontend/tests/apiProxyRouting.test.mjs，证明4GET/清理POST转发Runtime，结果单列。
+    test_selectors:
+    - test/backend/utils/test_trajectory_file_store.py
+    - test/backend/utils/test_trajectory_processor.py
+    - test/backend/utils/test_trajectory_identity.py
+    - test/backend/utils/test_trajectory_otlp_redaction.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - test/backend/utils/test_trajectory_environment.py
+    - test/backend/utils/test_trajectory_storage_mode.py
+    - test/backend/utils/test_trajectory_sources.py
+    - test/backend/utils/test_trajectory_lifespan.py
+    - test/backend/services/trajectory/test_catalog.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/services/trajectory/test_coverage.py
+    - test/backend/services/trajectory/test_source_receipts.py
+    - test/backend/services/trajectory/test_contracts_and_cache.py
+    - test/backend/services/trajectory/test_nodes.py
+    - test/backend/services/trajectory/test_primitives.py
+    - test/backend/services/trajectory/test_cleanup.py
+    - test/backend/services/trajectory/test_chat_content.py
+    - test/backend/utils/test_trajectory_audit.py
+    - test/backend/app/test_conversation_management_app.py
+    - test/backend/services/test_conversation_management_service.py
+    - test/backend/services/test_core_service_slimming.py
+    - test/backend/services/test_core_service_preview.py
+    - test/sdk/core/model_service/test_model_attempt_capture.py
+    - test/sdk/core/model_service/test_run_capture.py
+    - test/sdk/core/model_service/test_local_content_dto.py
+    - test/sdk/monitor/test_monitoring_stream_abort.py
+    - test/sdk/monitor/test_duration.py
+    - test/sdk/monitor/test_local_content_urls.py
+    - test/sdk/core/agents/observability/test_local_capture.py
+    - test/sdk/core/agents/observability/test_run_span_context.py
+  notes: Primary ownership runtime. Existing blocked higher-boundary Cases remain
+    required; query D2 will own self-contained HTTP/file fixtures with controlled
+    PG authorization, no external providers. Preparation families empty because resources
+    are private temporary files and managed worker lifecycle, released by fixtures.
+    Real-model/shared-volume/enterprise-load acceptance requires its actual runtime
+    surface.
+    RETENTION-D5 now has a partial file-risk script and owned subprocess helper.
+    It adds process-death and actual cross-process lock evidence beyond isolated
+    cleanup UT, without duplicating a new D1. Formal scripts also cover isolated
+    environment/factory configuration and real-file batch limits; only static
+    checks and collection are performed for them. Traditional UT verifies the
+    scheduled two-second deadline fix separately. Missing HTTP/PG and managed
+    timer startup/wakeup assertions keep the Case blocked and without a complete
+    execution binding.
+    QUERY-D2 adds post-physical-read expiry, actual local cleanup and controlled
+    membership-revocation variants, retaining the actual decoder and HTTP route.
+    The final error must withhold the decoded body; only collection/static checks
+    are performed while formal acceptance is deferred.

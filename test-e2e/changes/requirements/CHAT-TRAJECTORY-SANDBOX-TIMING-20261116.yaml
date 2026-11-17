@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-SANDBOX-TIMING-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-SANDBOX-TIMING-20261116
+  title: 沙箱初始化合并展示与代码执行单独计时
+  description: 沙箱内部阶段在查询树中折叠，代码实际执行计时排除延迟初始化与状态迁移。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 沙箱初始化下预热/工作区折叠，独立预热保留，实际父子及调用次数保持。
+    - 代码执行实测耗时排除延迟初始化、状态迁移和导入恢复；复用、本地路径、错误/取消及远端关闭模式。
+    reason: 已有phase和执行器UT缺少代码计时边界；补充传统UT并加强既有D3，无新增D1。
+    test_selectors:
+    - test/sdk/core/agents/observability/test_code_execution_phase.py
+    - test/sdk/core/agents/test_tool_fastpath_executor.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_pr4005_continuation.py
+    - test/backend/services/trajectory/test_phase_nodes.py
+    - frontend/tests/component/trajectoryPhases.test.tsx
+  notes: SPEC changes/chat-trajectory-phases AC-02/03/04；runtime责任域，D3沿用私有HTTP、文件、客户端和受管线程及fixture清理，families为空；完整PG/部署验收依用户要求暂缓。

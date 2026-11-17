@@ -222,6 +222,8 @@ async def run_agent_stream(
         # need a transient identifier for lifecycle operations such as stop.
         agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
 
+    # Preserve the submitted query before adding model-only runtime context.
+    user_query = agent_request.query
     # Inject current time in the user's timezone so the LLM can answer
     # time-related questions correctly. The SDK strips this prefix before
     # sending AGENT_NEW_RUN to the frontend, so the user message display
@@ -929,6 +931,7 @@ async def run_agent_stream(
             resolved_user_id,
             resolved_tenant_id,
             language,
+            user_query=user_query,
             extra_metadata={
                 "skip_user_save": skip_user_save,
                 "has_override_user_id": user_id is not None,

@@ -6,7 +6,7 @@ import asyncio
 import json
 from contextlib import suppress
 
-from contracts.constants.environment import RUNTIME_RUN_TTL_SECONDS
+from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
 from infrastructure.nexent_output import adapt_nexent_stream
 from management.db.conversation.repository import get_conversation_history
@@ -33,6 +33,44 @@ from management.services.conversation.creator_runtime import (
 from management.services.conversation.creator_targets import authorize_target
 from management.services.conversation.service import save_message, update_message_status
 from nexent.core.concurrency import run_blocking
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
+
+
+class _CreationStream:
+    """Bind saved identity around runtime advances without coupling HTTP lifetime."""
+
+    def __init__(self, stream, metadata):
+        self._runtime = stream
+        self._metadata = metadata
+        self._closed = False
+
+    async def __aiter__(self):
+        try:
+            while True:
+                try:
+                    event = await self.__anext__()
+                except StopAsyncIteration:
+                    return
+                yield event
+        finally:
+            await self.aclose()
+
+    async def __anext__(self):
+        if self._closed:
+            raise StopAsyncIteration
+        try:
+            with agent_monitoring_context(self._metadata):
+                return await anext(self._runtime)
+        except BaseException:
+            await self.aclose()
+            raise
+
+    async def aclose(self):
+        if self._closed:
+            return
+        self._closed = True
+        with agent_monitoring_context(self._metadata):
+            await self._runtime.aclose()
 
 
 def creator_history_context(history, retry_index=None):
@@ -184,6 +222,7 @@ async def start_creation_turn(
     )
     request_claimed = False
     preparation_guard = None
+    message_receipt = {}
     try:
         if conversation_id is not None:
             reservation = await claim_creator(
@@ -230,6 +269,7 @@ async def start_creation_turn(
             ),
             retry_user_message_id=request.retry_user_message_id,
             retry_message_index=request.retry_message_index,
+            message_receipt=message_receipt,
         )
         if reservation is None:
             reservation = await claim_creator(
@@ -249,6 +289,15 @@ async def start_creation_turn(
             tenant_id=tenant_id,
             status="streaming",
         )
+        extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents"}
+        source_id = message_receipt.get("message_id")
+        if type(source_id) is int and 0 < source_id <= 2147483647:
+            extra_metadata["trajectory_source_message_id"] = str(source_id)
+        stream = _CreationStream(stream, AgentRunMetadata(
+            tenant_id=tenant_id, user_id=user_id, agent_id=ref.agent_id,
+            conversation_id=conversation_id, query=request.query, is_debug=False,
+            extra_metadata=extra_metadata,
+        ))
         persisted = checkpoint_creator_stream(
             stream,
             message_id=message_id,

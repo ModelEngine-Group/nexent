@@ -281,6 +281,8 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
+        from management.db.trajectory.repository import seed_conversation
+        seed_conversation(session, record.conversation_id, user_id, agent_id)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -1973,7 +1975,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for updated_by field
+        user_id: Conversation owner and updated_by value
 
     Returns:
         bool: Whether the operation was successful
@@ -1993,7 +1995,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+        if user_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount == 0:
+            return False
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
         message_stmt = (
@@ -2082,6 +2091,9 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .values(update_data)
         )
 
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, owned_ids, user_id)
+
         # 2. Mark related messages as deleted
         session.execute(
             update(ConversationMessage)
@@ -2141,6 +2153,9 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .where(ConversationRecord.conversation_id.in_(conv_ids), ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
         session.execute(

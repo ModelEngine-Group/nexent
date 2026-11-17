@@ -6785,7 +6785,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         ), patch.object(
             nexent_agent_instance, "create_tool", return_value=tool
         ), patch.object(
-            nexent_agent, "_wrap_tool_with_monitoring", side_effect=lambda value, _name: value
+            nexent_agent, "_wrap_tool_with_monitoring", side_effect=lambda value, _name, **kwargs: value
         ), patch.object(
             nexent_agent_instance, "_pull_file_workspace_from_sandbox"
         ) as pull_workspace:

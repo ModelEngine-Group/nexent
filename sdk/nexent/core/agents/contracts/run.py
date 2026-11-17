@@ -18,6 +18,9 @@ class AgentHistory(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    preparation_trace: List[Dict[str, Any]] = Field(
+        default_factory=list, exclude=True, description="Local preparation phase facts awaiting the authorized worker"
+    )
     # Hosts inject deployment values; child runs inherit them without SDK environment reads.
     collaboration_timeout_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False,
         description="Jiuwen child/A2A queue-plus-execution deadline in seconds, capped by the parent deadline")

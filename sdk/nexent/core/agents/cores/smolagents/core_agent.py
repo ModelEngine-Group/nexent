@@ -1777,7 +1777,7 @@ Additional Args:
             ):
                 from nexent.core.agents.sandbox.execution import _execute_with_tool_context
 
-                code_output = _execute_with_tool_context(self.python_executor, code_action)
+                code_output = _execute_with_tool_context(self.python_executor, code_action, trace_execution=True)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
                     "logs": getattr(code_output, "logs", ""),
