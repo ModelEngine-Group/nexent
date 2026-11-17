@@ -12,6 +12,11 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'northbound.py',
+    'permission/identity/credentials.py',
+    'permission/identity/gateway_lookup.py',
+    'permission/identity/northbound.py',
+    'permission/identity/session.py',
     'agent/creation.py',
     'agent/lifecycle.py',
     'agent/background.py',

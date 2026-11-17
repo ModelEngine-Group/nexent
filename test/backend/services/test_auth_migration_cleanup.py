@@ -1,81 +1,48 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Only a committed local apply reclaims the selected Supabase stack."""
+"""Source cleanup follows an explicit committed worker result."""
 
-from unittest.mock import MagicMock
+import json
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
-
-migration = source_container = migrate
-from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationSetupError
+from test.backend.services.migration_shell_fixture import run_migration
 
 
-@pytest.fixture
-def cli(mocker):
-    events = []
-    source, target = MagicMock(), MagicMock()
-    target.__exit__.side_effect = lambda *args: events.append("commit" if args[0] is None else "rollback") or False
-    target.close.side_effect = lambda: events.append("close")
-    mocker.patch.object(migrate, "load_settings", return_value={})
-    mocker.patch.object(migrate, "connections", return_value=({}, {}, True))
-    mocker.patch.object(migrate, "target_connection", return_value={})
-    mocker.patch.object(migrate, "prepare_source", return_value="supabase-selected-db")
-    mocker.patch.object(migrate, "source_stack_configuration", return_value={"selected": True})
-    preflight = MagicMock()
-    preflight.__enter__.return_value = preflight
-    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
-    mocker.patch("psycopg2.connect", side_effect=[preflight, source, target])
-    mocker.patch.object(migration, "read_source_users", return_value=[])
-    importer = mocker.patch.object(migration, "import_users", return_value={"inserted": 0})
-    cleanup = mocker.patch.object(migrate, "cleanup_source_stack", side_effect=lambda values: events.append("cleanup"))
-    return events, importer, cleanup
+def source_removals(result):
+    return [command for command in result.commands if command[0] == "docker" and command[1] in {"stop", "rm"}
+            and not command[-1].startswith("account-migration-")]
 
 
 @pytest.mark.parametrize("apply", [False, True])
-def test_cleanup_only_after_successful_apply_and_closed_transaction(mocker, cli, apply):
-    events, importer, cleanup = cli
-    mocker.patch("sys.argv", ["migrate_docker.py"] + (["--apply"] if apply else []))
-    assert migrate.main() == 0
-    assert importer.call_args.kwargs["dry_run"] is not apply
-    assert events == (["commit", "close", "cleanup"] if apply else ["commit", "close"])
-    assert cleanup.call_count == int(apply)
+def test_cleanup_only_after_successful_apply(tmp_path, apply):
+    result = run_migration(tmp_path, ["--apply"] if apply else [])
+    assert result.code == 0, result.stderr
+    calls = source_removals(result)
+    assert bool(calls) is apply
+    if apply:
+        assert [c[-1] for c in calls if c[1] == "rm"] == ["supabase-kong-mini", "supabase-auth-mini", "supabase-db-mini"]
+        started = next(i for i,c in enumerate(result.commands) if c[1:3] == ["start", "-a"])
+        assert all(result.commands.index(c) > started for c in calls)
+        assert not any("-v" in c or "volume" in c for c in calls)
 
 
-def test_failed_import_preserves_containers_for_retry(mocker, cli):
-    events, importer, cleanup = cli
-    importer.side_effect = migration.MigrationConflict("identity conflict")
-    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
-    assert migrate.main() == 1
-    assert events == ["rollback", "close"]
-    cleanup.assert_not_called()
+@pytest.mark.parametrize("values", [{"FAKE_WORKER_STATUS": "1"}, {"FAKE_EXIT_CODE": "1"},
+    {"FAKE_RESULT": '{"committed":false}'}, {"FAKE_RESULT": '{"skipped":true}'}])
+def test_failed_or_uncommitted_worker_preserves_source(tmp_path, values):
+    result = run_migration(tmp_path, ["--apply"], values)
+    assert not source_removals(result)
+    assert result.code == (0 if "skipped" in values.get("FAKE_RESULT", "") else 1)
+    assert any(c[1:3] == ["rm", "-f"] and c[-1].startswith("account-migration-") for c in result.commands)
 
 
-def test_remote_source_does_not_remove_local_containers(mocker, cli):
-    events, importer, cleanup = cli
-    mocker.patch.object(migrate, "connections", return_value=({}, {}, False))
-    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
-    assert migrate.main() == 0
-    cleanup.assert_not_called()
+def test_remote_source_does_not_remove_local_containers(tmp_path):
+    result = run_migration(tmp_path, ["--apply"], {"SUPABASE_POSTGRES_HOST": "original.example"})
+    assert result.code == 0, result.stderr
+    assert not source_removals(result)
 
 
-@pytest.mark.parametrize("error", [MigrationSetupError("Docker cleanup unavailable"), RuntimeError("private-secret")])
-def test_cleanup_error_reports_committed_data_without_leaking_driver_values(mocker, cli, capsys, error):
-    events, importer, cleanup = cli
-    cleanup.side_effect = error
-    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
-    assert migrate.main() == 0
-    output = capsys.readouterr()
-    assert "migration committed; source cleanup failed" in output.err
-    assert "private-secret" not in output.err
-    assert events == ["commit", "close"]
-
-
-def test_source_stack_cleanup_uses_exact_selected_db_and_retains_volumes(mocker):
-    from deploy.sql.tools.supabase_to_postgres import migrate_docker as legacy_stack
-
-    values = source_container.source_stack_configuration({}, "supabase-original-db")
-    assert values["SUPABASE_MIGRATION_DB_CONTAINER"] == "supabase-original-db"
-    execute = mocker.patch.object(legacy_stack, "execute")
-    source_container.cleanup_source_stack(values)
-    execute.assert_called_once_with("down", values)
+def test_cleanup_error_reports_committed_data_without_driver_values(tmp_path):
+    result = run_migration(tmp_path, ["--apply"], {"FAKE_CLEANUP_STATUS": "1"})
+    assert result.code == 0
+    assert "cleanup incomplete" in result.stderr
+    assert "private-source" not in result.stderr and "private-target" not in result.stderr

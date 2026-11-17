@@ -12,6 +12,15 @@ def validate_deployment_version(value: str) -> str:
     return value
 
 
+def parse_boolean(raw_value: object, name: str, default: bool = False) -> bool:
+    """Accept explicit boolean flags without silently weakening authentication."""
+    if raw_value is None:
+        return default
+    if not isinstance(raw_value, str) or raw_value.lower() not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return raw_value.lower() == "true"
+
+
 def parse_positive_int(raw_value: object, name: str, default: int) -> int:
     """Parse a positive integer, falling back to ``default`` when unset."""
     value = default if raw_value is None else raw_value

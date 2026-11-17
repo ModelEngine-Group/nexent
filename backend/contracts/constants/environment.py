@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, parse_boolean, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -27,10 +27,7 @@ DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
 # Downstream verification settings; Gateway owns its upstream configuration.
 # Staged compatibility flag; shipped deployment and the standalone image enable it.
-_GATEWAY_AUTH_FLAG = os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower()
-if _GATEWAY_AUTH_FLAG not in {'true', 'false'}:
-    raise ValueError('GATEWAY_AUTH_ENABLED must be true or false')
-GATEWAY_AUTH_ENABLED = _GATEWAY_AUTH_FLAG == 'true'
+GATEWAY_AUTH_ENABLED = parse_boolean(os.getenv('GATEWAY_AUTH_ENABLED'), 'GATEWAY_AUTH_ENABLED')
 GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
 GATEWAY_SERVICE_URL = os.getenv('GATEWAY_SERVICE_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')

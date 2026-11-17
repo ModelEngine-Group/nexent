@@ -127,7 +127,7 @@ async def update_user_endpoint(
             requester_role=requester_role,
         )
 
-        logger.info(f"Updated user {user_id} by user {current_user_id}")
+        logger.info("User account updated")
 
         record_security_event(
             "user_update",

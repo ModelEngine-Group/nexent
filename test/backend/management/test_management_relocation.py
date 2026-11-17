@@ -15,8 +15,9 @@ def test_flat_service_exclusions_match_remaining_scope():
         "nl2agent_service.py", "workspace_cleanup_service.py",
     }
     assert not list((BACKEND / "utils").glob("*.py"))
-    for service in ("gateway", "runtime"):
-        assert (BACKEND / service / "api/__init__.py").is_file()
+    assert (BACKEND / "runtime/api/__init__.py").is_file()
+    assert (BACKEND / "gateway/application.py").is_file()
+    assert (BACKEND / "management/api/northbound.py").is_file()
 
 
 def test_production_imports_use_canonical_owners():
