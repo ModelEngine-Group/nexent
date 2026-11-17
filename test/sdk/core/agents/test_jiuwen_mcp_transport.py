@@ -9,7 +9,7 @@ import httpx
 import pytest
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig
 
-from nexent.consts.mcp_errors import classify_mcp_failure
+from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, classify_mcp_failure
 from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection, _ConfiguredNativeClient
 from nexent.core.concurrency import RunCancellationScope
 
@@ -120,3 +120,38 @@ async def test_native_transport_preserves_headers_factory_and_session(monkeypatc
         )
         factory.assert_not_called()
         open_http.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_false_connect_result_records_timeout_and_disconnects_owner(monkeypatch):
+    client = MagicMock(connect=AsyncMock(return_value=False), disconnect=AsyncMock())
+    monkeypatch.setattr("nexent.core.agents.cores.jiuwen.mcp._ConfiguredNativeClient", lambda *_: client)
+    owner = JiuwenMCPCollection(
+        authorized_tools=[], observe=lambda *_: None, manager=MagicMock(),
+        server_parameters=[{"url": "http://fixture/mcp", "transport": "streamable-http"}],
+        cancellation_scope=RunCancellationScope(), tool_timeout_seconds=3,
+        connect_timeout_seconds=2, close_timeout_seconds=1,
+    )
+    with pytest.raises(MCPConnectionFailure) as found:
+        await owner._run_async_session()
+    assert owner._startup_error is found.value
+    assert isinstance(found.value.__cause__, MCPConnectionTimeoutError)
+    assert classify_mcp_failure(found.value)[0] == "timeout"
+    client.connect.assert_awaited_once_with(timeout=2)
+    client.list_tools.assert_not_called()
+    client.disconnect.assert_awaited_once_with(timeout=1)
+    assert owner.tools == []
+
+
+@pytest.mark.asyncio
+async def test_successful_disconnect_closes_stack_and_clears_all_transport_references():
+    client = _ConfiguredNativeClient(
+        McpServerConfig(server_name="fixture", server_path="http://fixture/mcp", client_type="streamable-http"), None
+    )
+    client._exit_stack = MagicMock(aclose=AsyncMock())
+    client._session, client._client, client._read, client._write = (object() for _ in range(4))
+    client._is_disconnected = False
+    assert await client.disconnect(timeout=1) is True
+    client._exit_stack.aclose.assert_awaited_once()
+    assert (client._session, client._client, client._read, client._write) == (None, None, None, None)
+    assert client._is_disconnected is True

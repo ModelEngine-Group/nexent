@@ -5,9 +5,11 @@
 import asyncio
 import json
 from threading import Event
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from jsonschema import ValidationError
 
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
@@ -206,3 +208,124 @@ def test_wait_for_timeout_cancellation_cause_is_a_deadline_not_user_cancellation
     assert diagnostic.category == "mcp_timeout" and "timed out" in diagnostic.safe_message
     outer.__cause__ = asyncio.CancelledError()
     assert failure_error(outer, source="mcp", request_id="run") is None
+
+
+@pytest.mark.parametrize("source", ["a2a", "subagent"])
+def test_collaborator_failure_keeps_authorized_origin_and_exact_exception(adapter, source):
+    child = SimpleNamespace(name="child", invocation_name="delegate")
+    if source == "a2a":
+        adapter.external_agents = [child]
+    else:
+        adapter.run_info.agent_config.worker_agents = [child]
+    original = ValueError("private collaborator payload")
+    with pytest.raises(ValueError) as found:
+        with adapter._observe_tool("delegate", {}):
+            raise original
+    assert found.value is original
+    assert adapter.events.resource_error.category == f"{source}_execution_error"
+    assert "delegate" in adapter.events.resource_error.safe_message
+    assert "private" not in adapter.events.resource_error.safe_message
+    assert adapter._active_resource.get() is None
+
+
+@pytest.mark.parametrize("rejection", [AttributeError, TypeError])
+def test_unannotatable_exception_still_records_safe_resource_failure(adapter, rejection):
+    class ImmutableError(ValueError):
+        def __setattr__(self, name, value):
+            if name == "_nexent_resource_error":
+                raise rejection("immutable exception")
+            super().__setattr__(name, value)
+
+    original = ImmutableError("private tool payload")
+    with pytest.raises(ImmutableError) as found:
+        with adapter._observe_tool("local", {}):
+            raise original
+    assert found.value is original
+    assert not hasattr(original, "_nexent_resource_error")
+    assert adapter.events.resource_error.category == "tool_execution_error"
+    assert "private" not in adapter.events.resource_error.safe_message
+    events = [json.loads(item) for item in adapter.run_info.observer.get_cached_message()]
+    assert next(item for item in events if item["type"] == "tool_result")["is_error"] is True
+
+
+@pytest.mark.parametrize("signal", [asyncio.CancelledError(), RunTerminated(), SystemExit()])
+def test_recording_control_signal_does_not_replace_existing_diagnostic(adapter, signal):
+    adapter.record_failure(TimeoutError("private"), source="mcp")
+    original = adapter.events.last_error
+    adapter.record_failure(signal)
+    assert adapter.events.last_error is original
+    assert original.category == "mcp_timeout"
+
+
+def test_generic_execution_wrapper_preserves_specific_protocol_diagnostic(adapter):
+    original = adapter.events.error("JIUWEN_UNAUTHORIZED_TOOL")
+    adapter.events.record_error(original)
+    adapter.record_failure(RuntimeError("private native wrapper"))
+    assert adapter.events.last_error is original
+    assert adapter.events.finish("failed").error.category == "JIUWEN_UNAUTHORIZED_TOOL"
+
+
+@pytest.mark.parametrize("carrier", ["plain transport text", {"success": False, "error": "business data"}])
+def test_mcp_non_json_or_structured_carrier_is_preserved_without_false_failure(adapter, carrier):
+    payload = {"result": carrier}
+    with adapter._observe_tool("remote", {}):
+        adapter._resource_result(payload)
+    assert adapter.events.resource_error is None
+    events = [json.loads(item) for item in adapter.run_info.observer.get_cached_message()]
+    result = next(item for item in events if item["type"] == "tool_result")
+    assert result["is_error"] is False
+    assert json.loads(result["result"]) == payload
+
+
+def test_mcp_startup_failure_is_attributed_before_run_loop_and_reraised(adapter, mocker):
+    original = ConnectionRefusedError("private MCP endpoint")
+    mocker.patch.object(adapter, "_connect_mcp", side_effect=original)
+    loop = mocker.patch("nexent.core.agents.cores.jiuwen.execution_loop.get_execution_loop")
+    with pytest.raises(ConnectionRefusedError) as found:
+        adapter.run()
+    assert found.value is original
+    loop.assert_not_called()
+    assert adapter._run_completed is False
+    diagnostic = adapter.events.finish("failed").error
+    assert diagnostic.category == "mcp_connection_refused"
+    assert diagnostic.retryable is True
+    assert "private" not in diagnostic.safe_message
+
+
+def test_exception_group_prefers_nested_model_error_and_terminates_on_repeated_members():
+    model = ModelError(category="MODEL_TIMEOUT", scope="transport", retryable=True,
+                       safe_message="The model request timed out.", request_id="model-request")
+    repeated = ValueError("private repeated error")
+    nested = ExceptionGroup("private group", [repeated, repeated, ModelServiceError(model)])
+    diagnostic = failure_error(nested, source="tool", request_id="run")
+    assert diagnostic is model
+
+
+def test_cyclic_exception_chain_does_not_loop_or_expose_private_messages():
+    outer, inner = RuntimeError("private wrapper"), ValueError("private cause")
+    outer.__cause__ = inner
+    inner.__context__ = outer
+    diagnostic = failure_error(outer, source="tool", name="lookup", request_id="run")
+    assert diagnostic.category == "tool_execution_error"
+    assert diagnostic.request_id == "run" and diagnostic.retryable is False
+    assert "lookup" in diagnostic.safe_message and "private" not in diagnostic.safe_message
+
+
+@pytest.mark.parametrize("lang,expected", [("zh-CN", "模型输出格式"), ("en", "output format")])
+def test_unknown_protocol_code_keeps_identity_with_safe_localized_fallback(lang, expected):
+    original = ModelError(category="JIUWEN_FUTURE_PROTOCOL", scope="protocol", retryable=False,
+                          safe_message="JIUWEN_FUTURE_PROTOCOL", request_id="run")
+    diagnostic = public_error(original, lang)
+    assert diagnostic.category == original.category and diagnostic.request_id == "run"
+    assert expected in diagnostic.safe_message and diagnostic.retryable is False
+    assert original.safe_message == "JIUWEN_FUTURE_PROTOCOL"
+
+
+@pytest.mark.parametrize("source", ["tool", "mcp"])
+@pytest.mark.parametrize("lang,expected", [("zh", "参数不符合"), ("en", "do not match")])
+def test_schema_error_is_nonretryable_and_does_not_publish_validation_payload(source, lang, expected):
+    diagnostic = failure_error(ValidationError("private input and schema"), source=source,
+                               name="lookup", request_id="run", lang=lang)
+    assert diagnostic.category == f"{source}_invalid_arguments"
+    assert diagnostic.retryable is False and diagnostic.request_id == "run"
+    assert expected in diagnostic.safe_message and "private" not in diagnostic.safe_message

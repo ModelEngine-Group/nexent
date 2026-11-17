@@ -56,3 +56,14 @@ def test_cleanup_error_cannot_replace_a_specific_run_failure(diagnostic_adapter,
     with pytest.raises(ValueError):
         adapter.close()
     assert adapter.run_info.run_result.error.category == "mcp_connection_refused"
+
+
+@pytest.mark.parametrize("hook", [None, "unavailable"])
+def test_noncallable_optional_reporting_hook_preserves_failure_and_owned_cleanup(mocker, hook):
+    original = ValueError("original private failure")
+    adapter = SimpleNamespace(validate=Mock(side_effect=original), record_failure=hook, close=Mock())
+    mocker.patch("nexent.core.agents.factory.AgentCoreFactory.create", return_value=adapter)
+    with pytest.raises(ValueError) as found:
+        execute_adapter(SimpleNamespace())
+    assert found.value is original
+    adapter.close.assert_called_once_with()
