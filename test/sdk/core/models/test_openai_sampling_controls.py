@@ -21,7 +21,7 @@ def model():
 
 def test_unset_sampling_is_omitted_and_explicit_zero_beats_custom_body(model):
     create = MagicMock(); model.client.chat.completions.create = create
-    model._dispatch_chat_completion(messages=[], temperature=0, top_p=None, extra_body={'temperature': 1, 'custom': 7})
+    model._dispatch_chat_completion(messages=[], temperature=0, top_p=None, extra_body={'temperature': 1, 'top_p': None, 'custom': 7})
     sent = create.call_args.kwargs
     assert sent['temperature'] == 0 and 'top_p' not in sent
     assert sent['extra_body'] == {'custom': 7}
