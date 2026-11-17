@@ -13,6 +13,7 @@ from contracts.agentos_knowledge import (
     KnowledgeCleanseLookup,
     KnowledgeFileReference,
     ObjectReference,
+    cleanse_output_prefix,
 )
 from pydantic import Field
 
@@ -30,7 +31,9 @@ class KnowledgeCleanseRequest(KnowledgeFileReference):
 
 
 class KnowledgeCleanseState(KnowledgeCleanseLookup, CleanseResult):
-    pass
+    execution_ended: bool | None = Field(default=None, strict=True)
+    reconcile_required: bool | None = Field(default=None, strict=True)
+    artifact_ownership_known: bool | None = Field(default=None, strict=True)
 
 
 def cleanse_lookup(row, request):
@@ -108,10 +111,18 @@ def cleanse_state(row):
     if row["scope_kind"] == "run":
         return FileCleanseState(run_id=row["run_id"], **result)
     if row["scope_kind"] == "knowledge":
+        lookup = KnowledgeCleanseLookup(knowledge_id=row['knowledge_id'], file_id=row['file_id'],
+                                        file_version=row['file_version'], job_id=row['job_id'])
+        tracked = row.get('artifact_prefix') == cleanse_output_prefix(lookup) or (
+            row.get('execution_ended') is True and row.get('reconcile_required') is False
+            and row.get('attempt_id') is None and row.get('owner_id') is None and row.get('artifact') is None)
         return KnowledgeCleanseState(
             knowledge_id=row["knowledge_id"],
             file_id=row["file_id"],
             file_version=row["file_version"],
+            execution_ended=row.get('execution_ended'),
+            reconcile_required=row.get('reconcile_required'),
+            artifact_ownership_known=tracked,
             **result,
         )
     raise ValueError("Unsupported cleansing scope")

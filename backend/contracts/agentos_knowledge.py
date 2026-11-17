@@ -186,6 +186,8 @@ class KnowledgeJobState(KnowledgeJobLookup):
     ]
     error_code: str | None = Field(default=None, max_length=128)
     physical_cleanup_complete: bool = False
+    writer_ended: bool | None = Field(default=None, strict=True)
+    reconcile_required: bool | None = Field(default=None, strict=True)
     processed_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
     total_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
 

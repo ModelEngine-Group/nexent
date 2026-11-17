@@ -19,6 +19,7 @@ from nexent.storage.errors import (
     ScopeDenied,
 )
 from nexent.storage.models import (
+    FieldPatch,
     OperationContext,
     StorageScope,
     WriteOutcome,
@@ -185,6 +186,17 @@ def test_same_version_cannot_start_another_writer_until_previous_has_ended(setup
         service.submit(replacement, context=context)
     assert service.end_attempt(handle, writer_ended=True, context=context)
     assert service.submit(replacement, context=context).job_id != handle["job_id"]
+
+
+def test_explicit_reprocess_rejects_unreconciled_writer_even_if_marked_ended(setup):
+    service, records, _, request, context, _, _ = setup
+    state, handle = started(setup)
+    assert service.end_attempt(handle, writer_ended=True, context=context)
+    records.patch(JOBS, state.job_id, FieldPatch(set_values={'reconcile_required': True}), context=context)
+    inspected = service.inspect(lookup(state), context=context)
+    assert inspected.writer_ended is True and inspected.reconcile_required is True
+    with pytest.raises(Conflict):
+        service.submit(request.model_copy(update={'idempotency_key': 'explicit-reprocess'}), context=context)
 
 
 def test_delete_hides_visibility_and_fences_late_completion(setup):

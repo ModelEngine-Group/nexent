@@ -257,3 +257,8 @@ Management 的 KB 上传批次已通过 StorageInterface 原子接纳，上传�
 
 
 DataMate 目录属于 Management 的本地关联，远端仍拥有内容。租户删除在批量停用之前，以实际活动 SU 调用 unlink_datamate_for_tenant。每项 SI 事务锁住 KB revision，检查目标租户、datamate 来源、无既有父删除意图、无活动本地文件和 COMMITTED 账本，然后清除本地知识绑定、标签/投影并软删目录；创建者和 AIDP 关联保持原值。账本句柄只有读取权限，普通 KB 最终事务默认不增加该命名空间。事务失败会回滚全部本地改动，结果不明仅记录 pending，不自动重写。流程没有 Runtime/远端数据删除请求、新任务表或持久授权。DataMate provider 的原生 upsert/列表同步仍须在存储旁路整改中迁移。
+
+
+用户通过原文件 process 接口显式再次处理新链 FAILED 文件时，Management 先 inspect 旧清洗/Runtime任务，确认终态、执行已结束、无待核对写入，以及清洗产物归属明确，再单次 CAS 接纳 processing_attempt+1。source_generation、源对象revision/hash保持不变，任务ID换新，旧进度与错误清空。进行中与已完成请求继续复用原意图；后台不会自动重试失败文件。旧执行用户不同、历史意图不完整、404或闭合信息缺失都拒绝重处理，不借其他用户身份查询旧job。
+
+KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_known，Runtime File.inspect补充 writer_ended、reconcile_required。它们是可空严格布尔值，缺失表示未知。Runtime upload同时拒绝旧writer仍需reconcile的同版本替换。已确认、仍由旧job精确归属的局部对象保留到正常File.delete统一清理，不声称物理删除完成；未知历史义务留待维护。升级先完成全部Management实例，再升级Runtime，回滚先Runtime后Management，避免旧严格解析器收到新增字段。没有新AgentOS operation、SQL或公开请求参数。

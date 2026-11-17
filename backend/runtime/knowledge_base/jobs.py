@@ -40,6 +40,8 @@ def _all(*terms):
 
 def job_state(row):
     return KnowledgeJobState(
+        writer_ended=row.get('writer_ended'),
+        reconcile_required=row.get('reconcile_required'),
         processed_chunks=row.get("processed_chunks"),
         total_chunks=row.get("total_chunks"),
         **{
@@ -221,7 +223,7 @@ class KnowledgeJobs:
                 if (
                     active
                     and active["file_version"] == request.file_version
-                    and not active["writer_ended"]
+                    and (not active["writer_ended"] or active['reconcile_required'])
                 ):
                     raise Conflict()
                 self._cancel_covered(tx, request, context)

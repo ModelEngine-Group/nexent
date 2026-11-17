@@ -123,7 +123,7 @@ class IngestionCoordinator:
         ):
             journal = IngestionJournal(records)
             row = journal.record(file_id, context=context)
-            if row["ingestion_request"] is not None:
+            if row["ingestion_request"] is not None and row['status'] != 'FAILED':
                 _, row, intent = self._validated(
                     records, resources, file_id, actor, context
                 )
@@ -133,7 +133,9 @@ class IngestionCoordinator:
                     row,
                     intent.model_dump(mode="json"),
                     intent.embedding_model.model_id,
+                    None,
                 )
+            prior = journal.request(row) if row['status'] == 'FAILED' else None
             reference = KnowledgeFileReference(
                 knowledge_id=row["knowledge_id"],
                 file_id=file_id,
@@ -157,7 +159,21 @@ class IngestionCoordinator:
                 "parser_version": self.cleanse.parser_version,
                 "chunking_strategy": strategy,
             }
-            return row, values, knowledge["embedding_model_id"]
+            return row, values, knowledge["embedding_model_id"], prior
+
+    async def _prior_children(self, row, prior, actor, context):
+        cleanse = await self._blocking(
+            'inspect-prior-cleanse', self.cleanse.inspect,
+            KnowledgeCleanseLookup(**prior._reference(), job_id=row['process_task_id']),
+            tenant_id=actor.tenant_id, user_id=actor.user_id, context=context)
+        context.remaining()
+        runtime = None
+        if row['forward_task_id'] is not None:
+            runtime = await self.client.inspect_knowledge_file(
+                KnowledgeJobLookup(**prior._reference(), job_id=row['forward_task_id']),
+                user_id=actor.user_id, tenant_id=actor.tenant_id)
+            context.remaining()
+        return cleanse, runtime
 
     def _change(self, previous, actor, context, method, *args, intent=None):
         context.remaining()
@@ -227,7 +243,7 @@ class IngestionCoordinator:
         if chunking_strategy not in {"basic", "by_title", "none"}:
             raise InvalidInput()
         async with self._operation(context, file_id, phase="accept") as operation:
-            row, values, model_id = await self._blocking(
+            row, values, model_id, prior = await self._blocking(
                 "prepare",
                 self._draft,
                 file_id,
@@ -235,6 +251,7 @@ class IngestionCoordinator:
                 chunking_strategy,
                 operation,
             )
+            children = await self._prior_children(row, prior, actor, operation) if prior is not None else ()
             if type(model_id) is not int or model_id <= 0:
                 raise InvalidInput()
             metadata = await self.client.get_model(
@@ -258,8 +275,9 @@ class IngestionCoordinator:
                 row,
                 actor,
                 operation,
-                "admit",
+                "reprocess" if prior is not None else "admit",
                 intent,
+                *children,
                 intent=intent,
             )
 

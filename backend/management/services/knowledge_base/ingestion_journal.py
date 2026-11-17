@@ -111,6 +111,34 @@ class IngestionJournal:
             )
         ):
             raise Conflict()
+        return self._accept(intent, row, context)
+
+    def reprocess(self, row, intent, cleanse, runtime, *, context):
+        if not isinstance(intent, KnowledgeIngestionIntent):
+            raise InvalidInput()
+        self._source(row, intent)
+        prior = self.request(row)
+        if (row['status'] != 'FAILED' or row['stage'] != 'FAILED'
+                or prior.attempt != row['processing_attempt'] or intent.attempt != prior.attempt + 1
+                or row['process_task_id'] != cleanse_job_id(prior.cleanse_request(), row['tenant_id'], prior.user_id)):
+            raise Conflict()
+        self._child(row, cleanse, KnowledgeCleanseState, 'process_task_id')
+        if (cleanse.execution_ended is not True or cleanse.reconcile_required is not False
+                or cleanse.artifact_ownership_known is not True):
+            raise Conflict()
+        if row['forward_task_id'] is None:
+            if runtime is not None or cleanse.status not in {'failed', 'cancelled'}:
+                raise Conflict()
+        else:
+            self._child(row, runtime, KnowledgeJobState, 'forward_task_id')
+            if (cleanse.status != 'completed' or runtime.status not in {'failed', 'cancelled'}
+                    or runtime.writer_ended is not True or runtime.reconcile_required is not False
+                    or row['forward_task_id'] != knowledge_job_id(prior.runtime_request(cleanse.artifact),
+                                                                 row['tenant_id'], prior.user_id)):
+                raise Conflict()
+        return self._accept(intent, row, context)
+
+    def _accept(self, intent, row, context):
         return self._patch(
             row,
             {
@@ -119,6 +147,8 @@ class IngestionJournal:
                 "process_task_id": cleanse_job_id(
                     intent.cleanse_request(), row["tenant_id"], intent.user_id
                 ),
+                'forward_task_id': None,
+                'parent_task_id': None,
                 "status": "UPLOADED",
                 "stage": "INGEST_ACCEPTED",
                 "error_code": None,
