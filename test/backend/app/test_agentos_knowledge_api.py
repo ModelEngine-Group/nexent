@@ -11,6 +11,8 @@ from contracts.agentos_knowledge import (
     KnowledgeJobLookup,
     KnowledgeJobState,
     KnowledgeOperation,
+    KnowledgeSample,
+    KnowledgeSampleResult,
     KnowledgeSearch,
     KnowledgeSearchResult,
 )
@@ -40,6 +42,7 @@ def setup(monkeypatch):
         upload=AsyncMock(return_value=state),
         delete=AsyncMock(return_value=state),
         search=AsyncMock(),
+        sample=AsyncMock(),
     )
     app = FastAPI(root_path="/api")
     app.add_middleware(AgentOSMiddleware)
@@ -84,6 +87,19 @@ async def test_search_requires_signature_and_preserves_model_scope(setup):
     tampered = await send(app, KnowledgeOperation.SEARCH, request, tamper=True)
     assert tampered.status_code == 401
     service.search.assert_awaited_once()
+
+
+async def test_sample_uses_signed_reader_and_rejects_tampering(setup):
+    app, service, _ = setup
+    request = KnowledgeSample(knowledge_id=1, expected_revision='a' * 64)
+    service.sample.return_value = KnowledgeSampleResult(knowledge_id=1, knowledge_revision='a' * 64,
+        data_revision='b' * 64, embedding_model={'model_id': 2, 'revision': 'v1'}, documents=[])
+    response = await send(app, KnowledgeOperation.SAMPLE, request)
+    assert response.status_code == 200 and response.json()['documents'] == []
+    service.sample.assert_awaited_once_with(request, ServicePrincipal('user', 'tenant'))
+    tampered = await send(app, KnowledgeOperation.SAMPLE, request, tamper=True)
+    assert tampered.status_code == 401
+    service.sample.assert_awaited_once()
 
 
 async def test_deletion_reports_accepted_without_claiming_physical_completion(setup):

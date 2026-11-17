@@ -176,6 +176,13 @@ class VectorStore(StoragePort, Protocol):
 
     def search(self, collection: str, query: SearchQuery, *, context: OperationContext) -> tuple[SearchHit, ...]: ...
 
+    def scan(
+        self, collection: str, where: Comparison | Junction | None, page: PageRequest,
+        *, context: OperationContext,
+    ) -> Page[VectorRecord]:
+        """Read scoped records in key order; cursors do not provide snapshot isolation."""
+        ...
+
     def delete(
         self, collection: str, where: Comparison | Junction, *, context: OperationContext
     ) -> tuple[DeleteReceipt, ...]: ...

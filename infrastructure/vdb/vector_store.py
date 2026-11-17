@@ -52,6 +52,7 @@ class ElasticsearchVectorStore:
                 "vector.collection.exists",
                 "vector.upsert",
                 "vector.get",
+                "vector.scan",
                 "vector.search.dense",
                 "vector.search.text",
                 "vector.search.weighted_text",
@@ -407,6 +408,11 @@ class ElasticsearchVectorStore:
             terms = tuple(extract_highlight_terms(hit.get("highlight", {}))) if query.mode == "weighted_text" else ()
             hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
+
+    def scan(self, collection, where, page, *, context):
+        from infrastructure.vdb.vector_scan import scan_vectors
+
+        return scan_vectors(self, self._binding(collection), where, page, context=context)
 
     def count(self, collection, where, *, context):
         binding = self._binding(collection, maintenance=True)

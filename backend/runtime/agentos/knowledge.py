@@ -7,6 +7,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileUpload,
     KnowledgeJobLookup,
     KnowledgeOperation,
+    KnowledgeSample,
     KnowledgeSearch,
 )
 from contracts.knowledge_base_deletion import (
@@ -59,6 +60,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.SEARCH.value, include_in_schema=False)
     async def search(request: Request):
         return await dispatch(request, KnowledgeSearch, service.search, 200)
+
+    @router.post(KnowledgeOperation.SAMPLE.value, include_in_schema=False)
+    async def sample(request: Request):
+        return await dispatch(request, KnowledgeSample, service.sample, 200)
 
     @router.post(KnowledgeOperation.DELETE_BASE.value, include_in_schema=False)
     async def delete_base(request: Request):

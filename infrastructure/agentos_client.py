@@ -43,6 +43,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileGrant,
     KnowledgeJobState,
     KnowledgeOperation,
+    KnowledgeSampleResult,
     KnowledgeSearchGrant,
     KnowledgeSearchResult,
 )
@@ -134,14 +135,21 @@ class AgentOSClient:
         return await self._record_json(KnowledgeOperation.INSPECT_BASE_DELETION, payload, user_id, tenant_id, KnowledgeBaseDeleteState)
 
     async def search_knowledge(self, payload, user_id, tenant_id):
+        return await self._knowledge_read(KnowledgeOperation.SEARCH, payload, user_id, tenant_id, KnowledgeSearchResult)
+
+    async def sample_knowledge(self, payload, user_id, tenant_id):
+        return await self._knowledge_read(KnowledgeOperation.SAMPLE, payload, user_id, tenant_id, KnowledgeSampleResult)
+
+    async def _knowledge_read(self, operation, payload, user_id, tenant_id, schema):
         try:
             async with asyncio.timeout(_KNOWLEDGE_SEARCH_DEADLINE_SECONDS):
-                result = await self._post_json(KnowledgeOperation.SEARCH, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
-                return self._validate_result(KnowledgeSearchResult, result)
+                result = await self._post_json(operation, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
+                return self._validate_result(schema, result)
         except (TimeoutError, RuntimeServiceTimeoutError) as error:
-            logger.warning("agentos_knowledge_search_timeout phase=request threshold_seconds=%s exception_type=%s",
-                           _KNOWLEDGE_SEARCH_DEADLINE_SECONDS, type(error).__name__)
-            raise RuntimeServiceTimeoutError("AgentOS knowledge search timed out") from error
+            name = operation.name.lower()
+            logger.warning("agentos_knowledge_%s_timeout phase=request threshold_seconds=%s exception_type=%s",
+                           name, _KNOWLEDGE_SEARCH_DEADLINE_SECONDS, type(error).__name__)
+            raise RuntimeServiceTimeoutError(f"AgentOS knowledge {name} timed out") from error
 
     async def upload_knowledge_file(self, payload, user_id, tenant_id):
         return await self._record_json(KnowledgeOperation.UPLOAD, payload, user_id, tenant_id, KnowledgeJobState)

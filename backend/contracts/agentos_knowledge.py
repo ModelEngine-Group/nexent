@@ -273,6 +273,42 @@ class KnowledgeSearchResult(Contract):
     rerank_model: ModelVersion | None = None
 
 
+class KnowledgeSample(Contract):
+    knowledge_id: int = Field(gt=0)
+    document_limit: int = Field(default=200, ge=1, le=200)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgeSampleChunk(Contract):
+    chunk_index: int = Field(ge=0)
+    content: str
+    embedding: list[float] = Field(min_length=1)
+    location: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator('embedding')
+    @classmethod
+    def finite_embedding(cls, values):
+        import math
+
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError('Expected finite stored embeddings')
+        return values
+
+
+class KnowledgeSampleDocument(Contract):
+    file_ref: KnowledgeFileReference
+    filename: str = Field(max_length=1024)
+    chunks: list[KnowledgeSampleChunk]
+
+
+class KnowledgeSampleResult(Contract):
+    knowledge_id: int = Field(gt=0)
+    knowledge_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    data_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_model: ModelVersion
+    documents: list[KnowledgeSampleDocument] = Field(max_length=200)
+
+
 class FileCleanseRequest(Contract):
     run_id: str = Field(pattern=r"^(debug-)?[0-9a-f]{32}$")
     source: ObjectReference
@@ -331,3 +367,4 @@ class KnowledgeOperation(str, Enum):
     INSPECT = "/internal/agentos/v1/knowledge/files/inspect"
     DELETE = "/internal/agentos/v1/knowledge/files/delete"
     SEARCH = "/internal/agentos/v1/knowledge/search"
+    SAMPLE = "/internal/agentos/v1/knowledge/sample"

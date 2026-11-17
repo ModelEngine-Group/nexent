@@ -245,6 +245,14 @@ Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按�
 
 ## 当前保留项与后续工作
 
+`KnowledgeBase.sample` 的内部路径为 `/internal/agentos/v1/knowledge/sample`，客户端为 `sample_knowledge`。请求包含 `knowledge_id`、`expected_revision` 和 `document_limit`，文档数默认为 200，范围为 1 至 200。`expected_revision` 来自当前 Management 知识资源授权，避免摘要跨越资源配置变化。该入口复用标准知识库读取授权，始终传实际读取者和租户。
+
+Runtime 对权威可见文件做蓄水池抽样，通过 StorageInterface 的 `VectorStore.scan` 逐页读取已存向量。响应包含 `knowledge_revision`、`data_revision`、`embedding_model` 和 `documents`。每个文档携带版本化 `file_ref`、文件名以及按 `chunk_index` 排序的完整分块，分块含原文、embedding 和 location。分块数必须与已完成 job 的发布计数一致；旧 generation 被过滤，缺片、资源版本变化或读取期间可见 manifest 变化均报冲突，不返回部分成功，不重试或切回旧索引。样本入口不会调用 embedding 或 LLM。
+
+`data_revision` 是当前全部可见文件版本、generation 和发布 job 的摘要，覆盖未被抽中的文件。分页使用逻辑键游标，不承诺数据库快照隔离，Runtime 返回前重新核对可见集合和当前授权。Runtime 总截止与客户端总截止均为 180 秒，单次 ES 请求最多 5 秒且禁用驱动重试；HTTP 超时会取消请求并关闭客户端。向量扫描游标绑定实际 actor、租户、集合、schema/维度与过滤条件，不能用于其他范围。
+
+当前已交付样本契约、Runtime 实现和签名客户端。手动摘要及自动摘要仍有旧取样调用，继续按退役 SPEC 切换；聚类和 MapReduce 组装保留在 Management，模型调用继续使用 Model.invoke。新操作先部署 Runtime，再切换 Management 消费者；回滚先撤回消费者。当前没有新增公开摘要路径或备用协议。
+
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
 Management 源/产物清理、KB 多模态入库、旧检索语义对照及业务入口切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。

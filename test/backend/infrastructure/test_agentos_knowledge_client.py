@@ -93,3 +93,28 @@ async def test_search_total_deadline_closes_the_only_client(monkeypatch):
         await AgentOSClient("http://runtime", create).search_knowledge(
             KnowledgeSearch(knowledge_ids=[1], query="private query", embedding_model={"model_id": 2, "revision": "v1"}), "user", "tenant")
     assert len(requests) == len(clients) == 1 and clients[0].is_closed
+
+
+async def test_sample_total_deadline_cancels_and_closes_without_retry(monkeypatch):
+    from contracts.agentos_knowledge import KnowledgeOperation, KnowledgeSample
+
+    monkeypatch.setattr(environment, 'JWT_SECRET', 'synthetic-sample-client-key')
+    monkeypatch.setattr('infrastructure.agentos_client._KNOWLEDGE_SEARCH_DEADLINE_SECONDS', 0.1)
+    clients, calls, cancelled = [], [], []
+    async def blocked(message):
+        calls.append(message)
+        assert message.url.path == '/api' + KnowledgeOperation.SAMPLE.value
+        token = message.headers['Authorization'].removeprefix('Bearer ')
+        assert verify_call(token, KnowledgeOperation.SAMPLE, message.content) == ServicePrincipal('user', 'tenant')
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(True)
+    def create(**kwargs):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(blocked), **kwargs)
+        clients.append(client)
+        return client
+    with pytest.raises(RuntimeServiceTimeoutError):
+        await AgentOSClient('http://runtime', create).sample_knowledge(
+            KnowledgeSample(knowledge_id=1, expected_revision='a' * 64), 'user', 'tenant')
+    assert len(clients) == len(calls) == 1 and clients[0].is_closed and cancelled == [True]

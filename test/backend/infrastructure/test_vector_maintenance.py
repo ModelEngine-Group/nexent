@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 from nexent.storage.errors import CapabilityUnsupported
-from nexent.storage.models import Comparison, SearchQuery, VectorKey
+from nexent.storage.models import Comparison, PageRequest, SearchQuery, VectorKey
 
 from infrastructure.vdb.vector_store import ElasticsearchVectorStore
 from test.backend.infrastructure.test_vector_store import context, vector
@@ -27,13 +27,14 @@ def maintenance(store):
     lambda p: p.get(VectorKey("kb", "one"), context=context()),
     lambda p: p.upsert((vector(),), context=context()),
     lambda p: p.search("kb", SearchQuery(text="hello"), context=context()),
+    lambda p: p.scan("kb", None, PageRequest(), context=context()),
 ])
 def test_dimensionless_binding_rejects_vector_operations_before_transport(maintenance, operation):
     port, _, factory, _ = maintenance
     with pytest.raises(CapabilityUnsupported):
         operation(port)
     factory.assert_not_called()
-    assert port.capabilities.supported == {"vector.count", "vector.delete"}
+    assert port.capabilities.supported == {"vector.count", "vector.delete", "vector.collection.exists"}
 
 
 def test_dimensionless_binding_counts_and_deletes_with_the_same_scope(maintenance):
