@@ -43,3 +43,6 @@ change:
     history UT to keep queued turns reconnectable rather than failed. D4 selects
     histories by their title independently of the running indicator or timestamp;
     execution-record, retry and navigation assertions remain unchanged.
+    A retained live subscription and one resume after detachment both satisfy
+    navigation recovery; D4 bounds subscription counts to one or two and still
+    rejects new executions. D3 independently verifies trimmed compact replay.

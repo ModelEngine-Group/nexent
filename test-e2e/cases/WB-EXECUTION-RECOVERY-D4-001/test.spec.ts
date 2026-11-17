@@ -111,7 +111,9 @@ journey("WB-EXECUTION-RECOVERY-D4-001", async ({ page, contract }) => {
     await expect(page.getByRole("button", { name: /^Executed code python$/i })).toHaveCount(3);
     await expect(page.getByText("9.00s", { exact: true })).toBeVisible();
     const requests = await page.evaluate(() => (window as any).__executionFixture.requests);
-    expect(requests.length).toBe(2);
+    // Navigation may retain the live subscription or reconnect to its replay.
+    expect(requests.length).toBeGreaterThanOrEqual(1);
+    expect(requests.length).toBeLessThanOrEqual(2);
     expect(requests.every((r: any) => r.is_resume && r.enable_plan === false)).toBe(true);
     await page.reload();
     await expect(page.getByRole("button", { name: /^Executed code python$/i })).toHaveCount(3);
