@@ -3,6 +3,7 @@
 """Shared runtime/history orchestration for editor and Workbench creator entrypoints."""
 
 from contracts.conversation import ConversationTarget
+from infrastructure.nexent_output import adapt_nexent_stream
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
@@ -64,4 +65,4 @@ async def start_creation_turn(request, *, kind, user_id, tenant_id, stream_facto
         finally:
             await stream.aclose()
 
-    return persisted(), conversation_id
+    return adapt_nexent_stream(persisted()), conversation_id

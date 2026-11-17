@@ -39,6 +39,18 @@ def message(**changes):
     return {"conversation_id": 1, "message_idx": 200, "role": "user", "content": "hello", **changes}
 
 
+def test_ordered_pair_keeps_automation_provenance_and_shared_transaction(session):
+    session.scalar.side_effect = [1, 4]
+    message_id, index = db.append_conversation_user_message(
+        1, "scheduled task", [], "owner", message_source=MessageSource.AUTOMATION
+    )
+    assert (message_id, index) == (123, 6)
+    assert session.scalar.call_count == 2
+    inserts = [call.args[0] for call in session.execute.call_args_list if isinstance(call.args[0], Insert)]
+    assert len(inserts) == 1
+    assert inserts[0].compile().params["message_source"] == "AUTOMATION"
+
+
 def test_ordinary_quota_excludes_automation_and_rejects_before_inserting(session):
     with pytest.raises(AppException, match="maximum 100 turns") as error:
         db.create_conversation_message(message(message_source="AUTOMATION"), "owner")

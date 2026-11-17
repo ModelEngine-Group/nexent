@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -12,6 +12,9 @@ from ..configuration import _build_otlp_headers, _require_positive, _resolve_app
 # avoids silently replacing operator-provided service addresses.
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
+
+# One deployment owns the execution Core; persisted Agent fields are legacy metadata.
+NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'))
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
@@ -63,6 +66,14 @@ AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(os.getenv('AGENT_AUTOMATION_SHUTDO
 AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(os.getenv('AGENT_AUTOMATION_MIN_INTERVAL_SECONDS', '5'))
 # Timeout in seconds for invoking external A2A agents (runtime sub-agent path and northbound direct calls)
 A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
+
+# Queue-plus-execution deadline for one Jiuwen local-child or external A2A call (seconds).
+# The parent model deadline may shorten this limit; it does not replace the A2A HTTP deadline.
+RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS = parse_positive_float(os.getenv('RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS'), 'RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS', 300.0)
+# Jiuwen's outer deadline for one tool.invoke, including A2A and controlled Python tools (seconds).
+# Pass it through run parameters and ToolCard metadata instead of changing Jiuwen's process-global default.
+# For longer A2A calls, increase this, the collaboration limit and A2A_AGENT_INVOCATION_TIMEOUT_SECONDS together.
+DEFAULT_TOOL_CALL_TIMEOUT = parse_positive_float(os.getenv('DEFAULT_TOOL_CALL_TIMEOUT'), 'DEFAULT_TOOL_CALL_TIMEOUT', 300.0)
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')

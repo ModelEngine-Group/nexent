@@ -10,11 +10,11 @@ import pytest
 from threading import Event
 from unittest.mock import MagicMock, patch
 
-from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig, ToolConfig
-from sdk.nexent.core.agents.context import ContextItemInput
-from sdk.nexent.core.agents.nexent_agent import NexentAgent
-from sdk.nexent.core.agents.context import ContextManagerConfig
-from sdk.nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.context import ContextItemInput
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.context import ContextManagerConfig
+from nexent.core.utils.observer import MessageObserver
 
 
 def test_ut_sdk_dpr_004_factory_filters_prompt_and_execution_tools_by_run_policy():
@@ -57,7 +57,7 @@ def test_ut_sdk_dpr_004_factory_filters_prompt_and_execution_tools_by_run_policy
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch.object(factory, "create_tool", side_effect=fake_tool), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)
         factory.create_single_agent(second_config)
 
@@ -109,7 +109,7 @@ def test_create_single_agent_injects_managed_runtime_and_run_items():
         return MagicMock()
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)  # NOSONAR - trusted local test double.
         factory.create_single_agent(config)
         assert config.context_items == [item]
@@ -140,7 +140,7 @@ def test_create_single_agent_keeps_managed_runtime_when_compression_disabled():
         return MagicMock()
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)
 
     runtime = captured["context_runtime"]
@@ -163,7 +163,7 @@ def test_create_single_agent_defaults_to_managed_runtime_without_config():
         return MagicMock()
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)
 
     runtime = captured["context_runtime"]
@@ -192,7 +192,7 @@ def test_create_single_agent_preserves_explicit_empty_authorized_snapshot():
         return MagicMock()
 
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(  # NOSONAR - trusted local test double.
             config, context_items_override=()
         )
@@ -226,7 +226,7 @@ def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
 
     with patch.object(NexentAgent, "create_model", return_value=MagicMock()), \
             patch.object(NexentAgent, "_cleanup_sandbox"), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", FakeCoreAgent):
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", FakeCoreAgent):
         main_agent = factory.create_single_agent(  # NOSONAR - trusted local test double.
             root
         )
@@ -250,8 +250,25 @@ def test_clarification_policy_is_not_injected_into_other_protocols(kind):
     config = AgentConfig(name="agent", description="test", model_name="main", tools=[], context_items=[item],
                          output_protocol="final_envelope" if kind == "nl2skill" else "code_action")
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent") as core:
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent") as core:
         factory.create_single_agent(config, _managed_context=kind == "child")
     assert core.call_args.kwargs["enable_clarification"] is False
-    assert core.call_args.kwargs["context_runtime"].items == [item]
+    runtime_items = core.call_args.kwargs["context_runtime"].items
+    assert runtime_items[0] == item
+    assert [entry.id for entry in runtime_items] == ["system:policy", "system:common_behavior"]
+    assert all(entry.id != "system:clarification_protocol" for entry in runtime_items)
     assert config.context_items == [item]
+
+
+def test_common_behavior_keeps_legacy_fallback_tool_instructions():
+    factory = _factory()
+    config = AgentConfig(name="agent", description="test", model_name="main", tools=[])
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent") as core:
+        factory.create_single_agent(config)
+    runtime = core.call_args.kwargs["context_runtime"]
+    assert runtime.items == []
+    fallback = "Saved business instructions and child_echo tool definition"
+    runtime.prepare_run(memory=MagicMock(), fallback_system_prompt=fallback)
+    assert runtime._run_context.items[0].id == "system:fallback"
+    assert runtime._run_context.items[0].content["text"] == fallback

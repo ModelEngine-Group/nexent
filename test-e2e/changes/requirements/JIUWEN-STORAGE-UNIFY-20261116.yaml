@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-STORAGE-UNIFY-20261116
+  change_type: requirement
+  requirement_id: JIUWEN-STORAGE-UNIFY-20261116
+  title: Use standard ModelService persistence for Jiuwen without schema extensions
+  description: Remove the transitional runtime profile column/writers and import optional historical envelopes through
+    the existing legacy outlet migration. Canonical rows remain authoritative.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    added: []
+    modified:
+    - JIUWEN-RESOURCES
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D5-002
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    added: []
+    modified:
+    - JIUWEN-RESOURCES-D5-002
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Standard row-only model reading/writing and Jiuwen profile/parameter compilation.
+    - Legacy envelope size, fingerprint, tenant/identity and registry checks; frozen round-trip, absent-column compatibility,
+      dry-run and safe failures.
+    - Canonical-row precedence, transactional rollback and revision conflicts.
+    reason: Reuse codec/model bridge/outlet lifecycle UT; replace transitional-writer tests with migration and canonical-runtime
+      regressions. No duplicate formal D1.
+    test_selectors:
+    - test/sdk/core/model_service/test_outlet_storage.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/backend/database/test_model_outlet_migration_db.py
+    - test/backend/services/test_model_legacy_snapshot_migration.py
+    - test/backend/services/test_model_runtime_options.py
+    - test/backend/database/test_model_legacy_snapshot_column.py
+    - test/backend/services/test_model_management_service.py
+    - test/backend/services/test_model_health_service.py
+  notes: JS-001..005 in the existing runtime-agent-core-factory SPEC. Existing D5 owns disposable PostgreSQL and
+    releases it in finally; empty preparation families are self-contained. No live deployment database mutation
+    or new SQL. Existing global asset blockers are recorded separately.

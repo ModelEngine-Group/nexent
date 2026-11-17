@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { formatNl2AgentActionSummary } from "./nl2agent-action-summary";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { refreshToolListWithToast } from "@/hooks/mcpTools/useRefreshToolListWithToast";
@@ -523,10 +524,7 @@ export function SuggestedResourceInstallationCard({
       content: [
         {
           type: "text",
-          text: t(
-            "nl2agent.resourceInstallation.submittedSummary",
-            "Resource installation completed"
-          ),
+          text: formatNl2AgentActionSummary(payload.subtype, t),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },

@@ -12,9 +12,9 @@ from smolagents.tools import Tool
 from nexent.core.agents.context import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput
 from nexent.core.agents.context.rendering import ContextItemRenderer
-from nexent.core.agents.context.runtime import ManagedContextRuntime
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.output_protocol import (
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.output_protocol import (
     ExecutableAction,
     ModelOutputProtocolError,
     NonterminalThought,

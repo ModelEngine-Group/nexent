@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D2
+module: AGENT-CORE
+cases:
+- case_id: AGENT-CORE-D2-001
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R1
+  - AGENT-CORE-001-R5
+  title: Core configuration protocol compatibility
+  type: CONTRACT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Core configuration protocol compatibility
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Configuration request accepts jiuwen and rejects unknown
+      values.'
+    expected: Configuration request accepts jiuwen and rejects unknown values
+  - order: 2
+    action: 'Exercise scenario: Partial update preserves omitted selection.'
+    expected: Partial update preserves omitted selection
+  - order: 3
+    action: 'Exercise scenario: Export and version row preserve selection.'
+    expected: Export and version row preserve selection
+  expected_results:
+  - Configuration request accepts jiuwen and rejects unknown values
+  - Partial update preserves omitted selection
+  - Export and version row preserve selection
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  contract:
+    protocol: Nexent Agent configuration JSON
+    request_expectations:
+    - Optional agent_core accepts smolagents or jiuwen.
+    response_expectations:
+    - Core choice is preserved; omitted choice remains compatible.
