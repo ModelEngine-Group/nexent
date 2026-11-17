@@ -250,6 +250,9 @@ class ExecutionRepository:
                 current.delete_flag != "N" or current.status == "expired"
             ):
                 return
+            if current is not None and values["status"] == "expired":
+                # Archive expiry changes readability, not the persisted execution facts.
+                values = {"trajectory_id": values["trajectory_id"], "status": "expired"}
             values = {
                 **values,
                 "updated_by": identity.owner_user_id,
@@ -370,17 +373,14 @@ class ExecutionRepository:
             return len(rows)
 
     def compact(self, limit=1000):
-        """Reclaim old tombstones while retaining each active conversation's latest state."""
+        """Reclaim soft-deleted rows; active conversations retain every execution summary."""
         with get_db_session() as session:
             session.execute(text("SET LOCAL statement_timeout = '2000ms'"))
             ids = (
                 session.execute(
                     text("""SELECT e.trajectory_id FROM nexent.trajectory_execution_t e
               WHERE e.update_time < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '7 days'
-              AND (e.delete_flag='Y' OR e.status='expired' AND EXISTS (
-                SELECT 1 FROM nexent.trajectory_execution_t newer
-                WHERE newer.conversation_id=e.conversation_id AND newer.turn_no>e.turn_no
-                  AND newer.delete_flag='N'))
+              AND e.delete_flag='Y'
               ORDER BY e.update_time,e.trajectory_id LIMIT :limit FOR UPDATE SKIP LOCKED"""),
                     {"limit": limit},
                 )

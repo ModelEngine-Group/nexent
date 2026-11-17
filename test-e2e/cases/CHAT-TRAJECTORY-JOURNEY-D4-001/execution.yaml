@@ -12,7 +12,8 @@ preparation:
 notes: 'The fixed journey uses the product frontend from the configured base URL and
   owns its intercepted HTTP routes, cookies and browser context. Deferred cleanup
   unregisters routes and clears cookies; Playwright releases the context even on failure.
-  It provisions no shared tenant, Agent, model, file or backend resource. Version
+  Time-filter regression selects calendar dates, confirms the range, checks UTC query
+  boundaries and unchanged sort, then clears it. It provisions no shared tenant, Agent, model, file or backend resource. Version
   assertions cover the historical root, child, draft and unknown nodes, plus hiding
   Agent versions on model/tool selection. Code-tree fixtures use the simplified Ops DTO; the journey checks
   code groups, Python-call timing, named tools and navigation to the retained parent. Input/output wrapping

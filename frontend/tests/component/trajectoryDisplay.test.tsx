@@ -271,36 +271,85 @@ describe("documented execution information", () => {
 });
 
 describe("admin list display", () => {
-  it("shows cancelled executions and submits a distinct cancellation filter", async () => {
-    const page = recordsPage();
-    page.items = [
-      { ...record, root_agent_name: "cancelled-agent", status: "cancelled" },
-    ];
-    api.records.mockResolvedValue(page);
-    render(
-      <ObservabilityCenter
-        user={{ id: "operator", role: "OPS", tenantId: "tenant" } as User}
-      />,
-      { wrapper }
-    );
-    expect(
-      await screen.findByText("trajectory.businessStatus.cancelled")
-    ).toBeVisible();
-    expect(screen.queryByText("trajectory.error")).not.toBeInTheDocument();
-    const header = screen.getByRole("columnheader", {
-      name: /trajectory.status/,
-    });
-    await userEvent.click(within(header).getByRole("button"));
-    await userEvent.click(
-      await screen.findByRole("menuitem", {
-        name: "trajectory.businessStatus.cancelled",
-      })
-    );
-    await userEvent.click(screen.getByRole("button", { name: "OK" }));
-    await waitFor(() =>
-      expect(api.records.mock.calls.at(-1)?.[0].status).toBe("cancelled")
-    );
-  });
+  it.each([false, true])(
+    "keeps cleaned metrics visible and reports only actual missing usage (%s)",
+    async (missing) => {
+      const page = recordsPage();
+      page.items = [
+        {
+          ...record,
+          root_agent_name: "cleaned-agent",
+          status: null,
+          availability: "expired",
+          duration_ms: 1250,
+          usage: {
+            input: 10,
+            output: missing ? null : 20,
+            total: missing ? null : 30,
+            complete: !missing,
+          },
+        },
+      ];
+      api.records.mockResolvedValue(page);
+      render(
+        <ObservabilityCenter
+          user={{ id: "operator", role: "OPS", tenantId: "tenant" } as User}
+        />,
+        { wrapper }
+      );
+      const agent = await screen.findByRole("button", {
+        name: "cleaned-agent",
+      });
+      const row = within(agent.closest("tr")!);
+      expect(row.getByText("trajectory.availability.expired")).toBeVisible();
+      expect(row.getByText("1.25 s")).toBeVisible();
+      if (missing) expect(row.getByText("trajectory.partial")).toBeVisible();
+      else {
+        expect(row.getByText("30")).toBeVisible();
+        expect(row.queryByText("trajectory.partial")).not.toBeInTheDocument();
+      }
+    }
+  );
+
+  it.each([
+    ["cancelled", "trajectory.businessStatus.cancelled"],
+    ["unarchived", "trajectory.availability.unarchived"],
+  ])(
+    "shows %s and submits the matching status filter",
+    async (status, label) => {
+      const page = recordsPage();
+      page.items = [
+        {
+          ...record,
+          root_agent_name: `${status}-agent`,
+          status: status === "cancelled" ? "cancelled" : null,
+          availability: status === "unarchived" ? "unarchived" : "available",
+        },
+      ];
+      api.records.mockResolvedValue(page);
+      render(
+        <ObservabilityCenter
+          user={{ id: "operator", role: "OPS", tenantId: "tenant" } as User}
+        />,
+        { wrapper }
+      );
+      expect(await screen.findByText(label)).toBeVisible();
+      expect(screen.queryByText("trajectory.error")).not.toBeInTheDocument();
+      const header = screen.getByRole("columnheader", {
+        name: /trajectory.status/,
+      });
+      await userEvent.click(within(header).getByRole("button"));
+      await userEvent.click(
+        await screen.findByRole("menuitem", {
+          name: label,
+        })
+      );
+      await userEvent.click(screen.getByRole("button", { name: "OK" }));
+      await waitFor(() =>
+        expect(api.records.mock.calls.at(-1)?.[0].status).toBe(status)
+      );
+    }
+  );
 
   it.each([
     ["OPS", ["OPS"], "OPS"],

@@ -15,7 +15,7 @@ from nexent.monitor import (
     get_agent_monitoring_context,
 )
 
-EVENT = 'data: {"type":"string","content":"answer"}\n\n'
+EVENT = 'data: {"type": "string", "content": "answer"}\n\n'
 
 
 @pytest.fixture

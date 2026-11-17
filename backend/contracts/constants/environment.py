@@ -1,19 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
-
-from ..configuration import (
-    _build_otlp_headers,
-    _require_positive,
-    _resolve_app_version,
-    parse_agent_core,
-    parse_port,
-    parse_positive_float,
-    parse_positive_int,
-    validate_deployment_version,
-)
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -372,9 +361,7 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
-MONITORING_PROVIDER = (os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower()
-if MONITORING_PROVIDER not in ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'):
-    raise ValueError('Unsupported MONITORING_PROVIDER')
+MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
 ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
@@ -393,8 +380,7 @@ OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION = os.getenv('OTEL_EXPORTER_OTLP_LA
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
 LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', '')
 OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv('OTEL_EXPORTER_OTLP_METRICS_ENABLED')
-OTEL_EXPORTER_OTLP_METRICS_ENABLED = ((OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true'
-                                      and MONITORING_PROVIDER != 'local_file')
+OTEL_EXPORTER_OTLP_METRICS_ENABLED = ((OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true' and MONITORING_PROVIDER != 'local_file')
 MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv('MONITORING_INSTRUMENT_REQUESTS')
 MONITORING_INSTRUMENT_REQUESTS = (MONITORING_INSTRUMENT_REQUESTS_RAW or 'false').lower() == 'true'
 MONITORING_FASTAPI_INCLUDED_URLS = os.getenv('MONITORING_FASTAPI_INCLUDED_URLS', '')
@@ -414,9 +400,7 @@ TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() 
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
 TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR') or '/mnt/nexent-data/trajectory'
-TRAJECTORY_STORAGE_MODE = os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower()
-if TRAJECTORY_STORAGE_MODE not in ('single_node', 'shared_directory'):
-    raise ValueError('TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
+TRAJECTORY_STORAGE_MODE = _require_choice(os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower(), ('single_node', 'shared_directory'), 'TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
 TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)
 TRAJECTORY_FLUSH_INTERVAL_MS = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_INTERVAL_MS'), 'TRAJECTORY_FLUSH_INTERVAL_MS', 200)
 TRAJECTORY_FLUSH_BYTES = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_BYTES'), 'TRAJECTORY_FLUSH_BYTES', 262144)

@@ -14,7 +14,7 @@ from ops.services.trajectory.primitives import (
 
 @pytest.mark.parametrize("ensure_ascii", [True, False])
 def test_incremental_unicode_body_and_offsets(tmp_path, ensure_ascii):
-    body = ('汉字😀\\"\n\t' * 10000) + "\n"
+    body = ('汉字😀\\"\n\t' * 2048) + "\n"
     path = tmp_path / "body.json"
     path.write_text(
         json.dumps({"body": body, "number": 12}, ensure_ascii=ensure_ascii),
@@ -25,6 +25,7 @@ def test_incremental_unicode_body_and_offsets(tmp_path, ensure_ascii):
         result = JSONReader(fd, path.stat().st_size, buffer_size=97).value()
         text = result["body"]
         assert len(text.encode()) <= 16384
+        assert len(text) < len(body)
         assert text.char_count == len(body)
         assert text.byte_count == len(body.encode())
         chunks = []

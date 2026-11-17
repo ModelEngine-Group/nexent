@@ -72,8 +72,11 @@ def test_batch_delete_locks_owned_live_conversations_in_id_order_before_updates(
     assert "ORDER BY nexent.conversation_record_t.conversation_id ASC FOR UPDATE" in locked
     assert "created_by = 'owner'" in locked and "delete_flag = 'N'" in locked
     assert "UPDATE nexent.conversation_record_t" in sql(statements[1])
-    assert "UPDATE nexent.conversation_message_t" in sql(statements[2])
-    assert len(statements) == 6
+    assert "UPDATE nexent.trajectory_execution_t" in sql(statements[2])
+    messages = next(i for i, statement in enumerate(statements) if "UPDATE nexent.conversation_message_t" in sql(statement))
+    assert messages > 2
+    assert all("conversation_id IN (1, 2)" in sql(statement) for statement in statements[messages:])
+    assert len(statements[messages:]) == 4
 
 
 def test_single_delete_filters_owner_before_cascading_children(session):

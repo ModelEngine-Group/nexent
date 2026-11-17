@@ -1029,6 +1029,31 @@ def test_trj_query_private_validation_under_api_root(harness):
     assert response.json() == {"detail": {"code": "invalid_parameters"}}
 
 
+@pytest.mark.parametrize("view", ["conversation", "execution"])
+def test_trj_query_unarchived_filter_reaches_pg_without_opening_files(harness, monkeypatch, view):
+    from unittest.mock import Mock
+
+    catalog = Mock()
+    catalog.list_records.return_value = []
+    catalog.statistics.return_value = {"complete": False}
+    harness.service.execution_catalog = catalog
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Unarchived list query attempted a filesystem read")
+
+    monkeypatch.setattr(harness.service.archive, "manifest", forbidden)
+    monkeypatch.setattr(harness.service, "load", forbidden)
+    result = data(get(harness, "/trajectory/records", view=view, status="unarchived"))
+    assert result["total"] == 0 and result["items"] == []
+    assert catalog.list_records.call_args.args[1]["status"] == "unarchived"
+    assert catalog.list_records.call_args.kwargs["view"] == view
+    assert catalog.list_records.call_args.args[0] == ["t1"]
+    invalid = get(harness, "/trajectory/records", view=view, status="unarchive")
+    assert invalid.status_code == 422
+    assert invalid.json() == {"detail": {"code": "invalid_parameters"}}
+    catalog.list_records.assert_called_once()
+
+
 @pytest.mark.parametrize("missing_input", [False, True])
 @pytest.mark.parametrize("builtin", [False, True])
 @pytest.mark.parametrize("cancelled", [False, True])
@@ -1555,6 +1580,99 @@ def test_trj_query_su_syncs_schedule_for_all_tenants_with_explicit_scope(harness
     assert data(get(harness, path))["retention_days"] == 7
     harness.catalog.actors.pop("su")
     assert harness.client.put(path, json=payload, headers={"Authorization": "su"}).status_code == 403
+
+
+def test_trj_query_cleaned_files_keep_persisted_summary_metrics(harness, monkeypatch):
+    from unittest.mock import Mock
+
+    from ops.db.trajectory.queries import ExecutionCatalog
+    from ops.services.trajectory.access import Actor
+    from ops.services.trajectory.cache import ByteCache
+    from ops.services.trajectory.projection import execution_values
+
+    run = harness.add_run(age_days=8)
+    row = harness.catalog.resolve(["t1"], "123")
+    meta = harness.service.archive.manifest(row)
+    manifest_run = next(
+        value for value in meta["runs"] if value["trajectory_id"] == run.id
+    )
+    nodes, root, _ = harness.service.load(
+        Actor("admin", "t1", "OPS"), row, run.id, harness.service.budget()
+    )
+    saved = execution_values("123", manifest_run, nodes, root)
+    original = dict(saved)
+
+    # Control the PG persistence boundary; the router and file cleanup remain real.
+    def expired(identity, ids):
+        assert identity.tenant_id == "t1" and ids == [run.id]
+        saved["status"] = "expired"
+
+    harness.store.expire_callback = expired
+    cleaned = data(
+        harness.client.post(
+            "/trajectory/cleanup",
+            json={"before_days": 7},
+            headers={"Authorization": "admin"},
+        )
+    )
+    assert cleaned["deleted_runs"] == 1 and cleaned["failed_runs"] == 0
+    assert not (harness.root / "t1/u1/7/123" / f"{run.id}.otlp.jsonl").exists()
+    assert {key: value for key, value in saved.items() if key != "status"} == {
+        key: value for key, value in original.items() if key != "status"
+    }
+
+    catalog = Mock()
+    catalog.list_records.return_value = [
+        ExecutionCatalog._dto(
+            {
+                **row,
+                **saved,
+                "runs": [
+                    {
+                        "id": run.id,
+                        "status": "expired",
+                        "turn": saved["turn_no"],
+                        "matches": True,
+                    }
+                ],
+                "execution_count": saved["turn_no"],
+                "matching_execution_count": 1,
+                "cumulative_duration_ms": saved["duration_ms"],
+                **{
+                    "cumulative_" + key: saved[key]
+                    for key in ("input_tokens", "output_tokens", "total_tokens")
+                },
+            },
+            "conversation",
+        )
+    ]
+    catalog.statistics.return_value = {
+        "complete": True,
+        "duration": {"mean_ms": saved["duration_ms"]},
+    }
+    harness.service.execution_catalog = catalog
+    harness.service.queries = ByteCache()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Summary query attempted to read cleaned files")
+
+    monkeypatch.setattr(harness.service.archive, "manifest", forbidden)
+    monkeypatch.setattr(harness.service, "load", forbidden)
+    response = data(
+        get(harness, "/trajectory/records", view="conversation", status="expired")
+    )
+    item = response["items"][0]
+    assert (
+        item["availability"] == "expired"
+        and item["duration_ms"] == original["duration_ms"]
+    )
+    assert item["usage"] == {
+        "input": original["input_tokens"],
+        "output": original["output_tokens"],
+        "total": original["total_tokens"],
+        "complete": True,
+    }
+    assert response["summary"] == catalog.statistics.return_value
 
 
 def test_trj_query_su_manual_cleanup_deletes_only_the_selected_tenant(harness):

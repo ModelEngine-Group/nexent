@@ -26,8 +26,7 @@ export function CleanupDialog({
   const target = selectTenant ? tenant?.id : tenantId;
   const cleanup = useTrajectoryCleanup(onComplete, target);
   const close = () => {
-    cleanup.cancel();
-    onClose();
+    if (!cleanup.running) onClose();
   };
   const result = cleanup.result;
   const valid =
@@ -48,17 +47,18 @@ export function CleanupDialog({
       open
       title={t("trajectory.cleanup")}
       centered
-      closable={{ "aria-label": t("trajectory.close") }}
+      closable={
+        cleanup.running ? false : { "aria-label": t("trajectory.close") }
+      }
+      keyboard={!cleanup.running}
       mask={{ closable: false }}
       cancelText={t("trajectory.close")}
       onCancel={close}
       footer={
         <div className="flex justify-end gap-4">
-          <Button onClick={close}>
-            {cleanup.running
-              ? t("trajectory.stopCleanup")
-              : t("trajectory.close")}
-          </Button>
+          {!cleanup.running && (
+            <Button onClick={close}>{t("trajectory.close")}</Button>
+          )}
           <Button
             type="primary"
             disabled={!valid || cleanup.running}

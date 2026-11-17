@@ -116,7 +116,7 @@ describe("trajectory cleanup batches", () => {
     });
     expect(complete).toHaveBeenCalledOnce();
   });
-  it("stops issuing batches after cancellation even if transport resolves late", async () => {
+  it("releases requests on unmount and ignores late batch responses", async () => {
     let finish!: (value: CleanupResult) => void;
     api.cleanup.mockImplementationOnce(
       () =>
@@ -129,7 +129,7 @@ describe("trajectory cleanup batches", () => {
     act(() => {
       void hook.result.current.start(7);
     });
-    act(() => hook.result.current.cancel());
+    hook.unmount();
     expect(api.cleanup.mock.calls[0][2]?.aborted).toBe(true);
     await act(async () => finish(batch({ done: false, next_cursor: "next" })));
     expect(api.cleanup).toHaveBeenCalledOnce();

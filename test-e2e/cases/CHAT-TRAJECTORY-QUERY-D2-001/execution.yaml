@@ -14,7 +14,9 @@ notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager a
   and assert the connection is released; PostgreSQL syntax is covered separately by traditional UT compilation.
   Global schedule tests control only the configuration persistence boundary; repository transaction/lock
   assertions remain traditional UT and do not establish live PostgreSQL atomicity. Manual scope tests
-  delete real owned tenant files and verify another tenant remains readable.
+  delete real owned tenant files and verify another tenant remains readable. The retained-summary regression
+  controls the PG persistence result while checking actual HTTP file cleanup, preserved metric DTOs and no
+  archive access from subsequent list requests; it does not claim real PostgreSQL retention validation.
   Only PG authority/catalog and existing unrelated directory services are controlled; no live PG, provider or deployed
   multiworker proof is claimed. Each fixture owns its temporary root and TestClient, shuts down the managed workers
   in finally and asserts zero active workers. No shared preparation family, deployment, browser or business asset
@@ -50,6 +52,7 @@ acceptance_bindings:
   - test_trj_query_facets_and_only_declared_trajectory_routes
   - test_trj_query_private_validation_under_api_root
   AC-05:
+  - test_trj_query_cleaned_files_keep_persisted_summary_metrics
   - test_trj_query_su_manual_cleanup_deletes_only_the_selected_tenant
   - test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry
   - test_trj_query_cleanup_batches_and_cursor_scope
@@ -67,7 +70,9 @@ acceptance_bindings:
   AC-09:
   - test_trj_query_whole_result_metrics_filters_and_stable_membership
   AC-10:
+  - test_trj_query_cleaned_files_keep_persisted_summary_metrics
   - test_trj_query_pg_list_uses_snapshot_without_opening_archives
+  - test_trj_query_unarchived_filter_reaches_pg_without_opening_files
   AC-11:
   - test_trj_query_su_syncs_schedule_for_all_tenants_with_explicit_scope
   - test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes

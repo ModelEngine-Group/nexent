@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { formatMetric } from "@/lib/trajectory";
+import { nodeDuration } from "./TrajectoryPresentation";
 import type {
   Percentiles,
   TrajectorySummary as Summary,
@@ -14,13 +15,15 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
     count === undefined
       ? t("trajectory.samplesUnknown")
       : t("trajectory.samples", { count });
-  const percentiles = (values?: Percentiles) => (
+  const percentiles = (values?: Percentiles, adaptiveUnits = false) => (
     <div className="trajectory-percentiles">
       {(["p50_ms", "p90_ms", "p99_ms"] as const).map((key) => (
         <div key={key}>
           <small>{key.slice(0, 3).toUpperCase()}</small>
           <strong>
-            {formatMetric(values?.[key] == null ? null : values[key] / 1000)} s
+            {adaptiveUnits
+              ? nodeDuration(values?.[key])
+              : `${formatMetric(values?.[key] == null ? null : values[key] / 1000)} s`}
           </strong>
         </div>
       ))}
@@ -75,7 +78,7 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
             {t("trajectory.ttft")}
             <small>{samples(valid?.ttft.sample_count)}</small>
           </header>
-          {percentiles(valid?.ttft)}
+          {percentiles(valid?.ttft, true)}
         </section>
         <section style={{ borderLeftColor: "#08979C", color: "#08979C" }}>
           <header>

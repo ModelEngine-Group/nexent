@@ -32,7 +32,7 @@ def test_web_dispatches_trajectory_queries_to_ops_only():
     ]
     script = (
         """
-const assert = require('node:assert/strict');
+const assert = require('assert').strict;
 const AUTH_INTERCEPT_ENDPOINTS = new Set();
 const OPS_HTTP_BACKEND = 'ops', HTTP_BACKEND = 'config';
 const PROXY_TIMEOUT_MS = 1234, SSE_PROXY_TIMEOUT_MS = 9876;

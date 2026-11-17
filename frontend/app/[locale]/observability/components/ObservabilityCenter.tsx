@@ -217,6 +217,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           value: "not_captured",
         },
         { text: t("trajectory.availability.expired"), value: "expired" },
+        { text: t("trajectory.availability.unarchived"), value: "unarchived" },
       ],
       filterMultiple: false,
       render: (_, row) => (
@@ -270,69 +271,73 @@ export function ObservabilityCenter({ user }: { user: User }) {
       title: (
         <div className="flex items-center gap-1">
           {t("trajectory.lastExecution")}
-          <Popover
-            trigger="click"
-            content={
-              <div className="flex flex-col gap-3">
-                <span>{t("trajectory.shanghai")}</span>
-                <DatePicker.RangePicker
-                  showTime
-                  allowEmpty={[true, true]}
-                  value={[
-                    filters.started_from
-                      ? dayjs(filters.started_from).tz("Asia/Shanghai")
-                      : null,
-                    filters.started_to
-                      ? dayjs(filters.started_to).tz("Asia/Shanghai")
-                      : null,
-                  ]}
-                  onChange={(values) =>
-                    change({
-                      ...filters,
-                      started_from: values?.[0]
-                        ? dayjs
-                            .tz(
-                              values[0].format("YYYY-MM-DD HH:mm:ss"),
-                              "Asia/Shanghai"
-                            )
-                            .toISOString()
-                        : undefined,
-                      started_to: values?.[1]
-                        ? dayjs
-                            .tz(
-                              values[1].format("YYYY-MM-DD HH:mm:ss"),
-                              "Asia/Shanghai"
-                            )
-                            .toISOString()
-                        : undefined,
-                    })
-                  }
-                />
-                <Button
-                  onClick={() =>
-                    change({
-                      ...filters,
-                      started_from: undefined,
-                      started_to: undefined,
-                    })
-                  }
-                >
-                  {t("trajectory.clear")}
-                </Button>
-              </div>
-            }
+          <div
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
-            <button
-              aria-label={t("trajectory.filterTime")}
-              className={
-                filters.started_from || filters.started_to
-                  ? "text-blue-600"
-                  : "text-gray-400"
+            <Popover
+              trigger="click"
+              content={
+                <div className="flex flex-col gap-3">
+                  <DatePicker.RangePicker
+                    showTime
+                    allowEmpty={[true, true]}
+                    value={[
+                      filters.started_from
+                        ? dayjs(filters.started_from).tz("Asia/Shanghai")
+                        : null,
+                      filters.started_to
+                        ? dayjs(filters.started_to).tz("Asia/Shanghai")
+                        : null,
+                    ]}
+                    onChange={(values) =>
+                      change({
+                        ...filters,
+                        started_from: values?.[0]
+                          ? dayjs
+                              .tz(
+                                values[0].format("YYYY-MM-DD HH:mm:ss"),
+                                "Asia/Shanghai"
+                              )
+                              .toISOString()
+                          : undefined,
+                        started_to: values?.[1]
+                          ? dayjs
+                              .tz(
+                                values[1].format("YYYY-MM-DD HH:mm:ss"),
+                                "Asia/Shanghai"
+                              )
+                              .toISOString()
+                          : undefined,
+                      })
+                    }
+                  />
+                  <Button
+                    onClick={() =>
+                      change({
+                        ...filters,
+                        started_from: undefined,
+                        started_to: undefined,
+                      })
+                    }
+                  >
+                    {t("trajectory.clear")}
+                  </Button>
+                </div>
               }
             >
-              <Filter size={13} />
-            </button>
-          </Popover>
+              <button
+                aria-label={t("trajectory.filterTime")}
+                className={
+                  filters.started_from || filters.started_to
+                    ? "text-blue-600"
+                    : "text-gray-400"
+                }
+              >
+                <Filter size={13} />
+              </button>
+            </Popover>
+          </div>
         </div>
       ),
       key: "started_at",
@@ -526,11 +531,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
         <TrajectoryError error={records.error} retry={refresh} />
       )}
       <section className="trajectory-table-panel min-h-0 flex-1">
-        <div className="trajectory-list-caption">
-          <span>
-            {t("trajectory.total", { count: records.data?.total ?? 0 })}
-          </span>
-        </div>
         <Table<TrajectoryRecord>
           className="trajectory-table [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
           size="middle"

@@ -316,7 +316,7 @@ def test_directory_candidates_use_pg_without_file_checks(mocker):
     service.archive.manifest.assert_not_called()
 
 
-def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(mocker):
+def test_statistics_duration_queries_include_retained_expired_metrics(mocker):
     from datetime import UTC, datetime
 
     from ops.db.trajectory.statistics import duration_statistics
@@ -333,7 +333,7 @@ def test_statistics_duration_queries_use_sql_percentiles_and_exclude_expired(moc
     assert duration_statistics(["t"], datetime.now(UTC))["conversation_count"] == 3
     sql = str(session.execute.call_args_list[1].args[0])
     assert "percentile_cont(0.99)" in sql
-    assert "status IN ('success','error','cancelled','partial')" in sql
+    assert "status IN ('success','error','cancelled','partial','expired')" in sql
     assert "count(*)=count(duration_ms)" in sql
     assert "update_time<=:asof" in sql
 

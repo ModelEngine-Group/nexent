@@ -119,7 +119,7 @@ def test_enabled_ops_serves_private_queries_on_existing_api_prefix(
     records = Mock(return_value={"items": [], "total": 0})
     monkeypatch.setattr(trajectory, "records", records)
     app = create_app()
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/trajectory/records" in paths
     assert "/conversation/agent_groups" in paths
     assert "/agent/run" not in paths

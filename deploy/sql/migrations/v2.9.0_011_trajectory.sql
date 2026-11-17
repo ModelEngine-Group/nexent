@@ -4,30 +4,27 @@
 
 BEGIN;
 
-
 CREATE TABLE IF NOT EXISTS nexent.trajectory_execution_t (
-	trajectory_id UUID NOT NULL,
-	conversation_id INTEGER NOT NULL,
-	turn_no INTEGER NOT NULL,
-	agent_id INTEGER,
-	agent_version_no INTEGER,
-	models VARCHAR(100)[] DEFAULT '{}' NOT NULL,
-	status VARCHAR(30) NOT NULL,
-	started_at TIMESTAMP WITH TIME ZONE,
-	finished_at TIMESTAMP WITH TIME ZONE,
-	duration_ms DOUBLE PRECISION,
-	input_tokens BIGINT,
-	output_tokens BIGINT,
-	total_tokens BIGINT,
-	create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-	update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-	created_by VARCHAR(100),
-	updated_by VARCHAR(100),
-	delete_flag VARCHAR(1) DEFAULT 'N',
-	PRIMARY KEY (trajectory_id)
-)
-
-;
+    trajectory_id UUID NOT NULL,
+    conversation_id INTEGER NOT NULL,
+    turn_no INTEGER NOT NULL,
+    agent_id INTEGER,
+    agent_version_no INTEGER,
+    models VARCHAR(100)[] DEFAULT '{}' NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    duration_ms DOUBLE PRECISION,
+    input_tokens BIGINT,
+    output_tokens BIGINT,
+    total_tokens BIGINT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (trajectory_id)
+);
 
 COMMENT ON COLUMN nexent.trajectory_execution_t.trajectory_id IS 'Stable root execution UUID shared with OTLP';
 
@@ -73,42 +70,39 @@ CREATE INDEX IF NOT EXISTS idx_trajectory_models ON nexent.trajectory_execution_
 
 CREATE INDEX IF NOT EXISTS idx_trajectory_started ON nexent.trajectory_execution_t (started_at DESC, trajectory_id);
 
-
 CREATE TABLE IF NOT EXISTS nexent.trajectory_statistics_t (
-	statistics_id UUID NOT NULL,
-	scope_type VARCHAR(30) NOT NULL,
-	scope_id VARCHAR(100) NOT NULL,
-	conversation_count BIGINT,
-	execution_count BIGINT,
-	duration_sum_ms DOUBLE PRECISION,
-	duration_mean_ms DOUBLE PRECISION,
-	duration_sample_count BIGINT,
-	duration_p50_ms DOUBLE PRECISION,
-	duration_p90_ms DOUBLE PRECISION,
-	duration_p99_ms DOUBLE PRECISION,
-	conversation_duration_p50_ms DOUBLE PRECISION,
-	conversation_duration_p90_ms DOUBLE PRECISION,
-	conversation_duration_p99_ms DOUBLE PRECISION,
-	conversation_duration_sample_count BIGINT,
-	ttft_p50_ms DOUBLE PRECISION,
-	ttft_p90_ms DOUBLE PRECISION,
-	ttft_p99_ms DOUBLE PRECISION,
-	ttft_sample_count BIGINT,
-	computed_at TIMESTAMP WITH TIME ZONE,
-	next_refresh_at TIMESTAMP WITH TIME ZONE,
-	source_revision BIGINT DEFAULT 0 NOT NULL,
-	computed_revision BIGINT DEFAULT 0 NOT NULL,
-	complete BOOLEAN DEFAULT false NOT NULL,
-	definition_version INTEGER DEFAULT 1 NOT NULL,
-	create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-	update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-	created_by VARCHAR(100),
-	updated_by VARCHAR(100),
-	delete_flag VARCHAR(1) DEFAULT 'N',
-	PRIMARY KEY (statistics_id)
-)
-
-;
+    statistics_id UUID NOT NULL,
+    scope_type VARCHAR(30) NOT NULL,
+    scope_id VARCHAR(100) NOT NULL,
+    conversation_count BIGINT,
+    execution_count BIGINT,
+    duration_sum_ms DOUBLE PRECISION,
+    duration_mean_ms DOUBLE PRECISION,
+    duration_sample_count BIGINT,
+    duration_p50_ms DOUBLE PRECISION,
+    duration_p90_ms DOUBLE PRECISION,
+    duration_p99_ms DOUBLE PRECISION,
+    conversation_duration_p50_ms DOUBLE PRECISION,
+    conversation_duration_p90_ms DOUBLE PRECISION,
+    conversation_duration_p99_ms DOUBLE PRECISION,
+    conversation_duration_sample_count BIGINT,
+    ttft_p50_ms DOUBLE PRECISION,
+    ttft_p90_ms DOUBLE PRECISION,
+    ttft_p99_ms DOUBLE PRECISION,
+    ttft_sample_count BIGINT,
+    computed_at TIMESTAMP WITH TIME ZONE,
+    next_refresh_at TIMESTAMP WITH TIME ZONE,
+    source_revision BIGINT DEFAULT 0 NOT NULL,
+    computed_revision BIGINT DEFAULT 0 NOT NULL,
+    complete BOOLEAN DEFAULT false NOT NULL,
+    definition_version INTEGER DEFAULT 1 NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (statistics_id)
+);
 
 COMMENT ON COLUMN nexent.trajectory_statistics_t.statistics_id IS 'UUID deterministically derived from scope';
 
@@ -120,7 +114,7 @@ COMMENT ON COLUMN nexent.trajectory_statistics_t.conversation_count IS 'All acti
 
 COMMENT ON COLUMN nexent.trajectory_statistics_t.execution_count IS 'Actual executions excluding turn-zero placeholders';
 
-COMMENT ON COLUMN nexent.trajectory_statistics_t.duration_sum_ms IS 'Sum of known readable root execution durations';
+COMMENT ON COLUMN nexent.trajectory_statistics_t.duration_sum_ms IS 'Sum of known persisted root execution durations, including cleaned trajectories';
 
 COMMENT ON COLUMN nexent.trajectory_statistics_t.duration_mean_ms IS 'Mean over known execution durations';
 
@@ -180,4 +174,24 @@ AND NOT EXISTS (SELECT 1 FROM nexent.trajectory_execution_t e WHERE e.conversati
 
 ON CONFLICT (trajectory_id) DO NOTHING;
 
+-- Grant trajectory navigation to operations and super administrators.
+SELECT pg_advisory_xact_lock(hashtext('nexent.observability.menu'));
+
+DELETE FROM nexent.role_permission_t
+WHERE permission_type = 'LEFT_NAV_MENU'
+  AND permission_subtype = '/observability'
+  AND user_role NOT IN ('OPS', 'SU');
+
+INSERT INTO nexent.role_permission_t (
+    role_permission_id, user_role, permission_category, permission_type, permission_subtype
+)
+SELECT nextval('nexent.role_permission_t_role_permission_id_seq'),
+       requested.user_role, 'VISIBILITY', 'LEFT_NAV_MENU', '/observability'
+FROM (VALUES ('OPS'), ('SU')) AS requested(user_role)
+WHERE NOT EXISTS (
+    SELECT 1 FROM nexent.role_permission_t existing
+    WHERE existing.user_role = requested.user_role
+      AND existing.permission_type = 'LEFT_NAV_MENU'
+      AND existing.permission_subtype = '/observability'
+);
 COMMIT;

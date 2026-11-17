@@ -39,7 +39,7 @@ def policy_factory(mocker):
     ]
     create_tool = mocker.patch.object(factory, "create_tool", side_effect=lambda config: tools[config.name])
     mocker.patch.object(factory, "create_model", side_effect=lambda _: SimpleNamespace())
-    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda tool, _: tool)
+    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda tool, _, **kwargs: tool)
     core = mocker.patch.object(agent_module, "CoreAgent", side_effect=lambda **kwargs: SimpleNamespace(
         **kwargs, python_executor=kwargs["executor"],
     ))

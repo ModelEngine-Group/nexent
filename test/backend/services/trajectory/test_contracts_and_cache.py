@@ -43,6 +43,13 @@ def test_utc_normalization_and_semantically_equal_time_boundaries():
     assert query.filters["id_query"] == "a"
 
 
+@pytest.mark.parametrize("view", ["conversation", "execution"])
+def test_unarchived_filter_is_accepted_without_accepting_unknown_states(view):
+    assert RecordsQuery(view=view, status="unarchived").filters["status"] == "unarchived"
+    with pytest.raises(ValidationError):
+        RecordsQuery(view=view, status="unarchive")
+
+
 @pytest.mark.parametrize("value", [0, -1, True, 7.0, "7", 31])
 def test_cleanup_requires_strict_integer_days(value):
     with pytest.raises(ValidationError):

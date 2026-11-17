@@ -280,6 +280,10 @@ class DeferredToolExecutor:
     def __call__(self, code: str) -> Any:
         return self.execute(code)
 
+    def execute_with_trace(self, code: str) -> Any:
+        """Expose code-only tracing without coupling the sandbox to an Agent Core."""
+        return self.execute(code, trace_execution=True)
+
     def execute(self, code: str, *, trace_execution: bool = False) -> Any:
         """Time only the selected code invocation after executor preparation."""
         from nexent.core.agents.sandbox.execution import _execute_with_tool_context

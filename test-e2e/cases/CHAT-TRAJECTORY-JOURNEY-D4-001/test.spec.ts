@@ -8,6 +8,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   const state = await installTrajectoryFixture(page);
   const base = process.env.NEXENT_BASE_URL || "http://localhost:3000";
   contract.deferCleanup(async () => {
+    state.cleanupPaused = false;
+    state.releaseCleanup?.();
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await page.context().clearCookies();
   });
@@ -61,6 +63,38 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       page.locator(".trajectory-summary").getByText("20", { exact: true }),
     ).toBeVisible();
     await expect(statisticsTime).toHaveText(originalStatisticsTime);
+    const timeHeader = table.getByRole("columnheader", {
+      name: /最后执行时间/,
+    });
+    await page.getByRole("button", { name: "筛选开始时间" }).click();
+    await page.getByPlaceholder("开始日期").click();
+    const startDay = page.locator(".ant-picker-cell-in-view[title]").first();
+    const startDate = await startDay.getAttribute("title");
+    await startDay.click();
+    const confirmTime = page.getByRole("button", { name: /确\s*定/ });
+    await expect(confirmTime).toBeEnabled();
+    await confirmTime.click();
+    await page.getByPlaceholder("结束日期").click();
+    const endDay = page.locator(".ant-picker-cell-in-view[title]").nth(3);
+    const endDate = await endDay.getAttribute("title");
+    await endDay.click();
+    await confirmTime.click();
+    await expect
+      .poll(() => state.records.at(-1)?.searchParams.get("started_from"))
+      .toBe(new Date(`${startDate}T00:00:00+08:00`).toISOString());
+    await expect
+      .poll(() => state.records.at(-1)?.searchParams.get("started_to"))
+      .toBe(new Date(`${endDate}T00:00:00+08:00`).toISOString());
+    await expect(timeHeader).toHaveAttribute("aria-sort", "descending");
+    await page
+      .locator(".ant-popover")
+      .getByRole("button", { name: "清除筛选", exact: true })
+      .click();
+    await expect
+      .poll(() => state.records.at(-1)?.searchParams.get("started_from"))
+      .toBeNull();
+    await expect(timeHeader).toHaveAttribute("aria-sort", "descending");
+    await page.getByRole("button", { name: "筛选开始时间" }).click();
     await page.locator(".ant-pagination-item-2").click();
     await expect
       .poll(() =>
@@ -142,7 +176,14 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(
       0,
     );
-    await page.getByRole("treeitem", { name: /记忆预检索/ }).click();
+    const phaseLabel = page
+      .getByRole("treeitem", { name: /记忆预检索/ })
+      .locator("..");
+    const labelBounds = await phaseLabel.boundingBox();
+    expect(labelBounds).not.toBeNull();
+    await phaseLabel.click({
+      position: { x: labelBounds!.width - 30, y: labelBounds!.height / 2 },
+    });
     const phaseDetail = page.locator(".trajectory-node-detail");
     await expect(
       phaseDetail.getByRole("heading", { name: "记忆预检索" }),
@@ -327,16 +368,27 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect.poll(() => state.cleanups.length).toBe(4);
     await expect.poll(() => state.records.length).toBeGreaterThan(refreshed);
-    state.cleanupPartial = true;
     state.cleanupPaused = true;
     await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
     await page.getByRole("button", { name: "确认清理", exact: true }).click();
     await expect.poll(() => state.cleanups.length).toBe(5);
-    await page
-      .getByRole("button", { name: "停止后续批次", exact: true })
-      .click();
+    const runningDialog = page.getByRole("dialog");
+    await expect(
+      runningDialog.getByRole("button", { name: "关闭", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      runningDialog.getByRole("button", { name: "停止后续批次", exact: true }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(runningDialog).toBeVisible();
+    state.cleanupPaused = false;
+    state.releaseCleanup?.();
+    await expect.poll(() => state.cleanups.length).toBe(6);
+    await expect(runningDialog).toHaveCount(0);
+    state.cleanupPaused = false;
+    state.cleanupPartial = true;
     await page.goto("about:blank");
-    expect(state.cleanups).toHaveLength(5);
+    expect(state.cleanups).toHaveLength(6);
   });
   await contract.step(steps[6], async () => {
     state.multiRound = true;

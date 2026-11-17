@@ -381,7 +381,8 @@ export function TrajectoryTimeline({
           return (
             <div
               key={node.id}
-              className={`trajectory-timeline-row ${node.id === selected ? "is-selected" : ""} ${hasChildren ? "is-parent" : ""}`}
+              className={`trajectory-timeline-row cursor-pointer ${node.id === selected ? "is-selected" : ""} ${hasChildren ? "is-parent" : ""}`}
+              onClick={() => onSelect(sourceById.get(node.id) ?? node)}
             >
               <div
                 className="trajectory-tree-label"
@@ -402,14 +403,15 @@ export function TrajectoryTimeline({
                   )}
                   disabled={!hasChildren}
                   aria-expanded={hasChildren ? open : undefined}
-                  onClick={() =>
+                  onClick={(event) => {
+                    event.stopPropagation();
                     setCollapsed((previous) => {
                       const next = new Set(previous);
                       if (next.has(node.id)) next.delete(node.id);
                       else next.add(node.id);
                       return next;
-                    })
-                  }
+                    });
+                  }}
                 >
                   {hasChildren ? (
                     open ? (
@@ -430,7 +432,6 @@ export function TrajectoryTimeline({
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  onClick={() => onSelect(sourceById.get(node.id) ?? node)}
                 >
                   <NodeIcon
                     kind={node.kind}
@@ -454,7 +455,6 @@ export function TrajectoryTimeline({
                 data-round={node.round_no}
                 className="trajectory-time-cell"
                 aria-label={`${node.name}: ${formatMetric(node.duration_ms)} ms`}
-                onClick={() => onSelect(sourceById.get(node.id) ?? node)}
               >
                 {bar && (
                   <>

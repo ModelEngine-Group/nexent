@@ -125,17 +125,6 @@
   font-size: 18px;
   line-height: 26px;
 }
-.trajectory-list-caption {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  color: #777;
-  font-size: 12px;
-}
-.trajectory-list-caption > span:first-child {
-  color: #191919;
-}
 .trajectory-table-panel {
   min-width: 0;
 }

@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from management.db.client import db_client, get_db_session
 from management.db.trajectory.models import TrajectoryStatistics as Statistics
 from management.db.trajectory.repository import scope_uuid
-from ops.db.trajectory.queries import BASE, READABLE, _statement
+from ops.db.trajectory.queries import BASE, METRIC_STATUSES, READABLE, _statement
 
 
 @contextmanager
@@ -70,7 +70,7 @@ def duration_statistics(tenants, asof):
     # Terminal metric facts are immutable. Late publication is excluded by update_time.
     base = BASE + " AND e.create_time <= :asof"
     sql = f"""WITH base AS ({base}), valid AS (
-        SELECT * FROM base WHERE status IN {READABLE} AND update_time<=:asof
+        SELECT * FROM base WHERE status IN {METRIC_STATUSES} AND update_time<=:asof
       ), conversations AS (
         SELECT CASE WHEN count(*)=count(duration_ms) THEN sum(duration_ms) END AS duration_ms
         FROM valid GROUP BY conversation_id

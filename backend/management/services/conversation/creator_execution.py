@@ -20,7 +20,7 @@ class _CreationStream:
 
     def __init__(self, stream, metadata, **history):
         self._runtime = stream
-        self._persisted = persist_creation_stream(stream, **history)
+        self._persisted = adapt_nexent_stream(persist_creation_stream(stream, **history))
         self._metadata = metadata
         self._closed = False
 
@@ -115,7 +115,7 @@ async def start_creation_turn(request, *, kind, user_id, tenant_id, stream_facto
         conversation_id=conversation_id, query=request.query, is_debug=False,
         extra_metadata=extra_metadata,
     )
-    return adapt_nexent_stream(_CreationStream(
+    return _CreationStream(
         stream, metadata, conversation_id=conversation_id, assistant_index=index,
         user_id=user_id, tenant_id=tenant_id,
-    )), conversation_id
+    ), conversation_id

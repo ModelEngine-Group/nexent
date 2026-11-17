@@ -15,6 +15,7 @@ export async function installTrajectoryFixture(
     writes: [] as string[],
     failure: "",
     cleanupPaused: false,
+    releaseCleanup: null as (() => void) | null,
     cleanupPartial: true,
     multiRound: false,
     schedules: {} as Record<
@@ -339,7 +340,10 @@ export async function installTrajectoryFixture(
       const payload = request.postDataJSON();
       state.cleanups.push(payload);
       if (state.cleanupPaused)
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise<void>((resolve) => {
+          state.releaseCleanup = resolve;
+        });
+      state.releaseCleanup = null;
       data = {
         cutoff_at: "2026-11-03T01:00:00Z",
         scanned_runs: 2,

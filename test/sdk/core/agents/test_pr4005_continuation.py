@@ -66,7 +66,7 @@ def _agent_with_responses(contents, *, strict, monkeypatch):
             logs="",
         )
     )
-    sandbox_module = ModuleType(f"{core_agent_module.__package__}.sandbox")
+    sandbox_module = ModuleType("nexent.core.agents.sandbox.execution")
     sandbox_module._execute_with_tool_context = lambda executor, code, *, trace_execution=False: executor(code)
     monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 

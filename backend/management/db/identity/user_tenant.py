@@ -37,6 +37,7 @@ from management.db.models import (
     UserOAuthAccount,
     UserTenant,
 )
+from management.db.trajectory.repository import detach_owner
 from management.utils.orm import as_dict
 from permissions.role_assignment import check_managed_target
 
@@ -281,8 +282,6 @@ def upsert_user_tenant(
             promoted_roles = set(assigned) - set(old_roles)
             if is_new_tenant:
                 _validate_user_tenant_limit(session, tenant_id, assigned)
-                from management.db.trajectory.repository import detach_owner
-
                 detach_owner(session, user_id, result.tenant_id, tenant_id)
             elif has_any_role(promoted_roles, {'ADMIN','SU'}):
                 _validate_user_tenant_limit(session, tenant_id, assigned, include_user_count=False)

@@ -7,7 +7,13 @@ export interface TrajectoryFilters {
   conversation_id?: string;
   id_query?: string;
   model?: string;
-  status?: "success" | "error" | "cancelled" | "not_captured" | "expired";
+  status?:
+    | "success"
+    | "error"
+    | "cancelled"
+    | "not_captured"
+    | "expired"
+    | "unarchived";
   started_from?: string;
   started_to?: string;
 }

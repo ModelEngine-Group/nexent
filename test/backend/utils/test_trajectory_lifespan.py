@@ -33,7 +33,7 @@ def runtime_module(monkeypatch):
         "management.services.agent.run_state": {"runtime_state_service": Mock()},
         "infrastructure.observability.bootstrap": {"local_trajectory_processor": processor},
         "management.services.agent.execution": {"shutdown_agent_stream_tasks": AsyncMock(return_value=[])},
-        "nexent.core.agents.sandbox": {"SandboxPoolManager": SimpleNamespace(_instance=None)},
+        "nexent.core.agents.sandbox.execution": {"SandboxPoolManager": SimpleNamespace(_instance=None)},
     }
     for name, attributes in stubs.items():
         monkeypatch.setitem(sys.modules, name, SimpleNamespace(**attributes))

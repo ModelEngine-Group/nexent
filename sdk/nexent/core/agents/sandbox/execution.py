@@ -1155,12 +1155,11 @@ def _install_host_tool_bridge(
 def _execute_with_tool_context(executor: Any, code: str, *, trace_execution: bool = False) -> Any:
     """Bind remote callbacks to the caller's active Python tool span."""
     if trace_execution:
+        traced_execute = getattr(type(executor), "execute_with_trace", None)
+        if callable(traced_execute):
+            return traced_execute(executor, code)
+
         from nexent.monitor.phase_capture import trace_phase
-
-        from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
-
-        if isinstance(executor, DeferredToolExecutor):
-            return executor.execute(code, trace_execution=True)
         with trace_phase(
             "code.execute", input_value={"code": code},
             attributes={"execution.backend": getattr(executor, "_nexent_backend", "local")},

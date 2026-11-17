@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.monitor.run_capture import capture_run_input, capture_run_result
 
 

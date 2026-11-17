@@ -5,7 +5,6 @@ from datetime import UTC
 
 from sqlalchemy import bindparam, text
 
-
 # isort: split
 from contracts.errors.trajectory import QueryError
 from management.db.agent.models import AgentInfo
@@ -13,8 +12,8 @@ from management.db.trajectory.models import TrajectoryStatistics
 from management.db.trajectory.repository import scope_uuid
 from ops.db.trajectory.catalog import _session
 
-
 READABLE = "('success','error','cancelled','partial')"
+METRIC_STATUSES = "('success','error','cancelled','partial','expired')"
 BASE = """
 SELECT e.*, c.created_by AS user_id, c.conversation_title,
        u.user_email AS user_name, ut.tenant_id
@@ -27,7 +26,7 @@ WHERE e.delete_flag='N' AND ut.tenant_id IN :tenants
 
 
 def strict_sum(column):
-    return f"CASE WHEN count(*) FILTER (WHERE status IN {READABLE}) = count({column}) FILTER (WHERE status IN {READABLE}) THEN sum({column}) FILTER (WHERE status IN {READABLE}) END"
+    return f"CASE WHEN count(*) FILTER (WHERE status IN {METRIC_STATUSES}) = count({column}) FILTER (WHERE status IN {METRIC_STATUSES}) THEN sum({column}) FILTER (WHERE status IN {METRIC_STATUSES}) END"
 
 
 def _statement(sql):

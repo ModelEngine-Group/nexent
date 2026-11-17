@@ -49,7 +49,7 @@ export function TrajectoryNodeDetail({
     [t("trajectory.duration"), nodeDuration(node.duration_ms)],
     ...(node.kind === "model"
       ? [
-          [t("trajectory.ttft"), `${formatMetric(node.ttft_ms)} ms`],
+          [t("trajectory.ttft"), nodeDuration(node.ttft_ms)],
           [
             t("trajectory.throughput"),
             `${formatMetric(node.throughput)} Token/s`,

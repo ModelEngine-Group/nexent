@@ -18,11 +18,6 @@ export function useTrajectoryCleanup(
     complete.current = onComplete;
   }, [onComplete]);
 
-  function cancel() {
-    controller.current?.abort();
-    controller.current = null;
-    setRunning(false);
-  }
   useEffect(() => () => controller.current?.abort(), []);
 
   async function start(days: number, resume = false) {
@@ -74,5 +69,5 @@ export function useTrajectoryCleanup(
       }
     }
   }
-  return { running, result, error, start, cancel };
+  return { running, result, error, start };
 }

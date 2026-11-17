@@ -196,7 +196,7 @@ def test_membership_migration_revokes_archive_projection_in_same_transaction(moc
     mocker.patch.object(user_tenant, "_validate_user_tenant_limit")
     mocker.patch.object(user_tenant, "set_account_profile")
     mocker.patch.object(user_tenant, "as_dict", return_value={})
-    revoke = mocker.patch("management.db.trajectory.repository.detach_owner")
+    revoke = mocker.patch("management.db.identity.user_tenant.detach_owner")
     user_tenant.upsert_user_tenant("native", "new")
     revoke.assert_called_once_with(session, "native", "old", "new")
     assert row.tenant_id == "new"

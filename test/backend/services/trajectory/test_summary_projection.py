@@ -169,8 +169,9 @@ def test_projection_schema_only_has_approved_business_fields():
     assert not any(index.unique for index in TrajectoryExecution.__table__.indexes)
 
 
+@pytest.mark.parametrize("status", ["error", "unarchived"])
 def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation_only(
-    mocker,
+    mocker, status,
 ):
     from contextlib import contextmanager
 
@@ -186,7 +187,7 @@ def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation
     mocker.patch("ops.db.trajectory.queries._session", scoped)
     result = ExecutionCatalog().list_records(
         ["t"],
-        {"id_query": " 12 ", "agent_id": "7", "model": "m", "status": "error"},
+        {"id_query": " 12 ", "agent_id": "7", "model": "m", "status": status},
         view="conversation",
         limit=20,
         sort_by="duration_ms",
@@ -197,6 +198,7 @@ def test_pg_queries_aggregate_nulls_match_same_execution_and_search_conversation
     sql = str(statement)
     assert "CAST(b.conversation_id AS varchar) LIKE :id_query" in sql
     assert "l.status = :status" in sql and "g.matches" in sql
+    assert params["status"] == status
     assert "b.agent_id = :agent_id AND b.models @> ARRAY[:model]::varchar(100)[]" in sql
     assert "count(input_tokens) FILTER" in sql and "THEN sum(input_tokens)" in sql
     assert params["id_query"] == "%12%" and "trace" not in params

@@ -916,6 +916,15 @@ describe("administrator page and cleanup confirmation", () => {
       await waitFor(() => expect(api.cleanup).toHaveBeenCalledTimes(2));
       expect(dialog).toBeVisible();
       expect(
+        within(dialog).queryByRole("button", { name: "trajectory.stopCleanup" })
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryByRole("button", { name: "trajectory.close" })
+      ).not.toBeInTheDocument();
+      fireEvent.keyDown(dialog, { key: "Escape", code: "Escape", keyCode: 27 });
+      expect(dialog).toBeVisible();
+      expect(api.cleanup.mock.calls[1][2]?.aborted).toBe(false);
+      expect(
         within(dialog).getByRole("button", {
           name: "trajectory.confirmCleanup",
         })
@@ -994,5 +1003,9 @@ describe("administrator page and cleanup confirmation", () => {
     expect(api.cleanup.mock.calls[0][0]).toBe(7);
     expect(complete).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "trajectory.close" }).at(-1)!
+    );
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });
