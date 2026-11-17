@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Live file and KB permission resolution shared by cleansing and AgentOS grants."""
 
-from management.services.knowledge_base.owner_cleanup import has_owner_cleanup_authority
+from management.services.knowledge_base.owner_cleanup import has_cleanup_authority
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, PageRequest, RecordQuery
 from permissions.dac import resolve_knowledge_permissions
@@ -68,7 +68,7 @@ class KnowledgeFileAuthorization:
         delegated = set()
         if cleanup and (edit or inspect_cleanup):
             for row in rows.values():
-                if has_owner_cleanup_authority(row, self.user_id, self.records.scope.tenant_id):
+                if has_cleanup_authority(row, self.user_id, self.records.scope.tenant_id):
                     scope = self.records.scope
                     if scope.system or scope.service_role != 'management' or scope.actor_id != self.user_id:
                         raise ScopeDenied()

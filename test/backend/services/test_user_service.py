@@ -25,7 +25,7 @@ def private_cleanup_collaborators(mocker):
                  'soft_delete_tokens_by_user'):
         mocker.patch('management.services.permission.identity.users.' + name, return_value=0)
     mocker.patch("management.services.permission.identity.users.prepare_private_cleanup", new_callable=AsyncMock)
-    mocker.patch("management.services.permission.identity.users.execute_private_cleanup", new_callable=AsyncMock, return_value=None)
+    mocker.patch("management.services.permission.identity.users.execute_cleanup", new_callable=AsyncMock, return_value=None)
 
 
 class TestUserAuthorization:

@@ -23,7 +23,7 @@ def deletion(monkeypatch):
 
     preparation, execution = AsyncMock(side_effect=prepare), AsyncMock(side_effect=execute)
     monkeypatch.setattr(users, 'prepare_private_cleanup', preparation)
-    monkeypatch.setattr(users, 'execute_private_cleanup', execution)
+    monkeypatch.setattr(users, 'execute_cleanup', execution)
     for name in ('remove_user_from_all_groups', 'soft_delete_all_configs_by_user_id',
                  'soft_delete_all_conversations_by_user', 'soft_delete_all_oauth_accounts_by_user_id'):
         monkeypatch.setattr(users, name, Mock(return_value=0))

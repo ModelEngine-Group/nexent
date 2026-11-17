@@ -8,6 +8,7 @@ from contracts.agentos_knowledge import KnowledgeAuthorizationRequest, ObjectRef
 from contracts.knowledge_admission import (
     KnowledgeBaseDeletionIntent,
     KnowledgeOwnerCleanup,
+    KnowledgeTenantCleanup,
 )
 from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.knowledge_base.authorization import KnowledgeAuthorization
@@ -20,15 +21,19 @@ from test.backend.services.test_cleanse_jobs import context
 from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
 
 
-@pytest.fixture
-def delegated(resources):  # noqa: F811
+@pytest.fixture(params=('private', 'tenant'))
+def delegated(resources, request):  # noqa: F811
     _, update, engine, tables = resources
     source = knowledge_request().source
+    private = request.param == 'private'
     parent = KnowledgeBaseDeletionIntent(knowledge_id=1, index_name='kb-one', user_id='admin',
-        owner_cleanup=KnowledgeOwnerCleanup(purpose='user_deletion', owner_user_id='owner', actor_tenant_id='operator'))
+        owner_cleanup=(KnowledgeOwnerCleanup(purpose='user_deletion', owner_user_id='owner', actor_tenant_id='operator')
+                       if private else None),
+        tenant_cleanup=None if private else KnowledgeTenantCleanup(actor_tenant_id='operator'))
     intent = KnowledgeDeletionIntent(knowledge_id=1, file_id='b' * 32, file_version=0, user_id='admin', scope='full',
                                      index_name='kb-one', filename='source.txt', object_name=source.key, source=source)
-    update('cleanse_knowledge', created_by='owner', ingroup_permission='PRIVATE', deletion_request=parent.model_dump(mode='json'))
+    update('cleanse_knowledge', created_by='owner', ingroup_permission='PRIVATE' if private else 'READ_ONLY',
+           deletion_request=parent.model_dump(mode='json'))
     update('cleanse_files', status='DELETE_REQUESTED', stage='DELETE_RUNTIME_PENDING', object_name=source.key,
            deletion_request=intent.model_dump(mode='json'))
     update('cleanse_memberships', delete_flag='Y')

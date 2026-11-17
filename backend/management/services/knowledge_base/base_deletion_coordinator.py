@@ -19,6 +19,7 @@ from management.services.knowledge_base.base_deletion import (
     KnowledgeBaseDeletionJournal,
     request_knowledge_base_deletion,
     request_knowledge_base_owner_deletion,
+    request_knowledge_base_tenant_deletion,
 )
 from management.services.knowledge_base.ingestion_coordinator import (
     IngestionCancellation,
@@ -50,9 +51,11 @@ class KnowledgeBaseDeletionCoordinator:
         return await run_blocking('knowledge-base-deletion-' + name, fn, *args,
                                   lane='control-io', owner='management.knowledge_base', **kwargs)
 
-    def _admit(self, index_name, actor, context, owner_user_id=None, purpose=None):
+    def _admit(self, index_name, actor, context, owner_user_id=None, purpose=None, tenant_cleanup=False):
         context.remaining()
         with self.ports(actor, context=context) as (records, resources):
+            if tenant_cleanup:
+                return request_knowledge_base_tenant_deletion(records, resources, index_name, actor, context=context)
             if owner_user_id is not None:
                 return request_knowledge_base_owner_deletion(records, resources, index_name, owner_user_id,
                                                              purpose, actor, context=context)
@@ -99,7 +102,14 @@ class KnowledgeBaseDeletionCoordinator:
         return await self._request(index_name, actor, owner_user_id=owner_user_id, purpose=purpose,
                                    prepare_only=True, context=context)
 
-    async def _request(self, index_name, actor, *, owner_user_id=None, purpose=None, prepare_only=False, context=None):
+    async def admit_tenant_cleanup(self, index_name, actor, *, context=None):
+        return await self._request(index_name, actor, tenant_cleanup=True, prepare_only=True, context=context)
+
+    async def request_tenant_cleanup(self, index_name, actor, *, context=None):
+        return await self._request(index_name, actor, tenant_cleanup=True, context=context)
+
+    async def _request(self, index_name, actor, *, owner_user_id=None, purpose=None, prepare_only=False,
+                       tenant_cleanup=False, context=None):
         context = context or OperationContext('kb-base-delete-' + uuid4().hex, monotonic() + 10)
         stopped = Event()
         operation = replace(context, deadline=min(context.deadline, monotonic() + 10),
@@ -107,7 +117,8 @@ class KnowledgeBaseDeletionCoordinator:
         row = None
         try:
             async with asyncio.timeout(operation.remaining()):
-                row = await self._blocking('admit', self._admit, index_name, actor, operation, owner_user_id, purpose)
+                row = await self._blocking('admit', self._admit, index_name, actor, operation,
+                                           owner_user_id, purpose, tenant_cleanup)
                 intent = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
                 if prepare_only:
                     return row

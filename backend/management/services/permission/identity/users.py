@@ -26,8 +26,8 @@ from management.db.identity.user_tenant import (
 )
 from management.db.memory.config import soft_delete_all_configs_by_user_id
 from management.services.knowledge_base.deprovision import (
-    PrivateCleanupPlan,
-    execute_private_cleanup,
+    KnowledgeCleanupPlan,
+    execute_cleanup,
     prepare_private_cleanup,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
@@ -184,7 +184,7 @@ async def update_user_for_requester(
 
 async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str | None = None,
                                   membership_removed: bool = False,
-                                  private_cleanup: PrivateCleanupPlan | None = None) -> dict[str, int] | None:
+                                  private_cleanup: KnowledgeCleanupPlan | None = None) -> dict[str, int] | None:
     """
     Permanently delete user account and all related data.
 
@@ -263,7 +263,7 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str, *, actor_id: str
         cleanup_result = None
         try:
             if private_cleanup is not None:
-                cleanup_result = await execute_private_cleanup(private_cleanup)
+                cleanup_result = await execute_cleanup(private_cleanup)
         except Exception:
             logger.exception("Failed personal KB cleanup for user %s", user_id)
 

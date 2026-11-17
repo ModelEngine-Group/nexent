@@ -60,7 +60,7 @@ async def test_denied_or_malformed_preparation_is_failed_not_submitted(cleanup):
     cleanup.coordinator.admit_owner_cleanup.side_effect = ScopeDenied()
     plan = await service.prepare_private_cleanup('owner', 'target-tenant', 'admin')
     assert plan.total == plan.failed == 2 and not plan.indexes
-    assert await service.execute_private_cleanup(plan) == {'total': 2, 'succeeded': 0, 'failed': 2, 'pending': 0}
+    assert await service.execute_cleanup(plan) == {'total': 2, 'succeeded': 0, 'failed': 2, 'pending': 0}
     cleanup.coordinator.request_owner_cleanup.assert_not_awaited()
 
 
@@ -73,7 +73,7 @@ async def test_execute_requires_confirmed_terminal_and_keeps_actual_issuer(clean
                              'user_id': 'admin', 'phase': phase,
                              'owner_cleanup': {'purpose': 'user_deletion', 'owner_user_id': 'owner',
                                                'actor_tenant_id': 'operator-tenant'}}}
-    result = await service.execute_private_cleanup(plan)
+    result = await service.execute_cleanup(plan)
     assert result[expected] == result['total'] == 1
     assert result['succeeded' if expected == 'pending' else 'pending'] == result['failed'] == 0
     call = cleanup.coordinator.request_owner_cleanup.call_args
@@ -83,14 +83,14 @@ async def test_execute_requires_confirmed_terminal_and_keeps_actual_issuer(clean
 async def test_execute_error_does_not_replay(cleanup):
     plan = await service.prepare_private_cleanup('owner', 'target-tenant', 'admin')
     cleanup.coordinator.request_owner_cleanup.side_effect = ScopeDenied()
-    assert await service.execute_private_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
+    assert await service.execute_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
     cleanup.coordinator.request_owner_cleanup.assert_awaited_once()
 
 
 async def test_no_private_kb_preserves_absent_summary(cleanup):
     cleanup.records.query.return_value = Page(())
     plan = await service.prepare_private_cleanup('owner', 'target-tenant', 'admin')
-    assert await service.execute_private_cleanup(plan) is None
+    assert await service.execute_cleanup(plan) is None
     cleanup.coordinator.admit_owner_cleanup.assert_not_awaited()
 
 
@@ -98,7 +98,7 @@ async def test_selection_failure_is_reported_without_blocking_credential_revocat
     cleanup.records.query.side_effect = RuntimeError('selection failed')
     plan = await service.prepare_private_cleanup('owner', 'target-tenant', 'admin')
     assert plan.total is None and not plan.indexes
-    assert await service.execute_private_cleanup(plan) is None
+    assert await service.execute_cleanup(plan) is None
     cleanup.coordinator.admit_owner_cleanup.assert_not_awaited()
     assert 'private_knowledge_selection_failed' in caplog.text
 
@@ -107,7 +107,7 @@ async def test_coordinator_unavailable_counts_preparation_failures_without_repla
     monkeypatch.setattr(service, '_coordinator', Mock(side_effect=RuntimeError('unavailable')))
     plan = await service.prepare_private_cleanup('owner', 'target-tenant', 'admin')
     assert not plan.indexes and plan.failed == plan.total == 1
-    assert await service.execute_private_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
+    assert await service.execute_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
 
 
 @pytest.mark.parametrize('change', [{'user_id': 'owner'}, {'owner_cleanup': None}, {'index_name': 'foreign'}])
@@ -118,4 +118,34 @@ async def test_wrong_returned_authority_is_failed_not_pending(cleanup, change):
         'deletion_request': {'schema_version': 1, 'knowledge_id': 1, 'index_name': 'private-kb',
             'user_id': 'admin', 'phase': 'files',
             'owner_cleanup': {'purpose': 'user_deletion', 'owner_user_id': 'owner', 'actor_tenant_id': 'operator'}, **change}}
-    assert await service.execute_private_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
+    assert await service.execute_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 1, 'pending': 0}
+
+
+async def test_tenant_plan_selects_shared_local_only_and_never_requires_a_creator(cleanup):
+    cleanup.coordinator.admit_tenant_cleanup = AsyncMock()
+    plan = await service.prepare_tenant_cleanup('target-tenant', 'admin')
+    cleanup.coordinator.admit_tenant_cleanup.assert_awaited_once()
+    cleanup.coordinator.admit_owner_cleanup.assert_not_awaited()
+    assert plan.owner_user_id is None and plan.purpose == 'tenant_deletion'
+    query = cleanup.records.query.call_args.args[1]
+    assert [(term.field, term.operator, term.value) for term in query.where.terms] == [
+        ('ingroup_permission', 'in', ['EDIT', 'READ_ONLY']), ('knowledge_sources', 'eq', 'elasticsearch')]
+
+
+async def test_tenant_plan_executes_standard_parent_and_keeps_pending_separate(cleanup):
+    cleanup.coordinator.admit_tenant_cleanup = AsyncMock()
+    cleanup.coordinator.request_tenant_cleanup = AsyncMock(return_value={
+        'knowledge_id': 1, 'index_name': 'private-kb', 'delete_flag': 'N',
+        'deletion_request': {'schema_version': 1, 'knowledge_id': 1, 'index_name': 'private-kb', 'user_id': 'admin',
+                             'phase': 'files', 'tenant_cleanup': {'actor_tenant_id': 'operator'}}})
+    plan = await service.prepare_tenant_cleanup('target-tenant', 'admin')
+    assert await service.execute_cleanup(plan) == {'total': 1, 'succeeded': 0, 'failed': 0, 'pending': 1}
+    cleanup.coordinator.request_tenant_cleanup.assert_awaited_once()
+    cleanup.coordinator.request_owner_cleanup.assert_not_awaited()
+
+
+@pytest.mark.parametrize('owner', [None, ''])
+async def test_private_preparation_cannot_be_reinterpreted_as_tenant_scope(cleanup, owner):
+    with pytest.raises(ScopeDenied):
+        await service.prepare_private_cleanup(owner, 'target-tenant', 'admin')
+    cleanup.records.query.assert_not_called()

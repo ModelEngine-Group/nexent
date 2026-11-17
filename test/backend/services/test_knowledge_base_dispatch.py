@@ -17,7 +17,7 @@ def discovery(monkeypatch):
     events = []
     records = SimpleNamespace(query=Mock(return_value=Page(({
         'knowledge_id': 2, 'index_name': 'private', 'tenant_id': 'target', 'user_id': 'admin',
-        'owner_user_id': 'owner', 'purpose': 'tenant_deletion'},), 'base-next')))
+        'owner_user_id': 'owner', 'purpose': 'tenant_deletion', 'cleanup_kind': 'owner'},), 'base-next')))
 
     @contextmanager
     def ports(*, context):
@@ -81,3 +81,13 @@ async def test_single_lifespan_loop_keeps_both_cursors_without_starvation(monkey
     monkeypatch.setattr(dispatch, 'dispatch_bases_once', base_page)
     await dispatch.serve(object(), stop=stop, poll_seconds=0.01)
     assert files == [None, 'file-next'] and bases == [None, 'base-next']
+
+
+async def test_shared_parent_uses_distinct_tenant_entry_without_owner_impersonation(discovery):
+    discovery.records.query.return_value = Page(({'knowledge_id': 2, 'index_name': 'shared', 'tenant_id': 'target',
+        'user_id': 'admin', 'owner_user_id': None, 'purpose': 'tenant_deletion', 'cleanup_kind': 'tenant'},))
+    discovery.selected.request_tenant_cleanup = AsyncMock()
+    assert await dispatch.dispatch_bases_once(object(), stop=Event()) == (1, None)
+    args = discovery.selected.request_tenant_cleanup.call_args.args
+    assert args[0] == 'shared' and args[1].user_id == 'admin' and args[1].tenant_id == 'target'
+    discovery.selected.request_owner_cleanup.assert_not_awaited()

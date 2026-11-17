@@ -11,7 +11,7 @@ from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
-from management.services.knowledge_base.owner_cleanup import has_owner_cleanup_authority
+from management.services.knowledge_base.owner_cleanup import has_cleanup_authority
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from pydantic import ValidationError
@@ -36,7 +36,7 @@ class KnowledgeAuthorization:
             inspect_cleanup=request.action == 'inspect',
             context=context,
         )
-        if request.action == 'inspect' and has_owner_cleanup_authority(knowledge, self.user_id, self.resources.records.scope.tenant_id):
+        if request.action == 'inspect' and has_cleanup_authority(knowledge, self.user_id, self.resources.records.scope.tenant_id):
             self._require_cleanup_inspection(file, knowledge, request)
         source = None
         if execution:

@@ -15,7 +15,7 @@ from management.services.knowledge_base.file_authorization import (
 )
 from management.services.knowledge_base.owner_cleanup import (
     authorize_owner_cleanup_admission,
-    has_owner_cleanup_authority,
+    has_cleanup_authority,
 )
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Page, StorageScope
@@ -126,8 +126,8 @@ def granted(**changes):
 
 
 def test_persisted_resource_authority_needs_no_deleted_owner_identity():
-    assert has_owner_cleanup_authority(granted(), 'admin', 'target-tenant') is True
-    assert has_owner_cleanup_authority(knowledge(deletion_request=None), 'admin', 'target-tenant') is False
+    assert has_cleanup_authority(granted(), 'admin', 'target-tenant') is True
+    assert has_cleanup_authority(knowledge(deletion_request=None), 'admin', 'target-tenant') is False
 
 
 @pytest.mark.parametrize('change,user,tenant', [({'knowledge_id': 2}, 'admin', 'target-tenant'),
@@ -135,7 +135,7 @@ def test_persisted_resource_authority_needs_no_deleted_owner_identity():
     ({'index_name': 'other'}, 'admin', 'target-tenant'), ({}, 'owner', 'target-tenant'), ({}, 'admin', 'other')])
 def test_persisted_grant_is_not_portable_to_other_actor_resource_or_tenant(change, user, tenant):
     with pytest.raises(ScopeDenied):
-        has_owner_cleanup_authority(granted(**change), user, tenant)
+        has_cleanup_authority(granted(**change), user, tenant)
 
 
 def test_cleanup_callback_uses_persisted_issuer_after_target_identity_is_gone(resources):  # noqa: F811

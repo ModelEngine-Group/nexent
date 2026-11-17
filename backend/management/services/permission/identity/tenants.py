@@ -17,7 +17,7 @@ from management.db.identity.user_tenant import get_users_by_tenant_id, soft_dele
 from management.services.permission.identity.users import delete_user_and_cleanup
 from management.db.identity.group import query_groups_by_tenant, remove_group
 from management.services.model.commands import deactivate_tenant_models
-from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from management.services.knowledge_base.deprovision import execute_cleanup, prepare_tenant_cleanup
 from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
 from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
@@ -58,10 +58,6 @@ from management.db.identity.invitation import (
 from management.db.identity.user_tenant import (
     get_users_by_tenant_id,
     soft_delete_users_by_tenant_id,
-)
-from management.db.knowledge_base.repository import (
-    delete_knowledge_record,
-    get_knowledge_info_by_tenant_id,
 )
 from management.db.mcp.remote import (
     delete_mcp_record_by_name_and_url,
@@ -491,6 +487,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         # Stop before the local cascade if Runtime cannot confirm model cleanup.
         await deactivate_tenant_models(deleted_by or "system", tenant_id)
 
+        # Shared resources have their own SU tenant authority; creators need not remain active.
+        shared_cleanup = await prepare_tenant_cleanup(tenant_id, deleted_by)
+
         # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
@@ -531,22 +530,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete group {group.get('group_id')}: {str(e)}")
 
-        # 3. Delete all knowledge bases in the tenant
-        logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
-        knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
-        for kb in knowledge_list:
-            # PRIVATE resources are owned by admitted cleanup, not a raw metadata soft-delete.
-            # A pending ordinary deletion also keeps its parent available for finalization.
-            if kb.get('ingroup_permission') == 'PRIVATE' or kb.get('deletion_request') is not None:
-                continue
-            try:
-                delete_knowledge_record({
-                    "knowledge_id": kb["knowledge_id"],
-                    "user_id": deleted_by or "system"
-                })
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete knowledge base {kb.get('knowledge_id')}: {str(e)}")
+        # Confirm only known terminal cleanup; admitted pending parents remain discoverable.
+        cleanup_result = await execute_cleanup(shared_cleanup)
+        logger.info("Tenant KB cleanup for %s: %s", tenant_id, cleanup_result)
 
         # 4. Delete all agents in the tenant (including related data)
         logger.info(f"Deleting agents for tenant {tenant_id}")

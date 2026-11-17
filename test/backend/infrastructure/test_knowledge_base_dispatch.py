@@ -46,7 +46,7 @@ def test_disabled_owner_preserves_actual_issuer_and_only_minimum_dispatch_fields
     records, *_ = pending
     (row,) = records.query(module.DATASET, RecordQuery(), PageRequest(), context=context()).items
     assert row == {'knowledge_id': 1, 'tenant_id': 'target', 'index_name': 'private', 'user_id': 'admin',
-                       'owner_user_id': 'owner', 'purpose': 'user_deletion', 'delete_flag': 'N'}
+                       'owner_user_id': 'owner', 'purpose': 'user_deletion', 'delete_flag': 'N', 'cleanup_kind': 'owner'}
     with pytest.raises(ScopeDenied):
         records.patch(module.DATASET, 1, FieldPatch(set_values={'user_id': 'owner'}), context=context())
     with pytest.raises(InvalidInput):
@@ -84,3 +84,20 @@ def test_terminal_unadmitted_or_wrong_scope_is_not_discovered(pending, changes):
     with engine.begin() as conn:
         conn.execute(knowledge.update().values(deletion_request={**value, **changes}))
     assert not records.query(module.DATASET, RecordQuery(), PageRequest(), context=context()).items
+
+
+@pytest.mark.parametrize('live_member', [False, True])
+def test_tenant_scope_waits_for_bulk_member_revocation_without_needing_creator_identity(pending, live_member):
+    records, engine, knowledge, _, memberships, value = pending
+    value = {**value, 'owner_cleanup': None, 'tenant_cleanup': {'actor_tenant_id': 'operator'}}
+    with engine.begin() as conn:
+        conn.execute(knowledge.update().values(created_by='long-departed', ingroup_permission='EDIT', deletion_request=value))
+        if live_member:
+            conn.execute(memberships.update().values(delete_flag='N'))
+    page = records.query(module.DATASET, RecordQuery(), PageRequest(), context=context())
+    if live_member:
+        assert not page.items
+    else:
+        (row,) = page.items
+        assert row['cleanup_kind'] == 'tenant' and row['user_id'] == 'admin' and row['tenant_id'] == 'target'
+        assert row['owner_user_id'] is None and row['purpose'] == 'tenant_deletion'

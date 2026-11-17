@@ -32,18 +32,28 @@ def cascade(monkeypatch):
                  'query_invitations_by_tenant', 'get_all_configs_by_tenant_id'):
         monkeypatch.setattr(tenants, name, Mock(return_value=[]))
     monkeypatch.setattr(tenants, 'query_groups_by_tenant', Mock(return_value={'data': []}))
-    monkeypatch.setattr(tenants, 'get_knowledge_info_by_tenant_id', Mock(return_value=[
-        {'knowledge_id': 1, 'ingroup_permission': 'PRIVATE'},
-        {'knowledge_id': 2, 'ingroup_permission': 'PUBLIC', 'deletion_request': {'phase': 'files'}},
-    ]))
-    monkeypatch.setattr(tenants, 'delete_knowledge_record', Mock())
+    shared_plan = object()
+
+    async def prepare_shared(tenant_id, actor_id):
+        assert (tenant_id, actor_id) == ('target', 'su')
+        events.append('prepare-shared')
+        return shared_plan
+
+    async def execute_shared(plan):
+        assert plan is shared_plan
+        events.append('execute-shared')
+        return {'total': 1, 'succeeded': 0, 'failed': 0, 'pending': 1}
+
+    monkeypatch.setattr(tenants, 'prepare_tenant_cleanup', AsyncMock(side_effect=prepare_shared))
+    monkeypatch.setattr(tenants, 'execute_cleanup', AsyncMock(side_effect=execute_shared))
     monkeypatch.setattr(tenants, '_delete_skills_for_tenant', Mock())
     return SimpleNamespace(**locals())
 
 
 async def test_all_private_authority_precedes_bulk_disable_and_pending_parents_survive(cascade):
     assert await tenants.delete_tenant('target', 'su') is True
-    assert cascade.events[:3] == ['prepare-u1', 'prepare-u2', 'bulk']
-    assert set(cascade.events[3:]) == {'delete-u1', 'delete-u2'}
-    tenants.delete_knowledge_record.assert_not_called()
+    assert cascade.events[:4] == ['prepare-shared', 'prepare-u1', 'prepare-u2', 'bulk']
+    assert set(cascade.events[4:-1]) == {'delete-u1', 'delete-u2'}
+    assert cascade.events[-1] == 'execute-shared'
+    assert not hasattr(tenants, 'delete_knowledge_record')
 

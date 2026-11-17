@@ -124,10 +124,15 @@ async def dispatch_bases_once(coordinator, *, stop, cursor=None):
     for row in page.items:
         if stop.is_set():
             break
-        await selected.request_owner_cleanup(
-            row['index_name'], row['owner_user_id'], ServicePrincipal(row['user_id'], row['tenant_id']),
-            purpose=row['purpose'], context=OperationContext(
-                'knowledge-base-advance-' + uuid4().hex, monotonic() + 10, cancelled=stop))
+        actor = ServicePrincipal(row['user_id'], row['tenant_id'])
+        operation = OperationContext('knowledge-base-advance-' + uuid4().hex, monotonic() + 10, cancelled=stop)
+        if row['cleanup_kind'] == 'tenant':
+            await selected.request_tenant_cleanup(row['index_name'], actor, context=operation)
+        elif row['cleanup_kind'] == 'owner':
+            await selected.request_owner_cleanup(row['index_name'], row['owner_user_id'], actor,
+                                                  purpose=row['purpose'], context=operation)
+        else:
+            raise InvalidInput()
         consumed += 1
     return consumed, page.next_cursor
 

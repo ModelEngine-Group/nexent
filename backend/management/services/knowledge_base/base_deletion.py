@@ -5,7 +5,10 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.knowledge_admission import KNOWLEDGE_ADMISSION_DATASET as KB
 from contracts.knowledge_admission import UPLOAD_ADMISSION_DATASET as FILES
-from contracts.knowledge_admission import KnowledgeBaseDeletionIntent
+from contracts.knowledge_admission import (
+    KnowledgeBaseDeletionIntent,
+    KnowledgeOwnerCleanup,
+)
 from contracts.knowledge_base_deletion import (
     KnowledgeBaseDelete,
     KnowledgeBaseDeleteAuthorization,
@@ -22,8 +25,10 @@ from management.services.knowledge_base.file_authorization import (
 )
 from management.services.knowledge_base.owner_cleanup import (
     authorize_owner_cleanup_admission,
-    has_owner_cleanup_authority,
+    authorize_tenant_cleanup_admission,
+    has_cleanup_authority,
     require_private_owner,
+    require_tenant_resource,
 )
 from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import Comparison, PageRequest, RecordQuery, Revision, Sort
@@ -120,25 +125,43 @@ def request_knowledge_base_owner_deletion(records, resources, index_name, owner_
     return _request(records, resources, index_name, actor, owner_user_id=owner_user_id, purpose=purpose, context=context)
 
 
-def _existing_owner_scope(row, owner_user_id, purpose, actor):
-    if not has_owner_cleanup_authority(row, actor.user_id, actor.tenant_id):
+def request_knowledge_base_tenant_deletion(records, resources, index_name, actor, *, context):
+    return _request(records, resources, index_name, actor, owner_user_id=None, purpose=None,
+                    tenant_cleanup=True, context=context)
+
+
+def _existing_scope(row, owner_user_id, purpose, actor, tenant_cleanup):
+    if not has_cleanup_authority(row, actor.user_id, actor.tenant_id):
         return None
-    scope = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request']).owner_cleanup
-    if scope.owner_user_id != owner_user_id or scope.purpose != purpose:
-        raise ScopeDenied()
-    return scope
+    intent = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
+    if tenant_cleanup and intent.tenant_cleanup is not None:
+        return intent.tenant_cleanup
+    scope = intent.owner_cleanup
+    if (not tenant_cleanup and scope is not None and scope.owner_user_id == owner_user_id
+            and scope.purpose == purpose):
+        return scope
+    raise ScopeDenied()
 
 
-def _request(records, resources, index_name, actor, *, owner_user_id, purpose, context):
+def _require_cleanup_resource(row, cleanup, actor):
+    if isinstance(cleanup, KnowledgeOwnerCleanup):
+        require_private_owner(row, cleanup.owner_user_id, actor.tenant_id)
+    else:
+        require_tenant_resource(row, actor.tenant_id)
+
+
+def _request(records, resources, index_name, actor, *, owner_user_id, purpose, context, tenant_cleanup=False):
     require_admission_actor(records, resources, actor)
     authorization = KnowledgeFileAuthorization(resources, user_id=actor.user_id)
     knowledge = authorization._one('cleanse_knowledge', 'index_name', index_name, context)
     previous = records.get(KB, knowledge['knowledge_id'], context=context)
     if previous is None or previous['index_name'] != index_name:
         raise ScopeDenied()
-    cleanup = _existing_owner_scope(previous, owner_user_id, purpose, actor)
+    cleanup = _existing_scope(previous, owner_user_id, purpose, actor, tenant_cleanup)
     if cleanup is None:
-        if owner_user_id is None:
+        if tenant_cleanup:
+            cleanup = authorize_tenant_cleanup_admission(previous, actor, context=context)
+        elif owner_user_id is None:
             authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, cleanup=True, context=context)
         else:
             cleanup = authorize_owner_cleanup_admission(previous, owner_user_id, purpose, actor, context=context)
@@ -150,21 +173,26 @@ def _request(records, resources, index_name, actor, *, owner_user_id, purpose, c
             original = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
             if original.knowledge_id != row['knowledge_id'] or original.index_name != index_name:
                 raise Conflict()
-            existing = _existing_owner_scope(row, owner_user_id, purpose, actor)
+            existing = _existing_scope(row, owner_user_id, purpose, actor, tenant_cleanup)
             if existing is not None or cleanup is None:
                 return row
             if original.user_id != actor.user_id:
                 raise Conflict()
-            intent = original.model_copy(update={'owner_cleanup': cleanup})
+            intent = original.model_copy(update={
+                'owner_cleanup': cleanup if isinstance(cleanup, KnowledgeOwnerCleanup) else None,
+                'tenant_cleanup': cleanup if tenant_cleanup else None,
+            })
         else:
             intent = KnowledgeBaseDeletionIntent(knowledge_id=row['knowledge_id'], index_name=index_name,
-                                                  user_id=actor.user_id, owner_cleanup=cleanup)
+                                                  user_id=actor.user_id,
+                                                  owner_cleanup=cleanup if isinstance(cleanup, KnowledgeOwnerCleanup) else None,
+                                                  tenant_cleanup=cleanup if tenant_cleanup else None)
         if cleanup is not None:
-            require_private_owner(row, cleanup.owner_user_id, actor.tenant_id)
+            _require_cleanup_resource(row, cleanup, actor)
         reserved = change_knowledge_admission(transaction, row, {'deletion_request': intent.model_dump(mode='json')},
                                                expected=Revision(str(row['version'])), context=context)
         if cleanup is not None:
-            require_private_owner(reserved, cleanup.owner_user_id, actor.tenant_id)
+            _require_cleanup_resource(reserved, cleanup, actor)
             return reserved
         cursor = None
         while True:
