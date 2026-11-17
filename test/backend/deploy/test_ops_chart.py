@@ -106,6 +106,9 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
     )
     spec = deployment["spec"]["template"]["spec"]
     container = spec["containers"][0]
+    assert container["command"] == [
+        "/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service",
+    ]
     mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
     assert ("ops-trajectory" in mounts) is enabled
@@ -119,6 +122,14 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
         ref = env[name]["valueFrom"]["secretKeyRef"]
         assert (ref["name"], ref["key"]) == ("nexent-secrets", name)
         assert ref.get("optional", False) is (name == "GATEWAY_SIGNING_SECRET")
+    assert env["ELASTICSEARCH_HOST"]["valueFrom"]["configMapKeyRef"] == {
+        "name": "nexent-config", "key": "ELASTICSEARCH_HOST", "optional": True,
+    }
+    assert env["ELASTICSEARCH_API_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "nexent-secrets", "key": "ELASTICSEARCH_API_KEY", "optional": True,
+    }
+    for key in ("OPS_MONITORING_ENABLED", "OPS_POSTGRES_DB"):
+        assert env[key]["valueFrom"]["secretKeyRef"]["name"] == "nexent-env"
     if enabled:
         assert mounts["ops-trajectory"]["mountPath"] == "/srv/trajectory"
         assert (
@@ -146,6 +157,9 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
     ops = yaml.safe_load((directory / "docker-compose-ops.yml").read_text())[
         "services"
     ]["nexent-ops"]
+    assert ops["entrypoint"] == [
+        "/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service",
+    ]
     assert ops["env_file"] == ["../../env/.env", "../../env/monitoring.env"]
     archive_mount = "${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory"
     assert archive_mount in ops["volumes"]

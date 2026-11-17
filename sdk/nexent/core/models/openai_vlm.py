@@ -11,6 +11,7 @@ from smolagents.models import ChatMessage
 from ..models import OpenAIModel
 from ..concurrency import run_blocking
 from ..utils.observer import MessageObserver
+from ...monitor.model_fact import suppress_model_attempts
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +76,15 @@ class OpenAIVLModel(OpenAIModel):
             ]
 
         try:
-            await run_blocking(
-                "openai-vlm-connectivity",
-                self.client.chat.completions.create,
-                model=self.model_id,
-                messages=[{"role": "user", "content": content_parts}],
-                max_tokens=5,
-                stream=False,
-            )
+            with suppress_model_attempts():
+                await run_blocking(
+                    "openai-vlm-connectivity",
+                    self.client.chat.completions.create,
+                    model=self.model_id,
+                    messages=[{"role": "user", "content": content_parts}],
+                    max_tokens=5,
+                    stream=False,
+                )
             return True
         except Exception as e:
             logger.error("VLM connectivity check failed: %s", e)
