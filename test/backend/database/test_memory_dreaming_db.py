@@ -179,7 +179,7 @@ def test_ac078_schedule_reads_thresholds_and_next_fire(monkeypatch):
         timezone="Asia/Shanghai", start_at=datetime(2026, 1, 1), cron_expr=None,
         interval_seconds=3600, next_fire_at=None, last_fire_at=None, fire_count=0,
         min_score=0.8, min_recall_count=4, min_unique_queries=2, source_limit=50,
-        long_term_max_chars=9000, summarization_max_attempts=2,
+        long_term_max_chars=9000, long_term_length_tolerance_percent=0, summarization_max_attempts=2,
     )
     query = MagicMock()
     query.filter.return_value = query
@@ -190,6 +190,7 @@ def test_ac078_schedule_reads_thresholds_and_next_fire(monkeypatch):
     assert memory_dreaming_db.get_thresholds("t", "u", "__user__") == {
         "min_score": 0.8, "min_recall_count": 4, "min_unique_queries": 2,
         "source_limit": 50, "long_term_max_chars": 9000,
+        "long_term_length_tolerance_percent": 0,
         "summarization_max_attempts": 2,
     }
     assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
@@ -205,7 +206,8 @@ def test_ac078_all_unset_thresholds_return_none(monkeypatch):
     session = _mock_session(monkeypatch)
     row = MagicMock(
         min_score=None, min_recall_count=None, min_unique_queries=None,
-        source_limit=None, long_term_max_chars=None, summarization_max_attempts=None,
+        source_limit=None, long_term_max_chars=None, long_term_length_tolerance_percent=None,
+        summarization_max_attempts=None,
     )
     session.query.return_value.filter.return_value.first.return_value = row
     assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
@@ -483,3 +485,26 @@ def test_list_audits_none_datetime_fields(monkeypatch):
 
     assert result[0]["started_at"] is None
     assert result[0]["finished_at"] is None
+
+
+
+def test_ac007_upsert_preserves_omitted_tolerance_and_honors_zero_and_reset(monkeypatch):
+    session = _mock_session(monkeypatch)
+    row = MemoryDreamingSchedule(
+        tenant_id="t", user_id="u", agent_id="__user__", long_term_length_tolerance_percent=7,
+    )
+    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
+    settings = dict(
+        enabled=False, rule_type="CRON", timezone_name="Asia/Shanghai",
+        start_at=datetime(2026, 1, 1), cron_expr="0 3 * * *",
+        interval_seconds=None, next_fire_at=None, actor_user_id="u",
+    )
+
+    for update, expected in (
+        ({}, 7),
+        ({"long_term_length_tolerance_percent": 0}, 0),
+        ({"long_term_length_tolerance_percent": None}, None),
+    ):
+        schedule = memory_dreaming_db.upsert_schedule("t", "u", "__user__", **settings, **update)
+        assert schedule["long_term_length_tolerance_percent"] == expected
+        assert row.long_term_length_tolerance_percent == expected

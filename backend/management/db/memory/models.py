@@ -329,6 +329,10 @@ class MemoryDreamingSchedule(TableBase):
 
     __tablename__ = "memory_dreaming_schedule_t"
     __table_args__ = (
+        CheckConstraint(
+            "long_term_length_tolerance_percent BETWEEN 0 AND 100",
+            name="ck_memory_dreaming_length_tolerance",
+        ),
         Index(
             "uq_memory_dreaming_schedule_scope",
             "tenant_id",
@@ -367,6 +371,7 @@ class MemoryDreamingSchedule(TableBase):
     min_unique_queries = Column(Integer, nullable=True)
     source_limit = Column(Integer, nullable=True)
     long_term_max_chars = Column(Integer, nullable=True)
+    long_term_length_tolerance_percent = Column(Integer, nullable=True)
     summarization_max_attempts = Column(Integer, nullable=True)
 
 

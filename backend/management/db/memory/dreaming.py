@@ -67,6 +67,9 @@ def create_audit(
         return int(row.run_id)
 
 
+_UNSET = object()
+
+
 def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
     return {
         "schedule_id": row.schedule_id,
@@ -85,6 +88,7 @@ def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
         "min_unique_queries": row.min_unique_queries,
         "source_limit": row.source_limit,
         "long_term_max_chars": row.long_term_max_chars,
+        "long_term_length_tolerance_percent": row.long_term_length_tolerance_percent,
         "summarization_max_attempts": row.summarization_max_attempts,
     }
 
@@ -122,6 +126,7 @@ def upsert_schedule(
     min_unique_queries: Optional[int] = None,
     source_limit: Optional[int] = None,
     long_term_max_chars: Optional[int] = None,
+    long_term_length_tolerance_percent: Optional[int] | object = _UNSET,
     summarization_max_attempts: Optional[int] = None,
 ) -> Dict[str, Any]:
     with get_db_session() as session:
@@ -159,6 +164,8 @@ def upsert_schedule(
         row.min_unique_queries = min_unique_queries
         row.source_limit = source_limit
         row.long_term_max_chars = long_term_max_chars
+        if long_term_length_tolerance_percent is not _UNSET:
+            row.long_term_length_tolerance_percent = long_term_length_tolerance_percent
         row.summarization_max_attempts = summarization_max_attempts
         row.updated_by = actor_user_id
         session.flush()
@@ -175,6 +182,7 @@ def get_thresholds(tenant_id: str, user_id: str, agent_id: str) -> Optional[Dict
                 MemoryDreamingSchedule.min_unique_queries,
                 MemoryDreamingSchedule.source_limit,
                 MemoryDreamingSchedule.long_term_max_chars,
+                MemoryDreamingSchedule.long_term_length_tolerance_percent,
                 MemoryDreamingSchedule.summarization_max_attempts,
             )
             .filter(
@@ -193,6 +201,7 @@ def get_thresholds(tenant_id: str, user_id: str, agent_id: str) -> Optional[Dict
             "min_unique_queries": row.min_unique_queries,
             "source_limit": row.source_limit,
             "long_term_max_chars": row.long_term_max_chars,
+            "long_term_length_tolerance_percent": row.long_term_length_tolerance_percent,
             "summarization_max_attempts": row.summarization_max_attempts,
         }
         # Return None if ALL thresholds are unset
