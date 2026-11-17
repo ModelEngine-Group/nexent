@@ -2,6 +2,7 @@
 
 "use client";
 
+import { validTopP } from "@/lib/modelSamplingParameters";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
@@ -220,12 +221,13 @@ export const ModelEditDialog = ({
 
   const nameChanged = name.trim() !== model.name;
   const canSubmit =
+    validTopP(advanced.top_p) &&
     name.trim().length > 0 &&
     displayName.trim().length > 0 &&
     baseUrl.trim().length > 0;
 
   async function handleCheck() {
-    if (!model || probe === "checking") return;
+    if (!model || probe === "checking" || !validTopP(advanced.top_p)) return;
     setProbe("checking");
     try {
       // Empty apiKey falls back to the stored key via probe_model_id. The
@@ -261,6 +263,9 @@ export const ModelEditDialog = ({
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
+        ...(Object.hasOwn(advanced, "top_p") && advanced.top_p == null
+          ? { top_p: null }
+          : {}),
       };
       if (nameChanged) {
         params.name = name.trim();
@@ -365,7 +370,10 @@ export const ModelEditDialog = ({
         </DialogHeader>
 
         {model.migrationStatus === "failed" && (
-          <p role="alert" className="border-b px-6 py-3 text-sm text-destructive">
+          <p
+            role="alert"
+            className="border-b px-6 py-3 text-sm text-destructive"
+          >
             {t("modelMigration.failedHint")}
           </p>
         )}

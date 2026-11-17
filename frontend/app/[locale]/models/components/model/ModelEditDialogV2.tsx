@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { validTopP } from "@/lib/modelSamplingParameters";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -352,6 +355,7 @@ export const ModelEditDialogV2 = ({
   ]);
 
   const isFormValid = () => {
+    if (supportsInferenceParams && !validTopP(advanced.top_p)) return false;
     if (
       supportsCapacityFields &&
       // context_window/max_output not required; only data-shape checks gate Save.
@@ -508,7 +512,9 @@ export const ModelEditDialogV2 = ({
       : {};
     const inferenceUpdate = {
       temperature: inferencePayload.temperature as number | undefined,
-      topP: inferencePayload.top_p as number | undefined,
+      topP:
+        inferencePayload.top_p ??
+        (Object.hasOwn(advanced, "top_p") ? null : undefined),
       extraParams: inferencePayload.extra_params as
         | Record<string, unknown>
         | undefined,

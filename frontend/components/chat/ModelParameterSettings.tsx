@@ -14,6 +14,8 @@ import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
+import { TOP_P_STEP, validTopP } from "@/lib/modelSamplingParameters";
+
 function configuredValue(value: number | undefined, max: number) {
   return value != null && Number.isFinite(value) && value >= 0 && value <= max
     ? value
@@ -27,6 +29,8 @@ export function ParameterLevel({
   max,
   min = 0,
   disabled,
+  topPSchema,
+  onClear,
   onChange,
 }: {
   label: string;
@@ -35,10 +39,23 @@ export function ParameterLevel({
   max: number;
   min?: number;
   disabled?: boolean;
+  topPSchema?: Record<string, unknown>;
+  onClear?: () => void;
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
-  const displayValue = configuredValue(value ?? inheritedValue, max);
+  const topP = topPSchema !== undefined;
+  const step = topP ? TOP_P_STEP : 0.1;
+  const sliderMin = topP ? Math.min(max, Math.max(min, TOP_P_STEP)) : min;
+  const displayValue = topP
+    ? (value ?? inheritedValue)
+    : configuredValue(value ?? inheritedValue, max);
+  const isValid = (next: number) =>
+    topP
+      ? validTopP(next, topPSchema)
+      : Number.isFinite(next) && next >= min && next <= max;
+  const sliderDisabled =
+    disabled || (topP && sliderMin === max && !isValid(max));
   const [text, setText] = useState(
     displayValue == null ? "" : String(displayValue)
   );
@@ -53,8 +70,15 @@ export function ParameterLevel({
   }
   const commit = () => {
     if (!dirty) return;
+    if (!text.trim() && onClear) {
+      setError(false);
+      setDirty(false);
+      if (value !== undefined) onClear();
+      else setText(displayValue == null ? "" : String(displayValue));
+      return;
+    }
     const next = Number(text);
-    if (!text.trim() || !Number.isFinite(next) || next < min || next > max) {
+    if (!text.trim() || !isValid(next)) {
       setError(true);
       return;
     }
@@ -63,18 +87,19 @@ export function ParameterLevel({
     setText(String(next));
     if (next !== value) onChange(next);
   };
-  const sliderValue = text.trim()
-    ? (configuredValue(Number(text), max) ?? displayValue ?? null)
-    : (displayValue ?? null);
+  const draftNumber = text.trim() ? Number(text) : displayValue;
+  const sliderValue =
+    draftNumber != null && isValid(draftNumber) ? draftNumber : null;
+  const invalid = error || (topP && !!text.trim() && !isValid(Number(text)));
   return (
     <div className="space-y-1">
       <label className="text-sm">{label}</label>
       <div className="flex items-center gap-3">
         <Slider
-          min={min}
+          min={sliderMin}
           max={max}
-          step={0.1}
-          value={sliderValue ?? min}
+          step={step}
+          value={sliderValue ?? sliderMin}
           marks={
             sliderValue == null
               ? undefined
@@ -100,7 +125,7 @@ export function ParameterLevel({
                 }
               : undefined
           }
-          disabled={disabled}
+          disabled={sliderDisabled}
           className="!m-0 min-w-0 flex-1 focus-within:ring-2 focus-within:ring-ring/50 [&_.ant-slider-dot]:hidden"
           ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
           ariaValueTextFormatterForHandle={(next) =>
@@ -109,20 +134,23 @@ export function ParameterLevel({
               : String(next)
           }
           onChange={(next) => {
+            if (!isValid(next)) return;
             setText(String(next));
             setError(false);
             setDirty(true);
           }}
-          onChangeComplete={onChange}
+          onChangeComplete={(next) => {
+            if (isValid(next)) onChange(next);
+          }}
         />
         <input
           type="number"
-          min={min}
+          min={sliderMin}
           max={max}
-          step={0.1}
+          step={step}
           placeholder={t("modelProfile.thinkingModeOption.default")}
           aria-label={label}
-          aria-invalid={error}
+          aria-invalid={invalid}
           disabled={disabled}
           value={text}
           onChange={(event) => {
@@ -140,13 +168,15 @@ export function ParameterLevel({
           className="h-8 w-36 shrink-0 rounded border border-border px-2 text-sm"
         />
       </div>
-      {error && (
+      {invalid && (
         <p role="alert" className="text-xs text-destructive">
-          {t("workbench.controls.numberRange", {
-            defaultValue: "请输入 {{min}}–{{max}} 的数字",
-            min,
-            max,
-          })}
+          {topP
+            ? t("modelParams.topPInvalid")
+            : t("workbench.controls.numberRange", {
+                defaultValue: "请输入 {{min}}–{{max}} 的数字",
+                min,
+                max,
+              })}
         </p>
       )}
     </div>
@@ -262,6 +292,7 @@ export function ModelSamplingFields(
   control: ModelParameterSettingsControl & {
     disabledFields?: string[];
     bounds?: Record<string, { min?: number; max?: number }>;
+    topPSchema?: Record<string, unknown>;
   }
 ) {
   const { t } = useTranslation();
@@ -288,7 +319,13 @@ export function ModelSamplingFields(
         value={control.value.top_p}
         inheritedValue={control.inheritedValue?.top_p}
         min={control.bounds?.top_p?.min}
-        max={control.bounds?.top_p?.max ?? 1}
+        max={Math.min(control.bounds?.top_p?.max ?? 1, 1)}
+        topPSchema={control.topPSchema ?? {}}
+        onClear={() => {
+          const next = { ...control.value };
+          delete next.top_p;
+          control.onChange(next);
+        }}
         disabled={control.disabled || control.disabledFields?.includes("top_p")}
         onChange={(top_p) => control.onChange({ ...control.value, top_p })}
       />

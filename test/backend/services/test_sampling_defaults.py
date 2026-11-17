@@ -10,9 +10,9 @@ from management.services.model import management
 
 
 @pytest.mark.parametrize("sampling,expected", [
-    ({}, {"temperature": 1.0, "top_p": 1.0}),
-    ({"temperature": None, "top_p": None}, {"temperature": 1.0, "top_p": 1.0}),
-    ({"temperature": 0, "top_p": None}, {"temperature": 0, "top_p": 1.0}),
+    ({}, {"temperature": 1.0, "top_p": None}),
+    ({"temperature": None, "top_p": None}, {"temperature": 1.0, "top_p": None}),
+    ({"temperature": 0, "top_p": None}, {"temperature": 0, "top_p": None}),
     ({"temperature": 0.3, "top_p": 0.87}, {"temperature": 0.3, "top_p": 0.87}),
 ])
 async def test_model_list_exposes_effective_sampling_without_filling_stored_fields(monkeypatch, sampling, expected):

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal, validate_top_p_parameter
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.models.capacity_budget import (
     CallerMaxTokensOverrideForbidden,
@@ -32,6 +32,9 @@ class LegacyInvocationOptions:
 
         profile = ensure_outlet_parameter_rules(profile)
         submitted = dict(self.parameters)
+        validate_top_p_parameter(submitted.get("top_p"))
+        if submitted.get("top_p") is None:
+            submitted.pop("top_p", None)
         for key, value in (("stop", self.stop_sequences), ("response_format", self.response_format)):
             if value is None:
                 continue

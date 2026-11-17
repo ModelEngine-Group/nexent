@@ -201,6 +201,15 @@ def _validate(schema: dict, value: object, path: str) -> None:
                 _validate(additional, item, _path(path, key))
 
 
+def validate_top_p_parameter(value: object) -> None:
+    from nexent.core.models.sampling import validate_top_p
+
+    try:
+        validate_top_p(value)
+    except ValueError:
+        raise ParameterValidationError("TOP_P_OUT_OF_RANGE", "/top_p") from None
+
+
 def validate_parameter_value(schema: CompiledParameterSchema, value: object, path: str = "") -> None:
     """Validate the submitted JSON value without defaulting or coercion."""
     try:

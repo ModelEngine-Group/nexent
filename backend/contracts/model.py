@@ -233,7 +233,7 @@ class ModelRequest(BaseModel):
     capability_profile_version: Optional[str] = None
     # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
     temperature: Optional[float] = None
-    top_p: Optional[float] = None
+    top_p: Optional[float] = Field(default=None, gt=0, le=1, strict=True)
     # v2.6.0 fixed inference params without dedicated columns (key-value pairs
     # constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.
     extra_params: Optional[Dict[str, Any]] = None
@@ -509,7 +509,7 @@ class _ManageTenantModelCommonFields(BaseModel):
         None, description="Default sampling temperature for LLM/VLM models"
     )
     top_p: Optional[float] = Field(
-        None, description="Default nucleus sampling probability for LLM/VLM models"
+        None, gt=0, le=1, strict=True, description="Default nucleus sampling probability for LLM/VLM models"
     )
     extra_params: Optional[Dict[str, Any]] = Field(
         None,

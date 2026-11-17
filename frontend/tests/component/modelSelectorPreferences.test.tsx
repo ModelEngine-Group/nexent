@@ -361,12 +361,20 @@ it("AC-002 restores service-default effort without inventing a creation default"
   expect(api.patchConversationModelPreferences).toHaveBeenCalledTimes(1);
 });
 
-it("AC-004 keeps zero overrides and restores service default without injecting sampling", async () => {
+it("flags historical Top P zero and deletes the override on clear", async () => {
   saved.defaults = { temperature: null };
   saved.parameter_values = { temperature: 0, top_p: 0 };
   setup(11, undefined, { agentDefaults: {} });
   expect(await openAdvanced()).toHaveValue(0);
-  expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0);
+  const topP = screen.getByRole("spinbutton", { name: "Top P" });
+  expect(topP).toHaveValue(0);
+  expect(topP).toHaveAttribute("aria-invalid", "true");
+  await changeSampling("Top P", "0.995");
+  await waitFor(() => expect(saved.parameter_values.top_p).toBe(0.995));
+  await changeSampling("Top P", "");
+  await waitFor(() =>
+    expect(saved.parameter_values).toEqual({ temperature: 0 })
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "workbench.controls.restore" })
   );
@@ -381,7 +389,7 @@ it("AC-004 keeps zero overrides and restores service default without injecting s
     42,
     {
       parameter_values: {},
-      delete_parameters: ["temperature", "top_p"],
+      delete_parameters: ["temperature"],
     }
   );
 });

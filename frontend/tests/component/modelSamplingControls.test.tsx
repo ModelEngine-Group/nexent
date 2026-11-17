@@ -44,8 +44,8 @@ describe("model sampling controls", () => {
   it("displays inherited defaults without emitting values and preserves explicit zero and clearing", () => {
     const change = modelForm({ max_output_tokens: 512 });
     const temperature = screen.getByRole("spinbutton", { name: "温度" });
-    expect(temperature).toHaveValue(1);
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(1);
+    expect(temperature).toHaveValue(null);
+    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(null);
     expect(change).not.toHaveBeenCalled();
     fireEvent.change(temperature, { target: { value: "0" } });
     const explicit = change.mock.lastCall![0];
@@ -68,17 +68,23 @@ describe("model sampling controls", () => {
       "aria-valuenow",
       "2"
     );
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Top P" }), {
-      target: { value: "3" },
-    });
-    expect(screen.getByRole("slider", { name: "Top P" })).toHaveAttribute(
-      "aria-valuenow",
-      "1"
-    );
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Top P" }), {
-      target: { value: "-1" },
-    });
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0);
+    const input = screen.getByRole("spinbutton", { name: "Top P" });
+    const slider = screen.getByRole("slider", { name: "Top P" });
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(input).toHaveValue(0.01);
+    fireEvent.click(screen.getByRole("button", { name: "Top P −" }));
+    expect(input).toHaveValue(0.01);
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    expect(input).toHaveValue(0.02);
+    fireEvent.change(input, { target: { value: "0.995" } });
+    fireEvent.blur(input);
+    expect(input).toHaveValue(0.995);
+    fireEvent.change(input, { target: { value: "0.005" } });
+    expect(input).toHaveValue(0.005);
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveValue(null);
   });
 
   it("supports keyboard limits and decimal stepping", () => {

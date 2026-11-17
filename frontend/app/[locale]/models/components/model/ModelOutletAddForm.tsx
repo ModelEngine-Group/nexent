@@ -444,7 +444,7 @@ export function ModelOutletAddForm({
   const ready =
     !invalidKey &&
     headersValid &&
-    samplingComplete(sampling) &&
+    samplingComplete(sampling, samplingRules) &&
     (providerKey === "__custom__" ||
       !!provider ||
       (!!editing && !selectionChanged)) &&

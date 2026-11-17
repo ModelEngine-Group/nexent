@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for OpenAIVLMAdapter - the VLM protocol that lives on the adapter."""
 
 import base64
@@ -299,9 +301,8 @@ def test_build_model_does_not_send_frequency_penalty():
     assert "frequency_penalty" not in getattr(inner, "kwargs", {}), inner.kwargs
     # the dead instance attribute is still set for getattr parity.
     assert inner.frequency_penalty == 0.5
-    # sampling defaults the old OpenAIVLModel forwarded must still be set.
     assert inner.temperature == 0.7
-    assert inner.top_p == 0.7
+    assert inner.top_p is None
     assert inner.max_tokens == 512
 
 

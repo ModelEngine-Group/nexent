@@ -189,6 +189,7 @@ export function ModelAdvancedConfig({
                 <Label className="text-sm">{label}</Label>
                 <SliderStepper
                   compact
+                  topP={key === "top_p"}
                   label={label}
                   value={
                     typeof value[key] === "number" ? value[key] : undefined

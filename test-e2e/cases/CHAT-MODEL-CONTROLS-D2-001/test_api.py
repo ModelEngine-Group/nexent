@@ -27,7 +27,7 @@ def test_http_control_intents(api, path):
     for effort in EFFORTS:
         assert submit({"enable_thinking": True, "reasoning_effort": effort})["effort"] == effort
     assert submit({"enable_thinking": False})["effort"] is None
-    for temperature, top_p in [(0, 0), (0.7, 0.9), (2, 1)]:
+    for temperature, top_p in [(0, 0.995), (0.7, 0.005), (2, 1)]:
         result = submit({"temperature": temperature, "top_p": top_p})
         assert (result["temperature"], result["top_p"]) == (temperature, top_p)
     preserved = {"history": [{"role": "user", "content": "Previous fixture turn"}], "minio_files": [{"object_name": "fixture-attachment"}]}
@@ -48,7 +48,7 @@ def test_http_rejects_invalid_overlays_before_execution(api, path):
     identifier = api.records["effort"]["model_id"]
     for values in [
         {"temperature": True}, {"temperature": -0.1}, {"temperature": 2.1},
-        {"top_p": -0.1}, {"top_p": 1.1}, {"top_p": "0.7"},
+        {"top_p": 0}, {"top_p": -0.1}, {"top_p": 1.1}, {"top_p": "0.7"},
         {"reasoning_effort": "invalid"}, {"reasoning_effort": None},
         {"enable_thinking": None}, {"enable_thinking": "false"},
         {"enable_thinking": False, "reasoning_effort": "high"},

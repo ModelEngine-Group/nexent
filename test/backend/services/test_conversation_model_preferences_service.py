@@ -199,3 +199,17 @@ def test_preference_view_preserves_the_outlet_reasoning_status(persistence, prof
     result = service.read_model_preference_view(1, 42, "owner", "tenant")
     assert result["reasoning_status"] == profile.capabilities.reasoning.status
     assert profile.model_dump() == original
+
+
+
+def test_top_p_explicit_values_intersect_with_the_model_bounds(profile):
+    data = profile.model_dump()
+    rule = next(rule for rule in data["parameter_rules"] if rule["key"] == "top_p")
+    rule["schema"]["maximum"] = 0.8
+    bounded = profile.__class__.model_validate(data)
+    for invalid in (0, 0.995):
+        with pytest.raises(ModelOutletValidationError) as error:
+            service.merge_model_preferences(bounded, {"top_p": invalid})
+        assert error.value.path == "/top_p"
+    assert service.merge_model_preferences(bounded, {"top_p": 0.005}).parameter_values["top_p"] == 0.005
+    assert "top_p" not in service.merge_model_preferences(bounded, {"top_p": None}).parameter_values

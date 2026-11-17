@@ -2,6 +2,27 @@
 
 import type { ModelParameterRule } from "@/types/modelProfile";
 
+export const TOP_P_STEP = 0.01;
+
+export function validTopP(
+  value: unknown,
+  schema: Record<string, unknown> = {}
+) {
+  if (value == null) return true;
+  return (
+    typeof value === "number" &&
+    value > 0 &&
+    value <= 1 &&
+    (typeof schema.minimum !== "number" || value >= schema.minimum) &&
+    (typeof schema.maximum !== "number" || value <= schema.maximum) &&
+    (!Array.isArray(schema.enum) || schema.enum.includes(value)) &&
+    (!Object.hasOwn(schema, "const") || schema.const === value) &&
+    (![schema.type].flat().includes("integer") ||
+      [schema.type].flat().includes("number") ||
+      Number.isInteger(value))
+  );
+}
+
 /** Optional sampling controls remain available before provider discovery completes. */
 export function outletSamplingRules(
   rules: ModelParameterRule[]
@@ -35,9 +56,14 @@ export function outletSamplingValues(
   };
 }
 
-export function samplingComplete(values: Record<string, unknown>) {
-  return [values.temperature, values.top_p].every(
-    (value) =>
-      value == null || (typeof value === "number" && Number.isFinite(value))
+export function samplingComplete(
+  values: Record<string, unknown>,
+  rules: ModelParameterRule[] = []
+) {
+  return (
+    (values.temperature == null ||
+      (typeof values.temperature === "number" &&
+        Number.isFinite(values.temperature))) &&
+    validTopP(values.top_p, rules.find((rule) => rule.key === "top_p")?.schema)
   );
 }

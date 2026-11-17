@@ -368,6 +368,8 @@ def _build_openai_client(
         OpenAIModelClient,
     )
 
+    from nexent.core.models.sampling import validate_top_p
+
     class _DirectClient:
         """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
 
@@ -376,11 +378,13 @@ def _build_openai_client(
             self._model = request_config.model_name
 
         async def invoke(self, messages: list[dict]) -> Any:
+            top_p = request_config.top_p
+            validate_top_p(top_p)
             return await self._inner.invoke(
                 model=self._model,
                 messages=messages,
                 temperature=request_config.temperature,
-                top_p=request_config.top_p,
+                **({"top_p": top_p} if top_p is not None else {}),
             )
 
     client = OpenAIModelClient(

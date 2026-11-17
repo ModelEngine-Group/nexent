@@ -105,7 +105,7 @@ export interface ModelOption {
   temperature?: number;
   topP?: number;
   /** Read-only model/SDK sampling fallback; never part of a model save request. */
-  effectiveSampling?: { temperature: number; top_p: number };
+  effectiveSampling?: { temperature: number; top_p?: number | null };
   extraParams?: Record<string, unknown>;
   reasoningCapability?: ReasoningCapability;
   profileSchemaVersion?: number;

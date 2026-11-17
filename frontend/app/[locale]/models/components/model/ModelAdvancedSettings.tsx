@@ -2,6 +2,7 @@
 
 "use client";
 
+import { TopPInput } from "@/components/model/TopPInput";
 import { t as translate } from "i18next";
 
 import { Fragment, useEffect } from "react";
@@ -834,6 +835,18 @@ const renderFieldControl = (
   disabled: boolean,
   placeholder?: string
 ) => {
+  if (spec.key === "top_p") {
+    return (
+      <TopPInput
+        label={spec.label}
+        value={value}
+        inherited={placeholder === undefined ? undefined : Number(placeholder)}
+        schema={{ minimum: spec.range?.[0], maximum: spec.range?.[1] }}
+        disabled={disabled}
+        onChange={(next) => onChange(next ?? undefined)}
+      />
+    );
+  }
   const type: InferenceFieldType = spec.type;
   switch (type) {
     case "str":

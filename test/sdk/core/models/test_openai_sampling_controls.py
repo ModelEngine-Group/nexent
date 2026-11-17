@@ -45,3 +45,19 @@ def test_legacy_inherited_sampling_keeps_existing_compatibility_retry(model):
     assert create.call_count==2
     assert 'temperature' not in create.call_args.kwargs and 'top_p' not in create.call_args.kwargs
     assert create.call_args.kwargs['stream'] is True
+
+
+@pytest.mark.parametrize("sampling", [{"top_p": 0}, {"extra_body": {"top_p": 0}}])
+def test_zero_top_p_never_reaches_provider(model, sampling):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    with pytest.raises(ValueError, match="Top P must be greater than 0"):
+        model._dispatch_chat_completion(messages=[], **sampling)
+    create.assert_not_called()
+
+
+def test_typed_top_p_reaches_provider_at_full_precision(model):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    model._dispatch_chat_completion(messages=[], top_p=0.995)
+    assert create.call_args.kwargs["top_p"] == 0.995

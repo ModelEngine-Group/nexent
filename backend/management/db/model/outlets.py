@@ -243,7 +243,17 @@ def _connectivity_changed(current, proposed, row, *, api_key, http_headers):
     if (all(json_values_equal(old[field], new[field]) for field in fields)
             and json_values_equal(old["capabilities"]["sampling"], new["capabilities"]["sampling"])):
         return False
-    return not json_values_equal(_connectivity_request(current), _connectivity_request(proposed))
+    from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
+
+    proposed_request = _connectivity_request(proposed)
+    try:
+        current_request = _connectivity_request(current)
+    except ModelAdapterError as error:
+        # Historical zero must not prevent clearing or correcting the outlet.
+        if error.category != "TOP_P_OUT_OF_RANGE":
+            raise
+        return True
+    return not json_values_equal(current_request, proposed_request)
 
 
 def update_resolved_model_record(

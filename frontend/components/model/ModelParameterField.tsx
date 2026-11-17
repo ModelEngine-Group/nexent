@@ -6,6 +6,8 @@ import { RotateCcw } from "lucide-react";
 import { Form, Input, InputNumber, Select, Switch, Button } from "antd";
 import { useTranslation } from "react-i18next";
 
+import { TopPInput } from "./TopPInput";
+import { validTopP } from "@/lib/modelSamplingParameters";
 import type { ModelParameterRule } from "@/types/modelProfile";
 
 interface ModelParameterFieldProps {
@@ -85,18 +87,50 @@ export function ModelParameterField({
             : undefined
         }
         aria-label={label ?? rule.key}
+        allowClear={rule.key === "top_p" && !rule.required}
+        status={
+          rule.key === "top_p" && !validTopP(value, rule.schema)
+            ? "error"
+            : undefined
+        }
         value={value === undefined ? undefined : JSON.stringify(value)}
         disabled={disabled}
-        options={options.map((option) => ({
-          value: JSON.stringify(option),
-          label:
-            rule.key === "reasoning_effort"
-              ? t(`modelProfile.thinkingLevel.${String(option)}`, {
-                  defaultValue: String(option),
-                })
-              : String(option),
-        }))}
-        onChange={(selected) => onChange(rule.key, JSON.parse(selected))}
+        options={options
+          .filter(
+            (option) =>
+              rule.key !== "top_p" ||
+              (option != null && validTopP(option, rule.schema))
+          )
+          .map((option) => ({
+            value: JSON.stringify(option),
+            label:
+              rule.key === "reasoning_effort"
+                ? t(`modelProfile.thinkingLevel.${String(option)}`, {
+                    defaultValue: String(option),
+                  })
+                : String(option),
+          }))}
+        onChange={(selected) => {
+          if (selected !== undefined) onChange(rule.key, JSON.parse(selected));
+          else if (optionalSampling) onChange(rule.key, null);
+          else onReset(rule.key);
+        }}
+      />
+    );
+  else if (rule.key === "top_p")
+    control = (
+      <TopPInput
+        label={label ?? rule.key}
+        value={scope === "outlet" ? value : values[rule.key]}
+        inherited={
+          scope === "conversation" ? fallbackValues[rule.key] : undefined
+        }
+        schema={rule.schema}
+        disabled={disabled}
+        onChange={(next) => {
+          if (next !== null || optionalSampling) onChange(rule.key, next);
+          else onReset(rule.key);
+        }}
       />
     );
   else if (types.includes("boolean"))

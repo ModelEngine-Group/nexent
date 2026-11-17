@@ -35,6 +35,8 @@ def merge_runtime_model_parameters(profile, entry, preferences):
     canonical = read_agent_parameter_entry(entry)
     from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
     preferences = without_outlet_token_limits(preferences)
+    if preferences.get("top_p") is None:
+        preferences.pop("top_p", None)
     agent_view = _apply_agent_parameters(profile, canonical)
     try:
         session_view = merge_model_preferences(agent_view, preferences)

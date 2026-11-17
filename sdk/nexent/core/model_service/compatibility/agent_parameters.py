@@ -25,6 +25,8 @@ def read_agent_parameter_entry(entry):
             raise ParameterValidationError("PARAMETER_UPDATE_CONFLICT", "/model_params_override")
         result = deepcopy(entry)
         result["parameter_values"] = without_outlet_token_limits(result["parameter_values"])
+        if result["parameter_values"].get("top_p") is None:
+            result["parameter_values"].pop("top_p", None)
         for key in OUTLET_TOKEN_LIMIT_KEYS:
             result.pop(key, None)
         if isinstance(result.get("custom_overrides"), dict):
