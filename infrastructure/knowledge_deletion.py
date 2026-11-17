@@ -3,6 +3,7 @@
 
 from contextlib import contextmanager
 
+from contracts.knowledge import STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET
 from contracts.knowledge_deletion import DELETION_DATASET
 from nexent.storage.models import StorageScope
 
@@ -16,7 +17,8 @@ def knowledge_deletion_ports(actor, *, context):
     engine, owned = record_engine(context), []
     try:
         records = bind_deletion_records(
-            StorageScope("management", actor.tenant_id, actor.user_id, {DELETION_DATASET}), engine,
+            StorageScope("management", actor.tenant_id, actor.user_id,
+                         {DELETION_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}), engine,
         )
         owned.append(records)
         resources = bind_cleanse_resources(
@@ -26,3 +28,22 @@ def knowledge_deletion_ports(actor, *, context):
         yield records, resources
     finally:
         close_owned(context, [record.close for record in reversed(owned)] + [engine.dispose])
+
+
+@contextmanager
+def deletion_source_objects(row, actor, *, context):
+    from nexent.storage.errors import ScopeDenied
+
+    from infrastructure.object_storage.composition import bind_source_objects
+
+    context.remaining()
+    if row['tenant_id'] != actor.tenant_id:
+        raise ScopeDenied()
+    if row['object_name'] is None:
+        yield None
+        return
+    objects = bind_source_objects(actor.tenant_id, actor.user_id, row['object_name'], row['bucket_name'])
+    try:
+        yield objects
+    finally:
+        close_owned(context, [objects.close])

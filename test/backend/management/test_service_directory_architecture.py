@@ -12,6 +12,8 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'knowledge_base/deletion_coordinator.py',
+    'knowledge_base/source_deletion.py',
     'agent/creation.py',
     'agent/lifecycle.py',
     'agent/background.py',
