@@ -20,13 +20,16 @@ async def test_generation_reset_finish_and_cancel_use_the_same_fence(monkeypatch
     await service.reset_stream_async("owner", 9, generation="77")
     args = client.eval.call_args.args
     assert "DEL" in args[0] and "HSET" in args[0]
-    assert args[1:6] == (4, "runtime:stream:owner:9", "runtime:stream:done:owner:9",
-                        "runtime:cancel:owner:9", "runtime:run:owner:9")
-    assert args[6] == "77"
+    assert args[1:7] == (5, "runtime:stream:owner:9", "runtime:stream:done:owner:9",
+                        "runtime:cancel:owner:9", "runtime:run:owner:9", "runtime:replay:owner:9")
+    assert "KEYS[5]" in args[0]
+    assert args[7] == "77"
     service.mark_run_finished("owner", 9, "stopped", generation="77")
     args = client.eval.call_args.args
     assert "HGET" in args[0] and "return 0" in args[0]
-    assert args[2] == "runtime:run:owner:9" and args[6:8] == ("77", "stopped")
+    assert args[1:7] == (5, "runtime:run:owner:9", "runtime:cancel:owner:9",
+                        "runtime:stream:owner:9", "runtime:stream:done:owner:9", "runtime:replay:owner:9")
+    assert args[7:9] == ("77", "stopped")
     assert service.set_cancel_signal("owner", 9, expected_generation="77") is True
     args = client.eval.call_args.args
     assert "HGET" in args[0] and "SETEX" in args[0]

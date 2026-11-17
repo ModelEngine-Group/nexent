@@ -29,6 +29,7 @@ from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCap
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
+from runtime.executions import AgentRunAlreadyActiveError
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -144,6 +145,7 @@ sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monit
 sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
+sys.modules['management.services.agent.lifecycle'].AgentRunAlreadyActiveError = AgentRunAlreadyActiveError
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
@@ -327,14 +329,15 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
 
 
 @pytest.fixture(autouse=True)
-def creator_history_boundary(mocker):
+def creator_history_boundary(mocker, monkeypatch):
     mocker.patch("permissions.resource_access.get_current_user_context", return_value=("test_user", "test_tenant", ("DEV",)))
     from contracts.agent import SystemAgentRef
     from management.services.conversation import creator_execution
     mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))
     mocker.patch.object(creator_execution, "authorize_target", side_effect=lambda target, *_: target)
     mocker.patch.object(creator_execution, "prepare_creation_history", return_value=(42, 1))
-    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=lambda stream, **_: stream)
+    from test.common.creator_runtime_boundary import isolate_creator_runtime
+    return isolate_creator_runtime(monkeypatch, creator_execution)
 
 
 @pytest.mark.asyncio
@@ -364,6 +367,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -386,7 +390,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
 
 @pytest.mark.asyncio
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
-    mocker, mock_auth_header
+    mocker, mock_auth_header, creator_history_boundary
 ):
     mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
@@ -409,10 +413,6 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     prepare = mocker.patch(
         "management.services.conversation.creator_execution.prepare_creation_history", return_value=(42, 1)
     )
-    persist = mocker.patch(
-        "management.services.conversation.creator_execution.persist_creation_stream",
-        side_effect=lambda stream, **kwargs: stream,
-    )
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
             query="Build a weather agent",
@@ -426,13 +426,21 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
     assert response.headers["conversation_id"] == "42"
     assert prepare.call_args.kwargs["agent_id"] == 77
     assert prepare.call_args.kwargs["target"] == {"type": "agent", "id": 17}
     chunks = [chunk async for chunk in response.body_iterator]
     assert chunks
-    assert persist.call_args.kwargs["assistant_index"] == 1
+    assistant = creator_history_boundary.save.call_args.args[0]
+    assert assistant.role == "assistant" and assistant.message_idx == 1
+    assert creator_history_boundary.save.call_args.kwargs["status"] == "streaming"
+    creator_history_boundary.checkpoint.assert_called_once()
+    assert creator_history_boundary.checkpoint.call_args.kwargs == {
+        "message_id": 101, "conversation_id": 42, "user_id": "user-a",
+    }
+    creator_history_boundary.launch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -598,6 +606,7 @@ async def test_nl2agent_editor_run_uses_persistent_history(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -637,6 +646,7 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer invalid-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 401
@@ -664,6 +674,7 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 500
@@ -710,6 +721,7 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == expected_status
