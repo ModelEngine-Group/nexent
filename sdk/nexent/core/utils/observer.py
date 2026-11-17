@@ -10,6 +10,8 @@ from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
+from nexent.core.agents.contracts.identity import root_clarification_allowed
+
 
 _NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
 _NL2A_STATE_PATTERN = re.compile(
@@ -339,6 +341,12 @@ class MessageObserver:
         explicit ``agent_id`` from the tool still wins.
         """
         active = self._active_subagent()
+        if process_type == ProcessType.HUMAN_INTERACTION and (
+            not root_clarification_allowed() or active is not None
+        ):
+            # Legacy Core paths can return missing inputs as child-task text,
+            # but must not publish a child form to the user-facing channel.
+            return
         if active is not None:
             active_invocation, active_agent_id, _active_agent_name = active
         else:

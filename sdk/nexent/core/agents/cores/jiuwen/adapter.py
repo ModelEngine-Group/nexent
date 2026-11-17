@@ -16,6 +16,7 @@ from nexent.core.agents.context.models import ContextItem, ContextItemType
 from nexent.core.agents.context.rendering import ContextItemRenderer
 from nexent.core.agents.contracts.adapter import AgentCoreAdapter, UnsupportedAgentCoreConfig
 from nexent.core.agents.contracts.clarification import render_question_text
+from nexent.core.agents.contracts.identity import root_clarification_allowed
 from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested, JiuwenClarification
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
@@ -114,7 +115,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         ])
         occupied = {*reserved_names, *(child.invocation_name for child in self.external_agents)}
         self.clarification = JiuwenClarification(occupied) if (
-            getattr(config, "response_mode", "chat") == "chat"
+            root_clarification_allowed(run_info) and getattr(config, "response_mode", "chat") == "chat"
             and getattr(getattr(run_info, "observer", None), "enable_nl2a_wrapper", False) is not True
         ) else None
 
@@ -499,6 +500,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         shared = business_system_instructions(
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
             getattr(getattr(self.run_info, "observer", None), "lang", "en"),
+            is_subagent=not root_clarification_allowed(self.run_info),
         )
         protocol = "" if self.text_protocol or self.artifact_output else NATIVE_PROTOCOL_INSTRUCTION
         if self.artifact_output:
@@ -735,6 +737,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         except ClarificationRequested as requested:
             if getattr(self, "scope", None) is not None and self.scope.cancelled:
                 raise RunTerminated() from None
+            if not root_clarification_allowed(self.run_info):
+                answer = render_question_text(requested.form)
+                self.events.final_answer = answer
+                self._run_completed = True
+                return answer
             self.events.output(ProcessType.HUMAN_INTERACTION,
                                json.dumps({"schema_version": 1, **requested.form.model_dump(mode="json", exclude_none=True)},
                                           ensure_ascii=False))

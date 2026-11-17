@@ -604,7 +604,10 @@ class CoreAgent(CodeAgent):
         self._consecutive_clarification_errors = 0
         self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
-        if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
+        from nexent.core.agents.contracts.identity import root_clarification_allowed
+
+        if (kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action"
+                and root_clarification_allowed()):
             occupied = {
                 tool.name for tool in [*kwargs.get("tools", []), *kwargs.get("managed_agents", [])]
             }
