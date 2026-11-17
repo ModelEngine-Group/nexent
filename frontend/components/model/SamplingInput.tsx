@@ -2,9 +2,23 @@
 
 "use client";
 
-import { Button, InputNumber } from "antd";
+import { useRef } from "react";
+import { ConfigProvider, InputNumber } from "antd";
 import { useTranslation } from "react-i18next";
-import { TOP_P_STEP, samplingErrorKey, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
+
+import {
+  TOP_P_STEP,
+  samplingErrorKey,
+  validSampling,
+  type SamplingField,
+} from "@/lib/modelSamplingParameters";
+
+function formatSamplingNumber(
+  value: number | undefined,
+  { userTyping, input }: { userTyping: boolean; input: string }
+) {
+  return userTyping ? input : String(value ?? "");
+}
 
 export function SamplingInput({
   field,
@@ -13,7 +27,10 @@ export function SamplingInput({
   inherited,
   schema = {},
   disabled,
+  className,
+  placeholder,
   onChange,
+  onCommit,
 }: {
   field: SamplingField;
   label: string;
@@ -21,72 +38,89 @@ export function SamplingInput({
   inherited?: unknown;
   schema?: Record<string, unknown>;
   disabled?: boolean;
+  className?: string;
+  placeholder?: string;
   onChange: (value: number | null) => void;
+  onCommit?: (value: number | null) => void;
 }) {
   const { t } = useTranslation();
-  const display = value ?? inherited;
-  const invalid = !validSampling(field, display, schema);
+  const edited = useRef(false);
+  const number = typeof value === "number" ? value : null;
+  const invalid = !validSampling(field, value ?? inherited, schema);
   const step = field === "top_p" ? TOP_P_STEP : 0.1;
-  const min = Math.max(
-    field === "top_p" ? TOP_P_STEP : 0,
-    typeof schema.minimum === "number" ? schema.minimum : 0
-  );
   const max = Math.min(
     field === "top_p" ? 1 : 2,
     typeof schema.maximum === "number" ? schema.maximum : Infinity
   );
-  const stepValue = (direction: number) =>
-    Math.min(
-      max,
-      Math.max(
-        min,
-        Number(
-          (
-            (typeof display === "number" ? display : 0) +
-            direction * step
-          ).toPrecision(15)
-        )
-      )
-    );
-  const canStep = (direction: number) =>
-    !disabled &&
-    validSampling(field, stepValue(direction), schema) &&
-    stepValue(direction) !== display;
+  const min = Math.min(
+    max,
+    Math.max(
+      field === "top_p" ? TOP_P_STEP : 0,
+      typeof schema.minimum === "number" ? schema.minimum : 0
+    )
+  );
+
+  const commit = () => {
+    if (!edited.current) return;
+    edited.current = false;
+    onCommit?.(number);
+  };
 
   return (
-    <div className="min-w-0 flex-1">
-      <div className="flex gap-1">
-        <InputNumber
+    <div className={`min-w-0 ${className ?? "flex-1"}`}>
+      <ConfigProvider theme={{ components: { InputNumber: { handleVisible: true } } }}>
+        <InputNumber<number>
           aria-label={label}
           aria-invalid={invalid}
           className="!w-full"
-          controls={false}
-          keyboard={false}
+          controls
+          min={min}
+          max={max}
+          step={step}
+          formatter={formatSamplingNumber}
           changeOnBlur={false}
-          value={typeof value === "number" ? value : null}
+          value={number}
           placeholder={
             typeof inherited === "number"
               ? String(inherited)
-              : t("modelProfile.serviceSamplingDefault")
+              : (placeholder ?? t("modelProfile.serviceSamplingDefault"))
           }
           disabled={disabled}
           status={invalid ? "error" : undefined}
-          onChange={onChange}
+          onInput={(text) => {
+            // Numeric drafts may be outside the stepper range, such as a
+            // manually entered Top P below 0.01 or a value needing repair.
+            const next = text.trim() === "" ? null : Number(text);
+            if (next === number || (next !== null && !Number.isFinite(next))) return;
+            edited.current = true;
+            onChange(next);
+          }}
+          onStep={(stepped, { offset, type }) => {
+            const next =
+              number === null && typeof inherited === "number"
+                ? Math.min(
+                    max,
+                    Math.max(
+                      min,
+                      Number(
+                        (inherited + (type === "up" ? 1 : -1) * Number(offset)).toPrecision(15)
+                      )
+                    )
+                  )
+                : stepped;
+            if (!validSampling(field, next, schema)) return;
+            edited.current = false;
+            onChange(next);
+            onCommit?.(next);
+          }}
+          onBlur={commit}
+          onPressEnter={(event) => {
+            if (!onCommit) return;
+            event.preventDefault();
+            commit();
+          }}
         />
-        {([-1, 1] as const).map((direction) => {
-          const symbol = direction < 0 ? "−" : "+";
-          return (
-            <Button
-              key={direction}
-              aria-label={`${label} ${symbol}`}
-              disabled={!canStep(direction)}
-              onClick={() => onChange(stepValue(direction))}
-            >
-              {symbol}
-            </Button>
-          );
-        })}
-      </div>
+      </ConfigProvider>
       {invalid && (
         <p role="alert" className="text-xs text-destructive">
           {t(samplingErrorKey(field))}

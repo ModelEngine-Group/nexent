@@ -9,25 +9,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Button, Popover, Slider } from "antd";
+import { Button, Popover } from "antd";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
-import { TOP_P_STEP, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
+import {
+  validSampling,
+  type SamplingField,
+} from "@/lib/modelSamplingParameters";
+import { SamplingInput } from "@/components/model/SamplingInput";
 
-function configuredValue(value: number | undefined, max: number) {
-  return value != null && Number.isFinite(value) && value >= 0 && value <= max
-    ? value
-    : undefined;
-}
-
-export function ParameterLevel({
+function ParameterLevel({
   label,
   value,
   inheritedValue,
-  max,
-  min = 0,
   disabled,
   field,
   schema,
@@ -37,148 +33,41 @@ export function ParameterLevel({
   label: string;
   value?: number;
   inheritedValue?: number;
-  max: number;
-  min?: number;
   disabled?: boolean;
-  field?: SamplingField;
+  field: SamplingField;
   schema?: Record<string, unknown>;
-  onClear?: () => void;
+  onClear: () => void;
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
-  const topP = field === "top_p";
-  const step = topP ? TOP_P_STEP : 0.1;
-  const sliderMin = topP ? Math.min(max, Math.max(min, TOP_P_STEP)) : min;
   const displayValue = value ?? inheritedValue;
-  const isValid = (next: number) =>
-    field
-      ? validSampling(field, next, { minimum: min, maximum: max, ...schema })
-      : Number.isFinite(next) && next >= min && next <= max;
-  const sliderDisabled =
-    disabled || (topP && sliderMin === max && !isValid(max));
-  const [text, setText] = useState(
-    displayValue == null ? "" : String(displayValue)
-  );
-  const [error, setError] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [draft, setDraft] = useState(displayValue ?? null);
   const [previousValue, setPreviousValue] = useState(displayValue);
   if (previousValue !== displayValue) {
     setPreviousValue(displayValue);
-    setText(displayValue == null ? "" : String(displayValue));
-    setError(false);
-    setDirty(false);
+    setDraft(displayValue ?? null);
   }
-  const commit = () => {
-    if (!dirty) return;
-    if (!text.trim() && onClear) {
-      setError(false);
-      setDirty(false);
-      setText(inheritedValue == null ? "" : String(inheritedValue));
+  const commit = (next: number | null) => {
+    if (next === null) {
+      setDraft(inheritedValue ?? null);
       if (value !== undefined) onClear();
-      return;
+    } else if (validSampling(field, next, schema) && next !== value) {
+      onChange(next);
     }
-    const next = Number(text);
-    if (!text.trim() || !isValid(next)) {
-      setError(true);
-      return;
-    }
-    setError(false);
-    setDirty(false);
-    setText(String(next));
-    if (next !== value) onChange(next);
   };
-  const draftNumber = text.trim() ? Number(text) : displayValue;
-  const sliderValue =
-    draftNumber != null && isValid(draftNumber) ? draftNumber : null;
-  const invalid = error || (field !== undefined && !!text.trim() && !isValid(Number(text)));
   return (
     <div className="space-y-1">
       <label className="text-sm">{label}</label>
-      <div className="flex items-center gap-3">
-        <Slider
-          min={sliderMin}
-          max={max}
-          step={step}
-          value={sliderValue ?? sliderMin}
-          marks={
-            sliderValue == null
-              ? undefined
-              : {
-                  [sliderValue]: {
-                    label: <span />,
-                    style: { display: "none" },
-                  },
-                }
-          }
-          styles={
-            sliderValue == null
-              ? {
-                  handle: { opacity: 0 },
-                  track: { opacity: 0 },
-                }
-              : undefined
-          }
-          tooltip={
-            sliderValue == null
-              ? {
-                  formatter: () => t("modelProfile.thinkingModeOption.default"),
-                }
-              : undefined
-          }
-          disabled={sliderDisabled}
-          className="!m-0 min-w-0 flex-1 focus-within:ring-2 focus-within:ring-ring/50 [&_.ant-slider-dot]:hidden"
-          ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
-          ariaValueTextFormatterForHandle={(next) =>
-            sliderValue == null
-              ? t("modelProfile.thinkingModeOption.default")
-              : String(next)
-          }
-          onChange={(next) => {
-            if (!isValid(next)) return;
-            setText(String(next));
-            setError(false);
-            setDirty(true);
-          }}
-          onChangeComplete={(next) => {
-            if (isValid(next)) onChange(next);
-          }}
-        />
-        <input
-          type="number"
-          min={sliderMin}
-          max={max}
-          step={step}
-          placeholder={t("modelProfile.thinkingModeOption.default")}
-          aria-label={label}
-          aria-invalid={invalid}
-          disabled={disabled}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setDirty(true);
-          }}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commit();
-            }
-          }}
-          className="h-8 w-36 shrink-0 rounded border border-border px-2 text-sm"
-        />
-      </div>
-      {invalid && (
-        <p role="alert" className="text-xs text-destructive">
-          {topP
-            ? t("modelParams.topPInvalid")
-            : t("workbench.controls.numberRange", {
-                defaultValue: "请输入 {{min}}–{{max}} 的数字",
-                min,
-                max,
-              })}
-        </p>
-      )}
+      <SamplingInput
+        field={field}
+        label={label}
+        value={draft}
+        schema={schema}
+        disabled={disabled}
+        placeholder={t("modelProfile.thinkingModeOption.default")}
+        onChange={setDraft}
+        onCommit={commit}
+      />
     </div>
   );
 }
@@ -291,7 +180,6 @@ export function ModelParameterPopover({
 export function ModelSamplingFields(
   control: ModelParameterSettingsControl & {
     disabledFields?: string[];
-    bounds?: Record<string, { min?: number; max?: number }>;
     schemas?: Partial<Record<SamplingField, Record<string, unknown>>>;
   }
 ) {
@@ -304,8 +192,6 @@ export function ModelSamplingFields(
         label={t("workbench.controls.temperature", "温度")}
         value={control.value.temperature}
         inheritedValue={control.inheritedValue?.temperature}
-        min={Math.max(0, control.bounds?.temperature?.min ?? 0)}
-        max={Math.min(2, control.bounds?.temperature?.max ?? 2)}
         field="temperature"
         schema={control.schemas?.temperature}
         onClear={() => {
@@ -325,8 +211,6 @@ export function ModelSamplingFields(
         label="Top P"
         value={control.value.top_p}
         inheritedValue={control.inheritedValue?.top_p}
-        min={control.bounds?.top_p?.min}
-        max={Math.min(control.bounds?.top_p?.max ?? 1, 1)}
         field="top_p"
         schema={control.schemas?.top_p}
         onClear={() => {
@@ -337,21 +221,6 @@ export function ModelSamplingFields(
         disabled={control.disabled || control.disabledFields?.includes("top_p")}
         onChange={(top_p) => control.onChange({ ...control.value, top_p })}
       />
-      {(configuredValue(
-        control.value.temperature ?? control.inheritedValue?.temperature,
-        2
-      ) == null ||
-        configuredValue(
-          control.value.top_p ?? control.inheritedValue?.top_p,
-          1
-        ) == null) && (
-        <p className="text-xs text-muted-foreground">
-          {t(
-            "workbench.controls.configureDefaults",
-            "请先在模型配置中设置默认值，或输入本次使用的数值。"
-          )}
-        </p>
-      )}
       <Button
         size="small"
         htmlType="button"

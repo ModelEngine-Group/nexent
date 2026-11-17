@@ -139,7 +139,7 @@ async function changeSampling(name: string, value: string) {
   fireEvent.change(field, { target: { value } });
   fireEvent.blur(field);
 }
-it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by deletion", async () => {
+it("UI-SESSION-15 uses shared steppers, persists native values and resets by deletion", async () => {
   setup(11);
   expect(
     screen.queryByRole("button", { name: "modelProfile.parameters" })
@@ -150,13 +150,14 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
   await waitFor(() => expect(thinking).toBeEnabled());
   fireEvent.click(thinking);
   await waitFor(() => expect(thinking).toHaveAttribute("aria-checked", "true"));
-  expect(await openAdvanced()).toHaveValue(0.5);
-  expect(screen.getAllByRole("slider")).toHaveLength(2);
+  expect(await openAdvanced()).toHaveValue("0.5");
+  expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Increase Value" })).toHaveLength(2);
   await changeSampling(temperatureName, "0");
   await waitFor(() => expect(saved.parameter_values.temperature).toBe(0));
   await changeSampling(temperatureName, "");
   await waitFor(() => expect(saved.parameter_values.temperature).toBeUndefined());
-  expect(screen.getByRole("spinbutton", { name: temperatureName })).toHaveValue(0.5);
+  expect(screen.getByRole("spinbutton", { name: temperatureName })).toHaveValue("0.5");
   await changeSampling(temperatureName, "0.31");
   await waitFor(() => expect(saved.parameter_values.temperature).toBe(0.31));
   await changeSampling("Top P", "0.72");
@@ -171,8 +172,8 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
   );
   const panel = await screen.findByRole("region", { name: advancedName });
   fireEvent.keyDown(panel, { key: "Escape" });
-  expect(await openAdvanced()).toHaveValue(0.31);
-  expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0.72);
+  expect(await openAdvanced()).toHaveValue("0.31");
+  expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue("0.72");
   await waitFor(() =>
     expect(
       screen.getByRole("button", { name: "workbench.controls.restore" })
@@ -201,7 +202,7 @@ it("UI-SESSION-15 edits unsent conversation drafts without creating server prefe
   await waitFor(() => expect(thinking).toBeEnabled());
   fireEvent.click(thinking);
   await waitFor(() => expect(thinking).toHaveAttribute("aria-checked", "true"));
-  expect(await openAdvanced()).toHaveValue(0.5);
+  expect(await openAdvanced()).toHaveValue("0.5");
   await changeSampling(temperatureName, "0.24");
   await waitFor(() =>
     expect(readModelDraft("fresh-thread", 42)).toEqual({
@@ -212,7 +213,7 @@ it("UI-SESSION-15 edits unsent conversation drafts without creating server prefe
   fireEvent.keyDown(screen.getByRole("region", { name: advancedName }), {
     key: "Escape",
   });
-  expect(await openAdvanced()).toHaveValue(0.24);
+  expect(await openAdvanced()).toHaveValue("0.24");
   expect(readModelDraft("another-thread", 42)).toEqual({});
   expect(readModelDraft("fresh-thread", 43)).toEqual({});
   expect(api.getConversationModelPreferences).not.toHaveBeenCalled();
@@ -283,8 +284,8 @@ it("retains profile sampling bounds in the shared upstream control", async () =>
   saved.field_specs[0].schema = { type: "number", minimum: 0.1, maximum: 0.6 };
   setup(11);
   const field = await openAdvanced();
-  expect(field).toHaveAttribute("min", "0.1");
-  expect(field).toHaveAttribute("max", "0.6");
+  expect(field).toHaveAttribute("aria-valuemin", "0.1");
+  expect(field).toHaveAttribute("aria-valuemax", "0.6");
   fireEvent.change(field, { target: { value: "0.7" } });
   fireEvent.blur(field);
   expect(field).toHaveAttribute("aria-invalid", "true");
@@ -370,9 +371,9 @@ it("flags historical Top P zero and deletes the override on clear", async () => 
   saved.defaults = { temperature: null };
   saved.parameter_values = { temperature: 0, top_p: 0 };
   setup(11, undefined, { agentDefaults: {} });
-  expect(await openAdvanced()).toHaveValue(0);
+  expect(await openAdvanced()).toHaveValue("0");
   const topP = screen.getByRole("spinbutton", { name: "Top P" });
-  expect(topP).toHaveValue(0);
+  expect(topP).toHaveValue("0");
   expect(topP).toHaveAttribute("aria-invalid", "true");
   await changeSampling("Top P", "0.995");
   await waitFor(() => expect(saved.parameter_values.top_p).toBe(0.995));
@@ -387,7 +388,7 @@ it("flags historical Top P zero and deletes the override on clear", async () => 
   await waitFor(() =>
     expect(
       screen.getByRole("spinbutton", { name: temperatureName })
-    ).toHaveValue(null)
+    ).toHaveValue("")
   );
   expect(api.patchConversationModelPreferences).toHaveBeenLastCalledWith(
     11,
@@ -561,16 +562,11 @@ it("AC-004 lets a keyboard edit create the first explicit sampling value from se
   saved.defaults = {};
   setup(11, undefined, { agentDefaults: {} });
   const temperature = await openAdvanced();
-  const slider = screen.getByRole("slider", {
-    name: "workbench.controls.temperature workbench.controls.slider",
-  });
-  fireEvent.focus(slider);
+  fireEvent.focus(temperature);
   expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
-  fireEvent.keyDown(slider, { key: "ArrowRight", keyCode: 39 });
-  fireEvent.keyUp(slider, { key: "ArrowRight", keyCode: 39 });
+  fireEvent.keyDown(temperature, { key: "ArrowUp" });
   await waitFor(() =>
     expect(saved.parameter_values).toEqual({ temperature: 0.1 })
   );
-  expect(temperature).toHaveValue(0.1);
-  expect(slider).toHaveAttribute("aria-valuenow", "0.1");
+  expect(temperature).toHaveValue("0.1");
 });

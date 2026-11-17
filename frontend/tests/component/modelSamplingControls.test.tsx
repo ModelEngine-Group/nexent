@@ -44,8 +44,8 @@ describe("model sampling controls", () => {
   it("displays inherited defaults without emitting values and preserves explicit zero and clearing", () => {
     const change = modelForm({ max_output_tokens: 512 });
     const temperature = screen.getByRole("spinbutton", { name: "温度" });
-    expect(temperature).toHaveValue(null);
-    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(null);
+    expect(temperature).toHaveValue("");
+    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue("");
     expect(change).not.toHaveBeenCalled();
     fireEvent.change(temperature, { target: { value: "0" } });
     const explicit = change.mock.lastCall![0];
@@ -73,33 +73,36 @@ describe("model sampling controls", () => {
     fireEvent.change(input, { target: { value: "0" } });
     expect(input).toHaveAttribute("aria-invalid", "true");
     fireEvent.keyDown(slider, { key: "Home" });
-    expect(input).toHaveValue(0.01);
-    fireEvent.click(screen.getByRole("button", { name: "Top P −" }));
-    expect(input).toHaveValue(0.01);
+    expect(input).toHaveValue("0.01");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyUp(input, { key: "ArrowDown" });
+    expect(input).toHaveValue("0.01");
     fireEvent.keyDown(slider, { key: "ArrowRight" });
-    expect(input).toHaveValue(0.02);
+    expect(input).toHaveValue("0.02");
     fireEvent.change(input, { target: { value: "0.995" } });
     fireEvent.blur(input);
-    expect(input).toHaveValue(0.995);
+    expect(input).toHaveValue("0.995");
     fireEvent.change(input, { target: { value: "0.005" } });
-    expect(input).toHaveValue(0.005);
+    expect(input).toHaveValue("0.005");
     fireEvent.change(input, { target: { value: "" } });
-    expect(input).toHaveValue(null);
+    expect(input).toHaveValue("");
   });
 
   it("supports keyboard limits and decimal stepping", () => {
     modelForm({ temperature: 0.2 });
     const slider = screen.getByRole("slider", { name: "温度" });
     fireEvent.keyDown(slider, { key: "ArrowRight" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.3);
-    fireEvent.click(screen.getByRole("button", { name: "温度 −" }));
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.2);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.3");
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowDown" });
+    fireEvent.keyUp(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowDown" });
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.2");
     fireEvent.keyDown(slider, { key: "End" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(2);
-    fireEvent.click(screen.getByRole("button", { name: "温度 +" }));
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(2);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("2");
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowUp" });
+    fireEvent.keyUp(screen.getByRole("spinbutton", { name: "温度" }), { key: "ArrowUp" });
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("2");
     fireEvent.keyDown(slider, { key: "Home" });
-    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0);
+    expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0");
   });
 
   it("updates the numeric input when the slider is dragged", () => {
@@ -113,9 +116,9 @@ describe("model sampling controls", () => {
         width: 200,
       } as DOMRect);
       fireEvent.pointerDown(slider, { clientX: 150 });
-      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.5);
+      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.5");
       fireEvent.pointerMove(slider, { clientX: 200 });
-      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(1);
+      expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("1");
       fireEvent.pointerUp(slider);
     } finally {
       vi.unstubAllGlobals();

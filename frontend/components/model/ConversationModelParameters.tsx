@@ -404,23 +404,6 @@ function PreferenceEditor({
             .filter((rule) => samplingKeys.includes(rule.key))
             .map((rule) => [rule.key, rule.schema])
         )}
-        bounds={Object.fromEntries(
-          saved.field_specs
-            .filter((rule) => samplingKeys.includes(rule.key))
-            .map((rule) => [
-              rule.key,
-              {
-                min:
-                  typeof rule.schema.minimum === "number"
-                    ? rule.schema.minimum
-                    : undefined,
-                max:
-                  typeof rule.schema.maximum === "number"
-                    ? rule.schema.maximum
-                    : undefined,
-              },
-            ])
-        )}
         onChange={(next) =>
           save.mutate({
             parameter_values: { ...next },
