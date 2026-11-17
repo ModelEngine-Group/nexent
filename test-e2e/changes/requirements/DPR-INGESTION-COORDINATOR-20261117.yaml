@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-INGESTION-COORDINATOR-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Coordinate persisted Management ingestion with single child submissions
+  description: Reuse the domain journal and live resource policy to admit, reserve, submit and inspect fixed cleanse and Runtime jobs. Public callers and application dispatch remain pending.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-INGESTION-JOURNAL-D3-001, DPR-FILE-CLEANSE-D3-001]
+    added: []
+    modified: [DPR-KB-HTTP-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Recheck live DAC, exact source, current model binding and pinned model revision before effects.
+    - Persist each submission phase before its child call and fence competing or stale coordinators.
+    - Inspect deterministic IDs after lost replies; missing jobs never cause automatic resubmission.
+    - Propagate non-404 upstream errors and preserve explicit failure without replay.
+    - Bound the whole operation, signal cancellation, close owned ports and log safe timeout warnings once.
+    reason: Existing journal UT prove domain CAS and child identity. New UT combines real SQLite records, DAC and managed threads with controlled child I/O. The existing HTTP D3 gains actual PG, production cleansing admission, signed Model.get and KB upload/inspect, plus coordinator reconstruction after a deliberately lost accepted response. It does not prove public ingress, parser execution, vector execution or actual application restart; no duplicate D1 is added.
+    test_selectors:
+    - test/backend/services/test_knowledge_ingestion_coordinator.py
+    - test/backend/services/test_knowledge_ingestion_journal.py
+    - test/backend/services/test_knowledge_ingestion_contract.py
+    - test/backend/infrastructure/test_knowledge_ingestion_records.py
+    - test/backend/services/test_cleanse_authorization.py
+    - test/backend/services/test_knowledge_cleanse_jobs.py

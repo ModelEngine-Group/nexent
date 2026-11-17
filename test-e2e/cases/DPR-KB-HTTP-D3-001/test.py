@@ -38,6 +38,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
     from contracts.constants import environment
     from contracts.errors.exceptions import RuntimeUpstreamError
     from contracts.knowledge_cleanse import KnowledgeCleanseRequest
+    from coordinator_probe import check_management_coordinator
     from fastapi import FastAPI
     from management.api.knowledge_base.agentos_authorization import (
         create_knowledge_authorization_router,
@@ -55,6 +56,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
     from nexent.storage.models import OperationContext, RecordQuery, StorageScope
     from runtime.agentos.knowledge import create_knowledge_router
     from runtime.agentos.middleware import AgentOSMiddleware
+    from runtime.agentos.model import create_model_router
     from runtime.knowledge_base.service import KnowledgeService
     from runtime.model.service import ModelService
     from timeout_probe import check_lost_admission
@@ -70,7 +72,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
     from infrastructure.rdb.cleanse_jobs import DATASET, bind_cleanse_jobs, cleanse_jobs
     from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
     from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
-    from infrastructure.rdb.knowledge_jobs import FILES, JOBS, bind_knowledge_jobs
+    from infrastructure.rdb.knowledge_jobs import FILES, JOBS, bind_knowledge_jobs, jobs
     from infrastructure.rdb.knowledge_search_records import KnowledgeRecord
 
     def docker(*args):
@@ -274,6 +276,9 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
         runtime_app = FastAPI(root_path="/api")
         runtime_app.add_middleware(AgentOSMiddleware)
         runtime_app.include_router(
+            create_model_router(ModelService(load_model, no_provider))
+        )
+        runtime_app.include_router(
             create_knowledge_router(
                 KnowledgeService(
                     AgentOSClient(management_url, client),
@@ -416,6 +421,16 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
                     )
                 ).status == "cleanup_pending"
                 await check_lost_admission(api, engine, monkeypatch)
+                with engine.connect() as connection:
+                    assert (
+                        connection.execute(
+                            sa.select(sa.func.count()).select_from(jobs)
+                        ).scalar_one()
+                        == 3
+                    )
+                await check_management_coordinator(
+                    api, engine, source, artifact, context
+                )
                 with engine.begin() as connection:
                     connection.execute(
                         UserTenant.__table__.update().values(delete_flag="Y")
@@ -437,7 +452,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
                     assert not drained.stuck_execution_ids
 
         count = asyncio.run(scenario())
-        assert count() == 3
+        assert count() == 4
         record_property(
             "knowledge_http_probe",
             json.dumps(
@@ -447,6 +462,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
                     "durable_runtime_jobs": True,
                     "provider_invoked": False,
                     "physical_cleanup_claimed": False,
+                    "management_coordinator_lost_reply_inspect_only": True,
                     "dependency_image_id": image_id,
                     "source_hashes": {
                         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -454,6 +470,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
                             "backend/runtime/knowledge_base/service.py",
                             "backend/management/services/knowledge_base/authorization.py",
                             "infrastructure/agentos_client.py",
+                            "backend/management/services/knowledge_base/ingestion_coordinator.py",
                         )
                     },
                 },

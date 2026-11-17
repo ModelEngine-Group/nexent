@@ -23,6 +23,7 @@ def test_role_parser_images(record_property):
         "contracts.knowledge_ingestion": "backend/contracts/knowledge_ingestion.py",
         "management.services.file.cleanse_jobs": "backend/management/services/file/cleanse_jobs.py",
         "management.services.knowledge_base.ingestion_journal": "backend/management/services/knowledge_base/ingestion_journal.py",
+        "management.services.knowledge_base.ingestion_coordinator": "backend/management/services/knowledge_base/ingestion_coordinator.py",
         "runtime.knowledge_base.jobs": "backend/runtime/knowledge_base/jobs.py",
         "infrastructure.rdb.knowledge_file_record": "infrastructure/rdb/knowledge_file_record.py",
         "infrastructure.rdb.knowledge_ingestion": "infrastructure/rdb/knowledge_ingestion.py",

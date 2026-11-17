@@ -5,7 +5,7 @@ case:
   case_id: DPR-KB-HTTP-D3-001
   feature_id: DPR-KNOWLEDGE
   requirement_ids: [DPR-002, DPR-003, DPR-006]
-  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02, DPR-KNOWLEDGE-RULE-03]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02, DPR-KNOWLEDGE-RULE-03, DPR-KNOWLEDGE-RULE-07]
   title: Signed KB admission through Runtime and Management HTTP with PostgreSQL
   type: INTEGRATION
   priority: P1
@@ -34,6 +34,9 @@ case:
     action: Hold a manifest row lock, submit another delete, let the actual HTTP client deadline expire, release the lock and replay the exact request.
     expected: The timed out sender closes; the accepted request commits after release and replay returns one stable cleanup_pending job without another logical admission.
   - order: 6
+    action: Before revocation, admit a second owned file through the Management coordinator, complete its real cleanse job with a controlled artifact, drop the successful signed Runtime upload reply and reconstruct the coordinator.
+    expected: Persisted submission phases precede child effects; the reconstructed coordinator inspects its fixed forward_task_id and observes one queued Runtime job without a second upload or provider invocation.
+  - order: 7
     action: Revoke the actor membership, attempt inspection, then close both servers, managed workers, engine and owned container.
     expected: Inspection is denied without falling back to a database read in Runtime; owned resources are reclaimed.
   expected_results:
@@ -42,6 +45,7 @@ case:
   - Deletion remains logically pending and preserves lifecycle ownership.
   - Resource closure and revocation are observable without data-process or retry paths.
   - A lost HTTP admission response remains confirmable by the same idempotent request without false physical completion.
+  - Management coordinator reconstruction confirms an uncertain upload only by its original job ID and preserves current resource authorization.
   forbidden_side_effects:
   - No application data, model provider, actual vector write, parser process or data-process endpoint is accessed.
   integration_boundary:
@@ -69,11 +73,16 @@ case:
     forbidden_side_effects: [1]
   - id: AC-04
     description: Revocation stops access and owned resources close.
-    steps: [6]
+    steps: [7]
     expected_results: [4]
     forbidden_side_effects: [1]
   - id: AC-05
     description: An actual request deadline and lost response preserve durable idempotent admission.
     steps: [5]
     expected_results: [5]
+    forbidden_side_effects: [1]
+  - id: AC-06
+    description: Persisted Management coordination uses real signed child admission and only inspects after a lost response.
+    steps: [6]
+    expected_results: [6]
     forbidden_side_effects: [1]

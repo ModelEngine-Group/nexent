@@ -11,6 +11,7 @@ acceptance_bindings:
   AC-03: [test_signed_knowledge_lifecycle]
   AC-04: [test_signed_knowledge_lifecycle]
   AC-05: [test_signed_knowledge_lifecycle]
+  AC-06: [test_signed_knowledge_lifecycle]
 preparation:
   families: []
   anchors: false
