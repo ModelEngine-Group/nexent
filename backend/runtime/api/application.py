@@ -4,7 +4,6 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from configuration.runtime import start_system_configuration, stop_system_configuration
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from infrastructure.concurrency import runtime_thread_manager
 from management.api.automation.agent_automation import (
@@ -20,6 +19,10 @@ from management.api.conversation.conversation_share import (
     router as conversation_share_router,
 )
 from management.api.conversation.workbench_pins import router as workbench_pins_router
+from management.configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from management.services.agent.run_state import runtime_state_service
 from management.utils.app_factory import create_app
 from middleware.exception_handler import ExceptionHandlerMiddleware
@@ -74,13 +77,15 @@ async def runtime_lifespan(_app):
         return await runtime_thread_manager.run(
             "control-io",
             ManagedTaskSpec(
-                task_name="system-configuration-refresh", owner="configuration.runtime"
+                task_name="system-configuration-refresh", owner="management.configuration.runtime"
             ),
             fn,
         )
 
     try:
-        await start_system_configuration(run_configuration_io)
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         await start_agent_automation_scheduler()
         yield
     finally:

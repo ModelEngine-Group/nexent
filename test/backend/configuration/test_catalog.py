@@ -29,13 +29,13 @@ EXPECTED_DEFAULTS = {
 
 
 def _catalog():
-    from configuration.catalog import DEFAULT_CATALOG
+    from management.configuration.catalog import DEFAULT_CATALOG
 
     return DEFAULT_CATALOG
 
 
 def _validation_error():
-    from configuration.catalog import ConfigurationValidationError
+    from management.configuration.catalog import ConfigurationValidationError
 
     return ConfigurationValidationError
 

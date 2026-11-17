@@ -5,18 +5,36 @@ import json
 import logging
 
 import redis
-from configuration.catalog import (
+from contracts.constants.environment import REDIS_URL
+from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigValue,
     SystemConfigurationSnapshot,
 )
-from configuration.database import configuration_database
-from configuration.repository import SystemConfigurationRepository
-from configuration.runtime import CONFIGURATION_CHANGED, CONFIGURATION_CHANNEL
-from contracts.constants.environment import REDIS_URL
+from management.configuration.database import configuration_database
+from management.configuration.repository import SystemConfigurationRepository
+from management.configuration.runtime import (
+    CONFIGURATION_CHANGED,
+    CONFIGURATION_CHANNEL,
+)
+from nexent.core.concurrency import ManagedTaskSpec
 
 logger = logging.getLogger(__name__)
 repository = SystemConfigurationRepository()
+
+
+async def run_system_configuration_io(manager, fn, *args, **kwargs):
+    """Run every configuration database/Redis operation through the OPS I/O lane."""
+    return await manager.run(
+        "control-io",
+        ManagedTaskSpec(
+            task_name="system-configuration-io",
+            owner="ops.api.system_configurations",
+        ),
+        fn,
+        *args,
+        **kwargs,
+    )
 
 
 def _catalog_items(snapshot: SystemConfigurationSnapshot, keys=None) -> list[dict]:

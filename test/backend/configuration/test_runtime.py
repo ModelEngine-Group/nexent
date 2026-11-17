@@ -10,7 +10,7 @@ from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
 
 def _runtime(**overrides):
-    from configuration.runtime import SystemConfigurationRuntime
+    from management.configuration.runtime import SystemConfigurationRuntime
 
     return SystemConfigurationRuntime(**overrides)
 
@@ -41,7 +41,7 @@ async def test_getter_is_local_and_does_not_call_loader_or_redis():
 
 
 def test_getter_fails_when_no_valid_snapshot_exists():
-    from configuration.runtime import ConfigurationNotReadyError
+    from management.configuration.runtime import ConfigurationNotReadyError
 
     runtime = _runtime(loader=AsyncMock())
 
@@ -72,7 +72,7 @@ async def test_concurrent_refreshes_are_serialized_and_latest_database_value_win
 
 
 async def test_poll_coalesces_notifications_and_ignores_message_values():
-    from configuration.runtime import CONFIGURATION_CHANNEL
+    from management.configuration.runtime import CONFIGURATION_CHANNEL
 
     loader = AsyncMock(return_value={**EXPECTED_DEFAULTS, "MAX_TENANT_COUNT": 7})
     runtime = _runtime(loader=loader)

@@ -20,7 +20,7 @@ from contracts.constants.environment import (
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     NEXENT_MCP_INTERNAL_TOKEN,
 )
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
 from infrastructure.redis import get_redis_client

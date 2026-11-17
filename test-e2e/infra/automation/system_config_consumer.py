@@ -9,8 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import redis
-from configuration.repository import SystemConfigurationRepository
-from configuration.runtime import SystemConfigurationRuntime
+from management.configuration.repository import SystemConfigurationRepository
+from management.configuration.runtime import SystemConfigurationRuntime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -79,7 +79,7 @@ def _northbound_probe():
 
 
 async def _runtime_probe():
-    from configuration.runtime import get_config_snapshot
+    from management.configuration.runtime import get_config_snapshot
     from management.services.agent.preparation import run as preparation
     from management.services.agent.preparation.tools import (
         _build_parallel_executor_tool_config,
@@ -178,7 +178,7 @@ def _emit(message):
 
 
 async def _run(service):
-    import configuration.runtime as runtime_module
+    import management.configuration.runtime as runtime_module
 
     engine = create_engine(
         os.environ["NEXENT_SYSTEM_CONFIG_TEST_DATABASE_URL"],

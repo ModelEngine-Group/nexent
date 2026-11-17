@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError

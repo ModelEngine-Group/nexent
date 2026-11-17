@@ -16,9 +16,9 @@ from pathlib import Path
 import psycopg2
 import pytest
 import redis
-from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
-from configuration.repository import SystemConfigurationRepository
-from configuration.runtime import CONFIGURATION_CHANNEL
+from management.configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
+from management.configuration.repository import SystemConfigurationRepository
+from management.configuration.runtime import CONFIGURATION_CHANNEL
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session

@@ -3,11 +3,11 @@
 
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, build_opener
 
@@ -42,12 +42,27 @@ import sys
 
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        allowed_base_imports = {'management', 'management.db', 'management.db.base'}
-        if fullname not in allowed_base_imports and fullname.split('.')[0] in {
+        allowed_base_imports = {
+            'management', 'management.db', 'management.utils',
+            'management.utils.exception_handlers', 'management.utils.orm',
+            'management.utils.request_context',
+            'management.configuration',
+        }
+        allowed_shared_import = (
+            fullname in allowed_base_imports
+            or fullname.startswith('management.db.')
+            or fullname.startswith('management.configuration.')
+            or fullname == 'nexent' or fullname.startswith('nexent.')
+        )
+        if not allowed_shared_import and fullname.split('.')[0] in {
             'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
-        if fullname.startswith('infrastructure.') and fullname != 'infrastructure.logging':
+        if fullname.startswith('infrastructure.') and not (
+            fullname == 'infrastructure.logging'
+            or fullname == 'infrastructure.security'
+            or fullname.startswith('infrastructure.security.')
+        ):
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Union
 
 from contracts.constants.environment import ROOT_DIR
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
 from management.db.identity.group import query_group_ids_by_user

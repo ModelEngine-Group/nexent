@@ -3,7 +3,7 @@
 
 from unittest.mock import Mock
 
-from configuration.catalog import DEFAULT_CATALOG
+from management.configuration.catalog import DEFAULT_CATALOG
 
 from test.backend.configuration.helpers import system_config_snapshot
 

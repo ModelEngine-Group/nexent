@@ -239,11 +239,11 @@ class TestConfigAppRouterConfiguration:
             "infrastructure.concurrency",
             thread_lifecycle_module,
         )
-        configuration_runtime = types.ModuleType("configuration.runtime")
+        configuration_runtime = types.ModuleType("management.configuration.runtime")
         configuration_runtime.start_system_configuration = AsyncMock()
         configuration_runtime.stop_system_configuration = AsyncMock()
         monkeypatch.setitem(
-            sys.modules, "configuration.runtime", configuration_runtime
+            sys.modules, "management.configuration.runtime", configuration_runtime
         )
 
         recover_config_tasks = MagicMock()

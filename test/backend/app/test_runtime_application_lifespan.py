@@ -65,9 +65,9 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
         sys.modules,
-        "configuration.runtime",
+        "management.configuration.runtime",
         _module(
-            "configuration.runtime",
+            "management.configuration.runtime",
             start_system_configuration=start_configuration,
             stop_system_configuration=stop_configuration,
         ),

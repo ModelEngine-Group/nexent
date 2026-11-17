@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager

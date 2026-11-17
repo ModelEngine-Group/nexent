@@ -7,7 +7,7 @@ import pytest
 
 
 def test_session_commits_and_closes_on_success():
-    from configuration.database import ConfigurationDatabase
+    from management.configuration.database import ConfigurationDatabase
 
     session = Mock()
     database = ConfigurationDatabase(session_factory=lambda: session)
@@ -21,7 +21,7 @@ def test_session_commits_and_closes_on_success():
 
 
 def test_session_rolls_back_without_logging_connection_secrets(caplog):
-    from configuration.database import ConfigurationDatabase
+    from management.configuration.database import ConfigurationDatabase
 
     session = Mock()
     database = ConfigurationDatabase(session_factory=lambda: session)
@@ -37,17 +37,17 @@ def test_session_rolls_back_without_logging_connection_secrets(caplog):
 
 
 def test_lazy_engine_creation_and_dispose(mocker):
-    from configuration.database import ConfigurationDatabase
+    from management.configuration.database import ConfigurationDatabase
 
     session = Mock()
     engine = Mock()
     session_factory = Mock(return_value=session)
     create_engine = mocker.patch(
-        "configuration.database.create_engine",
+        "management.configuration.database.create_engine",
         return_value=engine,
     )
     sessionmaker = mocker.patch(
-        "configuration.database.sessionmaker",
+        "management.configuration.database.sessionmaker",
         return_value=session_factory,
     )
     database = ConfigurationDatabase()

@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from contracts.tool import ToolSourceEnum, ToolValidateRequest

@@ -3,13 +3,13 @@
 
 from collections import Counter
 
-from configuration.catalog import (
+from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
     ConfigValue,
     SystemConfigurationSnapshot,
 )
-from configuration.models import SystemConfiguration
+from management.configuration.models import SystemConfiguration
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 

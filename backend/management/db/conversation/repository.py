@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.clarification import ClarificationResponse, normalize_form
 from contracts.constants.constants import (
     ASSET_OWNER_ROLE,

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
 )
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest

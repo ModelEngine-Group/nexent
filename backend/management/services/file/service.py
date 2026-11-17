@@ -18,7 +18,7 @@ from nexent.multi_modal.utils import parse_s3_url
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import DATA_PROCESS_SERVICE, UPLOAD_FOLDER
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode

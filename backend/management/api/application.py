@@ -65,6 +65,10 @@ from management.api.skill.skill_repository import skill_repository_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.tool.tool_config import router as tool_config_router
 from management.api.voice.voice import voice_config_router as voice_router
+from management.configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from management.recovery import (
     recover_config_tasks,
     schedule_interrupted_upload_cleanup,
@@ -85,7 +89,6 @@ from nexent.core.concurrency import (
     run_blocking,
     set_default_thread_manager,
 )
-from configuration.runtime import start_system_configuration, stop_system_configuration
 from ops.api.access import router as ops_access_router
 
 logger = logging.getLogger("base_app")
@@ -132,10 +135,12 @@ async def config_lifespan(_app):
                 "system-configuration-refresh",
                 fn,
                 lane="control-io",
-                owner="configuration.runtime",
+                owner="management.configuration.runtime",
             )
 
-        await start_system_configuration(run_configuration_io)
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
         logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
         await recover_config_tasks_on_startup()

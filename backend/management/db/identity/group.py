@@ -10,7 +10,7 @@ from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from sqlalchemy import text
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:

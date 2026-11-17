@@ -6,7 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 
-from configuration.catalog import (
+from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigValue,
     SystemConfigurationSnapshot,
@@ -60,6 +60,15 @@ class SystemConfigurationRuntime:
                 "No valid system configuration snapshot is available"
             )
         return self._snapshot
+
+    @property
+    def is_ready(self) -> bool:
+        """Report whether at least one valid database snapshot was loaded."""
+        return self._snapshot is not None
+
+    def store_snapshot(self, values: Mapping[str, ConfigValue]) -> None:
+        """Validate and publish a snapshot for synchronous command consumers."""
+        self._snapshot = DEFAULT_CATALOG.build_snapshot(values)
 
     async def refresh(self) -> bool:
         async with self._refresh_lock:
@@ -150,13 +159,13 @@ _process_runtime: SystemConfigurationRuntime | None = None
 _process_database = None
 
 
-async def start_system_configuration(run_database) -> None:
+async def start_system_configuration(run_database) -> SystemConfigurationRuntime:
     """Start the single process-local implementation with a managed DB runner."""
     global _process_runtime
     global _process_database
     if _process_runtime is None:
-        from configuration.database import configuration_database
-        from configuration.repository import SystemConfigurationRepository
+        from management.configuration.database import configuration_database
+        from management.configuration.repository import SystemConfigurationRepository
 
         _process_database = configuration_database
         repository = SystemConfigurationRepository()
@@ -170,6 +179,7 @@ async def start_system_configuration(run_database) -> None:
 
         _process_runtime = SystemConfigurationRuntime(loader=loader)
     await _process_runtime.start()
+    return _process_runtime
 
 
 async def stop_system_configuration() -> None:
@@ -188,3 +198,26 @@ def get_config_snapshot() -> SystemConfigurationSnapshot:
     if _process_runtime is None:
         raise ConfigurationNotReadyError("System configuration runtime has not started")
     return _process_runtime.get_snapshot()
+
+
+def load_system_configuration() -> None:
+    """Load one database snapshot without starting Redis for a standalone command."""
+    global _process_runtime
+    global _process_database
+    from management.configuration.database import configuration_database
+    from management.configuration.repository import SystemConfigurationRepository
+
+    _process_database = configuration_database
+    repository = SystemConfigurationRepository()
+
+    def load_values():
+        with _process_database.session() as session:
+            return repository.load_snapshot(session, read_only=True).values
+
+    if _process_runtime is None:
+
+        async def loader():
+            return load_values()
+
+        _process_runtime = SystemConfigurationRuntime(loader=loader)
+    _process_runtime.store_snapshot(load_values())

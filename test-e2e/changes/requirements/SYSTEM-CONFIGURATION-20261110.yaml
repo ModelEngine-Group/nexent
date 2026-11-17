@@ -6,14 +6,14 @@ change:
   title: Operations-managed hot system configuration
   description: Add the frozen system configuration catalog, single-table persistence, ops management API, shared consumer refresh and formal page.
   affected_features:
-    existing: [OPS-BOOTSTRAP]
+    existing: [OPS-BOOTSTRAP, AUTH-LOCAL]
     added: [SYSTEM-CONFIGURATION]
-    modified: [OPS-BOOTSTRAP]
+    modified: [OPS-BOOTSTRAP, AUTH-LOCAL]
     retired: []
   affected_cases:
-    existing: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001]
+    existing: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, AUTH-LOCAL-D2-001]
     added: [SYS-CONFIG-MANAGEMENT-D2-001, SYS-CONFIG-HOT-REFRESH-D3-001, SYS-CONFIG-JOURNEY-D4-001]
-    modified: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001]
+    modified: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, AUTH-LOCAL-D2-001]
     retired: []
   traditional_ut:
     decision: add
@@ -26,6 +26,7 @@ change:
     - test/backend/configuration/test_consumers.py
     - test/backend/app/test_config_app.py
     - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/app/test_health_app.py
     - test/backend/database/test_conversation_activity.py
     - test/backend/database/test_conversation_branch_db.py
     - test/backend/database/test_conversation_branch_selection.py
@@ -44,6 +45,8 @@ change:
     - test/backend/agents/test_create_agent_info_workbench_coverage.py
     - test/backend/services/test_tool_configuration_service.py
     - test/backend/services/test_remote_mcp_service.py
+    - test/backend/services/test_role_assignment.py
+    - test/backend/services/test_local_account_cli.py
     - test/sdk/core/tools/test_parallel_executor.py
     - test/sdk/core/model_service/test_agent_model_construction.py
     - test/backend/database/test_group_db.py
@@ -58,7 +61,8 @@ change:
     - Validate exactly nineteen typed positive integer, finite positive number and boolean settings without environment fallback.
     - Detect missing, duplicate and invalid stored rows; merge and persist changed keys in one locked transaction.
     - Keep getters network-free, coalesce notifications, serialize refresh, retain the last valid snapshot and close owned resources.
-    - Enforce explicit operations authorization and safe 400/401/403/422/503 API responses, including unavailable recommendations.
+    - Own an OPS ThreadManager in lifespan and route configuration database/Redis I/O through one bounded control-io entry.
+    - Enforce explicit operations read authorization, SU-only platform writes and safe 400/401/403/422/503 API responses, including unavailable recommendations.
     - Preserve drafts across filtering, background queries, notification-degraded saves and edits made during a save.
     reason: New catalog, transaction, refresh, API and draft behavior require isolated success, boundary and error proof; D2/D3/D4 prove their distinct runtime boundaries.
   notes: >-

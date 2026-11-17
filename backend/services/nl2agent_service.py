@@ -33,7 +33,7 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server

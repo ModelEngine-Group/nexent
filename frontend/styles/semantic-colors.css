@@ -14,7 +14,6 @@
   --palette-indigo-05: #eeeefe;
   --palette-purple-05: #f7edfe;
   --palette-pink-05: #fde6fc;
-  --palette-brand-05: #e6f2fd;
   --palette-rose-10: #fcc3e0;
   --palette-red-10: #fabdc1;
   --palette-orange-10: #fde2bd;
@@ -26,7 +25,6 @@
   --palette-indigo-10: #d5d3fd;
   --palette-purple-10: #e8cffe;
   --palette-pink-10: #f9c5f6;
-  --palette-brand-10: #b8d9f9;
   --palette-rose-20: #f99ac7;
   --palette-red-20: #f59297;
   --palette-orange-20: #fcce92;
@@ -38,7 +36,6 @@
   --palette-indigo-20: #bfb9fa;
   --palette-purple-20: #d9b1fd;
   --palette-pink-20: #f39dec;
-  --palette-brand-20: #8abef3;
   --palette-rose-30: #f470ab;
   --palette-red-30: #ee696f;
   --palette-orange-30: #f9b766;
@@ -50,7 +47,6 @@
   --palette-indigo-30: #a89ff9;
   --palette-purple-30: #cb8efb;
   --palette-pink-30: #eb74df;
-  --palette-brand-30: #5ca2e9;
   --palette-rose-40: #ed448a;
   --palette-red-40: #e7434a;
   --palette-orange-40: #f69e39;
@@ -62,7 +58,6 @@
   --palette-indigo-40: #8e81f4;
   --palette-purple-40: #bf68fa;
   --palette-pink-40: #e049ce;
-  --palette-brand-40: #2e86de;
   --palette-rose-50: #e61866;
   --palette-red-50: #e02128;
   --palette-orange-50: #f4840c;
@@ -74,7 +69,6 @@
   --palette-indigo-50: #715afb;
   --palette-purple-50: #b62bf7;
   --palette-pink-50: #d41dbc;
-  --palette-brand-50: #0067d1;
   --palette-rose-60: #c40054;
   --palette-red-60: #c7000b;
   --palette-orange-60: #c76207;
@@ -86,7 +80,6 @@
   --palette-indigo-60: #5531eb;
   --palette-purple-60: #8a21bc;
   --palette-pink-60: #9f1c8d;
-  --palette-brand-60: #004ea8;
   --palette-rose-70: #811439;
   --palette-red-70: #850f12;
   --palette-orange-70: #954304;
@@ -98,7 +91,6 @@
   --palette-indigo-70: #3f21b5;
   --palette-purple-70: #651b8b;
   --palette-pink-70: #751868;
-  --palette-brand-70: #003d83;
   --palette-rose-80: #540d24;
   --palette-red-80: #59080a;
   --palette-orange-80: #642802;
@@ -110,7 +102,6 @@
   --palette-indigo-80: #281675;
   --palette-purple-80: #41125a;
   --palette-pink-80: #4c0f43;
-  --palette-brand-80: #002e6a;
   --palette-rose-90: #330614;
   --palette-red-90: #350305;
   --palette-orange-90: #3d1601;
@@ -122,7 +113,6 @@
   --palette-indigo-90: #160b48;
   --palette-purple-90: #260937;
   --palette-pink-90: #2e0728;
-  --palette-brand-90: #00214b;
   --palette-gray-90: #191919;
   --palette-gray-50: #777777;
   --palette-gray-30: #aeaeae;
@@ -154,11 +144,7 @@
   --aux-mint: #00a874;
 
   /* Semantic roles and chart capacity */
-  --color-brand: var(--palette-brand-50);
-  --color-brand-hover: var(--palette-brand-40);
   --color-brand-focus: var(--palette-brand-50);
-  --color-brand-active: var(--palette-brand-60);
-  --color-brand-disabled: var(--palette-brand-20);
   --color-text-primary: var(--palette-gray-90);
   --color-text-secondary: var(--palette-gray-50);
   --color-text-placeholder: var(--palette-gray-30);
@@ -186,8 +172,6 @@
   --color-bg-5: var(--palette-gray-0);
   --color-bg-6: rgb(201 201 201 / 20%);
   --color-bg-mask: rgb(25 25 25 / 30%);
-  --color-hover: rgb(25 25 25 / 5%);
-  --color-select: var(--palette-brand-05);
   --color-table-header: rgb(25 25 25 / 5%);
   --color-table-zebra: rgb(147 147 147 / 5%);
   --color-fill: rgb(25 25 25 / 5%);

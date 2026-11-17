@@ -80,6 +80,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
   let delayQuery = false;
   let failSave = false;
   let authorized = true;
+  let actorRole = "OPS";
   let deniedActorChecked = false;
   let notification: "published" | "degraded" = "published";
   await page.context().addCookies([
@@ -102,8 +103,8 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
               user_email: authorized
                 ? "ops@example.invalid"
                 : "denied@example.invalid",
-              user_role: authorized ? "OPS" : "USER",
-              roles: authorized ? ["OPS"] : ["USER"],
+              user_role: authorized ? actorRole : "USER",
+              roles: authorized ? [actorRole] : ["USER"],
               auth_provider: "local",
               groupIds: [],
               permissions: authorized
@@ -254,6 +255,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     deniedActorChecked = true;
 
     authorized = true;
+    actorRole = "SU";
     await page.goto("/zh/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),

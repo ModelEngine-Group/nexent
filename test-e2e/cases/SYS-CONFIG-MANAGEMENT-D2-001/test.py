@@ -4,9 +4,12 @@
 from unittest.mock import patch
 
 import pytest
-from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from fastapi.testclient import TestClient
 from gateway.authentication.auth import authenticate
+from management.configuration.catalog import (
+    DEFAULT_CATALOG,
+    ConfigurationValidationError,
+)
 from ops.api.application import create_app
 from permissions.models import CurrentUser
 
@@ -29,19 +32,20 @@ def _items():
     ]
 
 
-def _client(role=None):
+def _request(method, path, role=None, **kwargs):
     app = create_app()
     if role is not None:
         user = CurrentUser(f"{role.lower()}-user", "tenant", role, roles=(role,))
         app.dependency_overrides[authenticate] = lambda: user
-    return TestClient(app)
+    with TestClient(app) as client:
+        return client.request(method, path, **kwargs)
 
 
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
 def test_catalog_and_authorization_contract():
-    assert _client().get("/system_configurations").status_code == 401
+    assert _request("GET", "/system_configurations").status_code == 401
 
     for role in ("OPS", "SU"):
         with (
@@ -51,7 +55,7 @@ def test_catalog_and_authorization_contract():
                 return_value=_items(),
             ) as list_configurations,
         ):
-            response = _client(role).get("/system_configurations")
+            response = _request("GET", "/system_configurations", role)
         assert response.status_code == 200
         assert response.json()["total"] == 19
         assert {item["key"] for item in response.json()["items"]} == set(
@@ -64,7 +68,7 @@ def test_catalog_and_authorization_contract():
             patch("permissions.operations.has_permission", return_value=False),
             patch("ops.api.system_configurations.list_system_configurations") as query,
         ):
-            denied = _client(role).get("/system_configurations")
+            denied = _request("GET", "/system_configurations", role)
         assert denied.status_code == 403
         query.assert_not_called()
 
@@ -78,8 +82,10 @@ def test_catalog_and_authorization_contract():
             side_effect=RuntimeError("postgres://user:secret@example.invalid"),
         ),
     ):
-        failure = _client("OPS").get(
-            "/system_configurations", headers={"Authorization": "Bearer authorized"}
+        failure = _request("GET",
+            "/system_configurations",
+            "OPS",
+            headers={"Authorization": "Bearer authorized"},
         )
     assert failure.status_code == 503
     assert "secret" not in failure.text
@@ -89,19 +95,20 @@ def test_catalog_and_authorization_contract():
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
 def test_atomic_save_and_notification_degradation_contract():
-    client = _client("OPS")
     with (
         patch(
-            "ops.api.system_configurations.authorize_operations",
-            return_value="ops-user",
+            "ops.api.system_configurations.authorize_configuration_write",
+            return_value="su-user",
         ),
         patch(
             "ops.api.system_configurations.save_system_configurations",
             return_value={"items": [_items()[0]], "notification": "degraded"},
         ) as save,
     ):
-        response = client.patch(
+        response = _request(
+            "PATCH",
             "/system_configurations",
+            "SU",
             headers={"Authorization": "Bearer authorized"},
             json={"changes": {"MAX_TENANT_COUNT": 5}},
         )
@@ -111,7 +118,7 @@ def test_atomic_save_and_notification_degradation_contract():
         "items": [_items()[0]],
         "notification": "degraded",
     }
-    save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="ops-user")
+    save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="su-user")
 
     for changes in (
         {"UNKNOWN_SETTING": 1},
@@ -120,27 +127,32 @@ def test_atomic_save_and_notification_degradation_contract():
     ):
         with (
             patch(
-                "ops.api.system_configurations.authorize_operations",
-                return_value="ops-user",
+                "ops.api.system_configurations.authorize_configuration_write",
+                return_value="su-user",
             ),
             patch(
                 "ops.api.system_configurations.save_system_configurations",
                 side_effect=ConfigurationValidationError("invalid batch"),
             ) as save,
         ):
-            invalid = client.patch(
+            invalid = _request(
+                "PATCH",
                 "/system_configurations",
+                "SU",
                 headers={"Authorization": "Bearer authorized"},
                 json={"changes": changes},
             )
         assert invalid.status_code == 400
-        save.assert_called_once_with(changes, actor="ops-user")
+        save.assert_called_once_with(changes, actor="su-user")
 
     with patch(
-        "ops.api.system_configurations.authorize_operations", return_value="ops-user"
+        "ops.api.system_configurations.authorize_configuration_write",
+        return_value="su-user",
     ):
-        malformed = client.patch(
+        malformed = _request(
+            "PATCH",
             "/system_configurations",
+            "SU",
             headers={"Authorization": "Bearer authorized"},
             json={"changes": {}},
         )
@@ -150,16 +162,47 @@ def test_atomic_save_and_notification_degradation_contract():
 @pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
 @pytest.mark.stage("D2")
 @pytest.mark.api_it
+def test_only_su_can_save_platform_configuration():
+    for role, expected_status in (("OPS", 403), ("SU", 200)):
+        with (
+            patch("permissions.operations.has_permission", return_value=True),
+            patch(
+                "ops.api.system_configurations.save_system_configurations",
+                return_value={
+                    "items": [_items()[0]],
+                    "notification": "published",
+                },
+            ) as save,
+        ):
+            response = _request(
+                "PATCH",
+                "/system_configurations",
+                role,
+                json={"changes": {"MAX_TENANT_COUNT": 5}},
+            )
+        assert response.status_code == expected_status
+        if role == "SU":
+            save.assert_called_once_with(
+                {"MAX_TENANT_COUNT": 5}, actor="su-user"
+            )
+        else:
+            save.assert_not_called()
+
+
+@pytest.mark.case_id("SYS-CONFIG-MANAGEMENT-D2-001")
+@pytest.mark.stage("D2")
+@pytest.mark.api_it
 def test_current_recommendations_are_explicitly_unavailable():
-    client = _client("OPS")
     with patch(
         "ops.api.system_configurations.authorize_operations", return_value="ops-user"
     ):
         for key, default in DEFAULT_CATALOG.defaults.items():
             if isinstance(default, bool):
                 continue
-            response = client.post(
+            response = _request(
+                "POST",
                 "/system_configurations/recommendations",
+                "OPS",
                 headers={"Authorization": "Bearer authorized"},
                 json={"key": key},
             )
@@ -168,8 +211,10 @@ def test_current_recommendations_are_explicitly_unavailable():
             assert detail["code"] == "RECOMMENDATION_UNAVAILABLE"
             assert "value" not in detail
 
-        unknown = client.post(
+        unknown = _request(
+            "POST",
             "/system_configurations/recommendations",
+            "OPS",
             headers={"Authorization": "Bearer authorized"},
             json={"key": "UNKNOWN_SETTING"},
         )

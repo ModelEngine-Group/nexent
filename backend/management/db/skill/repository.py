@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_, update as sa_update
 from sqlalchemy.orm import defer
 
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, SKILL_DESCRIPTION_MAX_LENGTH
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException

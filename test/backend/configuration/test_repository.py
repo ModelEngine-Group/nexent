@@ -10,13 +10,13 @@ from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
 
 def _repository():
-    from configuration.repository import SystemConfigurationRepository
+    from management.configuration.repository import SystemConfigurationRepository
 
     return SystemConfigurationRepository()
 
 
 def _validation_error():
-    from configuration.catalog import ConfigurationValidationError
+    from management.configuration.catalog import ConfigurationValidationError
 
     return ConfigurationValidationError
 

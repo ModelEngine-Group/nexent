@@ -1,10 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP and authorization contracts for ops system configuration."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from fastapi.testclient import TestClient
 from gateway.authentication.auth import authenticate
+from management.configuration.catalog import (
+    DEFAULT_CATALOG,
+    ConfigurationValidationError,
+)
 from ops.api.application import create_app
 from permissions.models import CurrentUser
 
@@ -36,11 +42,12 @@ def _items():
 OPS_USER = CurrentUser("ops-user", "ops-tenant", "OPS", roles=("OPS",))
 
 
-def _client(user=OPS_USER):
+def _request(method, path, user=OPS_USER, **kwargs):
     app = create_app()
     if user is not None:
         app.dependency_overrides[authenticate] = lambda: user
-    return TestClient(app)
+    with TestClient(app) as client:
+        return client.request(method, path, **kwargs)
 
 
 def test_anonymous_request_is_rejected_before_configuration_lookup(mocker):
@@ -49,7 +56,7 @@ def test_anonymous_request_is_rejected_before_configuration_lookup(mocker):
         create=True,
     )
 
-    response = _client(None).get("/system_configurations")
+    response = _request("GET", "/system_configurations", None)
 
     assert response.status_code == 401
     lookup.assert_not_called()
@@ -67,7 +74,7 @@ def test_explicit_operations_permission_returns_exact_catalog(mocker):
         create=True,
     )
 
-    response = _client().get(
+    response = _request("GET",
         "/system_configurations", headers={"Authorization": "Bearer token"}
     )
 
@@ -91,7 +98,7 @@ def test_database_failure_is_a_safe_503(mocker):
         create=True,
     )
 
-    response = _client().get(
+    response = _request("GET",
         "/system_configurations", headers={"Authorization": "Bearer token"}
     )
 
@@ -102,7 +109,7 @@ def test_database_failure_is_a_safe_503(mocker):
 
 def test_patch_only_returns_saved_values_and_notification_degradation(mocker):
     authorize = mocker.patch(
-        "ops.api.system_configurations.authorize_operations",
+        "ops.api.system_configurations.authorize_configuration_write",
         return_value="ops-user",
         create=True,
     )
@@ -115,7 +122,7 @@ def test_patch_only_returns_saved_values_and_notification_degradation(mocker):
         create=True,
     )
 
-    response = _client().patch(
+    response = _request("PATCH",
         "/system_configurations",
         headers={"Authorization": "Bearer token"},
         json={"changes": {"MAX_TENANT_COUNT": 5}},
@@ -127,18 +134,18 @@ def test_patch_only_returns_saved_values_and_notification_degradation(mocker):
     assert "revision" not in response.text
     assert "consumer" not in response.text
     save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="ops-user")
-    authorize.assert_called_once_with(OPS_USER, "ops.configuration:update")
+    authorize.assert_called_once_with(OPS_USER)
 
 
 def test_patch_permission_denied_uses_safe_error(mocker):
     from fastapi import HTTPException
 
     mocker.patch(
-        "ops.api.system_configurations.authorize_operations",
+        "ops.api.system_configurations.authorize_configuration_write",
         side_effect=HTTPException(status_code=403, detail="Operations permission required"),
     )
 
-    response = _client().patch(
+    response = _request("PATCH",
         "/system_configurations",
         json={"changes": {"MAX_TENANT_COUNT": 5}},
     )
@@ -149,7 +156,7 @@ def test_patch_permission_denied_uses_safe_error(mocker):
 
 def test_patch_database_failure_is_a_safe_503(mocker):
     mocker.patch(
-        "ops.api.system_configurations.authorize_operations",
+        "ops.api.system_configurations.authorize_configuration_write",
         return_value="ops-user",
     )
     mocker.patch(
@@ -157,7 +164,7 @@ def test_patch_database_failure_is_a_safe_503(mocker):
         side_effect=RuntimeError("postgres://user:secret@example.invalid"),
     )
 
-    response = _client().patch(
+    response = _request("PATCH",
         "/system_configurations",
         json={"changes": {"MAX_TENANT_COUNT": 5}},
     )
@@ -182,7 +189,7 @@ def test_standard_operations_scope_controls_catalog_access(mocker, role, expecte
         return_value=_items(),
     )
 
-    response = _client(user).get("/system_configurations")
+    response = _request("GET", "/system_configurations", user)
 
     assert response.status_code == expected_status
     if expected_status == 200:
@@ -191,9 +198,34 @@ def test_standard_operations_scope_controls_catalog_access(mocker, role, expecte
         query.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "role,expected_status",
+    [("OPS", 403), ("SU", 200), ("ADMIN", 403), ("USER", 403)],
+)
+def test_platform_configuration_write_requires_su(mocker, role, expected_status):
+    user = CurrentUser("actor", "tenant", role, roles=(role,))
+    mocker.patch("permissions.operations.has_permission", return_value=True)
+    save = mocker.patch(
+        "ops.api.system_configurations.save_system_configurations",
+        return_value={"items": [_items()[0]], "notification": "published"},
+    )
+
+    response = _request("PATCH",
+        "/system_configurations",
+        user,
+        json={"changes": {"MAX_TENANT_COUNT": 5}},
+    )
+
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        save.assert_called_once_with({"MAX_TENANT_COUNT": 5}, actor="actor")
+    else:
+        save.assert_not_called()
+
+
 def test_invalid_business_batch_maps_to_400(mocker):
     mocker.patch(
-        "ops.api.system_configurations.authorize_operations",
+        "ops.api.system_configurations.authorize_configuration_write",
         return_value="ops-user",
         create=True,
     )
@@ -203,7 +235,7 @@ def test_invalid_business_batch_maps_to_400(mocker):
         create=True,
     )
 
-    response = _client().patch(
+    response = _request("PATCH",
         "/system_configurations",
         headers={"Authorization": "Bearer token"},
         json={"changes": {"MAX_TENANT_COUNT": 0}},
@@ -215,12 +247,12 @@ def test_invalid_business_batch_maps_to_400(mocker):
 
 def test_malformed_request_maps_to_422(mocker):
     mocker.patch(
-        "ops.api.system_configurations.authorize_operations",
+        "ops.api.system_configurations.authorize_configuration_write",
         return_value="ops-user",
         create=True,
     )
 
-    response = _client().patch(
+    response = _request("PATCH",
         "/system_configurations",
         headers={"Authorization": "Bearer token"},
         json={"changes": {}},
@@ -239,7 +271,7 @@ def test_current_numeric_parameters_have_no_recommendation(mocker, key):
         create=True,
     )
 
-    response = _client().post(
+    response = _request("POST",
         "/system_configurations/recommendations",
         headers={"Authorization": "Bearer token"},
         json={"key": key},
@@ -258,7 +290,7 @@ def test_recommendation_permission_denied_uses_safe_error(mocker):
         side_effect=HTTPException(status_code=403, detail="Operations permission required"),
     )
 
-    response = _client().post(
+    response = _request("POST",
         "/system_configurations/recommendations",
         json={"key": "MAX_TENANT_COUNT"},
     )
@@ -273,7 +305,7 @@ def test_unknown_recommendation_key_maps_to_400(mocker):
         return_value="ops-user",
     )
 
-    response = _client().post(
+    response = _request("POST",
         "/system_configurations/recommendations",
         json={"key": "UNKNOWN_SETTING"},
     )
@@ -309,3 +341,24 @@ def test_authorizer_returns_user_for_operations_role(mocker):
 
     assert authorize_operations(OPS_USER, "ops.configuration:update") == "ops-user"
     scope.assert_called_once_with(OPS_USER, None, "ops.configuration:update")
+
+
+@pytest.mark.asyncio
+async def test_configuration_io_uses_the_ops_control_lane(mocker):
+    from ops.services.system_configuration import run_system_configuration_io
+
+    manager = SimpleNamespace(run=AsyncMock(return_value={"saved": True}))
+    operation = Mock()
+
+    result = await run_system_configuration_io(
+        manager, operation, {"MAX_TENANT_COUNT": 5}, actor="su-user"
+    )
+
+    assert result == {"saved": True}
+    lane, spec, fn, changes = manager.run.await_args.args
+    assert lane == "control-io"
+    assert spec.task_name == "system-configuration-io"
+    assert spec.owner == "ops.api.system_configurations"
+    assert fn is operation
+    assert changes == {"MAX_TENANT_COUNT": 5}
+    assert manager.run.await_args.kwargs == {"actor": "su-user"}

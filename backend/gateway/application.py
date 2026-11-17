@@ -9,12 +9,15 @@ Assemble Gateway routers and manage the process-local thread lifecycle.
 import logging
 from contextlib import asynccontextmanager
 
-from configuration.runtime import start_system_configuration, stop_system_configuration
 from contracts.constants.constants import NORTHBOUND_SERVICE_NAME
 from contracts.constants.environment import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
 from gateway.api.northbound import a2a_router
 from gateway.api.northbound import router as northbound_router
 from infrastructure.concurrency import northbound_thread_manager
+from management.configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from management.services.agent.run_state import runtime_state_service
 from management.utils.app_factory import create_app
 from nexent.core.concurrency import (
@@ -55,13 +58,15 @@ async def northbound_lifespan(_app):
         return await northbound_thread_manager.run(
             "control-io",
             ManagedTaskSpec(
-                task_name="system-configuration-refresh", owner="configuration.runtime"
+                task_name="system-configuration-refresh", owner="management.configuration.runtime"
             ),
             fn,
         )
 
     try:
-        await start_system_configuration(run_configuration_io)
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         await recover_northbound_tasks_on_startup()
         yield
     finally:

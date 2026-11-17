@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RoleAssignmentConflict, TenantResourceLimitError
 from contracts.roles import (
     has_any_role,

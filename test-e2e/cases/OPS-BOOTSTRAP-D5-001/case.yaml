@@ -11,7 +11,7 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Prove the real launcher serves process health and configuration routes without importing business stacks or opening outbound connections.
+  objective: Prove the real launcher serves process health and configuration routes without importing business service modules or opening outbound connections. Shared ORM, identity, configuration, security and concurrency imports are allowed.
   preconditions:
   - Python 3.11 with the existing backend dependencies is available.
   - A free loopback port and subprocess execution are available.
@@ -37,7 +37,7 @@ case:
   - All owned subprocesses exit during cleanup.
   - Server and access logs are appended to the persistent ops file across process restarts.
   forbidden_side_effects:
-  - Importing management, runtime, infrastructure clients other than shared logging or the Agent SDK.
+  - Importing business services, runtime or external storage clients; shared ORM, identity, configuration, security and concurrency imports are allowed.
   - Opening outbound connections or running SQL migrations.
   acceptance:
   - id: AC-01
@@ -52,7 +52,7 @@ case:
   risk_type: RELIABILITY
   risk: A shared backend import or startup hook silently makes operations depend on the business stack.
   condition:
-  - Start with no business configuration and forbid business-package imports and outbound socket connections.
+  - Start with no business configuration and forbid business-service imports and outbound socket connections.
   metrics: [Startup latency, HTTP status and payload, child process exit]
   thresholds: [Ready within 20 seconds per start, zero forbidden imports or connections, zero surviving child processes]
   recovery_expectations: [A fresh process on the same port returns ready after the previous process exits.]

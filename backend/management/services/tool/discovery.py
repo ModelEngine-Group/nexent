@@ -410,7 +410,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 
 import jsonref
-from configuration.runtime import get_config_snapshot
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from contracts.errors.exceptions import MCPConnectionError
 from contracts.tool import ToolInfo, ToolSourceEnum

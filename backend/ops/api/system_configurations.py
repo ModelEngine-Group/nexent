@@ -4,17 +4,24 @@
 import logging
 from http import HTTPStatus
 
-from configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from contracts.configuration import (
     SystemConfigurationChangesRequest,
     SystemConfigurationRecommendationRequest,
 )
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gateway.authentication.auth import authenticate
-from ops.services.authorization import authorize_operations
+from management.configuration.catalog import (
+    DEFAULT_CATALOG,
+    ConfigurationValidationError,
+)
+from ops.services.authorization import (
+    authorize_configuration_write,
+    authorize_operations,
+)
 from ops.services.system_configuration import (
     list_system_configurations,
+    run_system_configuration_io,
     save_system_configurations,
 )
 from permissions.models import CurrentUser
@@ -35,10 +42,14 @@ def _authorization_error(error: HTTPException) -> JSONResponse:
 
 
 @router.get("")
-def get_configurations(user: CurrentUser = Depends(authenticate)):
+async def get_configurations(
+    request: Request, user: CurrentUser = Depends(authenticate)
+):
     try:
         authorize_operations(user)
-        items = list_system_configurations()
+        items = await run_system_configuration_io(
+            request.app.state.thread_manager, list_system_configurations
+        )
     except HTTPException as error:
         return _authorization_error(error)
     except Exception:  # noqa: BLE001 - return a safe dependency error
@@ -52,13 +63,19 @@ def get_configurations(user: CurrentUser = Depends(authenticate)):
 
 
 @router.patch("")
-def patch_configurations(
-    request: SystemConfigurationChangesRequest,
+async def patch_configurations(
+    payload: SystemConfigurationChangesRequest,
+    request: Request,
     user: CurrentUser = Depends(authenticate),
 ):
     try:
-        actor = authorize_operations(user, "ops.configuration:update")
-        result = save_system_configurations(request.changes, actor=actor)
+        actor = authorize_configuration_write(user)
+        result = await run_system_configuration_io(
+            request.app.state.thread_manager,
+            save_system_configurations,
+            payload.changes,
+            actor=actor,
+        )
     except HTTPException as error:
         return _authorization_error(error)
     except ConfigurationValidationError as error:

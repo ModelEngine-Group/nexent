@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from configuration.catalog import DEFAULT_CATALOG
+from management.configuration.catalog import DEFAULT_CATALOG
 from contracts.errors.exceptions import AppException, TenantResourceLimitError
 
 from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
