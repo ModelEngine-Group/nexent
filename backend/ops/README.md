@@ -19,8 +19,9 @@ The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
 reads remain centralized in `contracts/constants/environment.py`. Set
 `PYTHON_DOTENV_DISABLED=1` to disable nearby dotenv loading.
 
-With trajectory reading disabled and a provider other than `local_file`, ops
-serves health and documentation without importing business clients or the SDK.
+With trajectory reading and model monitoring disabled and a provider other than
+`local_file`, Ops serves health and documentation without initializing their
+storage clients.
 Setting `TRAJECTORY_READ_ENABLED=true` or selecting `MONITORING_PROVIDER=local_file`
 enables trajectory routes and managed maintenance. Query reads still require
 `TRAJECTORY_READ_ENABLED=true`. Enabled operations uses the existing PostgreSQL
@@ -48,11 +49,72 @@ response envelopes and opaque references retain their existing contracts.
 References are process-local; multi-replica deployments need affinity or must
 restart a query when its reference is unavailable.
 
-Health checks describe only the operations process and do not probe dependencies.
+When model monitoring is enabled, startup prepares its Elasticsearch mappings
+before reporting ready.
 `GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
 OPS is restricted to its tenant; SU can select any tenant or all tenants. The
-dashboard and configuration action grants are permission contracts; monitoring
-and configuration CRUD implementations are outside this change.
+dashboard and configuration action grants are permission contracts. Model monitoring is exposed under `/ops/v1/monitoring/models` when enabled.
+The Web proxy forwards `/api/ops/v1/monitoring/` to Ops on the same origin.
+
+## Model monitoring setup
+
+Create an independent PostgreSQL database for Ops and set `OPS_POSTGRES_HOST`,
+`OPS_POSTGRES_PORT`, `OPS_POSTGRES_DB`, `OPS_POSTGRES_USER` and
+`OPS_POSTGRES_PASSWORD`. The migration entry point takes these settings and
+installs the two shared tables in schema `ops`. The SQL uses a separate ledger.
+
+```shell
+bash deploy/common/run-ops-sql-migrations.sh
+```
+
+From a deployed Compose project, the shared backend image also packages the migration:
+
+```shell
+docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml run --rm --entrypoint bash nexent-ops /opt/nexent/scripts/run-ops-sql-migrations.sh
+```
+
+Apply the migration using a database role with schema creation permissions.
+The runtime role needs access to the two tables and their identity sequence.
+Set `OPS_MONITORING_ENABLED=true` for Ops and for Nexent services producing model
+requests. Producers stage sanitized batches in the Ops database. Ops owns the
+Elasticsearch mappings, writer and publisher. Give its Elasticsearch identity
+template management and monitoring-index permissions, including document
+deletion on `monitoring-daily-*`. The service uses the
+configured Elasticsearch endpoint and `OPS_MONITORING_TIMEZONE` for statistic
+dates.
+
+Model monitoring shares the existing SDK request and response observations.
+Legacy records keep their existing defaults, while Ops preserves missing provider
+usage so coverage can be measured. ModelService and the monitored legacy OpenAI
+chat client share physical attempt measurements with local Trace. A recorded
+attempt span and its ES fact carry the same fact identity. Facts can include the
+native `trace_id` and `span_id`, and publish even when local Trace is disabled.
+
+Model trends include every requested day. Dates without a publication return null
+metrics. Refresh returns HTTP 409 with `message.code=MONITORING_DATES_UNCOVERED`
+and `message.missing_dates` when the requested scope has no confirmed source for
+those dates.
+Unconfirmed failed Elasticsearch batches mark affected query scopes stale until
+they recover and the replacement statistics are published.
+
+For MCP, Agent and Skill, define a `MonitoringKind` with the typed fact,
+daily reducer and Elasticsearch fields. Add it to `MONITORING_KINDS` in
+`ops.monitoring.runtime`. Ops installs the compatible mappings on its shared
+indices at startup. The two monitoring tables are shared, with date state and
+publication tracked per tenant and kind. SDK callers submit sanitized events
+through `nexent.monitor.facts.emit_fact`; the backend producer owns transport
+and retries. Readers use `Monitoring.publication_snapshot` to pin the published
+documents for the duration of a query.
+
+The Ops worker starts an hourly sweep of superseded daily aggregation documents.
+It keeps the current PostgreSQL publication for each tenant, kind and date, and
+skips dates that have no publication. In-flight queries hold an Elasticsearch
+snapshot through the read. Fact documents are outside this cleanup.
+
+The first implementation starts each tenant's coverage at its first observed fact.
+It uses a single source generation and page-number queries. Configure fact
+retention and coordinate PostgreSQL and Elasticsearch snapshots at deployment.
+Snapshot-bound pagination is follow-up work.
 
 ## Storage and process resources
 

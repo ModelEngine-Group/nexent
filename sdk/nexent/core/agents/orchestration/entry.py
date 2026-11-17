@@ -8,6 +8,7 @@ import time
 from concurrent.futures import CancelledError
 from contextvars import Context, copy_context
 from dataclasses import replace
+from uuid import uuid4
 
 from nexent.consts.mcp_errors import (
     classify_mcp_failure, describe_exception_leaf, find_mcp_server_url,
@@ -200,8 +201,11 @@ class DeferredAgentRun:
 def agent_run_thread(agent_run_info: AgentRunInfo):
     """Trace the complete SDK worker, including setup and resource cleanup."""
     current = get_agent_monitoring_context() or AgentRunMetadata()
+    run_id = str(getattr(agent_run_info, "workspace_run_id", None) or uuid4())
     metadata = replace(
         current,
+        monitoring_run_id=run_id,
+        monitoring_root_run_id=run_id,
         agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
         agent_version_no=getattr(agent_run_info.agent_config, "version_no", None),

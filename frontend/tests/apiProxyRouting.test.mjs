@@ -8,9 +8,10 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 const start = source.indexOf("function handleAllApiProxy(");
 const end = source.indexOf("// ======================", start);
-assert.ok(start >= 0 && end > start);
+const trajectoryHelper = source.indexOf("function isTrajectoryOpsRequest(");
+assert.ok(start >= 0 && end > start && trajectoryHelper >= 0);
 
-function dispatch(method, pathname) {
+function dispatch(method, url) {
   const calls = [];
   const context = vm.createContext({
     AUTH_INTERCEPT_ENDPOINTS: new Set([
@@ -18,6 +19,8 @@ function dispatch(method, pathname) {
       "/api/user/refresh_token",
     ]),
     HTTP_BACKEND: "http://config:5010",
+    OPS_HTTP_BACKEND: "http://ops:5016",
+    URL,
     PROXY_TIMEOUT_MS: 100,
     SSE_PROXY_TIMEOUT_MS: 200,
     forwardAuthRequest: (_req, _res, target) =>
@@ -28,8 +31,12 @@ function dispatch(method, pathname) {
     }),
     proxy: { web: (_req, _res, config) => calls.push(config) },
   });
-  vm.runInContext(source.slice(start, end), context);
-  const handled = context.handleAllApiProxy(pathname, { method }, {});
+  vm.runInContext(
+    source.slice(start, end) + source.slice(trajectoryHelper),
+    context
+  );
+  const pathname = new URL(url, "http://localhost").pathname;
+  const handled = context.handleAllApiProxy(pathname, { method, url }, {});
   return { handled, calls };
 }
 
@@ -44,11 +51,17 @@ for (const [method, path, target] of [
   ["POST", "/api/file/preprocess", "runtime"],
   ["POST", "/api/agent/run", "runtime"],
   ["GET", "/api/conversation/42", "runtime"],
-  ["GET", "/api/trajectory/records", "runtime"],
-  ["GET", "/api/trajectory/conversations/42", "runtime"],
-  ["GET", "/api/trajectory/conversations/42/snapshot", "runtime"],
-  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "runtime"],
-  ["POST", "/api/trajectory/cleanup", "runtime"],
+  ["GET", "/api/trajectory/records", "ops"],
+  ["GET", "/api/trajectory/conversations/42", "ops"],
+  ["GET", "/api/trajectory/conversations/42/snapshot", "ops"],
+  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "ops"],
+  ["POST", "/api/trajectory/cleanup", "ops"],
+  ["GET", "/api/conversation/agent_groups?view=trajectory", "ops"],
+  ["GET", "/api/conversation/agent_groups?view=chat", "runtime"],
+  ["GET", "/api/ops/v1/monitoring/models/summary?start_date=2026-11-17", "ops"],
+  ["POST", "/api/ops/v1/monitoring/models/refresh", "ops"],
+  ["GET", "/api/ops/v1/monitoring/models/refreshes/signed-reference", "ops"],
+  ["GET", "/api/ops/v1/monitoring-other/models", "config"],
   ["GET", "/api/trajectory_config", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
@@ -57,7 +70,7 @@ for (const [method, path, target] of [
     assert.equal(result.calls.length, 1);
     assert.equal(
       result.calls[0].target,
-      `http://${target}:${target === "config" ? 5010 : 5014}`
+      `http://${target}:${{ config: 5010, runtime: 5014, ops: 5016 }[target]}`
     );
   });
 }

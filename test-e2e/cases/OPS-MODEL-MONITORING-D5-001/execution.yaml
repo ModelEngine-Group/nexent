@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: OPS-MODEL-MONITORING-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_ops_database_migration
+acceptance_bindings:
+  AC-01: [test_ops_database_migration]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The test creates and drops its own databases on an explicitly isolated PostgreSQL service.

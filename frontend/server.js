@@ -821,8 +821,10 @@ function handleAllApiProxy(pathname, req, res) {
     return true;
   }
 
-  // Historical trajectory queries are owned by the operations service.
-  if (isTrajectoryOpsRequest(pathname, req.url)) {
+  if (
+    pathname.startsWith("/api/ops/v1/monitoring/") ||
+    isTrajectoryOpsRequest(pathname, req.url)
+  ) {
     proxy.web(req, res, {
       target: OPS_HTTP_BACKEND,
       changeOrigin: true,

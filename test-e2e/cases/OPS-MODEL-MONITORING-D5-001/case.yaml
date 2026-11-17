@@ -1,0 +1,37 @@
+schema_version: '1.0'
+stage: D5
+module: OPS-PLATFORM
+case:
+  case_id: OPS-MODEL-MONITORING-D5-001
+  feature_id: OPS-MODEL-MONITORING
+  requirement_ids: [OPS-MODEL-MONITORING-20261116]
+  business_rule_ids: [OPS-MODEL-MONITORING-RULE-01]
+  title: Ops monitoring migration is repeatable and confined to the Ops database
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify new installation and repeated migration of independent control storage.
+  preconditions: [An isolated PostgreSQL server can host separate Nexent and Ops databases]
+  test_data: {databases: Empty Ops database and a separate Nexent database}
+  steps:
+  - order: 1
+    action: Run the Ops migration against the empty Ops database.
+    expected: Both monitoring control tables exist under the Ops schema.
+  - order: 2
+    action: Run the same migration again and inspect both databases.
+    expected: The Ops schema is unchanged and the Nexent database has no monitoring control tables.
+  expected_results: [Both Ops control tables exist after migration, Reapplying preserves the schema]
+  forbidden_side_effects: [Creating an Ops monitoring table in the Nexent database]
+  acceptance:
+  - id: AC-01
+    description: New setup and repeated migration target the Ops database only.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  risk_type: DEPLOYMENT
+  risk: A migration targets the Nexent business database or changes the Ops schema on reapplication.
+  condition: [Use distinct databases and run the deployment migration twice]
+  metrics: [Database target and control-table count]
+  thresholds: [Two control tables in Ops and zero in Nexent]
+  recovery_expectations: [A subsequent deployment can reuse the initialized Ops database]
