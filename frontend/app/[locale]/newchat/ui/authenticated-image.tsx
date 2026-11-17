@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -10,6 +12,8 @@ import {
 import { createPortal } from "react-dom";
 import { ImageIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useKnowledgeContentUrl } from "@/hooks/knowledge/useKnowledgeContentUrl";
+import type { KnowledgeContentRequest } from "@/types/knowledgeReference";
 import {
   fetchImageBlob,
   isLocalStorageObjectUrl,
@@ -50,6 +54,7 @@ export const AuthenticatedImage: React.FC<
     preview?: boolean;
     /** Fetch the image through `/api/image` even when it is publicly reachable. */
     proxy?: boolean;
+    knowledgeReference?: KnowledgeContentRequest;
   }
 > = ({
   src,
@@ -58,8 +63,21 @@ export const AuthenticatedImage: React.FC<
   fallback,
   preview = false,
   proxy = false,
+  knowledgeReference,
   ...imgProps
 }) => {
+  if (knowledgeReference) {
+    return (
+      <KnowledgeReferenceImage
+        reference={knowledgeReference}
+        alt={alt}
+        className={className}
+        fallback={fallback}
+        preview={preview}
+        {...imgProps}
+      />
+    );
+  }
   const imageSrc = typeof src === "string" ? src : undefined;
   const isAidpImage = imageSrc ? isAidpImageUrl(imageSrc) : false;
   const isLocalKnowledgeBaseImage = imageSrc
@@ -91,6 +109,32 @@ export const AuthenticatedImage: React.FC<
       {...imgProps}
     />
   );
+};
+
+const KnowledgeReferenceImage: React.FC<
+  ComponentProps<"img"> & {
+    reference: KnowledgeContentRequest;
+    fallback?: React.ReactNode;
+    preview: boolean;
+  }
+> = ({ reference, fallback, preview, ...props }) => {
+  const { url } = useKnowledgeContentUrl(reference);
+  if (!url) {
+    return fallback !== undefined ? (
+      <>{fallback}</>
+    ) : (
+      <span
+        className={cn(
+          "flex items-center justify-center bg-muted/50 text-muted-foreground",
+          props.className
+        )}
+        aria-label={props.alt}
+      >
+        <ImageIcon className="size-6" />
+      </span>
+    );
+  }
+  return <PlainPreviewableImage {...props} src={url} preview={preview} />;
 };
 
 const PlainPreviewableImage: React.FC<

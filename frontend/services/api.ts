@@ -256,6 +256,7 @@ export const API_ENDPOINTS = {
     ws: `${API_BASE_URL}/voice/tts/ws`,
   },
   storage: {
+    knowledgeContent: `${API_BASE_URL}/file/knowledge/content`,
     upload: `${API_BASE_URL}/file/storage`,
     files: `${API_BASE_URL}/file/storage`,
     file: (

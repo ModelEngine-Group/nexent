@@ -346,7 +346,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
       )
     : [];
   const markerMatch = imageSrc?.match(
-    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i
+    /\/__(?:aidp|knowledge)_image__\/([a-z]+\d+)(?:[?#].*)?$/i
   );
   if (markerMatch) {
     const contentImage = trustedImages.find(
@@ -359,14 +359,22 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
         : undefined);
     if (!image) return null;
     return (
-      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+      <span
+        role="figure"
+        className="my-4 block overflow-hidden rounded-xl border bg-muted/20"
+      >
         <AuthenticatedImage
           src={image.url}
+          knowledgeReference={
+            image.fileRef && image.imageRef
+              ? { ...image.fileRef, image_ref: image.imageRef }
+              : undefined
+          }
           alt={alt || image.title}
           className="max-h-[32rem] w-full cursor-zoom-in object-contain"
           preview
         />
-      </figure>
+      </span>
     );
   }
 
@@ -383,7 +391,10 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
     (imageSrc && isLocalStorageObjectUrl(imageSrc) ? imageSrc : undefined);
   if (verifiedImageUrl) {
     return (
-      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+      <span
+        role="figure"
+        className="my-4 block overflow-hidden rounded-xl border bg-muted/20"
+      >
         <AuthenticatedImage
           src={verifiedImageUrl}
           alt={alt || trustedImage?.title}
@@ -391,7 +402,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
           preview
           proxy={Boolean(trustedImage)}
         />
-      </figure>
+      </span>
     );
   }
 

@@ -28,6 +28,11 @@ import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
 import {
+  getKnowledgeSourceAttributes,
+  knowledgeReferenceKey,
+  parseKnowledgePictures,
+} from "@/lib/knowledgeReference";
+import {
   appendClarificationPart,
   isClarificationFallback,
   isHumanInteractionEvent,
@@ -1096,16 +1101,17 @@ export const searchImagesRegistry = new Map<
   Map<string, SearchSource>
 >();
 
-const AIDP_IMAGE_MARKER_PATTERN = /\/__aidp_image__\/([a-z]+\d+)/gi;
+const SEARCH_IMAGE_MARKER_PATTERN =
+  /\/__(?:aidp|knowledge)_image__\/([a-z]+\d+)/gi;
 const MARKDOWN_IMAGE_URL_PATTERN =
   /!\[[^\]]*\]\(\s*<?([^>\s)]+)>?(?:\s+["'][^)]*["'])?\s*\)/g;
 
-export function extractAidpImageKeys(texts: readonly string[]): string[] {
+export function extractSearchImageKeys(texts: readonly string[]): string[] {
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const text of texts) {
-    AIDP_IMAGE_MARKER_PATTERN.lastIndex = 0;
-    for (const match of text.matchAll(AIDP_IMAGE_MARKER_PATTERN)) {
+    SEARCH_IMAGE_MARKER_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(SEARCH_IMAGE_MARKER_PATTERN)) {
       const key = match[1];
       if (!seen.has(key)) {
         seen.add(key);
@@ -1473,9 +1479,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       lastUserIndex >= 0
         ? (
             messages[lastUserIndex].metadata?.custom as
-              | { annotations?: unknown }
-              | undefined
-        )?.annotations
+              { annotations?: unknown } | undefined
+          )?.annotations
         : undefined
     );
     const annotations = messageAnnotations.length
@@ -1682,8 +1687,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           clarification_response: requestBody.clarification_response as
             ClarificationResponse | undefined,
           annotations: requestBody.annotations as
-            | import("@/types/conversation").ApiMessageAnnotation[]
-            | undefined,
+            import("@/types/conversation").ApiMessageAnnotation[] | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;
@@ -2297,6 +2301,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     };
 
+    const appendKnowledgeImages = (payload: unknown) => {
+      for (const picture of parseKnowledgePictures(payload)) {
+        const key = knowledgeReferenceKey(picture);
+        if (
+          searchImagesAccumulator.some(
+            (image) =>
+              knowledgeReferenceKey(image) === key &&
+              image.citeIndex === picture.citeIndex &&
+              image.toolSign === picture.toolSign
+          )
+        )
+          continue;
+        searchImagesAccumulator.push({
+          ...picture,
+          url: "",
+          title: "",
+          sourceType: "file",
+          isImage: true,
+          imageKey: `${picture.toolSign}${picture.citeIndex}`,
+        });
+      }
+    };
+
     const updateVerificationPanel = (result: VerificationContent): boolean => {
       // Each verification lifecycle begins with `start`. Create its card as
       // soon as that SSE event arrives so all following phases stream into it.
@@ -2571,6 +2598,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 ? parsed.images_url
                 : [];
               appendSearchImages(imageUrls);
+              appendKnowledgeImages(parsed);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -2836,10 +2864,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
                 const imageMetadata = parseImageMetadata(result.text);
                 const resolvedUrl = imageMetadata?.image_url || url;
-                const text = imageMetadata ? "" : result.text;
+                const knowledgeAttributes =
+                  getKnowledgeSourceAttributes(result);
+                const text =
+                  imageMetadata || knowledgeAttributes.imageRef
+                    ? ""
+                    : result.text;
                 const isImage =
                   result.score_details?.chunk_type === "image" ||
-                  Boolean(imageMetadata);
+                  Boolean(imageMetadata || knowledgeAttributes.imageRef);
                 const retrievalHighlightTerms = getRetrievalHighlightTerms(
                   result.score_details
                 );
@@ -2866,6 +2899,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...knowledgeAttributes,
                     ...getSourceAttributes(
                       result.search_type,
                       result.score_details
@@ -2890,6 +2924,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...knowledgeAttributes,
                     ...getSourceAttributes(
                       result.search_type,
                       result.score_details
@@ -3028,6 +3063,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 ? parsed.images_url
                 : [];
               appendSearchImages(imageUrls);
+              appendKnowledgeImages(parsed);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -3171,10 +3207,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
                   const imageMetadata = parseImageMetadata(result.text);
                   const resolvedUrl = imageMetadata?.image_url || url;
-                  const text = imageMetadata ? "" : result.text;
+                  const knowledgeAttributes =
+                    getKnowledgeSourceAttributes(result);
+                  const text =
+                    imageMetadata || knowledgeAttributes.imageRef
+                      ? ""
+                      : result.text;
                   const isImage =
                     result.score_details?.chunk_type === "image" ||
-                    Boolean(imageMetadata);
+                    Boolean(imageMetadata || knowledgeAttributes.imageRef);
                   const retrievalHighlightTerms = getRetrievalHighlightTerms(
                     result.score_details
                   );
@@ -3201,6 +3242,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...knowledgeAttributes,
                       ...getSourceAttributes(
                         result.search_type,
                         result.score_details
@@ -3225,6 +3267,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...knowledgeAttributes,
                       ...getSourceAttributes(
                         result.search_type,
                         result.score_details
@@ -3261,7 +3304,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // SEARCH_CONTENT and PICTURE_WEB can reach the browser in either order.
       // Resolve them only after the stream is complete, using the markers that
       // actually survived into the final answer as the authoritative keys.
-      const answerImageKeys = extractAidpImageKeys(
+      const answerImageKeys = extractSearchImageKeys(
         contentParts.flatMap((part) =>
           part?.type === "text" && typeof part.text === "string"
             ? [part.text]
@@ -3283,6 +3326,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
         const metadata = imageMetadata.find((source) => {
+          if (image.fileRef)
+            return (
+              knowledgeReferenceKey(source) === knowledgeReferenceKey(image) &&
+              source.citeIndex === image.citeIndex &&
+              source.toolSign === image.toolSign
+            );
           if (!source.url || matchedImageSources.has(source)) return false;
           const relativeUrl = source.url.replace(/^\/+/, "");
           return image.url.endsWith(relativeUrl);
@@ -3301,7 +3350,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           url: image.url,
           title: metadata?.title || image.title,
           text: metadata?.text || image.text,
-          sourceType: "url",
+          sourceType: image.fileRef ? "file" : "url",
           isImage: true,
           imageKey,
         };
@@ -3324,6 +3373,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // grouped source block. AIDP markers and explicit markdown images keep
       // their original inline position and are not duplicated here.
       for (const image of searchImagesAccumulator) {
+        if (image.fileRef && image.imageRef && image.imageKey) {
+          if (!answerImageKeys.includes(image.imageKey))
+            contentParts.push({
+              type: "text",
+              text: `\n\n![${image.imageKey}](/__knowledge_image__/${image.imageKey})`,
+            });
+          continue;
+        }
         if (
           answerImageUrls.has(image.url) ||
           ((image.url.includes("/KnowledgeBase/Tenants/") ||
@@ -3358,6 +3415,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             searchType: source.searchType,
             sourceMetadata: source.sourceMetadata,
             sourceReference: source.sourceReference,
+            fileRef: source.fileRef,
+            imageRef: source.imageRef,
+            sourceLocation: source.sourceLocation,
             publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
@@ -3378,6 +3438,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           searchType: image.searchType,
           sourceMetadata: image.sourceMetadata,
           sourceReference: image.sourceReference,
+          fileRef: image.fileRef,
+          imageRef: image.imageRef,
+          sourceLocation: image.sourceLocation,
           messageId,
         });
       }

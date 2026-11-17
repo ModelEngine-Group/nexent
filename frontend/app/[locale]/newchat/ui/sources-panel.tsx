@@ -45,6 +45,9 @@ import type { SourceAttributes } from "@/types/source";
 import { getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
 import { SourceMetadata } from "@/components/common/sourceMetadata";
 import log from "@/lib/logger";
+import { fetchKnowledgeContent } from "@/services/knowledgeContentService";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+import { knowledgeReferenceKey } from "@/lib/knowledgeReference";
 
 export { getCitationKey } from "@/lib/citationDisplay";
 
@@ -190,6 +193,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   const itemKey = (item: PanelSourceItem, index: number) =>
     JSON.stringify([
       messageId,
+      knowledgeReferenceKey(item),
       Number.isInteger(item.citeIndex) && item.citeIndex! > 0
         ? getCitationKey(item)
         : [
@@ -474,6 +478,16 @@ const SourceListItem = memo(function SourceListItem({
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const contentController = useRef<AbortController | null>(null);
+  const fileIdentity = JSON.stringify(item.fileRef);
+  useEffect(
+    () => () => {
+      contentController.current?.abort();
+    },
+    [fileIdentity]
+  );
   const isAidp = isAidpSource(item);
   const sourceLabel = getSourceLabel(item, {
     knowledgeBase: t("chat.sources.knowledgeBase"),
@@ -493,8 +507,32 @@ const SourceListItem = memo(function SourceListItem({
 
     setIsDownloading(true);
     setDownloadError(null);
+    let downloadController: AbortController | undefined;
     try {
       const filename = item.filename || item.title || "download";
+      if (item.fileRef) {
+        contentController.current?.abort();
+        const controller = new AbortController();
+        downloadController = controller;
+        contentController.current = controller;
+        const blob = await fetchKnowledgeContent(
+          item.fileRef,
+          controller.signal
+        );
+        if (controller.signal.aborted) return;
+        const url = URL.createObjectURL(blob);
+        try {
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+        return;
+      }
       if (item.downloadUrl) {
         const link = document.createElement("a");
         link.href = item.downloadUrl;
@@ -519,13 +557,37 @@ const SourceListItem = memo(function SourceListItem({
       }
       await storageService.downloadFileWithAuth(objectName, filename);
     } catch (error) {
+      if (downloadController?.signal.aborted) return;
       log.error("Failed to download citation file", {
         searchType: item.searchType,
         error,
       });
       setDownloadError(t("chat.sources.downloadError"));
     } finally {
-      setIsDownloading(false);
+      if (!downloadController?.signal.aborted) setIsDownloading(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!item.fileRef || isPreviewing) return;
+    contentController.current?.abort();
+    const controller = new AbortController();
+    contentController.current = controller;
+    setIsPreviewing(true);
+    setDownloadError(null);
+    try {
+      const blob = await fetchKnowledgeContent(item.fileRef, controller.signal);
+      if (!controller.signal.aborted)
+        setPreviewFile(
+          new File([blob], item.filename || item.title || "download", {
+            type: blob.type,
+          })
+        );
+    } catch {
+      if (!controller.signal.aborted)
+        setDownloadError(t("chat.sources.downloadError"));
+    } finally {
+      if (!controller.signal.aborted) setIsPreviewing(false);
     }
   };
 
@@ -555,13 +617,14 @@ const SourceListItem = memo(function SourceListItem({
         : [],
     [citationContext, retrievalHighlightTerms, item.text, selected]
   );
-  const previewUrl = isAidp
-    ? undefined
-    : getLocalFilePreviewUrl(
-        item.url,
-        item.filename || item.title,
-        item.objectName
-      );
+  const previewUrl =
+    isAidp || item.fileRef
+      ? undefined
+      : getLocalFilePreviewUrl(
+          item.url,
+          item.filename || item.title,
+          item.objectName
+        );
 
   if (item.sourceType === "document") {
     return (
@@ -575,10 +638,14 @@ const SourceListItem = memo(function SourceListItem({
           <button
             type="button"
             onClick={() =>
-              previewUrl &&
-              window.open(previewUrl, "_blank", "noopener,noreferrer")
+              item.fileRef
+                ? void handlePreview()
+                : previewUrl &&
+                  window.open(previewUrl, "_blank", "noopener,noreferrer")
             }
-            disabled={!previewUrl}
+            disabled={
+              isPreviewing || isDownloading || (!item.fileRef && !previewUrl)
+            }
             className="group flex min-w-0 flex-1 items-start gap-2 text-left transition-colors hover:text-primary disabled:cursor-default disabled:hover:text-foreground"
             aria-label={t("chat.sources.preview", {
               name: item.filename || item.title || t("chat.sources.document"),
@@ -602,7 +669,7 @@ const SourceListItem = memo(function SourceListItem({
             <button
               type="button"
               onClick={() => void handleDocumentDownload()}
-              disabled={isDownloading}
+              disabled={isDownloading || isPreviewing}
               className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
               aria-label={t("chat.sources.download", {
                 name: item.filename || item.title || t("chat.sources.document"),
@@ -620,6 +687,14 @@ const SourceListItem = memo(function SourceListItem({
         <SourceFooter item={item} sourceLabel={sourceLabel} />
         {downloadError && (
           <p className="pt-2 text-xs text-destructive">{downloadError}</p>
+        )}
+        {previewFile && (
+          <FilePreviewDrawer
+            source="local"
+            file={previewFile}
+            open
+            onClose={() => setPreviewFile(null)}
+          />
         )}
       </li>
     );
@@ -712,7 +787,7 @@ const ImageListItem = memo(function ImageListItem({
   const resolvedUrl =
     imageState.url === imageUrl ? imageState.resolved : undefined;
   const loadError = imageState.url === imageUrl && imageState.error;
-  const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
+  const usesBackendStream = !item.fileRef && isLocalStorageObjectUrl(imageUrl);
 
   useEffect(() => {
     if (!imageUrl || !usesBackendStream) return;
@@ -742,7 +817,7 @@ const ImageListItem = memo(function ImageListItem({
     }
   }, [selected, selectionToken]);
 
-  if (!imageUrl) return null;
+  if (!imageUrl && !(item.fileRef && item.imageRef)) return null;
   const cardClassName = cn(
     "aui-global-search-image relative overflow-hidden rounded-md border bg-muted/50",
     selected && "border-[#1677ff] ring-1 ring-[#1677ff]"
@@ -787,6 +862,11 @@ const ImageListItem = memo(function ImageListItem({
         className="absolute top-2 right-2 z-10"
       />
       <AuthenticatedImage
+        knowledgeReference={
+          item.fileRef && item.imageRef
+            ? { ...item.fileRef, image_ref: item.imageRef }
+            : undefined
+        }
         src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"

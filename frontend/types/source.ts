@@ -1,4 +1,9 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import type {
+  KnowledgeFileReference,
+  KnowledgeObjectReference,
+} from "./knowledgeReference";
 
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | JsonObject;
@@ -8,6 +13,9 @@ export interface JsonObject {
 }
 
 export interface SourceAttributes {
+  fileRef?: KnowledgeFileReference;
+  imageRef?: KnowledgeObjectReference;
+  sourceLocation?: JsonObject;
   searchType?: string;
   toolSign?: string;
   sourceMetadata?: JsonObject;

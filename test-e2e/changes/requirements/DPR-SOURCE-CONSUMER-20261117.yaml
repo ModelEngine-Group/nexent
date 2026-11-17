@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-SOURCE-CONSUMER-20261117
+  change_type: requirement
+  requirement_id: DPR-004
+  title: Consume versioned knowledge content through the frontend
+  description: Preserve typed references through streaming and restored adapters and read authorized bytes for source downloads, previews and selected images.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DPR-SOURCE-CONSUMER-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Validate immutable references, preserve citation identities and only restore selected images.
+    - POST exact content identities with a bounded total read, propagate denial and cancellation without retries.
+    - Revoke Blob URLs on version changes and unmount and discard late reads.
+    - Download exact referenced content and open existing local preview without filename-based object guesses.
+    reason: UT owns parsing, transport and mounted component cleanup. The additional D4 runs the actual chat page and HTTP consumers in Chrome, proving streaming, download and history restoration beyond jsdom. All APIs are controlled and fixture routes are removed; no real tenant data, provider or database is accessed. No duplicate D1 is added.
+    test_selectors:
+    - frontend/tests/workbench/KnowledgeReferences.test.ts
+    - frontend/tests/workbench/KnowledgeContent.test.tsx
+    - frontend/tests/workbench/KnowledgeImage.test.tsx
+    - frontend/tests/workbench/KnowledgeSourceAdapters.test.ts
+    - frontend/tests/workbench/KnowledgeSourcesPanel.test.tsx

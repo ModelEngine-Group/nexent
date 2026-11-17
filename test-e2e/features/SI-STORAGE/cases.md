@@ -4,3 +4,4 @@
 
 - D3 [SI-OBJECT-D3-001](../../cases/SI-OBJECT-D3-001/case.yaml) · active
 - D3 [SI-OBJECT-LIST-D3-001](../../cases/SI-OBJECT-LIST-D3-001/case.yaml) · active
+- D3 [SI-VECTOR-D3-001](../../cases/SI-VECTOR-D3-001/case.yaml) · active

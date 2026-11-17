@@ -7,6 +7,11 @@ import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
 import {
+  getKnowledgeSourceAttributes,
+  knowledgeReferenceKey,
+  parseKnowledgePictures,
+} from "@/lib/knowledgeReference";
+import {
   ExportedMessageRepository,
   RuntimeAdapterProvider,
   useAui,
@@ -54,7 +59,7 @@ import {
   buildExecutionCodePart,
   buildToolCallPart,
   conversationSourcesRegistry,
-  extractAidpImageKeys,
+  extractSearchImageKeys,
   searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
@@ -175,6 +180,7 @@ const toToolSearchItem = (value: unknown) => {
   const sourceFile =
     typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
+  const knowledgeAttributes = getKnowledgeSourceAttributes(item);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
     (typeof item.title === "string" && item.title) ||
@@ -195,11 +201,12 @@ const toToolSearchItem = (value: unknown) => {
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata
-          ? undefined
-          : typeof item.text === "string"
-            ? item.text
-            : undefined,
+        text:
+          imageMetadata || knowledgeAttributes.imageRef
+            ? undefined
+            : typeof item.text === "string"
+              ? item.text
+              : undefined,
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
@@ -214,9 +221,10 @@ const toToolSearchItem = (value: unknown) => {
           typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
-        isImage: Boolean(imageMetadata),
+        isImage: Boolean(imageMetadata || knowledgeAttributes.imageRef),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
         ...getSourceAttributes(item.search_type, item.score_details),
+        ...knowledgeAttributes,
       }
     : null;
 };
@@ -424,7 +432,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       const runHasFinalAnswer = messageParts.some(
         (part) => part.type === "final_answer"
       );
-      const persistedAnswerImageKeys = extractAidpImageKeys(
+      const persistedAnswerImageKeys = extractSearchImageKeys(
         messageParts.flatMap((part) =>
           (part.type === "final_answer" || part.type === "text") &&
           typeof part.content === "string"
@@ -461,6 +469,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (url || filename || title) {
               const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const isImage =
+                Boolean(getKnowledgeSourceAttributes(item).imageRef) ||
                 (item.score_details as Record<string, unknown> | undefined)
                   ?.chunk_type === "image" ||
                 Boolean(imageMetadata) ||
@@ -490,6 +499,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                   item.score_details
                 ),
                 ...getSourceAttributes(item.search_type, item.score_details),
+                ...getKnowledgeSourceAttributes(item),
               });
             }
           }
@@ -856,6 +866,47 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "picture_web") {
+            try {
+              for (const picture of parseKnowledgePictures(
+                JSON.parse(part.content)
+              )) {
+                const imageKey = `${picture.toolSign}${picture.citeIndex}`;
+                if (restoredImageKeys.has(imageKey)) continue;
+                const metadata = persistedImageSources
+                  .map(toToolSearchItem)
+                  .find(
+                    (source) =>
+                      source &&
+                      knowledgeReferenceKey(source) ===
+                        knowledgeReferenceKey(picture) &&
+                      source.citeIndex === picture.citeIndex &&
+                      source.toolSign === picture.toolSign
+                  );
+                const imagePart = {
+                  ...metadata,
+                  ...picture,
+                  type: "source",
+                  sourceType: "file",
+                  url: "",
+                  title: metadata?.title || "",
+                  text: undefined,
+                  isImage: true,
+                  imageKey,
+                };
+                restoredImageKeys.add(imageKey);
+                restoredImages.push(imagePart);
+                attachSearchContentToTool(
+                  content,
+                  imagePart,
+                  part.tool_call_id
+                );
+              }
+            } catch (error) {
+              log.warn(
+                "[history-adapter] Failed to parse knowledge picture references",
+                error
+              );
+            }
             for (const imageUrl of parseSearchImageUrls(part.content)) {
               for (const imagePart of appendHistoricalImage(imageUrl)) {
                 attachSearchContentToTool(
@@ -1310,6 +1361,18 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           ...restoredImages,
         ]);
 
+        for (const image of restoredImages) {
+          if (
+            image.fileRef &&
+            image.imageRef &&
+            !answerImageKeys.includes(image.imageKey)
+          )
+            content.push({
+              type: "text",
+              text: `\n\n![${image.imageKey}](/__knowledge_image__/${image.imageKey})`,
+            });
+        }
+
         // Emit a `source` part for each persisted search result so the
         // `group-source` block renders the inline "检索结果" trigger button.
         // Mirrors the streaming adapter's end-of-stream emission, but uses the
@@ -1324,6 +1387,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const imageMetadata = parseImageMetadata(item.text);
               if (
+                getKnowledgeSourceAttributes(item).imageRef ||
                 scoreDetails?.chunk_type === "image" ||
                 imageMetadata ||
                 answerImageKeys.includes(searchImageKey)
@@ -1351,6 +1415,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                   item.score_details
                 ),
                 ...getSourceAttributes(item.search_type, item.score_details),
+                ...getKnowledgeSourceAttributes(item),
                 messageId,
               });
             }

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D4
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-SOURCE-CONSUMER-D4-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-002, DPR-004, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-06]
+  title: Versioned knowledge sources remain usable in live and restored chat
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise the real chat adapters, source panel, authenticated images and file download in a browser with controlled HTTP responses.
+  preconditions:
+  - The current frontend is running and Chrome is available; all product HTTP APIs are intercepted by isolated fixtures.
+  test_data:
+    profile: mock
+    resources: One conversation, one fixed-version TXT source and one selected PNG image; a second unselected image must never be requested.
+  steps:
+  - order: 1
+    action: Open an ordinary conversation and send a query receiving typed search and selected picture events.
+    expected: The answer and selected picture render; source metadata retains the fixed file version and no object URL is guessed.
+  - order: 2
+    action: Open the source panel, download the cited file and open its local preview.
+    expected: The file is downloaded with its original filename and exact bytes through the versioned POST endpoint; the existing preview drawer renders the same text.
+  - order: 3
+    action: Reload the completed conversation and inspect its restored answer, image and file source.
+    expected: The same selected image and source can be consumed without a new Agent run.
+  - order: 4
+    action: Deny a later content read and attempt the file download again.
+    expected: The panel shows its existing download error and does not request an old object path or retry the content read.
+  expected_results:
+  - Live and restored chat display the selected reference image and retain citation identity.
+  - File downloads contain exact bytes, local preview renders the text and both use fixed identity; refusal remains visible.
+  forbidden_side_effects:
+  - No real model calls, database writes, old data-process HTTP, guessed object downloads or unselected-image reads occur.
+  - Reload does not start an additional Agent run and denied downloads do not retry.
+  actor: Isolated ordinary chat user
+  journey: [Send query, View image, Download source, Reload history, Denied download]
+  final_business_result: [Versioned KB content remains usable through the actual chat UI after history restoration.]
+  failure_evidence: [Browser trace, Screenshots, Captured sanitized request identities]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Actual live and restored consumers retain versioned references and selected images without additional execution.
+    steps: [1, 3]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Authorized download produces exact bytes and a denied download remains an error without fallback or retry.
+    steps: [2, 4]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]

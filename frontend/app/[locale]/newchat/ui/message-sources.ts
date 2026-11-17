@@ -116,6 +116,9 @@ export function getMessageSources(
       searchType: source.searchType,
       sourceMetadata: source.sourceMetadata,
       sourceReference: source.sourceReference,
+      fileRef: source.fileRef,
+      imageRef: source.imageRef,
+      sourceLocation: source.sourceLocation,
     };
   });
   const displayIndices = buildCitationDisplayIndexMap(content, items);
