@@ -2,7 +2,6 @@
 
 """Knowledge file listing, deletion and status."""
 
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -16,13 +15,15 @@ from management.db.knowledge_base.file_lifecycle import list_file_records
 from management.db.knowledge_base.storage_object import list_committed_storage_objects
 from fastapi import Depends, Path, Query
 from management.services.knowledge_base.common import get_vector_db_core, logger
-from management.services.knowledge_base.status import get_all_files_status
+from management.services.knowledge_base.file_reader import read_knowledge_files
+from management.services.knowledge_base.file_projection import merge_lifecycle_files
+from infrastructure.agentos_identity import ServicePrincipal
 from nexent.vector_database.base import VectorDatabaseCore
+from nexent.storage.errors import DeadlineExceeded
 from management.services.knowledge_base.storage import (
     release_storage_charge,
     resolve_storage_reference,
 )
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.file.upload import get_file_size
 from management.services.file.preview import build_preview_pdf_object_key
 
@@ -139,9 +140,8 @@ class KnowledgeBaseFileService:
 
         try:
             file_list_result = await KnowledgeBaseManagementService.list_files(
-                index_name,
-                include_chunks=False,
-                vdb_core=vdb_core,
+                index_name, include_chunks=False, vdb_core=vdb_core,
+                user_id=updated_by, tenant_id=tenant_id,
             )
             files_to_delete = file_list_result.get("files", [])
         except Exception:
@@ -271,6 +271,9 @@ class KnowledgeBaseFileService:
             False, description="Whether to include text chunks for each file"
         ),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        *,
+        user_id: str,
+        tenant_id: str,
     ):
         """
         Get file list for the specified index, including files that are not yet stored in ES
@@ -288,6 +291,7 @@ class KnowledgeBaseFileService:
         )
 
         try:
+            lifecycle_rows = await read_knowledge_files(index_name, ServicePrincipal(user_id, tenant_id))
             files_map: Dict[str, Dict[str, Any]] = {}
             total_start_time = time.time()
 
@@ -301,14 +305,6 @@ class KnowledgeBaseFileService:
             step1_duration = time.time() - step1_start
             logger.info(
                 f"[list_files:step1] ES get_documents_detail: {len(existing_files)} files in {step1_duration:.3f}s"
-            )
-
-            # Step 2: Get celery task statuses from external service
-            step2_start = time.time()
-            celery_task_files = await get_all_files_status(index_name)
-            step2_duration = time.time() - step2_start
-            logger.info(
-                f"[list_files:step2] Celery task status: {len(celery_task_files)} tasks in {step2_duration:.3f}s"
             )
 
             # Step 3: Build files_map from ES data
@@ -358,191 +354,7 @@ class KnowledgeBaseFileService:
                 f"[list_files:step3] Build files_map from ES: {len(existing_files)} files in {step3_duration:.3f}s"
             )
 
-            # Step 4: Merge celery task data (Redis progress already fetched in get_all_files_status)
-            step4_start = time.time()
-            celery_file_count = 0
-            for path_or_url, status_info in celery_task_files.items():
-                celery_file_count += 1
-                status_dict = status_info if isinstance(status_info, dict) else {}
-
-                source_type = (
-                    status_dict.get("source_type")
-                    if status_dict.get("source_type")
-                    else "minio"
-                )
-                original_filename = status_dict.get("original_filename")
-                filename = original_filename or (
-                    os.path.basename(path_or_url) if path_or_url else ""
-                )
-
-                file_size = 0
-                if path_or_url in files_map:
-                    file_size = files_map[path_or_url].get("file_size", 0)
-                else:
-                    try:
-                        file_size = get_file_size(source_type or "minio", path_or_url)
-                    except Exception as size_err:
-                        logger.error(
-                            f"Failed to get file size for '{path_or_url}': {size_err}"
-                        )
-                        file_size = 0
-
-                # Get progress from celery_task_files (already includes Redis batch data)
-                processed_chunks = status_dict.get("processed_chunks")
-                total_chunks = status_dict.get("total_chunks")
-                task_id = status_dict.get("latest_task_id", "")
-
-                if path_or_url in files_map:
-                    file_data = files_map[path_or_url]
-                else:
-                    legacy_created_at = status_dict.get("created_at")
-                    try:
-                        if isinstance(legacy_created_at, (int, float)):
-                            legacy_timestamp = (
-                                float(legacy_created_at) / 1000
-                                if legacy_created_at > 10_000_000_000
-                                else float(legacy_created_at)
-                            )
-                        else:
-                            legacy_timestamp = datetime.fromisoformat(
-                                str(legacy_created_at).replace("Z", "+00:00")
-                            ).timestamp()
-                    except (TypeError, ValueError, OverflowError):
-                        legacy_timestamp = time.time()
-                    file_data = {
-                        "path_or_url": path_or_url,
-                        "file": filename,
-                        "file_size": file_size,
-                        "create_time": int(legacy_timestamp * 1000),
-                        "chunk_count": 0,
-                        "error_reason": None,
-                        "has_error_info": False,
-                    }
-                    files_map[path_or_url] = file_data
-
-                file_data["status"] = status_dict.get(
-                    "state", file_data.get("status", "UNKNOWN")
-                )
-                file_data["latest_task_id"] = task_id
-                file_data["processed_chunk_num"] = processed_chunks
-                file_data["total_chunk_num"] = total_chunks
-
-                # Get error reason for failed documents (fetch from Redis batch if needed)
-                if task_id and status_dict.get("state") in [
-                    "PROCESS_FAILED",
-                    "FORWARD_FAILED",
-                ]:
-                    try:
-                        redis_service = get_redis_service()
-                        error_reason = redis_service.get_error_info(task_id)
-                        if error_reason:
-                            file_data["error_reason"] = error_reason
-                            file_data["has_error_info"] = True
-                    except Exception:
-                        pass  # Error info is optional, don't fail the request
-            step4_duration = time.time() - step4_start
-            logger.info(
-                f"[list_files:step4] Merge celery tasks: {celery_file_count} tasks in {step4_duration:.3f}s"
-            )
-
-            # Durable lifecycle rows are authoritative for upload failures,
-            # timestamps, and deletion tombstones. If the migration is not
-            # present yet, retain the legacy ES/Redis result unchanged.
-            try:
-                knowledge_record = (
-                    get_knowledge_record({"index_name": index_name}) or {}
-                )
-                lifecycle_rows = list_file_records(
-                    index_name=index_name,
-                    tenant_id=knowledge_record.get("tenant_id"),
-                    include_hidden=True,
-                )
-                hidden_paths = {
-                    row.get("object_name")
-                    for row in lifecycle_rows
-                    if row.get("status") in {"DELETE_REQUESTED", "DELETED"}
-                    and row.get("object_name")
-                }
-                for hidden_path in hidden_paths:
-                    files_map.pop(hidden_path, None)
-
-                status_map = {
-                    "UPLOADING": "WAIT_FOR_PROCESSING",
-                    "UPLOADED": "WAIT_FOR_PROCESSING",
-                    "PROCESSING": "PROCESSING",
-                    "FORWARDING": "FORWARDING",
-                    "COMPLETED": "COMPLETED",
-                }
-                for row in lifecycle_rows:
-                    if row.get("status") in {"DELETE_REQUESTED", "DELETED"}:
-                        continue
-                    path_or_url = row.get("object_name")
-                    row_key = path_or_url or f"lifecycle:{row.get('file_id')}"
-                    existing = files_map.get(path_or_url) if path_or_url else None
-                    timestamp_value = row.get("uploaded_at") or row.get("create_time")
-                    try:
-                        timestamp = datetime.fromisoformat(
-                            str(timestamp_value).replace("Z", "+00:00")
-                        ).timestamp()
-                    except (TypeError, ValueError, OverflowError):
-                        timestamp = time.time()
-                    lifecycle_status = row.get("status") or "UPLOADING"
-                    if lifecycle_status == "FAILED":
-                        lifecycle_status = (
-                            "FORWARD_FAILED"
-                            if str(
-                                row.get("error_stage") or row.get("stage") or ""
-                            ).upper()
-                            in {"FORWARD", "FORWARDING"}
-                            else "PROCESS_FAILED"
-                        )
-                    # Keep the pre-lifecycle display contract for rows that still
-                    # have an ES/Redis name. New rows synchronize the same effective
-                    # name into PG after conflict resolution; PG is the fallback when
-                    # no legacy name is available (for example after Redis expiry).
-                    lifecycle_filename = row.get("original_filename") or ""
-                    legacy_filename = (existing or {}).get("file") or ""
-                    display_filename = legacy_filename or lifecycle_filename
-                    file_data = existing or {
-                        "path_or_url": path_or_url,
-                        "file": display_filename,
-                        "file_size": row.get("file_size") or 0,
-                        "create_time": int(timestamp * 1000),
-                        "chunk_count": 0,
-                        "error_reason": None,
-                        "has_error_info": False,
-                    }
-                    file_data.update(
-                        {
-                            "path_or_url": path_or_url,
-                            "file": display_filename or file_data.get("file", ""),
-                            "file_size": row.get("file_size")
-                            if row.get("file_size") is not None
-                            else file_data.get("file_size", 0),
-                            "create_time": int(timestamp * 1000),
-                            "status": status_map.get(
-                                lifecycle_status, lifecycle_status
-                            ),
-                            "latest_task_id": row.get("forward_task_id")
-                            or row.get("process_task_id")
-                            or "",
-                            "file_id": row.get("file_id"),
-                            "error_reason": row.get("error_message")
-                            or row.get("error_code"),
-                            "error_code": row.get("error_code"),
-                            "error_stage": row.get("error_stage") or row.get("stage"),
-                            "failed_at": row.get("failed_at"),
-                            "has_error_info": bool(
-                                row.get("error_message") or row.get("error_code")
-                            ),
-                        }
-                    )
-                    files_map[row_key] = file_data
-            except Exception as lifecycle_exc:
-                logger.warning(
-                    "[list_files] Lifecycle table unavailable; using legacy ES/Redis data: %s",
-                    lifecycle_exc,
-                )
+            merge_lifecycle_files(files_map, lifecycle_rows)
 
             files = list(files_map.values())
             logger.info(f"[list_files:step4] Total files built: {len(files)}")
@@ -629,6 +441,8 @@ class KnowledgeBaseFileService:
 
             return {"files": files}
 
+        except (TimeoutError, DeadlineExceeded):
+            raise
         except Exception as e:
             raise Exception(f"Error getting file list for index {index_name}: {str(e)}")
 

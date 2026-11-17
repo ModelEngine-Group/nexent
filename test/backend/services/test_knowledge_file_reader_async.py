@@ -41,7 +41,8 @@ async def test_success_and_storage_failure_signal_owned_context(monkeypatch):
     assert contexts[1].cancelled.is_set()
 
 
-async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplog):
+@pytest.mark.parametrize("phase", ["error-info", "file-list"])
+async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplog, phase):
     contexts = []
 
     async def blocking(*args, **kwargs):
@@ -54,10 +55,26 @@ async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplo
     monkeypatch.setattr(module, "run_blocking", blocking)
     monkeypatch.setattr(module, "OperationContext", context)
     with pytest.raises(TimeoutError):
-        await module.read_document_error(
-            "kb", "sensitive-document-path", ServicePrincipal("u", "t")
-        )
+        if phase == "error-info":
+            await module.read_document_error("kb", "sensitive-document-path", ServicePrincipal("u", "t"))
+        else:
+            await module.read_knowledge_files("kb", ServicePrincipal("u", "t"))
     assert len(contexts) == 1 and contexts[0].cancelled.is_set()
     records = [r for r in caplog.records if "knowledge_file_read_timeout" in r.message]
     assert len(records) == 1 and records[0].levelname == "WARNING"
     assert "sensitive-document-path" not in caplog.text
+    assert "phase=" + phase in caplog.text
+
+
+async def test_public_list_service_propagates_timeout_before_querying_es(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from management.services.knowledge_base import files
+    from nexent.storage.errors import DeadlineExceeded
+
+    read, core = AsyncMock(side_effect=DeadlineExceeded()), Mock()
+    monkeypatch.setattr(files, "read_knowledge_files", read)
+    with pytest.raises(DeadlineExceeded):
+        await files.KnowledgeBaseFileService.list_files("kb", include_chunks=False, vdb_core=core, user_id="u", tenant_id="t")
+    assert read.await_count == 1
+    core.get_documents_detail.assert_not_called()

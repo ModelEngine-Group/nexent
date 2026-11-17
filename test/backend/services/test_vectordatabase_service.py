@@ -286,6 +286,7 @@ if memory_pkg is not None:
 sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
+sys.modules['nexent.storage'].__path__ = [str(SDK_ROOT / 'nexent' / 'storage')]
 storage_factory_module = types.ModuleType('nexent.storage.storage_client_factory')
 storage_config_module = types.ModuleType('nexent.storage.minio_config')
 
@@ -429,12 +430,7 @@ sys.modules['management.services.knowledge_base.summary'] = document_vector_util
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 setattr(sys.modules['backend.utils'], 'document_vector_utils', document_vector_utils_mock)
 
-async def _mock_get_all_files_status(index_name):
-    return {}
-
-
 file_management_utils_mock = types.ModuleType('management.services.file.upload')
-file_management_utils_mock.get_all_files_status = _mock_get_all_files_status
 file_management_utils_mock.get_file_size = MagicMock(return_value=0)
 sys.modules['management.services.file.upload'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
@@ -2380,7 +2376,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(kwargs.get("embedding_batch_size"), 8)
         self.assertTrue(callable(kwargs.get("progress_callback")))
 
-    @patch('management.services.knowledge_base.files.get_all_files_status')
+    @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_without_chunks(self, mock_get_files_status):
         """
         Test listing files without including document chunks.
@@ -2400,8 +2396,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "create_time": "2023-01-01T12:00:00"
             }
         ]
-        mock_get_files_status.return_value = {
-            "file2": {"state": "PROCESSING", "latest_task_id": "task123"}}
+        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file2', 'status': 'PROCESSING', 'error_stage': 'PROCESS', 'forward_task_id': 'task123'}]
 
         # Execute
         async def run_test():
@@ -2409,7 +2404,7 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 include_chunks=False,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
 
@@ -2420,24 +2415,17 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_documents_detail.assert_called_once_with(
             "test_index")
 
-    @patch('management.services.knowledge_base.files.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     @patch('management.services.knowledge_base.files.get_file_size', return_value=12)
     @patch('management.services.knowledge_base.files.list_file_records')
     @patch('management.services.knowledge_base.files.get_knowledge_record')
-    @patch('management.services.knowledge_base.files.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.files.read_knowledge_files', new_callable=AsyncMock)
     def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_get_size, mock_redis
     ):
         """PG lifecycle rows should override legacy status and hide deleted paths."""
         self.mock_vdb_core.get_documents_detail.return_value = []
-        mock_get_files_status.return_value = {
-            "legacy-ms": {
-                "state": "PROCESS_FAILED",
-                "latest_task_id": "task-legacy",
-                "created_at": 1700000000000,
-                "original_filename": "legacy.txt",
-            }
-        }
+        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'legacy-ms', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-legacy', 'uploaded_at': '2023-11-14T22:13:20+00:00', 'original_filename': 'legacy.txt'}]
         mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
         mock_list_lifecycle.return_value = [
             {"file_id": "deleted", "object_name": "deleted.txt", "status": "DELETED"},
@@ -2465,8 +2453,10 @@ class TestElasticSearchService(unittest.TestCase):
         ]
         mock_redis.return_value.get_error_info.return_value = "legacy parse error"
 
+        mock_get_files_status.return_value += mock_list_lifecycle.return_value
+
         result = asyncio.run(
-            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core, user_id="user-1", tenant_id="tenant-1")
         )
 
         by_path = {item["path_or_url"]: item for item in result["files"]}
@@ -2477,10 +2467,10 @@ class TestElasticSearchService(unittest.TestCase):
         assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
         assert by_path["legacy-ms"]["create_time"] == 1700000000000
 
-    @patch('management.services.knowledge_base.files.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     @patch('management.services.knowledge_base.files.list_file_records')
     @patch('management.services.knowledge_base.files.get_knowledge_record')
-    @patch('management.services.knowledge_base.files.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.files.read_knowledge_files', new_callable=AsyncMock)
     def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_redis
     ):
@@ -2491,13 +2481,7 @@ class TestElasticSearchService(unittest.TestCase):
             "file_size": 5,
             "create_time": "2024-01-01T00:00:00",
         }]
-        mock_get_files_status.return_value = {
-            "folder/data.txt": {
-                "state": "PROCESS_FAILED",
-                "latest_task_id": "task-1",
-                "original_filename": "data_1.txt",
-            }
-        }
+        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'folder/data.txt', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-1', 'original_filename': 'data_1.txt'}]
         mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
         mock_list_lifecycle.return_value = [{
             "file_id": "fid-1",
@@ -2509,8 +2493,10 @@ class TestElasticSearchService(unittest.TestCase):
         }]
         mock_redis.return_value.get_error_info.return_value = None
 
+        mock_get_files_status.return_value += mock_list_lifecycle.return_value
+
         result = asyncio.run(
-            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core, user_id="user-1", tenant_id="tenant-1")
         )
 
         assert result["files"][0]["file"] == "data_1.txt"
@@ -2727,7 +2713,7 @@ class TestElasticSearchService(unittest.TestCase):
                 }
             )
 
-    @patch('management.services.knowledge_base.files.get_all_files_status')
+    @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_with_chunks(self, mock_get_files_status):
         """
         Test listing files with document chunks included.
@@ -2778,7 +2764,7 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 include_chunks=True,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
 
@@ -2788,7 +2774,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["files"][0]["chunk_count"], 1)
         self.mock_vdb_core.multi_search.assert_called_once()
 
-    @patch('management.services.knowledge_base.files.get_all_files_status')
+    @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_msearch_error(self, mock_get_files_status):
         """
         Test listing files when msearch encounters an error.
@@ -2821,7 +2807,7 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 include_chunks=True,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
 
@@ -2904,16 +2890,14 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
     @patch(
-        'management.services.knowledge_base.deletion.get_all_files_status',
+        'management.services.knowledge_base.deletion.read_knowledge_files',
         new_callable=AsyncMock,
     )
     @patch('management.services.knowledge_base.files.delete_file')
     def test_delete_document_by_scope_source_only(
         self, mock_delete_file, mock_get_status
     ):
-        mock_get_status.return_value = {
-            "knowledge_base/doc.pdf": {"state": "COMPLETED"}
-        }
+        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/doc.pdf', 'status': 'COMPLETED', 'error_stage': 'PROCESS'}]
         mock_delete_file.return_value = {"success": True}
 
         result = asyncio.run(
@@ -2922,7 +2906,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "knowledge_base/doc.pdf",
                 "source_only",
                 self.mock_vdb_core,
-            )
+             requested_by="user-1", tenant_id="tenant-1")
         )
 
         self.assertEqual(result["scope"], "source_only")
@@ -2994,7 +2978,7 @@ class TestElasticSearchService(unittest.TestCase):
         return_value={"tenant_id": "tenant-1"},
     )
     @patch(
-        'management.services.knowledge_base.deletion.get_all_files_status',
+        'management.services.knowledge_base.deletion.read_knowledge_files',
         new_callable=AsyncMock,
     )
     def test_delete_document_by_scope_source_only_reports_physical_failure(
@@ -3008,7 +2992,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "knowledge_base/doc.pdf",
                 "source_only",
                 self.mock_vdb_core,
-            )
+             requested_by="user-1", tenant_id="tenant-1")
         )
 
         self.assertEqual(result["status"], "failed")
@@ -3016,15 +3000,13 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["source_available"])
 
     @patch(
-        'management.services.knowledge_base.deletion.get_all_files_status',
+        'management.services.knowledge_base.deletion.read_knowledge_files',
         new_callable=AsyncMock,
     )
     def test_delete_document_by_scope_rejects_processing(
         self, mock_get_status
     ):
-        mock_get_status.return_value = {
-            "knowledge_base/doc.pdf": {"state": "PROCESSING"}
-        }
+        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/doc.pdf', 'status': 'PROCESSING', 'error_stage': 'PROCESS'}]
 
         with self.assertRaises(ValueError):
             asyncio.run(
@@ -3033,28 +3015,26 @@ class TestElasticSearchService(unittest.TestCase):
                     "knowledge_base/doc.pdf",
                     "source_only",
                     self.mock_vdb_core,
-                )
+                 requested_by="user-1", tenant_id="tenant-1")
             )
 
     @patch('management.services.knowledge_base.deletion.release_storage_charge')
     @patch('management.services.knowledge_base.deletion.delete_file')
     @patch(
-        'management.services.knowledge_base.deletion.get_all_files_status',
+        'management.services.knowledge_base.deletion.read_knowledge_files',
         new_callable=AsyncMock,
     )
     def test_processing_failure_does_not_delete_source_or_release_charge(
         self, mock_get_status, mock_delete_file, mock_release
     ):
-        mock_get_status.return_value = {
-            "knowledge_base/failed.pdf": {"state": "PROCESS_FAILED"}
-        }
+        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/failed.pdf', 'status': 'FAILED', 'error_stage': 'PROCESS'}]
 
         delete_operation = ElasticSearchService.delete_document_by_scope(
             "test_index",
             "knowledge_base/failed.pdf",
             "source_only",
             self.mock_vdb_core,
-        )
+         requested_by="user-1", tenant_id="tenant-1")
         with self.assertRaises(ValueError):
             asyncio.run(delete_operation)
 
@@ -5655,9 +5635,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         # two attempts to save progress (init and final)
         self.assertEqual(mock_redis.save_progress_info.call_count, 2)
 
-    @patch('management.services.knowledge_base.files.get_all_files_status')
+    @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
-        """list_files handles invalid timestamps, progress from get_all_files_status, and error info."""
+        """list_files handles invalid timestamps, progress from read_knowledge_files, and error info."""
         # ES file with invalid timestamp and chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
@@ -5670,24 +5650,15 @@ class TestRethrowOrPlain(unittest.TestCase):
         ]
         # Note: count() is no longer called - chunk_count comes from aggregation
 
-        # Progress and error info now come from get_all_files_status (batch from Redis)
-        mock_get_files_status.return_value = {
-            "file1": {
-                "state": "PROCESS_FAILED",
-                "latest_task_id": "task-1",
-                "processed_chunks": 2,
-                "total_chunks": 5,
-                "source_type": "minio",
-                "original_filename": "file1.txt"
-            }
-        }
+        # Progress and error info now come from read_knowledge_files (durable snapshot)
+        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file1', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-1', 'processed_chunks': 2, 'total_chunks': 5, 'source_type': 'minio', 'original_filename': 'file1.txt'}]
 
         async def run_test():
             return await ElasticSearchService.list_files(
                 index_name="idx",
                 include_chunks=False,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
         self.assertEqual(len(result["files"]), 1)
@@ -5696,14 +5667,14 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(file_info["chunk_count"], 1)
         self.assertEqual(file_info["file_size"], 10)
         self.assertEqual(file_info["status"], "PROCESS_FAILED")
-        # Progress from get_all_files_status
+        # Progress from read_knowledge_files
         self.assertEqual(file_info["processed_chunk_num"], 2)
         self.assertEqual(file_info["total_chunk_num"], 5)
         self.assertIsInstance(file_info["create_time"], int)
 
-    @patch('management.services.knowledge_base.files.get_all_files_status')
+    @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_warning_and_progress_error_branches(self, mock_get_files_status):
-        """list_files: chunk_count from aggregation, progress from get_all_files_status, error handling."""
+        """list_files: chunk_count from aggregation, progress from read_knowledge_files, error handling."""
         # ES file - chunk_count from aggregation (no longer uses count())
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
@@ -5716,30 +5687,15 @@ class TestRethrowOrPlain(unittest.TestCase):
         ]
         # Note: count() is no longer called - chunk_count comes from aggregation
 
-        # Tasks from Celery status - progress already included (batch from Redis via get_all_files_status)
-        mock_get_files_status.return_value = {
-            "file-processing": {
-                "state": "PROCESSING",
-                "latest_task_id": "t1",
-                "source_type": "minio",
-                "original_filename": "fp.txt",
-                "processed_chunks": 2,
-                "total_chunks": 4,
-            },
-            "file-failed": {
-                "state": "PROCESS_FAILED",
-                "latest_task_id": "t2",
-                "source_type": "minio",
-                "original_filename": "ff.txt",
-            },
-        }
+        # Persisted lifecycle rows - progress already included (durable snapshot via read_knowledge_files)
+        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file-processing', 'status': 'PROCESSING', 'error_stage': 'PROCESS', 'forward_task_id': 't1', 'source_type': 'minio', 'original_filename': 'fp.txt', 'processed_chunks': 2, 'total_chunks': 4}, {'file_id': 'fixture-1', 'object_name': 'file-failed', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 't2', 'source_type': 'minio', 'original_filename': 'ff.txt'}]
 
         async def run_test():
             return await ElasticSearchService.list_files(
                 index_name="idx",
                 include_chunks=False,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
 
@@ -5748,7 +5704,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertIn("file-es", paths)
         self.assertIn("file-processing", paths)
         self.assertIn("file-failed", paths)
-        # Processing file gets progress from get_all_files_status
+        # Processing file gets progress from read_knowledge_files
         proc_file = next(
             f for f in result["files"] if f["path_or_url"] == "file-processing")
         self.assertEqual(proc_file["processed_chunk_num"], 2)
@@ -5758,7 +5714,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             f for f in result["files"] if f["path_or_url"] == "file-es")
         self.assertEqual(es_file["chunk_count"], 1)
 
-    @patch('management.services.knowledge_base.files.get_all_files_status', return_value={})
+    @patch('management.services.knowledge_base.files.read_knowledge_files', return_value={})
     def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
         """list_files include_chunks: chunk_count from aggregation, no extra count() calls."""
         self.mock_vdb_core.get_documents_detail.return_value = [
@@ -5793,7 +5749,7 @@ class TestRethrowOrPlain(unittest.TestCase):
                 index_name="idx",
                 include_chunks=True,
                 vdb_core=self.mock_vdb_core
-            )
+            , user_id="user-1", tenant_id="tenant-1")
 
         result = asyncio.run(run_test())
         file_info = result["files"][0]
@@ -6971,13 +6927,13 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count query failed")
         # Return a file that's still being processed (not in ES yet)
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=False,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         # Should return the file with count from aggregation fallback
         self.assertEqual(len(result["files"]), 1)
@@ -6993,13 +6949,13 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.return_value = {"count": 1}
         mock_vdb_core.multi_search.side_effect = Exception("Msearch failed")
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         # Should return files even when msearch fails
         self.assertEqual(len(result["files"]), 1)
@@ -7026,13 +6982,13 @@ class TestCoverageImprovement(unittest.TestCase):
                 {"hits": {"hits": [{"_source": {"id": "1", "title": "t", "content": "c"}}]}}
             ]
         }
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         self.assertEqual(len(result["files"]), 1)
 
@@ -7046,13 +7002,13 @@ class TestCoverageImprovement(unittest.TestCase):
              "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 5}
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count failed")
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=False,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         # Should return file with fallback chunk_count from aggregation
         self.assertEqual(len(result["files"]), 1)
@@ -7225,8 +7181,7 @@ class TestCoverageImprovement(unittest.TestCase):
         }
         mock_get_redis.return_value = mock_redis
 
-        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
-                   new_callable=AsyncMock, return_value={"files": []}), \
+        with patch.object(mock_vdb_core, 'get_documents_detail', return_value=[]), \
                 patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, side_effect=Exception("Fatal error")) as mock_delete_index:
             async def run_test():
@@ -7395,13 +7350,13 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core.multi_search.return_value = {
             "responses": [{"error": "Search failed"}]
         }
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         # Should still return the file with empty chunks
         self.assertEqual(len(result["files"]), 1)
@@ -7961,16 +7916,16 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core.multi_search.return_value = {"responses": []}
 
         async def mock_get_files(index_name):
-            return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
+            return [{'file_id': 'fixture-0', 'object_name': 'file1.txt', 'status': 'COMPLETED', 'error_stage': 'PROCESS', 'source_type': 'minio'}]
 
-        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files), \
+        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files), \
                 patch('management.services.knowledge_base.files.get_file_size',
                       side_effect=Exception("Storage error")):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=False,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         self.assertIn("files", result)
         self.assertGreater(len(result["files"]), 0)
@@ -7985,10 +7940,10 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core.get_documents_detail.return_value = []
 
         async def mock_get_files(index_name):
-            return {"failed_file.txt": {"state": "PROCESS_FAILED", "latest_task_id": "task-42", "source_type": "minio"}}
+            return [{'file_id': 'fixture-0', 'object_name': 'failed_file.txt', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-42', 'source_type': 'minio'}]
 
-        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files), \
-                patch('management.services.knowledge_base.files.get_redis_service') as mock_get_redis:
+        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files), \
+                patch('management.services.knowledge_base.task_state.get_redis_service') as mock_get_redis:
             mock_redis_instance = MagicMock()
             mock_redis_instance.get_error_info.side_effect = Exception("Redis error")
             mock_get_redis.return_value = mock_redis_instance
@@ -7996,7 +7951,7 @@ class TestCoverageImprovement(unittest.TestCase):
                 index_name="test-index",
                 include_chunks=False,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         self.assertIn("files", result)
 
@@ -8014,14 +7969,14 @@ class TestCoverageImprovement(unittest.TestCase):
         }
 
         async def mock_get_files(index_name):
-            return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
+            return [{'file_id': 'fixture-0', 'object_name': 'file1.txt', 'status': 'COMPLETED', 'error_stage': 'PROCESS', 'source_type': 'minio'}]
 
-        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files):
+        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
                 vdb_core=mock_vdb_core,
-            )
+             user_id="user-1", tenant_id="tenant-1")
 
         self.assertEqual(len(result["files"]), 1)
         self.assertEqual(result["files"][0]["chunks"], [])
@@ -8033,14 +7988,14 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core = MagicMock()
         mock_vdb_core.get_documents_detail.side_effect = Exception("Elasticsearch unavailable")
 
-        with patch('management.services.knowledge_base.files.get_all_files_status',
+        with patch('management.services.knowledge_base.files.read_knowledge_files',
                    new_callable=AsyncMock, return_value={}):
             with self.assertRaises(Exception) as ctx:
                 await ElasticSearchService.list_files(
                     index_name="test-index",
                     include_chunks=False,
                     vdb_core=mock_vdb_core,
-                )
+                 user_id="user-1", tenant_id="tenant-1")
         self.assertIn("Elasticsearch unavailable", str(ctx.exception))
 
     # Tests for search_hybrid - outer exception (lines 2038-2043)

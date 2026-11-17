@@ -434,7 +434,7 @@ async def upload_files_impl(
         if index_name:
             try:
                 vdb_core = get_vector_db_core()
-                existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
+                existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core, user_id=user_id, tenant_id=uploader_tenant_id)
                 existing_files = existing.get(
                     "files", []) if isinstance(existing, dict) else []
                 # list_files merges durable lifecycle rows, including this

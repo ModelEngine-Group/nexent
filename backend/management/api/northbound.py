@@ -43,6 +43,7 @@ from fastapi.responses import (
 )
 from management.services.permission.identity.session import get_user_language
 from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
+from nexent.storage.errors import DeadlineExceeded
 from pydantic import ValidationError as PydanticValidationError
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
@@ -85,6 +86,8 @@ from management.services.permission.api_keys import (
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
+    list_knowledge_files_for_northbound,
+    delete_knowledge_document_for_northbound,
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
     get_agent_info_list,
@@ -876,7 +879,7 @@ async def get_index_files(
             ctx.tenant_id,
             ctx.user_id,
         )
-        result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
+        result = await list_knowledge_files_for_northbound(ctx=ctx, index_name=index_name, vdb_core=vdb_core)
         return {
             "status": "success",
             "files": result.get("files", []),
@@ -888,6 +891,8 @@ async def get_index_files(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except (TimeoutError, DeadlineExceeded):
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail='Error getting index files') from None
     except Exception:
         logger.exception("Error getting files for index")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error getting index files")
@@ -1012,10 +1017,10 @@ async def delete_documents(
 ):
     """Delete a document by scope. Restricted to asset administrators."""
     try:
-        await _require_asset_owner_context(request)
+        ctx = await _require_asset_owner_context(request)
         vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         logger.debug("Deleting documents for index %s scope=%s", index_name, scope)
-        result = await ElasticSearchService.delete_document_by_scope(index_name, path_or_url, scope, vdb_core)
+        result = await delete_knowledge_document_for_northbound(ctx=ctx, index_name=index_name, path_or_url=path_or_url, scope=scope, vdb_core=vdb_core)
 
         if scope == "full":
             try:
@@ -1051,6 +1056,8 @@ async def delete_documents(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except (TimeoutError, DeadlineExceeded):
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail='Error deleting documents') from None
     except Exception:
         logger.exception("Error deleting documents for index")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error deleting documents")

@@ -43,7 +43,9 @@ from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
     KnowledgeBaseManagementService,
 )
-from management.services.knowledge_base.status import get_all_files_status
+from management.services.knowledge_base.file_reader import read_knowledge_files
+from management.services.knowledge_base.file_projection import public_file_state
+from infrastructure.agentos_identity import ServicePrincipal
 from management.services.knowledge_base.storage import (
     release_storage_charge,
     resolve_storage_reference,
@@ -64,13 +66,17 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
     DOCUMENT_DELETE_SCOPES = ("source_only", "full")
 
     @staticmethod
-    async def _assert_source_only_deletable(index_name: str, path_or_url: str) -> None:
-        celery_task_files = await get_all_files_status(index_name)
-        status_info = celery_task_files.get(path_or_url)
-        if not status_info or not isinstance(status_info, dict):
+    async def _assert_source_only_deletable(index_name: str, path_or_url: str, *, actor, file_id=None) -> None:
+        rows = await read_knowledge_files(index_name, actor)
+        matches = [row for row in rows if (row.get("file_id") == file_id if file_id else
+                   path_or_url in (row.get("object_name"), row.get("local_source_path")))]
+        if not matches:
+            if file_id:
+                raise ValueError("Document not found")
             return
-        state = status_info.get("state") or ""
-        if state and state != "COMPLETED":
+        record = max(matches, key=lambda row: str(row.get("update_time") or ""))
+        state = public_file_state(record)
+        if state != "COMPLETED":
             raise ValueError(
                 f"Cannot delete source file while document is in state '{state}'. "
                 "Wait until processing completes or use scope=full to remove the document."
@@ -661,6 +667,7 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         vdb_core: VectorDatabaseCore,
         file_id: Optional[str] = None,
         requested_by: Optional[str] = None,
+        tenant_id: str | None = None,
     ) -> Dict[str, Any]:
         service_cls = cls
         if scope not in KnowledgeBaseDocumentDeletionService.DOCUMENT_DELETE_SCOPES:
@@ -670,7 +677,7 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             )
 
         if scope == "source_only":
-            await service_cls._assert_source_only_deletable(index_name, path_or_url)
+            await service_cls._assert_source_only_deletable(index_name, path_or_url, actor=ServicePrincipal(requested_by, tenant_id), file_id=file_id)
         if file_id is None and requested_by is None:
             lifecycle_record = service_cls._mark_file_delete_requested(
                 index_name, path_or_url

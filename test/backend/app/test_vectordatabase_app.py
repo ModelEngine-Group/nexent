@@ -8,6 +8,7 @@ from test.common.contract_stubs import install_business_contract_stubs
 import os
 import sys
 import logging
+from nexent.storage.errors import DeadlineExceeded
 import pytest
 import types
 import importlib.machinery
@@ -1171,7 +1172,7 @@ async def test_get_index_files_success(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_exception(vdb_core_mock):
+async def test_get_index_files_exception(vdb_core_mock, auth_data):
     """
     Test listing index files with exception.
     Verifies that the endpoint returns an appropriate error response when an exception occurs during file listing.
@@ -1199,7 +1200,7 @@ async def test_get_index_files_exception(vdb_core_mock):
         # Verify list_files was called with correct parameters
         # Use ANY for the vdb_core parameter because the actual object may differ
         mock_list_files.assert_called_once_with(
-            index_name, include_chunks=False, vdb_core=ANY)
+            index_name, include_chunks=False, vdb_core=ANY, user_id=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -2104,7 +2105,7 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
 
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "full", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
         cleanup_document.assert_called_once_with(
@@ -2141,7 +2142,7 @@ async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_
         mock_delete_by_scope.assert_awaited_once_with(
             auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY,
             file_id="fid-1", requested_by=auth_data["user_id"]
-        )
+        , tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -2172,7 +2173,7 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
     mock_delete.assert_awaited_once_with(
         auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY,
         file_id="fid-legacy", requested_by=auth_data["user_id"]
-    )
+    , tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -2379,7 +2380,7 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
         assert response.json()["scope"] == "source_only"
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "source_only", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
         redis_service_mock.delete_document_records.assert_not_called()
 
 
@@ -2438,7 +2439,7 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, a
 
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "full", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
 
@@ -2474,7 +2475,7 @@ async def test_delete_documents_es_exception(vdb_core_mock, auth_data):
         assert response.json() == {"detail": expected_error_detail}
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "full", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -2539,7 +2540,7 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
 
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "full", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
 
@@ -2574,7 +2575,7 @@ async def test_delete_documents_validation_exception(vdb_core_mock, auth_data):
         assert response.json() == {"detail": "Invalid document path format"}
         mock_delete_by_scope.assert_called_once_with(
             index_name, path_or_url, "source_only", ANY
-        )
+        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -3858,3 +3859,13 @@ class TestVectordatabaseAuditEntries:
         assert '"index_name":"test_index"' in messages[0]
         assert '"path_or_url":"docs/a.txt"' in messages[0]
         assert '"scope":"full"' in messages[0]
+
+
+@pytest.mark.parametrize("error_type", [TimeoutError, DeadlineExceeded])
+def test_file_list_timeout_preserves_failure_envelope_without_duplicate_error_log(auth_data, caplog, error_type):
+    with patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files", new=AsyncMock(side_effect=error_type())) as listing:
+        response = client.get(f"/indices/{auth_data['index_name']}/files", headers=auth_data["auth_header"])
+    assert response.status_code == 500
+    assert response.json() == {"detail": f"Error indexing documents: {error_type()}"}
+    assert listing.await_count == 1
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]

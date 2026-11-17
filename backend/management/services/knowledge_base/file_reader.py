@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+from contextlib import contextmanager
 from threading import Event
 from time import monotonic
 from uuid import uuid4
@@ -34,7 +35,8 @@ class KnowledgeFileReader:
     def __init__(self, *, ports=knowledge_file_read_ports):
         self.ports = ports
 
-    def error_info(self, index_name, path, actor, *, file_id=None, context):
+    @contextmanager
+    def _records(self, index_name, actor, *, context):
         context.remaining()
         with self.ports(actor, context=context) as (knowledge, identity, scoped_files):
             if any(
@@ -81,6 +83,28 @@ class KnowledgeFileReader:
                 or records.scope.system
             ):
                 raise ScopeDenied()
+            yield records, row
+
+    def files(self, index_name, actor, *, context):
+        with self._records(index_name, actor, context=context) as (records, knowledge):
+            query = RecordQuery(
+                where=Junction("and", (
+                    Comparison("knowledge_id", "eq", knowledge["knowledge_id"]),
+                    Comparison("index_name", "eq", index_name),
+                )),
+                order_by=(Sort("file_id"),),
+            )
+            rows, cursor = [], None
+            while True:
+                context.remaining()
+                page = records.query(FILES, query, PageRequest(limit=1000, cursor=cursor), context=context)
+                rows.extend(page.items)
+                if not page.next_cursor:
+                    return rows
+                cursor = page.next_cursor
+
+    def error_info(self, index_name, path, actor, *, file_id=None, context):
+        with self._records(index_name, actor, context=context) as (records, row):
             terms = [
                 Comparison("knowledge_id", "eq", row["knowledge_id"]),
                 Comparison("index_name", "eq", index_name),
@@ -123,7 +147,7 @@ class KnowledgeFileReader:
             }
 
 
-async def read_document_error(index_name, path, actor, *, file_id=None):
+async def _read(phase, callback, *args, **kwargs):
     cancelled = Event()
     context = OperationContext(
         "knowledge-file-read-" + uuid4().hex, monotonic() + 10, cancelled=cancelled
@@ -131,21 +155,29 @@ async def read_document_error(index_name, path, actor, *, file_id=None):
     try:
         async with asyncio.timeout(context.remaining()):
             return await run_blocking(
-                "knowledge-file-error",
-                KnowledgeFileReader().error_info,
-                index_name,
-                path,
-                actor,
-                file_id=file_id,
+                "knowledge-file-" + phase,
+                callback,
+                *args,
+                **kwargs,
                 context=context,
                 lane="control-io",
                 owner="management.knowledge_base",
             )
-    except (TimeoutError, DeadlineExceeded):
+    except (TimeoutError, DeadlineExceeded) as exc:
         logger.warning(
-            "knowledge_file_read_timeout operation_id=%s phase=error-info threshold_seconds=10",
+            "knowledge_file_read_timeout operation_id=%s phase=%s threshold_seconds=10 error_type=%s",
             context.operation_id,
+            phase,
+            type(exc).__name__,
         )
         raise
     finally:
         cancelled.set()
+
+
+async def read_document_error(index_name, path, actor, *, file_id=None):
+    return await _read("error-info", KnowledgeFileReader().error_info, index_name, path, actor, file_id=file_id)
+
+
+async def read_knowledge_files(index_name, actor):
+    return await _read("file-list", KnowledgeFileReader().files, index_name, actor)

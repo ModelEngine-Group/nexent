@@ -129,7 +129,7 @@ MIGRATED_MODULES = {
     'knowledge_base/scheduler.py',
     'knowledge_base/scope.py',
     'knowledge_base/service.py',
-    'knowledge_base/status.py',
+    'knowledge_base/file_projection.py',
     'knowledge_base/storage.py',
     'knowledge_base/summary.py',
     'knowledge_base/tag_projection.py',

@@ -2,6 +2,7 @@
 
 """Unit tests for management.api.northbound module."""
 import sys
+from nexent.storage.errors import DeadlineExceeded
 import os
 from http import HTTPStatus
 
@@ -1826,3 +1827,17 @@ def test_retired_control_fields_rejected_before_northbound_execution(field, valu
         })
         assert response.status_code == 400
         run.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", [None, TimeoutError(), DeadlineExceeded()])
+def test_knowledge_file_list_keeps_public_envelope_and_timeout_mapping(caplog, failure):
+    ctx, core = MagicMock(user_id="reader", tenant_id="asset-tenant"), object()
+    payload = {"files": [{"file": "a.txt", "status": "PROCESSING", "file_id": "f"}]}
+    with patch("management.api.northbound._require_asset_owner_context", new=AsyncMock(return_value=ctx)), \
+            patch("management.api.northbound.get_vector_db_core", return_value=core), \
+            patch("management.api.northbound.list_knowledge_files_for_northbound", new=AsyncMock(return_value=payload, side_effect=failure)) as listing:
+        response = client.get("/nb/v1/knowledge/indices/kb/files", headers=_build_headers())
+    assert response.status_code == (200 if failure is None else 500)
+    assert response.json() == ({"status": "success", **payload} if failure is None else {"detail": "Error getting index files"})
+    listing.assert_awaited_once_with(ctx=ctx, index_name="kb", vdb_core=core)
+    assert not [record for record in caplog.records if record.levelno >= 40]

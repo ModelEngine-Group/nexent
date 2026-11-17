@@ -118,3 +118,28 @@ async def test_single_failure_keeps_the_existing_northbound_error_message(adapte
         and result["message"] == "Data process service failed"
     )
     submit.assert_awaited_once()
+
+
+async def test_file_list_adapter_passes_actual_actor_and_preserves_service_payload(monkeypatch):
+    from management.services import northbound as module
+
+    payload = {"files": [{"file": "a.txt", "status": "FORWARDING"}]}
+    listing = AsyncMock(return_value=payload)
+    monkeypatch.setattr(module.ElasticSearchService, "list_files", listing)
+    ctx, core = SimpleNamespace(user_id="reader", tenant_id="asset-tenant"), object()
+    result = await module.list_knowledge_files_for_northbound(ctx=ctx, index_name="kb", vdb_core=core)
+    assert result is payload
+    listing.assert_awaited_once_with("kb", include_chunks=False, vdb_core=core, user_id="reader", tenant_id="asset-tenant")
+
+
+async def test_delete_adapter_passes_actor_without_new_public_parameters(monkeypatch):
+    from management.services import northbound as module
+
+    payload = {"status": "success", "deleted_minio": True}
+    deletion = AsyncMock(return_value=payload)
+    monkeypatch.setattr(module.ElasticSearchService, "delete_document_by_scope", deletion)
+    ctx, core = SimpleNamespace(user_id="editor", tenant_id="asset-tenant"), object()
+    result = await module.delete_knowledge_document_for_northbound(
+        ctx=ctx, index_name="kb", path_or_url="a", scope="source_only", vdb_core=core)
+    assert result is payload
+    deletion.assert_awaited_once_with("kb", "a", "source_only", core, requested_by="editor", tenant_id="asset-tenant")

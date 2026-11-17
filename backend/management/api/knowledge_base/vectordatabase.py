@@ -676,7 +676,7 @@ async def get_index_files(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
-        result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
+        result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
 
         # The read permission check above authorized this page; project tags in
         # one batch so each row never issues its own assignment request.
@@ -692,6 +692,8 @@ async def get_index_files(
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error indexing documents: {exc}") from None
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -759,9 +761,9 @@ async def delete_documents(
         # Pass the durable ID when available so deletion cannot select an older
         # tombstone that happens to reuse the same object path.  The optional
         # arguments keep path-only clients on the legacy contract.
-        delete_kwargs = {}
+        delete_kwargs = {"requested_by": user_id, "tenant_id": tenant_id}
         if file_id:
-            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
+            delete_kwargs["file_id"] = file_id
         result = await ElasticSearchService.delete_document_by_scope(
             index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
@@ -828,6 +830,8 @@ async def delete_documents(
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)) from None
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

@@ -362,7 +362,7 @@ def test_document_source_must_prove_the_exact_tenant_scoped_identity(document):
         provider="aidp",
         knowledge_base_id="kb-1",
         provider_document_id="doc-7",
-        tenant_id="tenant-a",
+        tenant_id="tenant-a", user_id="user-1",
     )
 
 
@@ -525,7 +525,7 @@ def test_local_document_uses_path_or_url_with_its_provider_scoped_parent():
         provider="local",
         knowledge_base_id="local-index",
         provider_document_id="knowledge_base/manual.pdf",
-        tenant_id="tenant-a",
+        tenant_id="tenant-a", user_id="user-1",
     )
 
 # ---------- pure helpers ----------
@@ -1063,7 +1063,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
     with pytest.raises(ValueError, match="Unsupported document provider"):
         _require_provider_document_edit_permission(provider="unknown", knowledge_base_id="kb", user_id="u", tenant_id="t")
     assert asyncio.run(
-        _resolve_provider_document(provider="unknown", knowledge_base_id="kb", provider_document_id="d", tenant_id="t")
+        _resolve_provider_document(provider="unknown", knowledge_base_id="kb", provider_document_id="d", tenant_id="t", user_id="u")
     ) is None
 
     # local provider uses get_knowledge_record + ES file listing
@@ -1095,7 +1095,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
     doc = asyncio.run(
         _resolve_provider_document(
             provider="local", knowledge_base_id="kb", provider_document_id="docs/b.pdf", tenant_id="t"
-        )
+        , user_id="u")
     )
     assert doc is not None
     assert doc["document_name"] == "b.pdf"
@@ -1133,7 +1133,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
     aidp_doc = asyncio.run(
         _resolve_provider_document(
             provider="aidp", knowledge_base_id="kb", provider_document_id="f-1", tenant_id="t"
-        )
+        , user_id="u")
     )
     assert aidp_doc is not None
     assert aidp_doc["document_name"] == "one.pdf"

@@ -160,6 +160,7 @@ async def _resolve_provider_document(
     knowledge_base_id: str,
     provider_document_id: str,
     tenant_id: str,
+    user_id: str,
 ) -> Mapping[str, Any] | None:
     """Prove a provider document exists before its canonical tag identity is used."""
 
@@ -170,6 +171,7 @@ async def _resolve_provider_document(
             knowledge_base_id,
             include_chunks=False,
             vdb_core=get_vector_db_core(),
+            user_id=user_id, tenant_id=tenant_id,
         )
         for file_info in files.get("files", []):
             if str(file_info.get("path_or_url") or "") == provider_document_id:
@@ -620,6 +622,7 @@ class DocumentTagResourceAdapter(_BaseAdapter):
                 knowledge_base_id=knowledge_base_id,
                 provider_document_id=provider_document_id,
                 tenant_id=caller.authenticated_tenant_id,
+                user_id=caller.user_id,
             )
         except (LookupError, PermissionError, ValueError):
             return ResolvedTagResource.not_found()

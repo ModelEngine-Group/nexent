@@ -64,6 +64,18 @@ _RUNTIME_METADATA_ERROR_CODE_MAP = {
 
 
 
+async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
+    """Keep the northbound file contract while supplying the current actor."""
+    return await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core,
+                                                user_id=ctx.user_id, tenant_id=ctx.tenant_id)
+
+
+async def delete_knowledge_document_for_northbound(*, ctx, index_name, path_or_url, scope, vdb_core):
+    """Pass authenticated ownership without changing public delete parameters."""
+    return await ElasticSearchService.delete_document_by_scope(index_name, path_or_url, scope, vdb_core,
+                                                               requested_by=ctx.user_id, tenant_id=ctx.tenant_id)
+
+
 async def process_uploaded_knowledge_for_northbound(*, ctx, index_name, upload_result):
     """Adapt standard ingestion to the existing northbound upload response contract."""
     from management.services.knowledge_base.ingestion import submit_knowledge_files
