@@ -179,14 +179,6 @@ function RepositoryAgentDetailContent({
             ) : null}
           </div>
         </div>
-        {detail.tags.length === 0 ? (
-          <section className="space-y-2">
-            <h3 className="font-medium">
-              {t("agentRepository.mine.detail.tags")}
-            </h3>
-            {empty}
-          </section>
-        ) : null}
       </header>
       <div className="repository-detail-body min-h-0 flex-1 space-y-4 overflow-y-auto pb-4">
         <div className="space-y-2">

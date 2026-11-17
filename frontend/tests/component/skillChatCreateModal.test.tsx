@@ -95,6 +95,7 @@ vi.mock("@/components/skill/SkillChatEditor", () => ({
         onClick={() =>
           onDraftChange({
             ...payload!,
+            name: payload!.name || "manual-skill",
             description: "Manual description",
             content: "Edited body",
           })
@@ -131,7 +132,9 @@ function show() {
 test("opens an independent dialog and feeds generated content to its editor", async () => {
   const { props } = show();
   await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
-  expect(screen.getByLabelText("Generated name")).toHaveTextContent("empty");
+  expect(document.querySelector(".ant-drawer-right")).not.toBeNull();
+  expect(document.querySelector(".ant-modal")).toBeNull();
+  expect(screen.getByLabelText("Generated name")).toBeEmptyDOMElement();
   fireEvent.click(screen.getByText("Generate skill"));
   expect(screen.getByLabelText("Generated name")).toHaveTextContent(
     "generated-skill"
@@ -207,4 +210,17 @@ test("rolls back a failed continuation to the last usable draft", () => {
     content: "Edited body",
   });
   expect(screen.getByLabelText("Run status")).toHaveTextContent("false");
+});
+
+test("accepts manual edits without requiring a generated response", () => {
+  show();
+  expect(screen.getByRole("button", { name: "Edit draft" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Edit draft" }));
+  fireEvent.click(screen.getByRole("button", { name: "Read snapshot" }));
+  expect(chat.snapshot).toEqual(
+    expect.objectContaining({
+      description: "Manual description",
+      content: "Edited body",
+    })
+  );
 });

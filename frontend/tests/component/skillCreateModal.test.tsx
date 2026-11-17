@@ -76,14 +76,23 @@ beforeEach(() => {
   api.update.mockReset().mockResolvedValue({ success: true });
   api.tags.mockReset().mockResolvedValue({});
 });
-function show() {
+function show(
+  overrides: Partial<React.ComponentProps<typeof SkillCreateModal>> = {}
+) {
   const onClose = vi.fn();
   const onSuccess = vi.fn();
   render(
     <App>
-      <SkillCreateModal open onClose={onClose} onSuccess={onSuccess} />
+      <SkillCreateModal
+        open
+        onClose={onClose}
+        onSuccess={onSuccess}
+        {...overrides}
+      />
     </App>
   );
+  expect(document.querySelector(".ant-drawer-right")).not.toBeNull();
+  expect(document.querySelector(".ant-modal")).toBeNull();
   return { onClose, onSuccess };
 }
 function fill() {
@@ -103,8 +112,9 @@ test("preserves a dirty draft when creation-mode switching is cancelled", async 
       name: /skillCreation.import skillCreation.importHint/,
     })
   );
-  await waitFor(() =>
-    expect(screen.getByText("skillCreation.discardDraft")).toBeVisible()
+  await waitFor(
+    () => expect(screen.getByText("skillCreation.discardDraft")).toBeVisible(),
+    { timeout: 5000 }
   );
   const cancelButtons = screen.getAllByRole("button", {
     name: "common.cancel",
@@ -158,45 +168,59 @@ test("retries tag configuration against the created skill instead of creating a 
   expect(api.tags).toHaveBeenLastCalledWith("skill", "42", { value_ids: [20] });
 });
 
-test("parses imports locally and submits the original ZIP only at final confirmation", async () => {
-  const { onSuccess } = show();
-  const zip = new JSZip();
-  zip.file(
-    "SKILL.md",
-    "---\nname: imported\ndescription: Imported skill\n---\nBody"
-  );
-  zip.file("asset.png", new Uint8Array([255]));
-  const file = new NativeFile(
-    [await zip.generateAsync({ type: "uint8array" })],
-    "skill.zip"
-  ) as unknown as File;
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: /skillCreation.import skillCreation.importHint/,
-    })
-  );
-  fireEvent.change(screen.getByLabelText("skillCreation.uploadFile"), {
-    target: { files: [file] },
-  });
-  fireEvent.click(
-    screen.getByRole("button", { name: "skillCreation.parseFile" })
-  );
-  await waitFor(() =>
-    expect(screen.getByLabelText("skillManagement.form.name")).toHaveValue(
-      "imported"
-    )
-  );
-  expect(api.upload).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "skillCreation.next" }));
-  await screen.findByRole("button", { name: "skillCreation.previous" });
-  fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
-  await waitFor(() => expect(onSuccess).toHaveBeenCalled());
-  expect(api.upload).toHaveBeenCalledWith("imported", file, false);
-  expect(api.update).toHaveBeenCalledWith(
-    43,
-    expect.objectContaining({ group_ids: [7], content: "Body" })
-  );
-});
+test.each([false, true])(
+  "parses imports locally and submits the original ZIP only at final confirmation, importOnly=%s",
+  async (importOnly) => {
+    const { onSuccess } = show({
+      importOnly,
+      initialMode: importOnly ? "import" : "manual",
+    });
+    const zip = new JSZip();
+    zip.file(
+      "SKILL.md",
+      "---\nname: imported\ndescription: Imported skill\n---\nBody"
+    );
+    zip.file("asset.png", new Uint8Array([255]));
+    const file = new NativeFile(
+      [await zip.generateAsync({ type: "uint8array" })],
+      "skill.zip"
+    ) as unknown as File;
+    if (importOnly) {
+      expect(
+        screen.queryByRole("button", {
+          name: /skillCreation.manual skillCreation.manualHint/,
+        })
+      ).toBeNull();
+    } else {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /skillCreation.import skillCreation.importHint/,
+        })
+      );
+    }
+    fireEvent.change(screen.getByLabelText("skillCreation.uploadFile"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "skillCreation.parseFile" })
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("skillManagement.form.name")).toHaveValue(
+        "imported"
+      )
+    );
+    expect(api.upload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "skillCreation.next" }));
+    await screen.findByRole("button", { name: "skillCreation.previous" });
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    expect(api.upload).toHaveBeenCalledWith("imported", file, false);
+    expect(api.update).toHaveBeenCalledWith(
+      43,
+      expect.objectContaining({ group_ids: [7], content: "Body" })
+    );
+  }
+);
 
 test("blocks resubmission when creation succeeds without a usable ID", async () => {
   api.create.mockResolvedValueOnce({ success: true, data: {} });

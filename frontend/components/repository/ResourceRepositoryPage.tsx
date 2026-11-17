@@ -188,19 +188,11 @@ export default function ResourceRepositoryPage() {
                 options={[
                   {
                     value: "repository",
-                    label: t(
-                      target.tab === "skill"
-                        ? "skillRepository.tabs.allSkills"
-                        : "resourceCenter.all"
-                    ),
+                    label: t("resourceCenter.all"),
                   },
                   {
                     value: "mine",
-                    label: t(
-                      target.tab === "skill"
-                        ? "skillRepository.tabs.installedSkills"
-                        : "resourceCenter.mine"
-                    ),
+                    label: t("resourceCenter.mine"),
                   },
                 ]}
               />

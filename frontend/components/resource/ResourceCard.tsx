@@ -185,7 +185,7 @@ export default function ResourceCard({
                   <div
                     className={cn(
                       "mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400",
-                      measuredAgent &&
+                      (measuredAgent || measuredMcp || measuredSkill) &&
                         "mt-2 font-['HarmonyHeiTi',sans-serif] font-normal leading-[18px] tracking-normal text-[rgba(25,25,25,0.7)]"
                     )}
                   >

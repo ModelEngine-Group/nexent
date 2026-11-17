@@ -34,6 +34,8 @@ function show(detail: Partial<SkillRepositoryListingDetail>) {
       />
     </App>
   );
+  expect(document.querySelector(".ant-drawer-right")).not.toBeNull();
+  expect(document.querySelector(".ant-modal")).toBeNull();
 }
 
 test("reads the frozen ZIP and removes its common root folder", async () => {

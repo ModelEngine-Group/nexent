@@ -15,20 +15,9 @@ import {
 import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
 import { useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
-import {
-  App,
-  Button,
-  Dropdown,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Spin,
-} from "antd";
+import { App, Button, Dropdown, Empty, Input, Modal, Select, Spin } from "antd";
 import {
   Bot,
-  ChevronDown,
   Copy,
   Download,
   MoreHorizontal,
@@ -43,6 +32,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
+import RepositoryCardActions from "@/components/repository/RepositoryCardActions";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { AgentCardTags } from "./components/AgentCardTags";
 import ResourceCard from "@/components/resource/ResourceCard";
@@ -210,10 +200,6 @@ export function AgentSpace({
     // The ordinary repository status menu must not expose take-down actions
     // for official listings to tenant administrators.
     const canManageListing = showAdminMenu && !listing.is_official;
-    const showSplitAction =
-      canManageListing && presentation?.layout === "cards";
-    const templateButtonClassName =
-      "!box-border !h-[32px] !min-w-[88px] !max-w-[200px] !rounded !border-[#c9c9c9] !bg-white !px-[16px] !py-[5px] !font-['HarmonyOS_Sans_SC',sans-serif] !text-[14px] !font-normal !leading-[20px] !tracking-normal !text-[#191919]";
     const menuItems: MenuProps["items"] = canManageListing
       ? [
           {
@@ -352,13 +338,13 @@ export function AgentSpace({
                   formattedCount: downloads.toLocaleString(),
                 })}
               </span>
-              <span className="ml-auto flex min-w-0 items-center gap-1">
+              <span className="ml-auto mr-12 flex min-w-0 items-center gap-1">
                 <span className="shrink-0 whitespace-nowrap">
                   {t("resourceCenter.publishedVersion")}
                 </span>
                 <span
                   title={listing.version_label || undefined}
-                  className="h-5 min-w-0 max-w-[60px] truncate rounded bg-blue-50 px-2 leading-5"
+                  className="h-5 min-w-0 max-w-[240px] truncate rounded bg-blue-50 px-2 leading-5"
                 >
                   {listing.version_label || "—"}
                 </span>
@@ -383,16 +369,7 @@ export function AgentSpace({
                 {downloads.toLocaleString()}
               </span>
             )}
-            {canManageListing && presentation?.layout === "list" ? (
-              <Button
-                type="link"
-                className="!h-auto !px-0 !py-0 !text-sm !font-normal !leading-[22px] !text-[#0067D1]"
-                loading={isTakingDown}
-                onClick={() => confirmTakeDown(listing)}
-              >
-                {t("repository.listingStatus.takeDown")}
-              </Button>
-            ) : canManageListing && !showSplitAction ? (
+            {canManageListing && !presentation ? (
               <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
                 <Button
                   type="text"
@@ -407,52 +384,31 @@ export function AgentSpace({
           </div>
         }
         footer={
-          showSplitAction ? (
-            <Space.Compact>
-              <Button
-                className={`${templateButtonClassName} !rounded-r-none`}
-                onClick={() => setCopyListing(listing)}
-              >
-                {t("resourceCenter.createFromTemplate")}
-              </Button>
-              <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-                <Button
-                  className="!size-[32px] !border-[#c9c9c9] !text-[#191919]"
-                  icon={<ChevronDown className="size-4" aria-hidden />}
-                  loading={isTakingDown}
-                  aria-label={t("agentRepository.mine.menu.more")}
-                />
-              </Dropdown>
-            </Space.Compact>
+          presentation ? (
+            <RepositoryCardActions
+              primary={{
+                label: t("resourceCenter.createFromTemplate"),
+                onClick: () => setCopyListing(listing),
+              }}
+              takeDown={
+                canManageListing
+                  ? {
+                      label: t("repository.listingStatus.takeDown"),
+                      loading: isTakingDown,
+                      onClick: () => confirmTakeDown(listing),
+                    }
+                  : undefined
+              }
+            />
           ) : (
             <Button
-              type={
-                presentation?.layout === "list"
-                  ? "link"
-                  : presentation
-                    ? "default"
-                    : "text"
-              }
-              size={presentation ? "middle" : "small"}
-              className={
-                presentation?.layout === "list"
-                  ? "!h-auto !min-w-0 !border-0 !bg-transparent !px-0 !py-0 !text-sm !font-normal !leading-[22px] !text-[#0067D1] !shadow-none"
-                  : presentation
-                    ? templateButtonClassName
-                    : "!text-slate-600 hover:!text-blue-500"
-              }
-              icon={
-                presentation ? undefined : (
-                  <Copy className="size-3.5" aria-hidden />
-                )
-              }
+              type="text"
+              size="small"
+              className="!text-slate-600 hover:!text-blue-500"
+              icon={<Copy className="size-3.5" aria-hidden />}
               onClick={() => setCopyListing(listing)}
             >
-              {t(
-                presentation
-                  ? "resourceCenter.createFromTemplate"
-                  : "agentRepository.card.copy"
-              )}
+              {t("agentRepository.card.copy")}
             </Button>
           )
         }
@@ -480,9 +436,7 @@ export function AgentSpace({
         <div
           className={
             presentation
-              ? presentation.layout === "list"
-                ? "relative w-[349px] min-w-0 max-w-full"
-                : "relative w-[440px] min-w-0 max-w-full"
+              ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
               : "relative min-w-0 flex-1"
           }
         >

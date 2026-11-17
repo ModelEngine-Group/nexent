@@ -362,12 +362,15 @@ export function MySkill({ active }: { active: boolean }) {
       )}
       {skillBuildLoaded && presentation && !editingSkill ? (
         <SkillCreateModal
+          initialMode="import"
+          importOnly
           open={skillBuildOpen}
           onClose={() => setSkillBuildOpen(false)}
           onSuccess={handleSkillBuildSuccess}
         />
       ) : skillBuildLoaded ? (
         <SkillBuildModal
+          repositoryLayout={Boolean(presentation)}
           isOpen={skillBuildOpen}
           editingSkill={editingSkill}
           onCancel={() => {

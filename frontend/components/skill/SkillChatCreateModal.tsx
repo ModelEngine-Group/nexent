@@ -5,7 +5,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { App, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { Modal } from "antd";
+import { Drawer } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Nl2SkillChatPanel } from "@/app/newchat/assistant-ui/nl2skill-chat-panel";
 import {
@@ -19,6 +19,15 @@ import {
 import SkillChatEditor from "./SkillChatEditor";
 import SkillTypeIcon from "@/components/repository/skill/components/SkillTypeIcon";
 import log from "@/lib/logger";
+
+const EMPTY_SKILL_DRAFT: SkillChatPayload = {
+  name: "",
+  description: "",
+  source: "custom",
+  tags: [],
+  content: "",
+  files: [],
+};
 
 export default function SkillChatCreateModal({
   open,
@@ -130,18 +139,16 @@ export default function SkillChatCreateModal({
       setEditorOpen(true);
     });
   return (
-    <Modal
-      centered
+    <Drawer
+      placement="right"
       open={open}
       closable={{ "aria-label": t("common.close") }}
       title={t("skillChat.title")}
-      cancelText={t("common.cancel")}
-      okText={t("common.confirm")}
-      onCancel={() => close()}
-      width="min(1800px, calc(100vw - 48px))"
+      onClose={() => close()}
+      size="min(1600px, 100vw)"
       styles={{
-        container: {
-          height: "calc(100dvh - 64px)",
+        section: {
+          height: "100dvh",
           display: "flex",
           flexDirection: "column",
         },
@@ -224,7 +231,7 @@ export default function SkillChatCreateModal({
         <SkillChatEditor
           key={sessionId}
           scopeKey={scopeKey}
-          payload={generated}
+          payload={generated ?? EMPTY_SKILL_DRAFT}
           rawFiles={draft.files}
           running={running}
           open={editorOpen}
@@ -254,6 +261,6 @@ export default function SkillChatCreateModal({
           }}
         />
       </div>
-    </Modal>
+    </Drawer>
   );
 }

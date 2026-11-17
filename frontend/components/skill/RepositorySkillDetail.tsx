@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import JSZip from "jszip";
 import { useTranslation } from "react-i18next";
-import { Modal } from "antd";
+import { Drawer } from "antd";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 import type { SkillFileContent } from "@/types/skill";
 import SkillReadOnlyDetail from "./SkillReadOnlyDetail";
@@ -91,19 +91,24 @@ export default function RepositorySkillDetail({
   }, [open, detail]);
   const source = detail?.source;
   return (
-    <Modal
-      centered
+    <Drawer
+      placement="right"
       open={open}
       closable={{ "aria-label": t("common.close") }}
-      width={860}
+      size="min(960px, 100vw)"
       styles={{
-        body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" },
+        body: { overflowY: "auto" },
       }}
       title={t("skillManagement.detail.title")}
-      cancelText={t("common.cancel")}
-      okText={t("common.confirm")}
-      onCancel={onClose}
-      onOk={onClose}
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="primary" onClick={onClose}>
+            {t("common.confirm")}
+          </Button>
+        </div>
+      }
     >
       {isLoading ? (
         <div className="flex min-h-64 items-center justify-center">
@@ -140,6 +145,6 @@ export default function RepositorySkillDetail({
           />
         </Spin>
       ) : null}
-    </Modal>
+    </Drawer>
   );
 }

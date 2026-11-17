@@ -191,7 +191,7 @@ export default function ResourceReviewCenter({
               placeholder={t("resourceCenter.search")}
               allowClear
               onSearch={(value) => filter("search", value.trim())}
-              className="w-full sm:!w-[594px]"
+              className="w-full min-w-0 max-w-[800px] sm:flex-[1_1_320px]"
             />
             <Select
               aria-label={t("resourceCenter.type")}

@@ -83,7 +83,13 @@ export function SkillDetail({
       className="skill-detail-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
       bodyStyle={{ padding: 0 }}
     >
-      <div className="flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden">
+      <div
+        className={
+          repositoryLayout
+            ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+            : "flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden"
+        }
+      >
         <div
           className={
             repositoryLayout

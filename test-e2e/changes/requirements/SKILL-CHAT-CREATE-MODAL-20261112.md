@@ -1,4 +1,4 @@
-# Resource repository skill chat creation dialog — 2026-11-12
+# Resource repository combined manual and chat skill creation
 
 ## Clarified scope
 
@@ -11,15 +11,26 @@ repository layout, form creation, details and batch management work is preserved
 
 ## Acceptance and implementation
 
-- MineSkillsView's chat creation menu invokes an independent callback; it does
-  not navigate to `/workbench`. MySkill mounts SkillChatCreateModal in place.
-- The modal uses StandardModal, the existing NL2Skill chat panel unchanged,
+- The creation menu exposes Import creation and Chat creation. Chat creation
+  invokes an independent callback and never navigates to `/workbench`.
+  MySkill mounts SkillChatCreateModal as a right-side drawer.
+- The editor follows a two-step wizard: configure metadata/files, then select
+  accessible groups. Next validates configuration without create/update calls;
+  Previous retains the draft and only final Confirm persists the skill. The
+  step indicator does not allow bypassing validation. A newly generated version
+  returns to configuration for review.
+- The editor starts with editable empty metadata and SKILL.md. Users may fill
+  and save it without generating a response. Required metadata, accessible
+  groups, canonical tags and existing permission checks still apply. An empty
+  draft must not query existing skills by an empty name or update another skill.
+- The drawer uses native Ant Design Drawer, the existing NL2Skill chat panel unchanged,
   shared text file editor, canonical tag selection and user group table. It
   shows actual generated artifacts, configuration/groups tabs, local draft save
   status, file selection, maximize/collapse and confirm controls.
 - Its session owns generation, draft checkpoints and edited snapshots. Edited
   metadata/files go into subsequent generation requests; a failed continuation
-  restores the last usable draft. New sessions do not share state.
+  restores the last usable draft. New sessions do not share state. Manual edits
+  remain available as the next conversation snapshot.
 - Confirm uses existing create/update/tag services. Existing resource ACLs are
   preserved unless edited. Partial creation retains its ID for retries. Success
   refreshes Mine; opening the saved artifact filters the current repository.
@@ -28,6 +39,22 @@ repository layout, form creation, details and batch management work is preserved
   generation. No demonstration conversations or generated artifacts are seeded.
 
 ## Verification responsibilities and evidence
+
+The 2026-11-17 entry consolidation adds regressions for manual creation without
+a generated response, blank-form validation, no blank-name lookup, manual draft
+forwarding to the conversation and direct import entry. The targeted editor,
+chat drawer and wizard tests passed: 23 tests (9 editor, 8 chat drawer, 6 wizard),
+with the chat file rerun after correcting its manual-entry fixture. These run
+in the isolated frontend harness with real forms and mocked network boundaries.
+Implementation asset validation remains blocked by the local Python interpreter
+missing openpyxl; no formal or deployed-browser PASS is claimed. Existing PW-SKILL-01/PW-SKILL-02 assets are preserved;
+the combined repository drawer journey still needs real-browser/D4 execution.
+The final two-step editor/drawer rerun passed 19 targeted tests (11 editor,
+8 drawer), including no persistence on Next, draft retention on Previous,
+required-field failures and blocked final saving when group loading fails.
+No backend/Python behavior or HTTP contract changed. The sibling SPEC repository
+is absent, so SPEC ownership integration remains blocked.
+
 
 Traditional UT: added frontend tests for the modal boundary and reused the
 editor/file tests, updated to shared skill module imports. No Python product code

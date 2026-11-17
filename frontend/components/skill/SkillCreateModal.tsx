@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Select, Steps } from "antd";
 import { FileUp, SquarePen } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "antd";
+import { Drawer } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -36,10 +36,14 @@ export default function SkillCreateModal({
   open,
   onClose,
   onSuccess,
+  initialMode = "manual",
+  importOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+  initialMode?: "manual" | "import";
+  importOnly?: boolean;
 }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
@@ -61,7 +65,9 @@ export default function SkillCreateModal({
     bucket?.bucket_id ?? null
   );
   const [step, setStep] = useState(0);
-  const [mode, setMode] = useState<"manual" | "import">("manual");
+  const [mode, setMode] = useState<"manual" | "import">(
+    importOnly ? "import" : initialMode
+  );
   const [files, setFiles] = useState<SkillFileContent[]>([
     { path: "SKILL.md", content: "" },
   ]);
@@ -98,7 +104,7 @@ export default function SkillCreateModal({
         tag_value_ids: [],
       });
       setStep(0);
-      setMode("manual");
+      setMode(importOnly ? "import" : initialMode);
       setFiles([{ path: "SKILL.md", content: "" }]);
       setFile(null);
       setParsed(false);
@@ -112,7 +118,7 @@ export default function SkillCreateModal({
     }
     if (!open) parseGeneration.current += 1;
     opened.current = open;
-  }, [open, form, accessibleKey]);
+  }, [open, form, accessibleKey, initialMode, importOnly]);
   const changeMode = (value: "manual" | "import") => {
     if (value === mode || savingRef.current || createdId || creationUnconfirmed)
       return;
@@ -313,20 +319,20 @@ export default function SkillCreateModal({
     onClose();
   };
   return (
-    <Modal
-      centered
+    <Drawer
+      placement="right"
       open={open}
       closable={{ "aria-label": t("common.close") }}
-      onCancel={() => {
+      onClose={() => {
         if (!savingRef.current) close();
       }}
-      width={860}
+      size="min(960px, 100vw)"
       styles={{
-        body: { maxHeight: "calc(100dvh - 200px)", overflowY: "auto" },
+        body: { overflowY: "auto" },
       }}
-      title={t("skillCreation.title")}
-      cancelText={t("common.cancel")}
-      okText={t("common.confirm")}
+      title={t(
+        importOnly ? "skillRepository.mine.createImport" : "skillCreation.title"
+      )}
       footer={
         <div className="flex justify-end gap-2">
           <Button disabled={saving} onClick={close}>
@@ -376,34 +382,38 @@ export default function SkillCreateModal({
       )}
       <Form form={form} layout="vertical" disabled={saving}>
         <div hidden={step !== 0}>
-          <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {(["manual", "import"] as const).map((value) => {
-              const Icon = value === "manual" ? SquarePen : FileUp;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={saving || Boolean(createdId) || creationUnconfirmed}
-                  aria-pressed={mode === value}
-                  onClick={() => changeMode(value)}
-                  className={`flex min-h-[72px] items-center gap-4 rounded border bg-white p-4 text-left disabled:opacity-60 ${mode === value ? "border-[#0067D1]" : "border-[#D9D9D9]"}`}
-                >
-                  <Icon
-                    className="size-8 shrink-0 text-violet-500"
-                    aria-hidden
-                  />
-                  <span>
-                    <strong className="block text-sm font-medium">
-                      {t(`skillCreation.${value}`)}
-                    </strong>
-                    <span className="text-xs text-[#777777]">
-                      {t(`skillCreation.${value}Hint`)}
+          {!importOnly && (
+            <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(["manual", "import"] as const).map((value) => {
+                const Icon = value === "manual" ? SquarePen : FileUp;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={
+                      saving || Boolean(createdId) || creationUnconfirmed
+                    }
+                    aria-pressed={mode === value}
+                    onClick={() => changeMode(value)}
+                    className={`flex min-h-[72px] items-center gap-4 rounded border bg-white p-4 text-left disabled:opacity-60 ${mode === value ? "border-[#0067D1]" : "border-[#D9D9D9]"}`}
+                  >
+                    <Icon
+                      className="size-8 shrink-0 text-violet-500"
+                      aria-hidden
+                    />
+                    <span>
+                      <strong className="block text-sm font-medium">
+                        {t(`skillCreation.${value}`)}
+                      </strong>
+                      <span className="text-xs text-[#777777]">
+                        {t(`skillCreation.${value}Hint`)}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {mode === "import" && (
             <div className="mb-6 space-y-2">
               <label className="block text-sm">
@@ -586,6 +596,6 @@ export default function SkillCreateModal({
           </Form.Item>
         </div>
       </Form>
-    </Modal>
+    </Drawer>
   );
 }

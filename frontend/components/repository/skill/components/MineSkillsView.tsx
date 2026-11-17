@@ -310,14 +310,14 @@ export function MineSkillsView({
         <div
           className={
             presentation
-              ? "flex min-w-0 max-w-full flex-wrap items-center gap-2"
+              ? "flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-2"
               : "contents"
           }
         >
           <div
             className={
               presentation
-                ? "relative w-[594px] max-w-full"
+                ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
                 : "relative w-full sm:flex-1"
             }
           >
@@ -422,12 +422,12 @@ export function MineSkillsView({
                   menu={{
                     items: [
                       {
-                        key: "form",
-                        label: t("skillRepository.mine.createForm"),
+                        key: "import",
+                        label: t("skillRepository.mine.createImport"),
                         onClick: onCreateSkill,
                       },
                       {
-                        key: "workbench",
+                        key: "chat",
                         label: t("skillRepository.mine.createChat"),
                         onClick: onCreateSkillWithChat,
                       },
@@ -702,7 +702,7 @@ export function MineSkillCard({
   const displayName = useUserDisplayName();
   const author = displayName(
     skill.author_cas_username,
-    skill.author?.trim() || t("skillRepository.detail.unknownAuthor"),
+    skill.author?.trim() || t("skillRepository.detail.unknownAuthor")
   );
   const latestRepository = pickReviewDisplayRepositoryInfo(
     (skill.repository_info ?? []).filter((item) => item.status === "shared")
@@ -731,7 +731,25 @@ export function MineSkillCard({
   return (
     <ResourceCard
       actionsOnly={presentation?.layout === "list"}
-      title={skill.name || t("skillRepository.common.untitled")}
+      title={
+        presentation ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate" title={skill.name || undefined}>
+              {skill.name || t("skillRepository.common.untitled")}
+            </span>
+            {hasRepositoryInfo && (
+              <span
+                className={`shrink-0 rounded px-2 text-xs leading-5 font-normal ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
+              >
+                {getSkillRepositoryStatusLabel(t, repositoryStatus)}
+              </span>
+            )}
+          </span>
+        ) : (
+          skill.name || t("skillRepository.common.untitled")
+        )
+      }
+      subtitle={presentation ? <span title={author}>{author}</span> : undefined}
       className={presentation ? "h-full" : "h-full min-h-[200px] p-4"}
       onClick={managing ? undefined : onView}
       icon={
@@ -769,12 +787,6 @@ export function MineSkillCard({
       meta={
         presentation ? (
           <>
-            <span
-              className="min-w-0 truncate"
-              title={author}
-            >
-              {t("skillRepository.detail.author")}: {author}
-            </span>
             <span className="shrink-0">
               {t("resourceCenter.skillInstalls", {
                 count: skill.downloads ?? 0,
@@ -814,8 +826,10 @@ export function MineSkillCard({
               ) : null}
             </div>
             <div className="flex min-w-0 items-center justify-end">
-              <ResourceReviewLink review={skill.latest_review} />
-              {hasRepositoryInfo ? (
+              {skill.latest_review?.status !== "approved" ? (
+                <ResourceReviewLink review={skill.latest_review} />
+              ) : null}
+              {!presentation && hasRepositoryInfo ? (
                 <span
                   className={`block max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
                 >

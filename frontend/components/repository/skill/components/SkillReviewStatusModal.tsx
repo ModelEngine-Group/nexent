@@ -2,7 +2,7 @@
 
 "use client";
 
-import { Button, Modal } from "antd";
+import { Button, Drawer, Modal } from "antd";
 import { CheckCircle2, Clock, PackageX, Store, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -90,10 +90,11 @@ export function SkillReviewStatusModal({
   };
 
   return (
-    <Modal
+    <Drawer
+      placement="right"
       open={open}
-      onCancel={onClose}
-      centered
+      size="min(800px, 100vw)"
+      onClose={onClose}
       destroyOnHidden
       title={
         <span className="inline-flex items-center gap-2">
@@ -165,6 +166,6 @@ export function SkillReviewStatusModal({
           </div>
         </div>
       ) : null}
-    </Modal>
+    </Drawer>
   );
 }

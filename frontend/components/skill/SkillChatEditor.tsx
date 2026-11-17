@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Form, Input, Segmented, Select } from "antd";
+import { Alert, App, Button, Form, Input, Steps, Select } from "antd";
 import { Maximize2, Minimize2, PanelRightClose, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -219,6 +219,7 @@ export default function SkillChatEditor({
       return;
     if (current?.dirty && !finished) return;
     const next = seed(source.payload, source.fingerprint);
+    setTab("configure");
     if (current?.name === next.name) {
       next.skillId = current.skillId;
       next.group_ids = current.group_ids;
@@ -300,7 +301,7 @@ export default function SkillChatEditor({
           if (!response.success || !response.data)
             throw new Error(response.message);
           found = response.data;
-        } else {
+        } else if (incoming.current.payload?.name.trim()) {
           for (let page = 1; ; page += 1) {
             const result = await fetchMyEditableSkills({
               ownership: "created",
@@ -356,6 +357,25 @@ export default function SkillChatEditor({
     const next = { ...current, ...fields, dirty: true };
     setCurrent(next);
     onDraftChange(asPayload(next));
+  };
+  const nextStep = async () => {
+    if (busy.current || running || !draftRef.current) return;
+    try {
+      await form.validateFields(["name", "description", "tag_value_ids"]);
+      if (
+        draftRef.current.files.some((file) => !isValidSkillDraftPath(file.path))
+      )
+        throw new Error(t("skillCreation.invalidPath"));
+      setError(null);
+      setTab("groups");
+    } catch (caught) {
+      if (!(caught && typeof caught === "object" && "errorFields" in caught))
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : t("ui.localization.skillSaveFailed")
+        );
+    }
   };
   const save = async () => {
     const current = draftRef.current;
@@ -496,14 +516,21 @@ export default function SkillChatEditor({
                 : t("skillChat.localDraft")}
           </p>
         </div>
-        <Segmented
-          value={tab}
-          onChange={(value) => setTab(String(value))}
-          options={[
-            { value: "configure", label: t("skillCreation.parameters") },
-            { value: "groups", label: t("skillCreation.groups") },
+        <Steps
+          current={tab === "configure" ? 0 : 1}
+          size="small"
+          responsive={false}
+          className="!w-full !max-w-[360px]"
+          items={[
+            { title: t("skillCreation.parameters") },
+            { title: t("skillCreation.groups") },
           ]}
         />
+        {tab === "groups" && (
+          <Button disabled={unavailable} onClick={() => setTab("configure")}>
+            {t("skillCreation.previous")}
+          </Button>
+        )}
         <Button
           type="primary"
           className="!border-[#191919] !bg-[#191919]"
@@ -512,15 +539,14 @@ export default function SkillChatEditor({
             unavailable ||
             !draft ||
             lookup !== "ready" ||
-            groupsLoading ||
-            groupsError ||
+            (tab === "groups" && (groupsLoading || groupsError)) ||
             tagsLoading ||
             librariesLoading ||
             Boolean(tagsError || librariesError)
           }
-          onClick={save}
+          onClick={tab === "configure" ? nextStep : save}
         >
-          {t("common.confirm")}
+          {t(tab === "configure" ? "skillCreation.next" : "common.confirm")}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
@@ -608,8 +634,8 @@ export default function SkillChatEditor({
               ...all,
               aclTouched: Boolean(
                 draft?.aclTouched ||
-                "group_ids" in changed ||
-                "ingroup_permission" in changed
+                  "group_ids" in changed ||
+                  "ingroup_permission" in changed
               ),
               tagsTouched: Boolean(
                 draft?.tagsTouched || "tag_value_ids" in changed

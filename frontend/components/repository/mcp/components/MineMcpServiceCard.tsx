@@ -5,7 +5,7 @@ import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { CheckCircleFilled } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { Button, Dropdown, type MenuProps } from "antd";
-import { Clock, MoreHorizontal, Puzzle } from "lucide-react";
+import { Clock, MoreHorizontal, Puzzle, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpDeploymentType } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -126,7 +126,7 @@ export default function MineMcpServiceCard({
 
   const actionItems: MenuProps["items"] = (() => {
     const items: MenuProps["items"] = [];
-    if (onHealthCheck && localService && isOwned) {
+    if (!presentation && onHealthCheck && localService && isOwned) {
       items.push({
         key: "health-check",
         label: t("mcpConfig.serverList.button.healthCheck"),
@@ -369,10 +369,13 @@ export default function MineMcpServiceCard({
                 />
               </Dropdown>
             </div>
-            {presentation?.layout !== "list" ? (
+            {presentation?.layout !== "list" &&
+            localService?.latest_review?.status !== "approved" ? (
               <ResourceReviewLink review={localService?.latest_review} />
             ) : null}
-            {!repositoryCard && presentation?.layout !== "list" && reviewBadge ? (
+            {!repositoryCard &&
+            presentation?.layout !== "list" &&
+            reviewBadge ? (
               <span
                 className={`self-end rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
                   reviewBadge.variant === "pending"
@@ -389,19 +392,42 @@ export default function MineMcpServiceCard({
         )
       }
       footer={
-        repositoryCard && onHealthCheck && isOwned && connectionStatus !== "unchecked" ? (
-          <span
-            className={`inline-flex items-center gap-1 text-xs ${
-              connectionStatus === "success" ? "text-emerald-700" : "text-red-600"
-            }`}
+        presentation &&
+        onHealthCheck &&
+        localService &&
+        isOwned &&
+        !selection ? (
+          <Button
+            type="text"
+            size="small"
+            loading={healthChecking}
+            disabled={healthChecking}
+            aria-label={t("mcpConfig.serverList.button.healthCheck")}
+            icon={
+              connectionStatus === "success" ? (
+                <CheckCircleFilled aria-hidden />
+              ) : (
+                <RotateCw size={14} aria-hidden />
+              )
+            }
+            className={
+              connectionStatus === "success"
+                ? "!text-emerald-700"
+                : connectionStatus === "failed"
+                  ? "!text-red-600"
+                  : "!text-primary"
+            }
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!healthChecking) onHealthCheck(item);
+            }}
           >
-            {connectionStatus === "success" ? (
-              <CheckCircleFilled aria-hidden />
-            ) : (
-              <span aria-hidden className="size-1.5 rounded-full bg-red-500" />
+            {t(
+              connectionStatus === "unchecked"
+                ? "mcpConfig.serverList.button.healthCheck"
+                : `mcpTools.mine.connectionStatus.${connectionStatus}`
             )}
-            {t(`mcpTools.mine.connectionStatus.${connectionStatus}`)}
-          </span>
+          </Button>
         ) : null
       }
     />

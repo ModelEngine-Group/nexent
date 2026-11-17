@@ -2,7 +2,7 @@
 
 ## Scope and reference
 
-User-provided screenshots define the manual/import creation layout. The owning
+User-provided screenshots define the import creation layout. The owning
 entry is `frontend/components/repository/skill/my-skill.tsx`. Existing edit and
 non-repository `SkillBuildModal` flows remain in place; the new wizard is used
 only for creation in the unified resource repository. Workbench creation remains
@@ -19,7 +19,11 @@ inventing a historical SPEC or formal Case IDs.
 - Configure parameters first, then select accessible user groups and their
   existing EDIT/READ_ONLY/PRIVATE permission. Name and description are required;
   description is capped at 1000 characters. Advancing does not create a resource.
-- Manual creation starts with SKILL.md and supports nested text files, editing,
+- The unified repository menu opens this wizard directly in import-only mode.
+  Its manual/import switch is hidden there. Manual creation is integrated with
+  Chat creation in the adjacent conversation/editor drawer; legacy wizard callers
+  retain their existing mode switch.
+- The file editor supports nested text files, editing,
   preview, copy, download and saving changes to the draft. New paths must be
   relative, must not traverse directories and must not conflict with existing
   file/directory paths, including case-insensitive SKILL.md collisions.

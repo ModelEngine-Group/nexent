@@ -30,7 +30,7 @@ vi.mock(
   "@/components/repository/skill/components/SkillRepositoryControls",
   () => ({
     AsyncContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  }),
+  })
 );
 
 const listing: SkillRepositoryListingItem = {
@@ -45,7 +45,7 @@ function renderActions(
   installingRepositoryId: number | null = null,
   installationState: SkillRepositoryListingItem["installation_state"] = "not_installed",
   copies: NonNullable<SkillRepositoryListingItem["installed_copies"]> = [],
-  enhanced = true,
+  enhanced = true
 ) {
   const install = vi.fn();
   const detail = vi.fn();
@@ -83,7 +83,7 @@ function renderActions(
         installingRepositoryId={installingRepositoryId}
         takingDownRepositoryId={null}
       />
-    </RepositoryPresentationContext.Provider>,
+    </RepositoryPresentationContext.Provider>
   );
   return { install, detail };
 }
@@ -104,12 +104,12 @@ describe("skill repository install and installed actions", () => {
   it("installs an unavailable skill with one button and no dropdown", () => {
     const { install } = renderActions();
     fireEvent.click(
-      screen.getByRole("button", { name: "resourceCenter.install" }),
+      screen.getByRole("button", { name: "resourceCenter.install" })
     );
     expect(install).toHaveBeenCalledOnce();
     expect(install.mock.calls[0][0].skill_repository_id).toBe(7);
     expect(
-      screen.queryByRole("button", { name: "resourceCenter.actions" }),
+      screen.queryByRole("button", { name: "resourceCenter.actions" })
     ).toBeNull();
   });
 
@@ -119,20 +119,21 @@ describe("skill repository install and installed actions", () => {
     { copies: [{ ...copy, can_uninstall: false }] },
     { copies: [copy, { ...copy, skill_id: 12, name: "Second copy" }] },
   ])(
-    "shows installed without a removal action for copies: %j",
+    "hides installed actions without a removal action for copies: %j",
     ({ copies }) => {
       const { install } = renderActions(null, "installed", copies);
-      const button = screen.getByRole("button", {
-        name: "resourceCenter.installed",
-      });
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
+      expect(
+        screen.queryByRole("button", { name: "resourceCenter.installed" })
+      ).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "resourceCenter.install" })
+      ).toBeNull();
       expect(install).not.toHaveBeenCalled();
       expect(
-        screen.queryByRole("button", { name: "resourceCenter.uninstall" }),
+        screen.queryByRole("button", { name: "resourceCenter.uninstall" })
       ).toBeNull();
       expect(screen.queryByRole("dialog")).toBeNull();
-    },
+    }
   );
 
   it("does not guess installation state for unlinked historical skills", () => {
@@ -148,7 +149,7 @@ describe("skill repository install and installed actions", () => {
   it("blocks repeated clicks while installation is pending", () => {
     const { install } = renderActions(7);
     fireEvent.click(
-      screen.getByRole("button", { name: /resourceCenter\.install$/ }),
+      screen.getByRole("button", { name: /resourceCenter\.install$/ })
     );
     expect(install).not.toHaveBeenCalled();
   });

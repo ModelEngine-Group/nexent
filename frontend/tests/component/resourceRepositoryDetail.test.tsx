@@ -45,11 +45,10 @@ function renderAgentDetail(overrides: Partial<MyAgentDetailView> = {}) {
 }
 
 describe("agent repository detail", () => {
-  it("keeps each empty section heading and renders the standard empty state", () => {
+  it("hides empty tags while retaining the other section empty states", () => {
     renderAgentDetail();
     const headings = screen.getAllByRole("heading", { level: 3 });
     expect(headings.map((heading) => heading.textContent)).toEqual([
-      "agentRepository.mine.detail.tags",
       "common.description",
       "agentRepository.mine.detail.author",
       "resourceCenter.publishedAt",
@@ -66,6 +65,17 @@ describe("agent repository detail", () => {
       ).toBeTruthy();
     }
     expect(screen.getByText("resourceCenter.notRecorded")).toBeTruthy();
+    expect(screen.queryByText("agentRepository.mine.detail.tags")).toBeNull();
+  });
+
+  it("retains nonempty tags in the detail header", () => {
+    renderAgentDetail({ tags: ["medical", "reports"] });
+    const tags = screen.getByRole("list", {
+      name: "agentRepository.mine.detail.tags",
+    });
+    expect(tags.textContent).toContain("medical");
+    expect(tags.textContent).toContain("reports");
+    expect(tags.querySelector(".ant-empty")).toBeNull();
   });
 
   it("renders four separate models initially and lets users show and hide the rest", () => {
@@ -119,7 +129,7 @@ describe("repository detail container compatibility", () => {
     expect(document.querySelector(".ant-drawer")).toBeNull();
   });
 
-  it.each(["agent", "mcp"])(
+  it.each(["agent", "mcp", "skill"])(
     "opens %s detail as a right drawer and retains the close callback",
     (resourceType) => {
       const close = vi.fn();
@@ -135,6 +145,19 @@ describe("repository detail container compatibility", () => {
       expect(document.querySelector(".ant-drawer-right")).not.toBeNull();
       expect(document.querySelector(".ant-modal")).toBeNull();
       expect(screen.getByText("Repository detail")).toBeTruthy();
+      expect(screen.getByRole("dialog")).toHaveStyle({ borderRadius: "0" });
+      expect(document.querySelector(".ant-drawer")).toHaveClass(
+        "resource-detail-drawer",
+        "!rounded-none"
+      );
+      expect(document.querySelector(".ant-drawer-content-wrapper")).toHaveClass(
+        "!rounded-none"
+      );
+      expect(screen.getByRole("dialog")).toHaveClass("!rounded-none");
+      expect(document.querySelector(".ant-drawer-body")).toHaveClass(
+        "!pt-6",
+        "!pb-0"
+      );
       fireEvent.click(screen.getByRole("button", { name: "common.close" }));
       expect(close).toHaveBeenCalledOnce();
     }

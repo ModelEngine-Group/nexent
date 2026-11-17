@@ -3,17 +3,12 @@
 "use client";
 
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import RepositoryCardActions from "@/components/repository/RepositoryCardActions";
 import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
-import { Button, Dropdown, Space, Tag } from "antd";
-import {
-  Bot,
-  ChevronDown,
-  Download,
-  MoreHorizontal,
-  Trash2,
-} from "lucide-react";
+import { Button, Dropdown, Tag } from "antd";
+import { Bot, Download, MoreHorizontal, Trash2 } from "lucide-react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
@@ -64,7 +59,7 @@ export function SkillRepositoryCard({
     ? displayName(listing.author_cas_username, listing.author.trim())
     : displayName(
         listing.submitted_by_cas_username,
-        listing.submitted_by?.trim() || "",
+        listing.submitted_by?.trim() || ""
       );
   const menuItems: MenuProps["items"] =
     (listing.can_take_down ?? showAdminMenu) &&
@@ -81,15 +76,13 @@ export function SkillRepositoryCard({
           },
         ]
       : [];
-  const splitAction = Boolean(
-    presentation && action != null && menuItems.length > 0,
-  );
 
   return (
     <ResourceCard
       actionsOnly={presentation?.layout === "list"}
       className="h-full"
       title={listing.name}
+      subtitle={presentation && author ? <span title={author}>{author}</span> : undefined}
       footerLayout="inline"
       icon={
         presentation ? (
@@ -140,7 +133,7 @@ export function SkillRepositoryCard({
         )
       }
       actions={
-        !splitAction && menuItems.length > 0 ? (
+        !presentation && menuItems.length > 0 ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
@@ -156,7 +149,7 @@ export function SkillRepositoryCard({
       meta={
         <>
           {" "}
-          {author ? (
+          {!presentation && author ? (
             <span className="block truncate" title={author}>
               {presentation
                 ? `${t("skillRepository.detail.author")}: ${author}`
@@ -176,26 +169,21 @@ export function SkillRepositoryCard({
         </>
       }
       footer={
-        splitAction ? (
-          <Space.Compact>
-            <span className="inline-flex [&_.ant-btn]:!rounded-r-none">
-              {action}
-            </span>
-            <Dropdown
-              menu={{ items: menuItems }}
-              trigger={["click"]}
-              placement="bottomRight"
-              disabled={isTakingDown}
-            >
-              <Button
-                className="!w-8 !rounded-l-none !px-0"
-                icon={<ChevronDown size={14} aria-hidden />}
-                aria-label={t("skillRepository.common.moreActions")}
-                disabled={isTakingDown}
-                onClick={(event) => event.stopPropagation()}
-              />
-            </Dropdown>
-          </Space.Compact>
+        presentation ? (
+          <div className="inline-flex items-center gap-1">
+            {action}
+            <RepositoryCardActions
+              takeDown={
+                menuItems.length > 0
+                  ? {
+                      label: t("skillRepository.action.status.notShared"),
+                      loading: isTakingDown,
+                      onClick: () => onTakeDown?.(),
+                    }
+                  : undefined
+              }
+            />
+          </div>
         ) : (
           action
         )

@@ -19,11 +19,11 @@ vi.mock("@/components/repository/ResourceReviewLink", () => ({
 }));
 vi.mock(
   "@/components/repository/skill/components/MineApplyListingModal",
-  () => ({ MineApplyListingModal: () => null }),
+  () => ({ MineApplyListingModal: () => null })
 );
 vi.mock(
   "@/components/repository/skill/components/SkillReviewStatusModal",
-  () => ({ SkillReviewStatusModal: () => null }),
+  () => ({ SkillReviewStatusModal: () => null })
 );
 vi.mock("@/components/repository/skill/components/CreateNewSkillCard", () => ({
   CreateNewSkillCard: () => null,
@@ -70,15 +70,54 @@ test.each([
             onViewReview={vi.fn()}
           />
         </RepositoryPresentationContext.Provider>
-      </App>,
+      </App>
     );
     expect(screen.getByTitle(expected)).toHaveTextContent(expected);
+    expect(
+      screen.getByRole("heading", { name: "Helper" }).parentElement
+    ).toContainElement(screen.getByTitle(expected));
     expect(screen.queryByText(/internal-author-uuid/)).not.toBeInTheDocument();
     expect(skill.created_by).toBe("internal-author-uuid");
     expect(
       screen.queryByRole("button", {
         name: "skillRepository.common.moreActions",
-      }),
+      })
     ).not.toBeInTheDocument();
-  },
+  }
+);
+
+test.each([undefined, new URLSearchParams("view=mine")])(
+  "keeps the listed skill badge beside its name",
+  (query) => {
+    render(
+      <App>
+        <RepositoryPresentationContext.Provider
+          value={{ layout: "cards", resourceType: "skill", query }}
+        >
+          <MineSkillCard
+            skill={{
+              skill_id: 5,
+              name: "Listed skill",
+              permission: "EDIT",
+              downloads: 2,
+              repository_info: [{ skill_repository_id: 7, status: "shared" }],
+              latest_review: { review_id: "review-7", status: "approved" },
+            }}
+            onEdit={vi.fn()}
+            onView={vi.fn()}
+            onDelete={vi.fn()}
+            onApplyListing={vi.fn()}
+            onViewReview={vi.fn()}
+          />
+        </RepositoryPresentationContext.Provider>
+      </App>
+    );
+    const badge = screen.getByText("repository.status.listed");
+    expect(
+      screen.getByRole("heading", { name: /Listed skill/ })
+    ).toContainElement(badge);
+    expect(
+      screen.getByText("resourceCenter.skillInstalls").parentElement
+    ).not.toContainElement(badge);
+  }
 );

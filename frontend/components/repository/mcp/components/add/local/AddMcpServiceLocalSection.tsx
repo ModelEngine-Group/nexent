@@ -288,7 +288,7 @@ export default function AddMcpServiceLocalSection({
             classNames={{
               item: "!flex-none",
               itemRail: "!hidden",
-              itemWrapper: "relative !gap-2",
+              itemWrapper: "relative z-10 !gap-2 bg-white",
               itemTitle: "!text-sm",
             }}
             current={step}

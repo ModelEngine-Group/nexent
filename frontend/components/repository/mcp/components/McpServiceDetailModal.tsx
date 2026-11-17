@@ -21,6 +21,7 @@ import {
 import type { McpServiceItem } from "@/types/mcpTools";
 import { resolveDeploymentType, toPrettyRegistryJson } from "@/lib/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -91,6 +92,14 @@ export default function McpServiceDetailModal({
     useTagDefinitions(defaultLibrary?.bucket_id ?? null);
   const [containerPort, setContainerPort] = useState<number | undefined>();
 
+  const { enableUploadImage } = useMcpServerList({
+    enabled: Boolean(selectedService),
+  });
+  const deploymentOptions = enableUploadImage
+    ? DEPLOYMENT_OPTIONS
+    : DEPLOYMENT_OPTIONS.filter(
+        (item) => item.value !== McpDeploymentType.LOCAL_IMAGE
+      );
   const detail = useMcpServiceDetail({ selectedService, onClose });
   const { user } = useAuthorizationContext();
   const { isReady, can } = usePermission();
@@ -293,7 +302,7 @@ export default function McpServiceDetailModal({
                 classNames={{
                   item: "!flex-none",
                   itemRail: "!hidden",
-                  itemWrapper: "relative !gap-2",
+                  itemWrapper: "relative z-10 !gap-2 bg-white",
                   itemTitle: "!text-sm",
                 }}
                 current={showGroupStep ? 1 : 0}
@@ -318,7 +327,7 @@ export default function McpServiceDetailModal({
                   aria-label={t("mcpTools.detail.addMethod")}
                   className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,155px),1fr))] gap-4"
                 >
-                  {DEPLOYMENT_OPTIONS.map(
+                  {deploymentOptions.map(
                     ({ value, labelKey, descriptionKey }) => (
                       <div
                         key={value}

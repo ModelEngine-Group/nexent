@@ -2,9 +2,10 @@
 
 "use client";
 
+import RepositoryCardActions from "@/components/repository/RepositoryCardActions";
 import RepositoryDisplayControls from "@/components/repository/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
-import { Button, Input, Tooltip } from "antd";
+import { Button, Input } from "antd";
 import { Copy, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
@@ -72,46 +73,38 @@ export function RepositoryView({
     const unknown =
       !listing.installation_state || listing.installation_state === "unknown";
     const busy = installingRepositoryId === listing.skill_repository_id;
-    return (
-      <span className="inline-flex items-center gap-2">
-        <Tooltip
-          title={
-            enhanced && unknown
-              ? t("resourceCenter.sourceUnknown")
-              : enhanced && installed
-                ? t("resourceCenter.sourceAlreadyAvailable")
-                : undefined
+    if (enhanced) {
+      return (
+        <RepositoryCardActions
+          primary={
+            installed
+              ? undefined
+              : {
+                  label: t("resourceCenter.install"),
+                  hint: unknown ? t("resourceCenter.sourceUnknown") : undefined,
+                  disabled: unknown,
+                  loading: busy,
+                  onClick: () => {
+                    if (!busy && !unknown) onInstall(listing);
+                  },
+                }
           }
-        >
-          <Button
-            type={enhanced ? "default" : "text"}
-            size={enhanced ? "middle" : "small"}
-            className={
-              enhanced
-                ? "h-8 min-w-[88px] max-w-[190px] rounded px-4 text-sm font-normal leading-[22px]"
-                : undefined
-            }
-            icon={enhanced ? undefined : <Copy className="size-3.5" />}
-            loading={busy}
-            disabled={enhanced && (unknown || installed)}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (busy) return;
-              if (!enhanced || (!installed && !unknown)) {
-                onInstall(listing);
-              }
-            }}
-          >
-            {t(
-              enhanced
-                ? installed
-                  ? "resourceCenter.installed"
-                  : "resourceCenter.install"
-                : "skillRepository.repository.copy",
-            )}
-          </Button>
-        </Tooltip>
-      </span>
+        />
+      );
+    }
+    return (
+      <Button
+        type="text"
+        size="small"
+        icon={<Copy className="size-3.5" />}
+        loading={busy}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!busy) onInstall(listing);
+        }}
+      >
+        {t("skillRepository.repository.copy")}
+      </Button>
     );
   };
   return (
@@ -126,7 +119,7 @@ export function RepositoryView({
         <div
           className={
             presentation
-              ? "relative w-[594px] min-w-0 max-w-full"
+              ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
               : "relative min-w-0 flex-1"
           }
         >

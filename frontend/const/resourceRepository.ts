@@ -8,3 +8,5 @@ export const RESOURCE_REPOSITORY_TABS = [
   "review",
 ] as const;
 export const RESOURCE_TYPES = ["agent", "mcp", "skill"] as const;
+
+export const RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH = 800;

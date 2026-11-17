@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Form, Modal, Spin } from "antd";
+import { Alert, Button, Drawer, Form, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { Skill } from "@/types/agentConfig";
@@ -155,29 +155,8 @@ export default function SkillDetailModal({
     onClose();
   };
 
-  return (
-    <Modal
-      title={t("skillManagement.detail.title")}
-      open={open}
-      onCancel={handleClose}
-      footer={repositoryLayout ? undefined : null}
-      onOk={handleClose}
-      okText={t("common.confirm")}
-      cancelText={t("common.cancel")}
-      centered={repositoryLayout}
-      destroyOnHidden={repositoryLayout}
-      width={repositoryLayout ? 860 : 820}
-      zIndex={zIndex}
-      mask={{ closable: maskClosable }}
-      className="skill-detail-modal"
-      styles={{
-        body: {
-          height: repositoryLayout ? "auto" : 620,
-          maxHeight: "75vh",
-          overflow: repositoryLayout ? "auto" : "hidden",
-        },
-      }}
-    >
+  const content = (
+    <>
       {fileTreeMessage ? (
         <Alert
           type="warning"
@@ -217,6 +196,56 @@ export default function SkillDetailModal({
           height: 100%;
         }
       `}</style>
+    </>
+  );
+  if (repositoryLayout) {
+    return (
+      <Drawer
+        open={open}
+        onClose={handleClose}
+        placement="right"
+        size="min(960px, 100vw)"
+        title={t("skillManagement.detail.title")}
+        zIndex={zIndex}
+        mask={{ closable: maskClosable }}
+        destroyOnHidden
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button onClick={handleClose}>{t("common.cancel")}</Button>
+            <Button type="primary" onClick={handleClose}>
+              {t("common.confirm")}
+            </Button>
+          </div>
+        }
+      >
+        {content}
+      </Drawer>
+    );
+  }
+  return (
+    <Modal
+      title={t("skillManagement.detail.title")}
+      open={open}
+      onCancel={handleClose}
+      footer={repositoryLayout ? undefined : null}
+      onOk={handleClose}
+      okText={t("common.confirm")}
+      cancelText={t("common.cancel")}
+      centered={repositoryLayout}
+      destroyOnHidden={repositoryLayout}
+      width={repositoryLayout ? 860 : 820}
+      zIndex={zIndex}
+      mask={{ closable: maskClosable }}
+      className="skill-detail-modal"
+      styles={{
+        body: {
+          height: repositoryLayout ? "auto" : 620,
+          maxHeight: "75vh",
+          overflow: repositoryLayout ? "auto" : "hidden",
+        },
+      }}
+    >
+      {content}
     </Modal>
   );
 }

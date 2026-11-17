@@ -1,15 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import RepositoryCardActions from "@/components/repository/RepositoryCardActions";
 import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
-import { Button, Dropdown, Space, type MenuProps } from "antd";
-import {
-  ChevronDown,
-  Download,
-  MoreHorizontal,
-  Puzzle,
-  Trash2,
-} from "lucide-react";
+import { Button, Dropdown, type MenuProps } from "antd";
+import { Download, MoreHorizontal, Puzzle, Trash2 } from "lucide-react";
 import { AgentCardTags } from "@/components/repository/agent/components/AgentCardTags";
 import { McpDeploymentType } from "@/const/mcpTools";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
@@ -70,15 +65,6 @@ export default function RepositoryMcpCard({
   const installLabel = t(
     installed ? "mcpTools.repository.installed" : "mcpTools.repository.install"
   );
-  const installButton = (
-    <Button
-      className={`min-w-[88px] disabled:!text-[#AEAEAE] ${actionItems.length ? "!rounded-r-none" : ""}`}
-      disabled={installed}
-      onClick={() => onInstall(service)}
-    >
-      {installLabel}
-    </Button>
-  );
   const iconTone =
     deploymentType === McpDeploymentType.REMOTE_LINK
       ? "bg-[#EEE0F7] text-[#743E9C]"
@@ -104,6 +90,7 @@ export default function RepositoryMcpCard({
           service.name
         )
       }
+      subtitle={presentation ? <span title={author}>{author}</span> : undefined}
       footerLayout="inline"
       icon={
         repositoryCard ? (
@@ -161,9 +148,6 @@ export default function RepositoryMcpCard({
       meta={
         repositoryCard ? (
           <>
-            <span className="min-w-0 truncate" title={author}>
-              {t("resourceCenter.author")}：{author}
-            </span>
             <span className="shrink-0">
               {t("agentRepository.detail.downloads", { count: installCount })}
             </span>
@@ -171,11 +155,9 @@ export default function RepositoryMcpCard({
         ) : (
           <>
             {" "}
-            {
-              <span className="block truncate" title={author}>
-                {author}
-              </span>
-            }{" "}
+            {!presentation && (
+              <span className="block truncate" title={author}>{author}</span>
+            )}{" "}
             <ResourcePublishedAt value={service.publishedAt} />
             {presentation && (
               <span>
@@ -218,61 +200,33 @@ export default function RepositoryMcpCard({
         </>
       }
       footer={
-        repositoryList ? (
-          <div className="flex items-center gap-2">
-            <Button
-              type="link"
-              autoInsertSpace={false}
-              className="!px-0"
-              disabled={installed}
-              onClick={() => onInstall(service)}
-            >
-              {installLabel}
-            </Button>
-            {isAdmin && (
-              <Button
-                type="link"
-                danger
-                autoInsertSpace={false}
-                className="!px-0"
-                onClick={() => onOffline(service)}
-              >
-                {t("mcpTools.repository.offline")}
-              </Button>
-            )}
-          </div>
-        ) : repositoryCard ? (
-          actionItems.length > 0 ? (
-            <Space.Compact>
-              {installButton}
-              <Dropdown
-                menu={{ items: actionItems }}
-                trigger={["click"]}
-                placement="bottomRight"
-              >
-                <Button
-                  className="!w-8 !rounded-l-none !px-0"
-                  aria-label={t("mcpTools.mine.moreActions")}
-                  icon={<ChevronDown size={14} aria-hidden />}
-                />
-              </Dropdown>
-            </Space.Compact>
-          ) : (
-            installButton
-          )
+        presentation ? (
+          <RepositoryCardActions
+            primary={
+              installed
+                ? undefined
+                : { label: installLabel, onClick: () => onInstall(service) }
+            }
+            takeDown={
+              isAdmin
+                ? {
+                    label: t("mcpTools.repository.offline"),
+                    onClick: () => onOffline(service),
+                  }
+                : undefined
+            }
+          />
         ) : (
           <Button
-            type={presentation ? "default" : "text"}
-            size={presentation ? "middle" : "small"}
+            type="text"
+            size="small"
             className={
-              presentation
-                ? "h-8 min-w-[88px] max-w-[190px] gap-1 rounded border-[#C9C9C9] bg-white px-4 py-[5px] text-sm leading-[22px] font-normal text-[#191919]"
-                : installed
-                  ? undefined
-                  : "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+              installed
+                ? undefined
+                : "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
             }
             disabled={installed}
-            icon={presentation ? undefined : <Download className="size-3.5" />}
+            icon={<Download className="size-3.5" />}
             onClick={() => onInstall(service)}
           >
             {installed

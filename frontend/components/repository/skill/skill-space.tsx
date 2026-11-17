@@ -9,7 +9,7 @@ import {
   useRepositoryQueryState,
 } from "@/hooks/useRepositoryQueryState";
 import { useEffect, useMemo, useState } from "react";
-import { App, Input, Modal } from "antd";
+import { App, Button, Drawer, Input } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
@@ -309,16 +309,33 @@ export function SkillSpace({
         onClose={() => setDetailRepositoryId(null)}
         onRetry={() => refetchDetail()}
       />
-      <Modal
-        centered
+      <Drawer
+        size="min(800px, 100vw)"
         destroyOnHidden
         title={t("skillRepository.copy.title")}
         open={copyListing != null}
-        okText={t("skillRepository.copy.confirm")}
-        cancelText={t("common.cancel")}
-        confirmLoading={installMutation.isPending}
-        onOk={handleConfirmInstall}
-        onCancel={() => {
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={installMutation.isPending}
+              onClick={() => {
+                setCopyListing(null);
+                setCopyTargetName("");
+                setCopyNameError(null);
+              }}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="primary"
+              loading={installMutation.isPending}
+              onClick={handleConfirmInstall}
+            >
+              {t("skillRepository.copy.confirm")}
+            </Button>
+          </div>
+        }
+        onClose={() => {
           setCopyListing(null);
           setCopyTargetName("");
           setCopyNameError(null);
@@ -349,7 +366,7 @@ export function SkillSpace({
             </p>
           )}
         </div>
-      </Modal>
+      </Drawer>
     </>
   );
 }

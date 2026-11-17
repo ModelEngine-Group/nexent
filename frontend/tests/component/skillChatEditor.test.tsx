@@ -1,6 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { App } from "antd";
 import { beforeEach, expect, test, vi } from "vitest";
 import SkillChatEditor from "@/components/skill/SkillChatEditor";
@@ -17,6 +23,7 @@ const api = vi.hoisted(() => ({
   list: vi.fn(),
   tags: vi.fn(),
   allowed: true,
+  groupsError: false,
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -37,6 +44,7 @@ vi.mock("@/hooks/group/useGroupList", () => ({
       ],
     },
     isLoading: false,
+    isError: api.groupsError,
   }),
 }));
 vi.mock("@/hooks/useTagManagement", () => ({
@@ -133,6 +141,7 @@ const payload = {
 beforeEach(() => {
   sessionStorage.clear();
   api.allowed = true;
+  api.groupsError = false;
   api.create
     .mockReset()
     .mockResolvedValue({ success: true, data: { skill_id: 42 } });
@@ -167,11 +176,30 @@ function show(
   );
   return { ...result, props };
 }
+async function advance() {
+  const next = screen.getByRole("button", { name: "skillCreation.next" });
+  await waitFor(() => expect(next).toBeEnabled());
+  await act(async () => {
+    fireEvent.click(next);
+  });
+  await screen.findByRole("button", { name: "common.confirm" });
+}
 async function confirm() {
+  const next = screen.queryByRole("button", { name: "skillCreation.next" });
+  if (next) {
+    await waitFor(() => expect(next).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(next);
+    });
+    if (!screen.queryByRole("button", { name: "common.confirm" })) return;
+  }
   const button = screen.getByRole("button", { name: "common.confirm" });
   await waitFor(() => expect(button).toBeEnabled());
-  fireEvent.click(button);
+  await act(async () => {
+    fireEvent.click(button);
+  });
 }
+
 test("serializes edited metadata and supplementary files for the next generation", () => {
   const edited = {
     ...payload,
@@ -245,7 +273,7 @@ test("keeps failed save edits and requires a successful existing-resource lookup
   api.list.mockRejectedValueOnce(new Error("Network"));
   show();
   expect(await screen.findByText("skillChat.lookupFailed")).toBeVisible();
-  expect(screen.getByRole("button", { name: "common.confirm" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "skillCreation.next" })).toBeDisabled();
   fireEvent.click(
     screen.getByRole("button", { name: "repository.common.retry" })
   );
@@ -282,7 +310,7 @@ test("restores local edits for the same conversation and never restores them int
 });
 test("does not save incomplete generation, missing required fields or a forbidden creation", async () => {
   const result = show({ running: true });
-  expect(screen.getByRole("button", { name: "common.confirm" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "skillCreation.next" })).toBeDisabled();
   result.unmount();
   const next = show();
   fireEvent.change(screen.getByLabelText("skillManagement.form.name"), {
@@ -296,11 +324,11 @@ test("does not save incomplete generation, missing required fields or a forbidde
   next.unmount();
   api.allowed = false;
   show();
-  expect(screen.getByRole("button", { name: "common.confirm" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "skillCreation.next" })).toBeDisabled();
 });
 test("switches to user groups and exposes only accessible groups", async () => {
   show();
-  fireEvent.click(screen.getByText("skillCreation.groups"));
+  await advance();
   expect(screen.getByRole("button", { name: "Allowed" })).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "Other" })
@@ -312,4 +340,77 @@ test("switches to user groups and exposes only accessible groups", async () => {
       expect.objectContaining({ group_ids: [7] })
     )
   );
+});
+
+
+test("creates a manually filled skill before any conversation generation", async () => {
+  const { props } = show({
+    payload: {
+      name: "",
+      description: "",
+      source: "custom",
+      tags: [],
+      content: "",
+      files: [],
+    },
+  });
+  await confirm();
+  expect(
+    await screen.findByText("skillManagement.form.nameRequired")
+  ).toBeVisible();
+  expect(api.create).not.toHaveBeenCalled();
+  expect(api.list).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("skillManagement.form.name"), {
+    target: { value: "manual-skill" },
+  });
+  fireEvent.change(screen.getByLabelText("skillManagement.form.description"), {
+    target: { value: "Manual description" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit file" }));
+  await confirm();
+  await waitFor(() => expect(props.onSaved).toHaveBeenCalled());
+  expect(api.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "manual-skill",
+      description: "Manual description",
+      content: "Edited instructions",
+      group_ids: [7],
+      ingroup_permission: "READ_ONLY",
+    })
+  );
+  expect(api.update).not.toHaveBeenCalled();
+});
+
+test("validates configuration before groups and saves only after final confirmation", async () => {
+  show();
+  expect(screen.queryByRole("button", { name: "common.confirm" })).toBeNull();
+  await advance();
+  expect(api.create).not.toHaveBeenCalled();
+  expect(api.update).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Allowed" })).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "skillCreation.previous" })
+  );
+  expect(screen.getByLabelText("skillManagement.form.name")).toHaveValue(
+    payload.name
+  );
+  fireEvent.change(screen.getByLabelText("skillManagement.form.description"), {
+    target: { value: "Changed before saving" },
+  });
+  await confirm();
+  await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
+  expect(api.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: "Changed before saving",
+      group_ids: [7],
+    })
+  );
+});
+
+test("allows reaching the group error state but blocks final saving until groups load", async () => {
+  api.groupsError = true;
+  show();
+  await advance();
+  expect(screen.getByRole("button", { name: "common.confirm" })).toBeDisabled();
+  expect(api.create).not.toHaveBeenCalled();
 });

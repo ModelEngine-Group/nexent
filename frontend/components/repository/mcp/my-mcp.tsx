@@ -744,7 +744,7 @@ export function MyMcp({
                   >
                     {listingState.label}
                   </span>
-                  {latestReview ? (
+                  {latestReview && latestReview.status !== "approved" ? (
                     <ResourceReviewLink review={latestReview} />
                   ) : null}
                 </div>

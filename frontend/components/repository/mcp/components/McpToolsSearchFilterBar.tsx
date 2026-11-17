@@ -127,7 +127,7 @@ export default function McpToolsSearchFilterBar({
             measuredMine
               ? "flex min-w-[192px] flex-1 items-center gap-2"
               : measuredRepository
-                ? "flex min-w-0 max-w-full flex-wrap items-center gap-2"
+                ? "flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-2"
                 : "flex min-w-[240px] flex-1 items-center gap-3"
           }
         >
@@ -149,9 +149,9 @@ export default function McpToolsSearchFilterBar({
             }
             className={
               measuredRepository
-                ? `h-8 min-w-0 max-w-full shrink-0 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE] ${presentation.layout === "list" ? "!w-[349px]" : "!w-[440px]"}`
+                ? "h-8 min-w-0 max-w-[800px] flex-[1_1_320px] gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
                 : measuredMine
-                  ? "h-8 !min-w-[80px] max-w-[440px] flex-[1_1_440px] rounded-lg border-slate-200 bg-slate-50/60"
+                  ? "h-8 !min-w-[80px] max-w-[800px] flex-[1_1_320px] rounded-lg border-slate-200 bg-slate-50/60"
                   : "h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
             }
           />
