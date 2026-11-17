@@ -88,7 +88,8 @@ class KnowledgeFileAuthorization:
         allowed = {"UPLOADED", "PROCESSING", "FORWARDING", "FAILED", "COMPLETED"}
         if history:
             allowed |= {"DELETE_REQUESTED", "DELETED"}
-        if (file["knowledge_id"] != reference.knowledge_id or file["status"] not in allowed
+        if (not history and file.get("deletion_request") is not None
+            or file["knowledge_id"] != reference.knowledge_id or file["status"] not in allowed
             or file["source_generation"] is None or (
                 file["source_generation"] < reference.file_version if history
                 else file["source_generation"] != reference.file_version

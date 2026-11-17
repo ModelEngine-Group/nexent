@@ -45,6 +45,8 @@ class IngestionJournal:
         ):
             raise ScopeDenied()
         if (
+            row.get("deletion_request") is not None
+            or
             any(
                 row[name] != getattr(intent, name)
                 for name in ("file_id", "knowledge_id")

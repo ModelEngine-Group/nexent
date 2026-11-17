@@ -111,6 +111,7 @@ MIGRATED_MODULES = {
     'knowledge_base/common.py',
     'knowledge_base/document_tasks.py',
     'knowledge_base/deletion.py',
+    'knowledge_base/deletion_journal.py',
     'knowledge_base/files.py',
     'knowledge_base/ingestion.py',
     'knowledge_base/listing.py',

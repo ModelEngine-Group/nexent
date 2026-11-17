@@ -208,3 +208,16 @@ def test_execution_preserves_original_request_identity(resources, field, value):
     }
     with pytest.raises(ScopeDenied):
         authorize().authorize_execution(row, typed, context=context())
+
+
+
+def test_source_only_deletion_fence_stops_execution_while_preserving_history_read(resources):
+    from contracts.agentos_knowledge import KnowledgeFileReference
+
+    authorize, update, _, _ = resources
+    update("cleanse_files", status="COMPLETED", deletion_request={"scope": "source_only"})
+    with pytest.raises(ScopeDenied):
+        authorize().authorize(knowledge_request(), context=context())
+    reference = KnowledgeFileReference(knowledge_id=1, file_id="b" * 32, file_version=0)
+    file, _ = authorize().resolve(reference, edit=True, history=True, context=context())
+    assert file["status"] == "COMPLETED"

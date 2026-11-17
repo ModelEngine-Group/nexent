@@ -191,6 +191,11 @@ class KnowledgeFileLifecycle(TableBase):
         nullable=True,
         comment="Validated Management ingestion intent snapshot, at most 16 KiB; NULL for legacy or unadmitted files.",
     )
+    deletion_request = Column(
+        sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="Immutable Management deletion intent with actor, scope, file generation and source snapshot, at most 16 KiB; NULL before admission or for legacy rows.",
+    )
     cleanse_status = Column(String(30), nullable=True, comment="Last confirmed Management cleansing child state; NULL before observation or for legacy rows.")
     runtime_status = Column(String(30), nullable=True, comment="Last confirmed AgentOS Runtime child state; NULL before observation or for legacy rows.")
     processed_chunks = Column(Integer, nullable=True, comment="Last confirmed Runtime vector-write count for the current file attempt; NULL when unknown.")
@@ -198,6 +203,14 @@ class KnowledgeFileLifecycle(TableBase):
 
 
 _source = KnowledgeFileLifecycle.__table__.c
+sa.CheckConstraint(
+    sa.or_(
+        _source.deletion_request.is_(None),
+        sa.and_(sa.func.jsonb_typeof(_source.deletion_request) == "object",
+                sa.func.octet_length(sa.cast(_source.deletion_request, sa.Text)) <= 16384),
+    ),
+    name="ck_knowledge_deletion_request", table=KnowledgeFileLifecycle.__table__,
+).ddl_if(dialect="postgresql")
 sa.CheckConstraint(
     "(processed_chunks IS NULL OR processed_chunks >= 0) AND (total_chunks IS NULL OR total_chunks >= 0) "
     "AND (processed_chunks IS NULL OR total_chunks IS NULL OR processed_chunks <= total_chunks)",

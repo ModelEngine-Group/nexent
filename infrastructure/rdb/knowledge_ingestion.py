@@ -34,6 +34,7 @@ def ingestion_catalog():
         "source_revision",
         "source_sha256",
         "ingestion_request",
+        "deletion_request",
         "processing_attempt",
         "process_task_id",
         "forward_task_id",
@@ -59,7 +60,7 @@ def ingestion_catalog():
         FieldDefinition(
             name,
             "object"
-            if name == "ingestion_request"
+            if name in {"ingestion_request", "deletion_request"}
             else "integer"
             if name in integers
             else "string",

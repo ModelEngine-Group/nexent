@@ -51,7 +51,7 @@ TABLES = {
     "cleanse_groups": TenantGroupInfo.__table__,
 }
 FIELDS = {
-    "cleanse_files": "file_id tenant_id knowledge_id original_filename status source_generation source_space source_key source_revision source_sha256 bucket_name object_name local_source_path delete_flag",
+    "cleanse_files": "file_id tenant_id knowledge_id original_filename status source_generation source_space source_key source_revision source_sha256 bucket_name object_name local_source_path deletion_request delete_flag",
     "cleanse_knowledge": "knowledge_id tenant_id index_name embedding_model_id created_by group_ids ingroup_permission knowledge_sources delete_flag",
     "cleanse_memberships": "user_tenant_id user_id tenant_id delete_flag",
     "cleanse_accounts": "account_id tenant_id user_id user_roles delete_flag",
@@ -83,6 +83,8 @@ def bind_cleanse_resources(scope, engine):
                 if field in INTEGER_FIELDS
                 else "array"
                 if field == "user_roles"
+                else "object"
+                if field == "deletion_request"
                 else "string",
                 nullable=table.c[field].nullable,
             )
