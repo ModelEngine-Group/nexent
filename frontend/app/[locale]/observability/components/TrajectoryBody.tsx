@@ -201,36 +201,6 @@ function TrajectoryBodyContent({
               { label: "JSON", value: "json" },
             ]}
           />
-          <Button
-            type={wordWrap ? "primary" : "text"}
-            size="small"
-            icon={<WrapText size={14} />}
-            aria-label={t(
-              wordWrap ? "trajectory.unwrapLines" : "trajectory.wrapLines"
-            )}
-            title={t(
-              wordWrap ? "trajectory.unwrapLines" : "trajectory.wrapLines"
-            )}
-            aria-pressed={wordWrap}
-            disabled={reference.availability !== "available"}
-            onClick={() => setWordWrap((value) => !value)}
-          />
-          <button
-            className="trajectory-icon-button"
-            aria-label={t("trajectory.copy")}
-            disabled={
-              awaitingFirstChunk ||
-              (!text && reference.availability !== "available")
-            }
-            onClick={() => {
-              void navigator.clipboard.writeText(formatted).then(
-                () => message.success(t("trajectory.copied")),
-                () => message.error(t("trajectory.copyFailed"))
-              );
-            }}
-          >
-            <Copy size={14} />
-          </button>
         </div>
       </header>
       {!collapsed && (
@@ -265,21 +235,57 @@ function TrajectoryBodyContent({
                       {t("trajectory.characters", {
                         count: reference.char_count ?? Array.from(text).length,
                       })}
-                      <button
-                        className="trajectory-icon-button"
-                        aria-label={t(
-                          expanded
-                            ? "trajectory.collapseContent"
-                            : "trajectory.expandContent"
-                        )}
-                        onClick={() => setExpanded((value) => !value)}
-                      >
-                        {expanded ? (
-                          <Minimize2 size={13} />
-                        ) : (
-                          <Maximize2 size={13} />
-                        )}
-                      </button>
+                      <span className="trajectory-code-actions">
+                        <Button
+                          type={wordWrap ? "primary" : "text"}
+                          size="small"
+                          icon={<WrapText size={14} />}
+                          aria-label={t(
+                            wordWrap
+                              ? "trajectory.unwrapLines"
+                              : "trajectory.wrapLines"
+                          )}
+                          title={t(
+                            wordWrap
+                              ? "trajectory.unwrapLines"
+                              : "trajectory.wrapLines"
+                          )}
+                          aria-pressed={wordWrap}
+                          disabled={reference.availability !== "available"}
+                          onClick={() => setWordWrap((value) => !value)}
+                        />
+                        <button
+                          className="trajectory-icon-button"
+                          aria-label={t("trajectory.copy")}
+                          disabled={
+                            awaitingFirstChunk ||
+                            (!text && reference.availability !== "available")
+                          }
+                          onClick={() => {
+                            void navigator.clipboard.writeText(formatted).then(
+                              () => message.success(t("trajectory.copied")),
+                              () => message.error(t("trajectory.copyFailed"))
+                            );
+                          }}
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button
+                          className="trajectory-icon-button"
+                          aria-label={t(
+                            expanded
+                              ? "trajectory.collapseContent"
+                              : "trajectory.expandContent"
+                          )}
+                          onClick={() => setExpanded((value) => !value)}
+                        >
+                          {expanded ? (
+                            <Minimize2 size={13} />
+                          ) : (
+                            <Maximize2 size={13} />
+                          )}
+                        </button>
+                      </span>
                     </span>
                   </div>
                   <div className="trajectory-code-scroll">

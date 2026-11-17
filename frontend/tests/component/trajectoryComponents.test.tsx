@@ -460,8 +460,8 @@ describe("node details and bounded body reads", () => {
         "trajectory.loadingContent"
       );
       expect(
-        screen.getByRole("button", { name: "trajectory.copy" })
-      ).toBeDisabled();
+        screen.queryByRole("button", { name: "trajectory.copy" })
+      ).not.toBeInTheDocument();
       const text = JSON.stringify({
         max_tokens: 1024,
         messages: [{ role: "user", content: "你好" }],

@@ -71,6 +71,12 @@ describe("trajectory body word wrapping", () => {
       const toggle = screen.getByRole("button", {
         name: "trajectory.wrapLines",
       });
+      expect(toggle.closest(".trajectory-code-actions")).toContainElement(
+        screen.getByRole("button", { name: "trajectory.copy" })
+      );
+      expect(toggle.closest(".trajectory-code-actions")).toContainElement(
+        screen.getByRole("button", { name: "trajectory.expandContent" })
+      );
       expect(toggle).toHaveAttribute("aria-pressed", "false");
       fireEvent.click(toggle);
       expect(pre).toHaveClass("is-wrapped");
@@ -133,7 +139,7 @@ describe("trajectory body word wrapping", () => {
   });
 
   it.each(["not_captured", "expired"] as const)(
-    "disables wrapping for %s body",
+    "hides body actions for %s body",
     (availability) => {
       const reference: ContentReference = {
         ...body(""),
@@ -142,8 +148,8 @@ describe("trajectory body word wrapping", () => {
       };
       const view = render(<App>{component("input", "node", reference)}</App>);
       expect(
-        screen.getByRole("button", { name: "trajectory.wrapLines" })
-      ).toBeDisabled();
+        screen.queryByRole("button", { name: "trajectory.wrapLines" })
+      ).not.toBeInTheDocument();
       expect(view.container.querySelector("pre")).toBeNull();
     }
   );

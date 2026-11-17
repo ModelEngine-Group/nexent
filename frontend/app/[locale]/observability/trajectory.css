@@ -743,10 +743,12 @@
   align-items: center;
   gap: 12px;
 }
-.trajectory-code-meta > button {
-  border-left: 1px solid #f0f0f0;
-  padding-left: 10px;
-  width: 24px;
+.trajectory-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-left: 1px solid var(--color-border-separator-subtle);
+  padding-left: 8px;
 }
 .trajectory-code-scroll {
   overflow: auto;
