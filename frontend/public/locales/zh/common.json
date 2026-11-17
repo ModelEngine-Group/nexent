@@ -6940,6 +6940,7 @@
   "trajectory.errors.query_busy": "查询繁忙，请稍后重试",
   "trajectory.errors.query_budget_exceeded": "查询范围过大，请缩小租户或时间范围",
   "trajectory.errors.storage_unavailable": "轨迹存储不可用",
+  "trajectory.errors.trajectory_cache_unavailable": "轨迹查询暂不可用，请稍后重试",
   "trajectory.errors.trajectory_corrupt": "轨迹文件损坏",
   "trajectory.errors.snapshot_reset": "数据范围已变化，请重新查询",
   "trajectory.errors.trajectory_not_found": "记录不存在或无权访问",

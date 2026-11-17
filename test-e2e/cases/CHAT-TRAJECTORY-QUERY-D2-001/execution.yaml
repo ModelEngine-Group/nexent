@@ -10,6 +10,9 @@ preparation:
   special_assets: false
   d4_groups: []
 notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and product OTLP file storage/reader.
+  Shared-reference variants use two independent service/cache clients with one owned FakeServer,
+  execute actual Redis Lua and close every client in finally; this is HTTP contract evidence,
+  not a real Redis or multi-Pod deployment claim.
   The tenant-facet variants execute actual catalog ORM on owned in-memory SQLite membership rows, dispose the engine,
   and assert the connection is released; PostgreSQL syntax is covered separately by traditional UT compilation.
   Global schedule tests control only the configuration persistence boundary; repository transaction/lock
@@ -26,6 +29,7 @@ notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager a
 acceptance_bindings:
   AC-08:
   - test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed
+  - test_trj_query_shared_references_survive_service_switch
   AC-01:
   - test_trj_query_su_all_routes_use_platform_identity_recheck
   - test_trj_query_effective_operations_roles

@@ -35,6 +35,7 @@ class TrajectoryService:
         max_candidates=10_000,
         source_query=None,
         execution_catalog=None,
+        query_cache=None,
     ):
         self.execution_catalog = execution_catalog
         self.archive, self.catalog, self.references = (
@@ -48,7 +49,7 @@ class TrajectoryService:
             max_candidates,
         )
         self.queries, self.summaries = (
-            ByteCache(16 * 1024 * 1024),
+            query_cache if query_cache is not None else ByteCache(16 * 1024 * 1024),
             ByteCache(32 * 1024 * 1024),
         )
 

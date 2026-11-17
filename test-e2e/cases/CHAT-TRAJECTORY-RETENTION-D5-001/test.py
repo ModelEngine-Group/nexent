@@ -9,6 +9,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -353,6 +354,20 @@ def test_retention_cleanup_batch_lock_is_exclusive_across_processes(files):
         assert state(files, expired)["cleanup_reason"] is None
         assert digest(expired.path) == original
     assert files.reopen().cleanup(files.owner)["deleted_runs"] == 1
+
+
+def test_retention_session_lock_yields_and_cold_continuation_deletes(files):
+    expired = files.add(age_days=30)
+    with locked(files, expired, "hold_session"):
+        started = time.monotonic()
+        outcome = files.store.cleanup(files.owner, deadline=started + 2)
+        assert time.monotonic() - started < 2
+        assert outcome["next_turn"] == 0 and outcome["pending_runs"] > 0
+        assert outcome["deleted_runs"] == 0 and expired.path.exists()
+        with files.store._root() as root, root.lock(".cleanup.lock", blocking=False):
+            pass
+    assert files.reopen().cleanup(files.owner, after_turn=outcome["next_turn"])["deleted_runs"] == 1
+    assert not expired.path.exists()
 
 
 def test_retention_active_runs_and_fixed_storage_agent_survive_old_run_reclamation(

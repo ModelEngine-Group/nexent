@@ -114,18 +114,19 @@ def test_refresh_publishes_exact_model_quantiles_and_reuses_unchanged_archive(re
     assert refresher._cache_bytes == 320
 
 
-def test_fresh_scope_skips_archive_scan_but_expired_scope_refreshes(refresh):
+@pytest.mark.parametrize("kind,identity", [("tenant", "t"), ("global", "global")])
+def test_fresh_scope_skips_archive_scan_but_expired_scope_refreshes(refresh, kind, identity):
     refresher, scope, rows, publish, _ = refresh
     scope.return_value.update(
         complete=True,
         computed_revision=7,
         next_refresh_at=datetime.now(UTC) + timedelta(days=1),
     )
-    assert refresher.refresh(["t"], "tenant", "t")
+    assert refresher.refresh(["t"], kind, identity)
     rows.assert_not_called()
     publish.assert_not_called()
     scope.return_value["next_refresh_at"] = datetime.now(UTC) - timedelta(days=1)
-    assert refresher.refresh(["t"], "tenant", "t")
+    assert refresher.refresh(["t"], kind, identity)
     publish.assert_called_once()
 
 

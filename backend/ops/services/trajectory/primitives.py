@@ -48,10 +48,10 @@ class Budget:
 
 
 class ReferenceStore:
-    """Keep immutable reference state in a bounded process-local cache."""
+    """Keep immutable reference state in an injected bounded server-side cache."""
 
-    def __init__(self, *, max_bytes=16 * 1024 * 1024, ttl=1800):
-        self.cache = ByteCache(max_bytes=max_bytes, ttl=ttl)
+    def __init__(self, *, max_bytes=16 * 1024 * 1024, ttl=1800, cache=None):
+        self.cache = cache if cache is not None else ByteCache(max_bytes=max_bytes, ttl=ttl)
 
     def issue(self, kind, data):
         raw = json.dumps({"kind": kind, "data": data}, separators=(",", ":"), allow_nan=False)

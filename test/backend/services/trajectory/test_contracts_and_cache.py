@@ -151,6 +151,12 @@ def test_read_configuration_is_independent_and_shared_per_process(
     monkeypatch.setattr(environment, "ENABLE_TELEMETRY", False)
     monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", True)
     monkeypatch.setattr(environment, "TRAJECTORY_ROOT_DIR", str(tmp_path))
+    import fakeredis
+    from ops.services.trajectory import redis_cache
+
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(environment, "REDIS_BACKEND_URL", "redis://test/1")
+    monkeypatch.setattr(redis_cache.Redis, "from_url", lambda *a, **kw: fakeredis.FakeRedis(server=server))
     service = runtime.get_service()
     assert service is runtime.get_service()
     assert service.max_bytes == environment.TRAJECTORY_QUERY_MAX_BYTES
@@ -160,8 +166,8 @@ def test_read_configuration_is_independent_and_shared_per_process(
     fresh = runtime.get_service()
     assert fresh is not service
     reference = service.references.issue("snapshot", {"actor": "admin"})
-    with pytest.raises(QueryError, match="invalid_reference"):
-        fresh.references.resolve(reference, "snapshot")
+    assert fresh.references.resolve(reference, "snapshot")["actor"] == "admin"
+    runtime.reset_service()
 
 
 @pytest.mark.parametrize(

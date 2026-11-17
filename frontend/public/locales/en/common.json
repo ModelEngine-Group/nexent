@@ -6943,6 +6943,7 @@
   "trajectory.errors.query_busy": "Query busy. Try again later",
   "trajectory.errors.query_budget_exceeded": "Query too large. Narrow tenant/time scope",
   "trajectory.errors.storage_unavailable": "Trace storage unavailable",
+  "trajectory.errors.trajectory_cache_unavailable": "Trace queries are temporarily unavailable. Retry later",
   "trajectory.errors.trajectory_corrupt": "Corrupt trace file",
   "trajectory.errors.snapshot_reset": "Data scope changed. Query again",
   "trajectory.errors.trajectory_not_found": "Record unavailable or access denied",

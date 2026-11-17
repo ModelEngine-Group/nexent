@@ -78,14 +78,16 @@ def cleanup(service, actor, before_days, cursor=None, tenant_id=None):
                     service.recheck(actor, row)
                     meta = service.archive.manifest(row)
                     if meta:
+                        after_turn = (
+                            state["turn_after"]
+                            if int(row["conversation_id"]) == state["conversation_after"]
+                            else 0
+                        )
                         batch = store.cleanup(
                             identity(row),
                             before_days=before_days,
                             cutoff_at=parse_time(state["cutoff"]),
-                            after_turn=state["turn_after"]
-                            if int(row["conversation_id"])
-                            == state["conversation_after"]
-                            else 0,
+                            after_turn=after_turn,
                             scan_limit=1000 - result["scanned_runs"],
                             delete_limit=100 - result["deleted_runs"],
                             deadline=deadline,
@@ -93,11 +95,22 @@ def cleanup(service, actor, before_days, cursor=None, tenant_id=None):
                         )
                         for key in result:
                             result[key] += batch[key]
-                        if batch["next_turn"] is not None:
+                        next_turn = batch["next_turn"]
+                        if next_turn is None and (batch["pending_runs"] or batch["failed_runs"]):
+                            next_turn = after_turn
+                        if next_turn is not None:
+                            retries = (
+                                0 if batch["deleted_runs"] or next_turn > after_turn
+                                else state.get("retry_attempts", 0) + 1
+                            )
+                            if retries >= 3:
+                                code = "storage_unavailable" if batch["failed_runs"] else "cleanup_busy"
+                                raise QueryError(code, 503 if batch["failed_runs"] else 409, retry_after=2)
                             state = {
                                 **state,
                                 "conversation_after": int(row["conversation_id"]),
-                                "turn_after": batch["next_turn"],
+                                "turn_after": next_turn,
+                                "retry_attempts": retries,
                             }
                             next_state = state
                             break
@@ -106,6 +119,7 @@ def cleanup(service, actor, before_days, cursor=None, tenant_id=None):
                         **state,
                         "conversation_after": int(row["conversation_id"]),
                         "turn_after": 2147483647,
+                        "retry_attempts": 0,
                     }
                 else:
                     if len(candidates) > 1000:
@@ -116,7 +130,7 @@ def cleanup(service, actor, before_days, cursor=None, tenant_id=None):
             raise storage_error(error) from error
         except (OSError, TrajectoryCorrupt) as error:
             raise storage_error(error) from error
-        if next_state and not progressed and result["scanned_runs"] == 0:
+        if next_state and not progressed and result["scanned_runs"] == 0 and not next_state.get("retry_attempts"):
             raise QueryError("cleanup_budget_exceeded", 503, retry_after=2)
         return {
             "cutoff_at": state["cutoff"],

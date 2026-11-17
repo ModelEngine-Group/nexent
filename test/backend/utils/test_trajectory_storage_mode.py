@@ -135,6 +135,7 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     }.items():
         monkeypatch.setattr(environment, key, value)
     monkeypatch.setattr(runtime, "_service", None)
+    monkeypatch.setattr(environment, "REDIS_BACKEND_URL", "redis://test/1")
     assert runtime.get_service().archive.store.storage_mode == "shared_directory"
     monkeypatch.setattr(runtime, "_service", None)
     monkeypatch.setattr(environment, "TRAJECTORY_STORAGE_MODE", "single_node")

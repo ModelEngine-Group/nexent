@@ -50,8 +50,8 @@ export function useTrajectoryCleanup(
             (accumulated?.deleted_bytes ?? 0) + batch.deleted_bytes,
           skipped_active:
             (accumulated?.skipped_active ?? 0) + batch.skipped_active,
-          pending_runs: (accumulated?.pending_runs ?? 0) + batch.pending_runs,
-          failed_runs: (accumulated?.failed_runs ?? 0) + batch.failed_runs,
+          pending_runs: batch.pending_runs,
+          failed_runs: batch.failed_runs,
         };
         setResult(accumulated);
         cursor = batch.next_cursor ?? undefined;

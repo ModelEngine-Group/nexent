@@ -50,6 +50,28 @@ def test_token_sort_places_unknown_last_and_preserves_frozen_members(service):
         records(service, ACTOR, {}, query_id=result["query_id"])
 
 
+def test_pg_membership_survives_switching_cache_clients(service):
+    import fakeredis
+    from ops.services.trajectory.redis_cache import RedisByteCache
+
+    server = fakeredis.FakeServer()
+    clients = [fakeredis.FakeRedis(server=server) for _ in range(2)]
+    try:
+        service.references = ReferenceStore(cache=RedisByteCache(clients[0], namespace="references"))
+        service.queries = RedisByteCache(clients[0], namespace="queries")
+        first = records(service, ACTOR, {}, page_size=1)
+        service.references = ReferenceStore(cache=RedisByteCache(clients[1], namespace="references"))
+        service.queries = RedisByteCache(clients[1], namespace="queries")
+        service.execution_catalog.list_records.side_effect = AssertionError("Frozen list was recomputed")
+        second = records(service, ACTOR, {}, page_size=1, page=2, query_id=first["query_id"])
+        assert first["total"] == second["total"] == 3
+        assert first["as_of"] == second["as_of"]
+        assert first["items"][0]["conversation_id"] != second["items"][0]["conversation_id"]
+    finally:
+        for client in clients:
+            client.close()
+
+
 @pytest.mark.parametrize(
     "params",
     [

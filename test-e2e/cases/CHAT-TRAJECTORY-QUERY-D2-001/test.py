@@ -266,6 +266,44 @@ def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness
     assert get(harness, prefix + new_id).status_code == 200
 
 
+def test_trj_query_shared_references_survive_service_switch(harness, monkeypatch):
+    import fakeredis
+    from ops.api import trajectory as api
+    from ops.services.trajectory.primitives import ReferenceStore
+    from ops.services.trajectory.redis_cache import RedisByteCache
+    from ops.services.trajectory.service import TrajectoryService
+
+    server = fakeredis.FakeServer()
+    clients = [fakeredis.FakeRedis(server=server) for _ in range(2)]
+    try:
+        services = [TrajectoryService(
+            harness.store, harness.service.catalog,
+            ReferenceStore(cache=RedisByteCache(client, namespace="references")),
+            query_cache=RedisByteCache(client, namespace="queries"),
+        ) for client in clients]
+        monkeypatch.setattr(api, "get_service", lambda: services[0])
+        harness.add_run()
+        listed = data(get(harness, "/trajectory/records", page_size=1))
+        first = snapshot(harness, limit=1)
+        complete = snapshot(harness)
+        tool = next(n for n in complete["nodes"] if n["kind"] == "tool")
+        content_id = tool["output"]["content_id"]
+        prefix = "/trajectory/conversations/123/contents/"
+        before = data(get(harness, prefix + content_id))
+
+        monkeypatch.setattr(api, "get_service", lambda: services[1])
+        second = snapshot(harness, cursor=first["next_cursor"], limit=1)
+        assert second["snapshot_id"] and second["nodes"][0]["id"] != first["nodes"][0]["id"]
+        assert data(get(harness, prefix + content_id))["text"] == before["text"]
+        assert get(harness, prefix + content_id, actor="admin2").status_code == 422
+        page = data(get(harness, "/trajectory/records", page=2, page_size=1, query_id=listed["query_id"]))
+        assert page["as_of"] == listed["as_of"] and page["total"] == listed["total"]
+        assert page["items"][0]["trajectory_id"] != listed["items"][0]["trajectory_id"]
+    finally:
+        for client in clients:
+            client.close()
+
+
 @pytest.mark.parametrize("body_bytes", [1024 * 1024, 4 * 1024 * 1024])
 def test_trj_query_large_unicode_content_roundtrip_and_reference_scope(
     harness, body_bytes

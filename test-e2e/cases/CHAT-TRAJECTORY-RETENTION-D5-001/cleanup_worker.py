@@ -102,6 +102,11 @@ def main():
         scheduled_cleanup(root, clock, fault)
         return
 
+    if fault == "hold_session":
+        with store._session(identity):
+            print("locked", flush=True)
+            sys.stdin.read()
+        return
     if fault == "hold_cleanup":
         with (
             store._root() as directory,

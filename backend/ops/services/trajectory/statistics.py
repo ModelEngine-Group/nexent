@@ -33,6 +33,7 @@ class StatisticsRefresher:
                 return False
             record = database.read_scope(kind, identity)
             asof = datetime.now(UTC)
+            # Global scopes refresh by time even though business writes only dirty tenants.
             if (
                 record["complete"]
                 and record["source_revision"] == record["computed_revision"]

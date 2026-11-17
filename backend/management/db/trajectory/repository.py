@@ -32,10 +32,8 @@ def placeholder_uuid(conversation_id):
 def dirty(session, tenant_id):
     """Change counters survive restarts and are never replaced by computed values."""
     tenants = [tenant_id] if isinstance(tenant_id, str) else sorted(set(tenant_id))
-    # Lock every tenant scope before the shared global scope to avoid lock inversion.
-    for kind, identity in [("tenant", value) for value in tenants] + [
-        ("global", "global")
-    ]:
+    # Global statistics refresh on a timer; business transactions lock only their tenants.
+    for kind, identity in [("tenant", value) for value in tenants]:
         stmt = insert(Statistics).values(
             statistics_id=scope_uuid(kind, identity),
             scope_type=kind,
@@ -61,7 +59,7 @@ def dirty(session, tenant_id):
 
 
 def seed_conversation(session, conversation_id, owner, agent_id):
-    session.execute(
+    inserted = session.execute(
         insert(Execution)
         .values(
             trajectory_id=placeholder_uuid(conversation_id),
@@ -76,6 +74,8 @@ def seed_conversation(session, conversation_id, owner, agent_id):
         )
         .on_conflict_do_nothing(index_elements=[Execution.trajectory_id])
     )
+    if inserted.rowcount == 0:
+        return
     tenants = (
         session.execute(
             select(UserTenant.tenant_id).where(

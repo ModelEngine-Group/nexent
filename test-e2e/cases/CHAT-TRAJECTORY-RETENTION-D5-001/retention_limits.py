@@ -27,17 +27,19 @@ def prove_delete_limit(files):
     first = files.store.cleanup(files.owner, delete_limit=10000)
     assert first["scanned_runs"] == 101 and first["deleted_runs"] == 100
     assert first["pending_runs"] == 1 and first["failed_runs"] == 0
+    assert first["next_turn"] == 100
     removed = {path for path in sizes if not path.exists()}
     assert len(removed) == 100 and runs[-1].path.exists()
     assert first["deleted_bytes"] == sum(sizes[path] for path in removed)
     pending = files.store.manifest(files.owner)["runs"]
     assert all(run["cleanup_reason"] == "retention" for run in pending)
     assert sum(run["file_deleted_at"] is None for run in pending) == 1
-    last = files.reopen().cleanup(files.owner)
+    last = files.reopen().cleanup(files.owner, after_turn=first["next_turn"])
     assert (
         last["deleted_runs"] == 1 and last["pending_runs"] == last["failed_runs"] == 0
     )
     assert last["deleted_bytes"] == sizes[runs[-1].path]
+    assert last["next_turn"] is None
     assert not any(run.path.exists() for run in runs)
     assert first["deleted_bytes"] + last["deleted_bytes"] == sum(sizes.values())
     assert files.reopen().cleanup(files.owner)["deleted_runs"] == 0

@@ -418,6 +418,7 @@ def test_pg_reader_construction_never_opens_or_provisions_the_file_root(mocker):
 
     mocker.patch.object(runtime, "_service", None)
     mocker.patch.object(environment, "TRAJECTORY_READ_ENABLED", True)
+    mocker.patch.object(environment, "REDIS_BACKEND_URL", "redis://test/1")
     provision = mocker.patch(
         "infrastructure.observability.trajectory_store.TrajectoryFileStore.provision",
         side_effect=AssertionError("List construction touched storage"),
@@ -427,10 +428,21 @@ def test_pg_reader_construction_never_opens_or_provisions_the_file_root(mocker):
     provision.assert_not_called()
 
 
-def test_multiple_dirty_tenant_scopes_are_locked_before_the_global_scope():
+def test_multiple_dirty_tenant_scopes_never_lock_the_global_scope():
     from management.db.trajectory.repository import dirty
 
     session = Mock()
     dirty(session, ["old", "new", "old"])
     scopes = [call.args[0].compile().params["scope_id"] for call in session.execute.call_args_list]
-    assert scopes == ["new", "old", "global"]
+    assert scopes == ["new", "old"]
+
+
+def test_duplicate_conversation_placeholder_does_not_dirty_statistics(mocker):
+    from management.db.trajectory.repository import seed_conversation
+
+    session = Mock()
+    session.execute.return_value.rowcount = 0
+    dirty = mocker.patch("management.db.trajectory.repository.dirty")
+    seed_conversation(session, 123, "u", 7)
+    dirty.assert_not_called()
+    assert session.execute.call_count == 1

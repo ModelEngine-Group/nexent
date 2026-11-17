@@ -100,6 +100,27 @@ describe("trajectory query membership", () => {
 });
 
 describe("trajectory cleanup batches", () => {
+  it("clears resolved pending counts after continuation finishes", async () => {
+    api.cleanup
+      .mockResolvedValueOnce(
+        batch({
+          done: false,
+          next_cursor: "next",
+          pending_runs: 1,
+          failed_runs: 1,
+        })
+      )
+      .mockResolvedValueOnce(batch());
+    const complete = vi.fn();
+    const hook = renderHook(() => useTrajectoryCleanup(complete));
+    await act(async () => hook.result.current.start(7));
+    expect(hook.result.current.result).toMatchObject({
+      deleted_runs: 2,
+      pending_runs: 0,
+      failed_runs: 0,
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
   it("requires an explicit start, follows cursor, and totals real batch results", async () => {
     api.cleanup
       .mockResolvedValueOnce(batch({ done: false, next_cursor: "next" }))

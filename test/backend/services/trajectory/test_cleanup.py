@@ -75,9 +75,25 @@ def test_manual_audit_distinguishes_pending_and_failed_batches(
     service.archive.store.cleanup.return_value[field] = 1
     result = cleanup(service, ACTOR, 7)
     (event,) = audit_events(caplog)
-    assert result["done"] and result[field] == 1
+    assert not result["done"] and result["next_cursor"] and result[field] == 1
     assert event["status"] == status and event[field] == 1
     assert event["error_code"] == ("delete_failed" if field == "failed_runs" else None)
+
+
+@pytest.mark.parametrize("field,code", [("pending_runs", "cleanup_busy"), ("failed_runs", "storage_unavailable")])
+def test_cleanup_stops_automatic_retries_without_progress(service, field, code):
+    batch = service.archive.store.cleanup.return_value
+    batch.update(scanned_runs=0, deleted_runs=0, next_turn=0)
+    batch[field] = 1
+    first = cleanup(service, ACTOR, 7)
+    second = cleanup(service, ACTOR, 7, first["next_cursor"])
+    assert not first["done"] and not second["done"]
+    assert first["cutoff_at"] == second["cutoff_at"]
+    with pytest.raises(QueryError, match=code) as raised:
+        cleanup(service, ACTOR, 7, second["next_cursor"])
+    assert raised.value.retry_after == 2
+    batch.update(pending_runs=0, failed_runs=0, next_turn=None, scanned_runs=1, deleted_runs=1)
+    assert cleanup(service, ACTOR, 7, second["next_cursor"])["done"]
 
 
 def test_manual_audit_keeps_first_cutoff_on_cursor_continuation(service, caplog):

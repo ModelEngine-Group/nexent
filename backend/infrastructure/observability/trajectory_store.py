@@ -534,122 +534,151 @@ class TrajectoryFileStore:
         force_reason=None,
         scheduled=False,
     ):
-        """Clean one authorized conversation; the scheduler supplies bounded batches."""
+        """Clean bounded batches without waiting for a session or execution lock."""
         days = self._days(before_days if before_days is not None else self.retention_days)
         now = now or self.clock()
-        cutoff = cutoff_at or now - timedelta(days=days)
-        scan_limit, delete_limit = min(1000, scan_limit), min(100, delete_limit)
-        result = {
-            "deleted_runs": 0,
-            "deleted_bytes": 0,
-            "skipped_active": 0,
-            "pending_runs": 0,
-            "failed_runs": 0,
-            "scanned_runs": 0,
-            "next_turn": None,
-        }
+        result = dict.fromkeys((
+            "deleted_runs", "deleted_bytes", "skipped_active", "pending_runs", "failed_runs", "scanned_runs",
+        ), 0)
+        result["next_turn"] = None
         with (
             self._root() as root,
             nullcontext() if lock_held else root.lock(".cleanup.lock", blocking=False),
         ):
-            with self._session(identity) as directory:
-                meta = directory.read_json("meta.json")
-                targets = []
-                changed = False
-                remaining = sorted(
-                    (r for r in meta["runs"] if r["turn_no"] > after_turn),
-                    key=lambda r: r["turn_no"],
+            try:
+                self._cleanup_runs(
+                    identity, result, before_days=before_days, now=now,
+                    cutoff=cutoff_at or now - timedelta(days=days), after_turn=after_turn,
+                    scan_limit=min(1000, scan_limit), delete_limit=min(100, delete_limit),
+                    deadline=deadline, force_reason=force_reason, scheduled=scheduled,
                 )
-                last_turn = after_turn
-                for run in remaining:
-                    if result["scanned_runs"] >= scan_limit or (deadline and time.monotonic() >= deadline):
-                        result["next_turn"] = last_turn
-                        break
-                    result["scanned_runs"] += 1
-                    last_turn = run["turn_no"]
-                    if (not run["finished_at"] or run["publication_no"] is None) and force_reason != "conversation_deleted":
-                        result["skipped_active"] += 1
-                        continue
-                    expires = None
-                    if run["finished_at"] and run["expires_at"]:
-                        expires = min(
-                            parse_time(run["expires_at"]),
-                            parse_time(run["finished_at"]) + timedelta(days=self.retention_days),
-                        )
-                        if timestamp(expires) != run["expires_at"]:
-                            run["expires_at"] = timestamp(expires)
-                            changed = True
-                    eligible = (
-                        bool(force_reason)
-                        or (not scheduled and expires is not None and expires <= now)
-                        or (before_days is not None and parse_time(run["finished_at"]) <= cutoff)
-                    )
-                    if not run["cleanup_reason"] and eligible:
-                        run.update(
-                            capture_state="expired",
-                            cleanup_reason=force_reason or ("manual" if before_days is not None and not scheduled else "retention"),
-                            cleanup_marked_at=timestamp(now),
-                        )
-                        meta["cleanup_version"] += 1
-                        meta["had_expired_history"] = True
-                        meta["had_manual_cleanup"] |= before_days is not None and not scheduled
-                        meta["expired_execution_count"] += 1
-                        meta["earliest_expired_at"] = meta["earliest_expired_at"] or timestamp(now)
-                        meta["latest_expired_at"] = timestamp(now)
-                        changed = True
-                    if run["cleanup_reason"] and not run["file_deleted_at"]:
-                        targets.append((run["trajectory_id"], run["confirmed_bytes"]))
-                if changed:
-                    self._save_manifest(directory, meta)
-                if self.expire_callback:
-                    self.expire_callback(identity, [r["trajectory_id"] for r in meta["runs"] if r.get("cleanup_reason")])
-            # Releasing the session lock before taking a run lock avoids lock inversion.
-            for position, (trajectory_id, size) in enumerate(targets[:delete_limit]):
-                if deadline and time.monotonic() >= deadline:
-                    result["pending_runs"] += len(targets[:delete_limit]) - position
-                    break
-                try:
-                    with self._session(identity) as directory:
-                        fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR)
-                    try:
-                        try:
-                            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        except BlockingIOError:
-                            result["pending_runs"] += 1
-                            continue
-                        with self._session(identity) as directory:
-                            meta = directory.read_json("meta.json")
-                            run = self._run(meta, trajectory_id)
-                            if not run["cleanup_reason"]:
-                                raise TrajectoryConflict("Trajectory cleanup marker is missing")
-                            os.unlink(f"{trajectory_id}.otlp.jsonl", dir_fd=directory.fd)
-                            os.fsync(directory.fd)
-                            run["file_deleted_at"] = timestamp(now)
-                            self._save_manifest(directory, meta)
-                            result["deleted_runs"] += 1
-                            result["deleted_bytes"] += size
-                    finally:
-                        os.close(fd)
-                except FileNotFoundError:
-                    with self._session(identity) as directory:
-                        meta = directory.read_json("meta.json")
-                        self._run(meta, trajectory_id)["file_deleted_at"] = timestamp(now)
-                        self._save_manifest(directory, meta)
-                except OSError:
-                    result["failed_runs"] += 1
-            result["pending_runs"] += max(0, len(targets) - delete_limit)
-            with self._session(identity) as directory:
-                meta = directory.read_json("meta.json")
-                retained = [
-                    run
-                    for run in meta["runs"]
-                    if not run["file_deleted_at"] or parse_time(run["file_deleted_at"]) + timedelta(days=7) > now
-                ]
-                if len(retained) != len(meta["runs"]):
-                    meta["cleanup_version"] += 1
-                    meta["runs"] = retained
-                    self._save_manifest(directory, meta)
+            except TrajectoryConflict as error:
+                if "locked" not in str(error):
+                    raise
+                # A session lock may become busy at any stage. Re-scan safely instead
+                # of skipping unconfirmed deletions; successful receipts are idempotent.
+                result["pending_runs"] += 1
+                result["next_turn"] = after_turn
         return result
+
+    def _cleanup_runs(
+        self, identity, result, *, before_days, now, cutoff, after_turn,
+        scan_limit, delete_limit, deadline, force_reason, scheduled,
+    ):
+        def exhausted():
+            return deadline is not None and time.monotonic() >= deadline
+
+        if exhausted():
+            result["next_turn"] = after_turn
+            return
+        with self._session(identity, blocking=False) as directory:
+            meta = directory.read_json("meta.json")
+            targets = []
+            changed = False
+            remaining = sorted(
+                (r for r in meta["runs"] if r["turn_no"] > after_turn),
+                key=lambda r: r["turn_no"],
+            )
+            last_turn = after_turn
+            for run in remaining:
+                if result["scanned_runs"] >= scan_limit or exhausted():
+                    result["next_turn"] = last_turn
+                    break
+                result["scanned_runs"] += 1
+                last_turn = run["turn_no"]
+                if (not run["finished_at"] or run["publication_no"] is None) and force_reason != "conversation_deleted":
+                    result["skipped_active"] += 1
+                    continue
+                expires = None
+                if run["finished_at"] and run["expires_at"]:
+                    expires = min(
+                        parse_time(run["expires_at"]),
+                        parse_time(run["finished_at"]) + timedelta(days=self.retention_days),
+                    )
+                    if timestamp(expires) != run["expires_at"]:
+                        run["expires_at"] = timestamp(expires)
+                        changed = True
+                eligible = (
+                    bool(force_reason)
+                    or (not scheduled and expires is not None and expires <= now)
+                    or (before_days is not None and parse_time(run["finished_at"]) <= cutoff)
+                )
+                if not run["cleanup_reason"] and eligible:
+                    run.update(
+                        capture_state="expired",
+                        cleanup_reason=force_reason or ("manual" if before_days is not None and not scheduled else "retention"),
+                        cleanup_marked_at=timestamp(now),
+                    )
+                    meta["cleanup_version"] += 1
+                    meta["had_expired_history"] = True
+                    meta["had_manual_cleanup"] |= before_days is not None and not scheduled
+                    meta["expired_execution_count"] += 1
+                    meta["earliest_expired_at"] = meta["earliest_expired_at"] or timestamp(now)
+                    meta["latest_expired_at"] = timestamp(now)
+                    changed = True
+                if run["cleanup_reason"] and not run["file_deleted_at"]:
+                    targets.append((run["turn_no"], run["trajectory_id"], run["confirmed_bytes"]))
+            if changed:
+                self._save_manifest(directory, meta)
+            if self.expire_callback:
+                self.expire_callback(identity, [r["trajectory_id"] for r in meta["runs"] if r.get("cleanup_reason")])
+        unresolved = {turn for turn, _, _ in targets}
+        # Release the session lock before taking a run lock to avoid lock inversion.
+        for position, (turn, trajectory_id, size) in enumerate(targets[:delete_limit]):
+            if exhausted():
+                result["pending_runs"] += len(targets[:delete_limit]) - position
+                break
+            try:
+                with self._session(identity, blocking=False) as directory:
+                    fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR)
+                try:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        result["pending_runs"] += 1
+                        continue
+                    with self._session(identity, blocking=False) as directory:
+                        meta = directory.read_json("meta.json")
+                        run = self._run(meta, trajectory_id)
+                        if not run["cleanup_reason"]:
+                            raise TrajectoryConflict("Trajectory cleanup marker is missing")
+                        os.unlink(f"{trajectory_id}.otlp.jsonl", dir_fd=directory.fd)
+                        os.fsync(directory.fd)
+                        run["file_deleted_at"] = timestamp(now)
+                        self._save_manifest(directory, meta)
+                        result["deleted_runs"] += 1
+                        result["deleted_bytes"] += size
+                        unresolved.discard(turn)
+                finally:
+                    os.close(fd)
+            except FileNotFoundError:
+                with self._session(identity, blocking=False) as directory:
+                    meta = directory.read_json("meta.json")
+                    os.fsync(directory.fd)
+                    self._run(meta, trajectory_id)["file_deleted_at"] = timestamp(now)
+                    self._save_manifest(directory, meta)
+                    unresolved.discard(turn)
+            except OSError:
+                result["failed_runs"] += 1
+        result["pending_runs"] += max(0, len(targets) - delete_limit)
+        if unresolved:
+            retry_after = min(unresolved) - 1
+            result["next_turn"] = (
+                min(result["next_turn"], retry_after)
+                if result["next_turn"] is not None else retry_after
+            )
+        if exhausted():
+            return
+        with self._session(identity, blocking=False) as directory:
+            meta = directory.read_json("meta.json")
+            retained = [
+                run for run in meta["runs"]
+                if not run["file_deleted_at"] or parse_time(run["file_deleted_at"]) + timedelta(days=7) > now
+            ]
+            if len(retained) != len(meta["runs"]):
+                meta["cleanup_version"] += 1
+                meta["runs"] = retained
+                self._save_manifest(directory, meta)
 
 
 class RunWriter:

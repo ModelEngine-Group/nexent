@@ -7,6 +7,7 @@ from .primitives import QueryError, ReferenceStore
 
 _lock = threading.Lock()
 _service = None
+_cache_client = None
 
 
 def get_service():
@@ -14,7 +15,7 @@ def get_service():
 
     if not config.TRAJECTORY_READ_ENABLED:
         raise QueryError("trajectory_read_disabled", 404)
-    global _service
+    global _service, _cache_client
     with _lock:
         if _service is None:
             from infrastructure.observability.trajectory_io import (
@@ -30,10 +31,12 @@ def get_service():
             from ops.db.trajectory.queries import ExecutionCatalog
 
             from .archive import storage_error
+            from .redis_cache import shared_caches
             from .service import TrajectoryService
 
+            client, reference_cache, query_cache = shared_caches(config.REDIS_BACKEND_URL)
             try:
-                references = ReferenceStore()
+                references = ReferenceStore(cache=reference_cache)
                 catalog = TrajectoryCatalog()
                 store = TrajectoryFileStore(
                     config.TRAJECTORY_ROOT_DIR,
@@ -49,9 +52,12 @@ def get_service():
                     initialize_storage=False,
                 )
             except ValueError as error:
+                client.close()
                 raise QueryError("trajectory_configuration_invalid", 503) from error
             except (OSError, TrajectoryConflict, TrajectoryCorrupt) as error:
+                client.close()
                 raise storage_error(error) from error
+            _cache_client = client
             _service = TrajectoryService(
                 store,
                 catalog,
@@ -60,12 +66,16 @@ def get_service():
                 max_candidates=config.TRAJECTORY_QUERY_MAX_CANDIDATES,
                 source_query=capture_sources,
                 execution_catalog=ExecutionCatalog(),
+                query_cache=query_cache,
             )
     return _service
 
 
 def reset_service():
-    """Release process-local query references after workers have stopped."""
-    global _service
+    """Close this process's Redis pool; shared references retain their original TTL."""
+    global _service, _cache_client
     with _lock:
         _service = None
+        if _cache_client is not None:
+            _cache_client.close()
+            _cache_client = None
