@@ -8,7 +8,7 @@ from test.common.contract_stubs import install_business_contract_stubs
 import os
 import sys
 import logging
-from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
 import pytest
 import types
 import importlib.machinery
@@ -2699,7 +2699,7 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
 @pytest.mark.asyncio
 async def test_update_summary_frequency_endpoint_success(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.repository.update_summary_frequency", return_value=True):
+            patch("management.api.knowledge_base.vectordatabase.configure_summary_schedule", new_callable=AsyncMock, return_value=True) as configure:
         response = client.patch(
             f"/indices/{auth_data['index_name']}/summary_frequency",
             json={"summary_frequency": "1d"},
@@ -2707,17 +2707,29 @@ async def test_update_summary_frequency_endpoint_success(vdb_core_mock, auth_dat
         )
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    configure.assert_awaited_once_with(index_name=auth_data['index_name'], summary_frequency='1d',
+                                       tenant_id=auth_data['tenant_id'], user_id=auth_data['user_id'])
 
 
 @pytest.mark.asyncio
 async def test_update_summary_frequency_endpoint_invalid_value(auth_data):
-    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.configure_summary_schedule", new_callable=AsyncMock, side_effect=InvalidInput()):
         response = client.patch(
             f"/indices/{auth_data['index_name']}/summary_frequency",
             json={"summary_frequency": "bad"},
             headers=auth_data["auth_header"],
         )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize('error,status', [(ScopeDenied(),403),(NotFound(),404),(DeadlineExceeded(),500)])
+async def test_summary_settings_domain_errors_preserve_public_status(auth_data,error,status):
+    with patch('management.api.knowledge_base.vectordatabase.configure_summary_schedule',new_callable=AsyncMock,side_effect=error) as configure:
+        response=client.patch(f"/indices/{auth_data['index_name']}/summary_frequency",
+                              json={'summary_frequency':'1d'},headers=auth_data['auth_header'])
+    assert response.status_code == status
+    configure.assert_awaited_once()
 
 
 @pytest.mark.asyncio

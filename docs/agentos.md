@@ -257,6 +257,10 @@ Management 手动摘要已切换到 `KnowledgeSummaryService`。它通过 SI 查
 
 自动摘要仍有旧 ES 取样与 data-process 调度调用，继续按退役 SPEC 迁移其实际启用者、版本接纳和受管生命周期。发布前仍需完成 P4 历史源与旧索引维护，不能直接把旧 ES 数据当作 Runtime 已发布文件。先部署 Runtime 样本操作并确认维护完成，再切换 Management 消费者，回滚先消费者。当前没有新增公开摘要路径或备用协议，整个 data-process 退役尚未完成。
 
+自动摘要设置现经 SI 保存实际设置者。原 `PATCH /indices/{index_name}/summary_frequency` 的请求与成功响应保持，当前用户须有 KB 编辑权限；允许先设置频率再配置 embedding 模型。执行接纳另行要求本地 KB 和有效 embedding ID。SQL 029 在原 KB 行增加可空 `summary_schedule`，保存配置 ID、实际 user_id 与最后一次数据版本工作，不保存供应方配置。修改频率、关闭或重新启用均保留最后 attempt，当前相同 data_revision 不重复接纳；新数据版本可形成新工作。`admitted` 表示已接纳但结果尚未确认，重启不回放，`completed` 和 `failed` 有明确终态时间。摘要、last_summary_time 和 completed 状态在同一 SI 事务提交。
+
+历史频率没有可信启用者时保持 NULL 快照，须在 P4 核对或由实际用户重新设置，不使用创建者或最后更新者代替。失败记录只允许原已接纳 attempt 的实际用户关闭，撤权后不能发布摘要。当前已交付设置、持久接纳和受限候选发现，旧自动执行器尚未接入这些能力，仍需迁入 Management lifespan 后移除 data-process 中的启动/关闭调用及旧 ES 取样。部署需先应用 SQL 029，完成全部 Management 写入方升级及 P4 维护，再切换执行归属；不能同时运行旧调度和新调度。
+
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 
 Management 源/产物清理、KB 多模态入库、旧检索语义对照及业务入口切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。

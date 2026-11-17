@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from contracts.constants.environment import (
     MAX_KNOWLEDGE_BASES_PER_TENANT,
     MAX_KNOWLEDGE_BASES_PER_USER,
@@ -745,27 +744,6 @@ def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str
         raise
 
 
-def update_summary_frequency(index_name: str, summary_frequency: Optional[str], _tenant_id: str, user_id: str) -> bool:
-    """Update the auto-summary frequency for a knowledge base."""
-    valid_frequencies = VALID_SUMMARY_FREQUENCIES
-    if summary_frequency not in valid_frequencies:
-        raise ValueError(f"Invalid summary_frequency: {summary_frequency}")
-    try:
-        with get_db_session() as session:
-            record = (
-                session.query(KnowledgeRecord)
-                .filter(KnowledgeRecord.index_name == index_name, KnowledgeRecord.delete_flag != "Y")
-                .first()
-            )
-            if not record:
-                return False
-            record.summary_frequency = summary_frequency
-            record.updated_by = user_id
-            session.commit()
-            return True
-    except SQLAlchemyError:
-        logger.exception("Update summary frequency error")
-        raise
 
 
 def update_last_summary_time(index_name: str):

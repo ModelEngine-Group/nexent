@@ -36,7 +36,6 @@ from management.services.permission.identity.session import get_current_user_con
 from management.db.knowledge_base.repository import (
     get_index_name_by_knowledge_name,
     get_knowledge_record,
-    update_summary_frequency,
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.file.service import check_file_access
@@ -59,6 +58,8 @@ from management.services.permission.identity.session import get_current_user_con
 from management.services.tag.projection import project_authorized_document_tags
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 from nexent.core.concurrency import run_blocking
+from nexent.storage.errors import InvalidInput
+from management.services.knowledge_base.summary_settings import configure_summary_schedule
 from nexent.vector_database.base import VectorDatabaseCore
 
 router = APIRouter(prefix="/indices")
@@ -310,33 +311,26 @@ async def update_summary_frequency_endpoint(
     """Update the auto-summary frequency for a knowledge base."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         summary_frequency = request.get("summary_frequency")
-
-        valid_frequencies = VALID_SUMMARY_FREQUENCIES
-        if summary_frequency not in valid_frequencies:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail=f"Invalid summary_frequency. Must be one of: {valid_frequencies}",
-            )
-
-
-        success = update_summary_frequency(
-            index_name=index_name, summary_frequency=summary_frequency, _tenant_id=tenant_id, user_id=user_id
+        await configure_summary_schedule(
+            index_name=index_name, summary_frequency=summary_frequency, tenant_id=tenant_id, user_id=user_id
         )
-
-        if success:
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={"message": "Summary frequency updated successfully", "status": "success"},
-            )
-        else:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"Knowledge base '{index_name}' not found")
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Summary frequency updated successfully", "status": "success"})
     except HTTPException:
         raise
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except NotFound:
+        raise HTTPException(status_code=404, detail=f"Knowledge base '{index_name}' not found") from None
+    except ScopeDenied:
+        raise HTTPException(status_code=403, detail="No permission to modify this knowledge base") from None
+    except InvalidInput:
+        raise HTTPException(status_code=400,
+            detail=f"Invalid summary_frequency. Must be one of: {VALID_SUMMARY_FREQUENCIES}") from None
+    except DeadlineExceeded:
+        raise HTTPException(status_code=500, detail="Error updating summary frequency: timed out") from None
     except Exception as exc:
         logger.exception("Error updating summary frequency")
         raise HTTPException(

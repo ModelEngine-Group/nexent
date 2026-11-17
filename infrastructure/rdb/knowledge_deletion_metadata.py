@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from contracts.knowledge_deletion import DELETION_KNOWLEDGE_DATASET
+from sqlalchemy.dialects.postgresql import JSONB
 
 from infrastructure.rdb.record_audit import RecordAudit, timestamp
 from infrastructure.storage.catalog import DatasetDefinition, FieldDefinition
@@ -44,6 +45,11 @@ knowledge = sa.Table(
     sa.Column('group_ids', sa.String),
     sa.Column('ingroup_permission', sa.String(30)),
     sa.Column('knowledge_sources', sa.String(300)),
+    sa.Column('summary_frequency', sa.String(10), comment='Existing automatic summary frequency; NULL disables scheduling'),
+    sa.Column('last_summary_time', _LocalWallTime(), comment='Existing local wall time of the last saved summary'),
+    sa.Column('knowledge_describe', sa.String(3000), comment='Existing user-visible knowledge summary'),
+    sa.Column('summary_schedule', sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), 'postgresql'),
+              nullable=True, comment='Management-owned actual summary issuer and last data-version attempt; NULL means no attested issuer'),
     schema='nexent',
 )
 
