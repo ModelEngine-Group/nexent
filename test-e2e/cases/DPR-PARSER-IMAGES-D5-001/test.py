@@ -30,6 +30,8 @@ def test_role_parser_images(record_property):
         "runtime.knowledge_images": "backend/runtime/knowledge_images.py",
         "runtime.knowledge_base.image_ingestion": "backend/runtime/knowledge_base/image_ingestion.py",
         "runtime.knowledge_base.ingestion": "backend/runtime/knowledge_base/ingestion.py",
+        "runtime.knowledge_base.tool_search": "backend/runtime/knowledge_base/tool_search.py",
+        "runtime.knowledge_base.search": "backend/runtime/knowledge_base/search.py",
         "runtime.model.service": "backend/runtime/model/service.py",
         "infrastructure.knowledge_objects": "infrastructure/knowledge_objects.py",
         "nexent.core.tools.knowledge_base_search_tool": "sdk/nexent/core/tools/knowledge_base_search_tool.py",

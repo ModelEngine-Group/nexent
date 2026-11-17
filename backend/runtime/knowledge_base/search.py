@@ -57,6 +57,28 @@ def rank_candidates(lexical, semantic, mode, query):
     return sorted(merged.values(), key=lambda h: (-h.score, _identity(h)))
 
 
+def rerank_indexes(output, count):
+    if not isinstance(output, list) or len(output) > count:
+        raise InvalidInput()
+    seen, ranked = set(), []
+    for item in output:
+        if not isinstance(item, dict):
+            raise InvalidInput()
+        index, score = item.get("index"), item.get("relevance_score")
+        if (type(index) is not int or not 0 <= index < count or index in seen
+            or type(score) not in {int, float}):
+            raise InvalidInput()
+        try:
+            score = float(score)
+        except OverflowError as error:
+            raise InvalidInput() from error
+        if not math.isfinite(score):
+            raise InvalidInput()
+        seen.add(index)
+        ranked.append((index, score))
+    return ranked
+
+
 class KnowledgeSearchService:
     def __init__(self, authorization_client, models, *, ports=knowledge_search_ports, operation_seconds=180):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
@@ -78,6 +100,10 @@ class KnowledgeSearchService:
                 or len({g.collection for g in grant.knowledge_bases}) != len(grant.knowledge_bases)):
             raise ScopeDenied()
         if any(g.embedding_model_id != request.embedding_model.model_id for g in grant.knowledge_bases):
+            raise Conflict()
+        if request.expected_revisions and any(
+            request.expected_revisions[g.knowledge_id] != g.revision for g in grant.knowledge_bases
+        ):
             raise Conflict()
         return grant
 
@@ -141,25 +167,8 @@ class KnowledgeSearchService:
 
     @staticmethod
     def _reranked(output, candidates):
-        if not isinstance(output, list) or len(output) > len(candidates):
-            raise InvalidInput()
-        seen, ranked = set(), []
-        for item in output:
-            if not isinstance(item, dict):
-                raise InvalidInput()
-            index, score = item.get("index"), item.get("relevance_score")
-            if (type(index) is not int or not 0 <= index < len(candidates) or index in seen
-                or type(score) not in {int, float}):
-                raise InvalidInput()
-            try:
-                score = float(score)
-            except OverflowError as error:
-                raise InvalidInput() from error
-            if not math.isfinite(score):
-                raise InvalidInput()
-            seen.add(index)
-            ranked.append(replace(candidates[index], score=score, score_kind="model.rerank"))
-        return ranked
+        return [replace(candidates[index], score=score, score_kind="model.rerank")
+                for index, score in rerank_indexes(output, len(candidates))]
 
     async def search(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeSearch):

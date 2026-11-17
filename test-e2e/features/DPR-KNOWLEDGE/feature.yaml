@@ -16,4 +16,6 @@ feature:
     description: Deletion removes logical visibility before cleanup, and unended writers prevent physical completion.
   - rule_id: DPR-KNOWLEDGE-RULE-04
     description: Multi-embedding ingests verified manifest image references through Model.invoke and exact read-only ObjectStore, preserving block identity without persisting image bytes.
+  - rule_id: DPR-KNOWLEDGE-RULE-05
+    description: Bound knowledge tool retrieval groups immutable model versions, fixes file scope, rechecks resource revisions and invokes one optional final rerank without replay.
   required_test_stages: [D3]

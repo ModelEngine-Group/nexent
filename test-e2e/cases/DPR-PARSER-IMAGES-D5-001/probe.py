@@ -203,6 +203,7 @@ else:
     )
     modules = ["runtime.knowledge_base.chunking", "nexent.multi_modal.image_filter",
                "runtime.knowledge_base.image_ingestion", "runtime.knowledge_base.ingestion",
+               "runtime.knowledge_base.tool_search", "runtime.knowledge_base.search",
                "runtime.model.service", "infrastructure.knowledge_objects",
                "runtime.text_cleanse", "runtime.knowledge_images", "runtime.agentos.tools",
                "nexent.core.tools.analyze_text_file_tool", "nexent.core.tools.knowledge_base_search_tool"]

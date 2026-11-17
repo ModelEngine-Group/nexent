@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-TOOL-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Prepare model-scoped Runtime knowledge tool retrieval
+  description: Bound Runtime retrieval groups model revisions, fixes file scopes and preserves typed references without activating public consumers before historical migration.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Group bound collections by model ID and revision and reject expanded scopes.
+    - Preserve fixed file scope and deny an empty whitelist without inference.
+    - Fuse incompatible model scores by rank and rerank once through Model.invoke.
+    - Reject stale resource revisions, reauthorize before returning and propagate cancellation and deadline.
+    reason: Existing search UT and worker D3 prove single-model retrieval and physical visibility. Strengthen the same D3 for the actual tool component; no duplicate D1 or new deployment mode. The case owns labelled storage containers, sockets and managed workers with existing cleanup.
+    test_selectors:
+    - test/backend/services/test_knowledge_tool_search.py
+    - test/backend/services/test_knowledge_search.py
+    - test/backend/app/test_agentos_knowledge_contract.py
+    - test/backend/app/test_agentos_knowledge_api.py

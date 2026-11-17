@@ -151,6 +151,10 @@ Runtime 调用 Management 时使用 `ManagementOperation`，包括自动化提�
 
 ### KnowledgeBase 文件生命周期
 
+`KnowledgeSearch.expected_revisions` 可钉住知识库配置快照。提供时必须包含全部请求知识库 ID 与 SHA256 版本；Runtime 在每次授权中比对，配置变化返回冲突。普通即时查询可省略该字段。`file_ids` 用于限制返回的稳定文件 ID。
+
+Runtime 的 `KnowledgeToolSearch` 按每个知识库绑定的模型 ID 和版本调用标准检索服务。单模型沿用原分数，多模型按排名融合，统一 rerank 经一次 `Model.invoke` 执行。固定文件白名单为空时拒绝全部文件，未指定时仅受知识库权限约束。该组件返回 typed hit，保留文件版本、图片引用和位置；现有 SDK 入口尚未切换，需与公开写入及历史索引迁移同步完成。
+
 Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回 `cleanup_pending`。上传和文本向量删除 worker 已接入 Runtime lifespan，文本检索及 rerank 已有标准接口。图片及 Management 对象清理仍在迁移，当前公开入库和旧 SDK 检索尚未切换。
 
 | 用途 | AgentOS 路径 | 客户端方法及契约 |

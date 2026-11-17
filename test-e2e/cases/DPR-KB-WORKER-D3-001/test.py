@@ -58,6 +58,7 @@ def test_runtime_knowledge_upload(record_property):
         "other_scope_preserved",
         "delete_without_model",
         "signed_search",
+        "bound_tool_search",
         "visible_rerank",
         "search_scope_denial",
         "deleted_search_absent",

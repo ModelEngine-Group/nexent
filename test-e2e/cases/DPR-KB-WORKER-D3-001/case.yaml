@@ -5,7 +5,7 @@ case:
   case_id: DPR-KB-WORKER-D3-001
   feature_id: DPR-KNOWLEDGE
   requirement_ids: [DPR-002, DPR-003, DPR-006]
-  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-01, DPR-KNOWLEDGE-RULE-02, DPR-KNOWLEDGE-RULE-05]
   title: Execute a Runtime upload through signed authorization and real object/vector storage
   type: INTEGRATION
   priority: P1
@@ -28,7 +28,7 @@ case:
     action: Deliver the same completed job again and inspect both the new vector index and a preexisting legacy sentinel index.
     expected: Model invocation and physical chunk counts stay unchanged; the legacy sentinel remains intact.
   - order: 4
-    action: Search through the signed Runtime HTTP endpoint in accurate, semantic and hybrid modes, use Model.invoke rerank, and submit wrong-user, wrong-tenant and tampered requests.
+    action: Search through the signed Runtime HTTP endpoint in accurate, semantic and hybrid modes, use Model.invoke rerank, and submit wrong-user, wrong-tenant and tampered requests. Run the bound tool search component against the same visible data and verify an empty fixed file whitelist denies every result.
     expected: Only the visible authorized generation is returned; rerank receives its content and rejected calls do not invoke models. Weighted lexical hits expose plain matched terms, and hybrid score_details retain both normalized branch scores.
   - order: 5
     action: Admit a version-zero deletion, let lifespan discover it, then inspect real vector keys for the deleted generation, a newer version, another file and another tenant.
@@ -84,5 +84,10 @@ case:
   - id: AC-06
     description: Signed Runtime search and Management grants enforce scope and visibility while embedding/rerank use Model.invoke and deleted generations remain absent.
     steps: [4, 5]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-07
+    description: The Runtime tool search component reads the authorized visible generation through standard knowledge retrieval and an empty fixed file whitelist performs no query.
+    steps: [4]
     expected_results: [6]
     forbidden_side_effects: [1]

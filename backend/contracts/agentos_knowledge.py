@@ -171,6 +171,17 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
     file_ids: list[str] = Field(default_factory=list, max_length=1000)
+    expected_revisions: dict[int, str] = Field(default_factory=dict, max_length=100)
+
+    @model_validator(mode="after")
+    def pinned_resources(self):
+        if self.expected_revisions and (
+            set(self.expected_revisions) != set(self.knowledge_ids)
+            or any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value)
+                   for value in self.expected_revisions.values())
+        ):
+            raise ValueError("Expected a SHA256 revision for every requested knowledge resource")
+        return self
 
     @field_validator("file_ids")
     @classmethod

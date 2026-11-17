@@ -168,6 +168,14 @@ async def test_wrong_embedding_model_is_refused_before_provider_or_storage(searc
     s.vectors.search.assert_not_called()
 
 
+async def test_changed_resource_revision_is_refused_before_models_and_vectors(search):
+    s, request, _, _, service = search
+    with pytest.raises(Conflict):
+        await service.search(request.model_copy(update={"expected_revisions": {1: "b" * 64}}), s.actor)
+    s.models.invoke.assert_not_awaited()
+    s.vectors.search.assert_not_called()
+
+
 async def test_embedding_revision_or_shape_never_reaches_vectors(search):
     s, request, _, _, service = search
     for revision, output, error in [("wrong", [[1.0, 0.5]], Conflict), ("v1", [[1.0]], InvalidInput)]:

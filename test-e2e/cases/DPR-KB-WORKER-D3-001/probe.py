@@ -53,7 +53,9 @@ from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.knowledge_base.deletion import KnowledgeDeleteWorker
 from runtime.knowledge_base.dispatch import knowledge_lifespan
 from runtime.knowledge_base.jobs import KnowledgeJobs
+from runtime.knowledge_base.search import KnowledgeSearchService
 from runtime.knowledge_base.service import KnowledgeService
+from runtime.knowledge_base.tool_search import KnowledgeToolSearch
 from runtime.knowledge_base.worker import KnowledgeUploadWorker
 from runtime.model.service import ModelService
 from search_probe import prove_deleted_search, prove_search
@@ -392,6 +394,18 @@ def main(run_id):
                 assert vector.payload["content"] == content.decode()
                 assert vector.payload["embedding_revision"] == "v1"
                 evidence.update(await prove_search(public, actor, request, content.decode(), searches))
+                search_service = KnowledgeSearchService(rpc, models)
+                from contracts.agentos_knowledge import KnowledgeSearchAuthorization
+                grant = await rpc.authorize_knowledge_search(
+                    KnowledgeSearchAuthorization(knowledge_ids=[1]), actor.user_id, actor.tenant_id)
+                bindings = [(grant.knowledge_bases[0], request.embedding_model)]
+                bound = KnowledgeToolSearch(search_service, actor, bindings, file_ids=[request.file_id])
+                hits = await bound.search("worker", ["kb-worker"], search_mode="accurate")
+                assert len(hits) == 1 and hits[0].file_id == request.file_id
+                assert hits[0].content == content.decode() and hits[0].file_version == 0
+                denied = KnowledgeToolSearch(search_service, actor, bindings, file_ids=[])
+                assert await denied.search("worker", ["kb-worker"]) == []
+                evidence["bound_tool_search"] = True
                 evidence.update(await prove_deletion(
                     api, actor, request, vectors, vector, workers, db, owned, calls,
                 ))

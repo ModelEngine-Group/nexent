@@ -20,6 +20,20 @@ def reference():
     )
 
 
+@pytest.mark.parametrize("revisions", [{1: "a" * 64}, {1: "b" * 64, 2: "c" * 64}, {1: "unsafe"}])
+def test_search_resource_revisions_are_complete_and_json_round_trippable(revisions):
+    from contracts.agentos_knowledge import KnowledgeSearch, ModelVersion
+
+    values = {"knowledge_ids": [1], "query": "query", "embedding_model": ModelVersion(model_id=2, revision="v1"),
+              "expected_revisions": revisions}
+    if revisions == {1: "a" * 64}:
+        request = KnowledgeSearch(**values)
+        assert KnowledgeSearch.model_validate_json(request.model_dump_json()) == request
+    else:
+        with pytest.raises(ValidationError):
+            KnowledgeSearch(**values)
+
+
 def test_artifact_round_trip_and_order():
     block = CleanseBlock(
         ordinal=0,
