@@ -37,7 +37,7 @@ change:
     decision: strengthen
     behaviors:
     - Static ordinary update log, unchanged HTTP payload/service/audit behavior.
-    - Strict true/false authentication flag validation remains outside constant assignments.
+    - Strict true/false authentication flags are read directly in a single constant assignment.
     - Account role lists, no downstream credential fallback, explicit allowlist rejection
       and canonical service ownership.
     - Shell migration environment/address rules, source preservation until committed
