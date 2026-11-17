@@ -18,7 +18,10 @@ from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup
 from contracts.knowledge_ingestion import KnowledgeIngestionIntent
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
-from management.services.knowledge_base.ingestion_journal import IngestionJournal
+from management.services.knowledge_base.ingestion_journal import (
+    IngestionJournal,
+    IngestionPhaseChanged,
+)
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
     Conflict,
@@ -171,7 +174,7 @@ class IngestionCoordinator:
                 intent,
             )
             if row["version"] != previous["version"]:
-                raise Conflict()
+                raise IngestionPhaseChanged()
             result = (
                 getattr(journal, method)(*args, row, context=context)
                 if method == "admit"
@@ -180,7 +183,7 @@ class IngestionCoordinator:
             # A reread after a successful CAS may already observe another participant's write.
             updated = result[0] if isinstance(result, tuple) else result
             if updated["version"] > row["version"] + 1:
-                raise Conflict()
+                raise IngestionPhaseChanged()
             return result
 
     async def _model(self, intent, actor, context):

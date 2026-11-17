@@ -332,7 +332,11 @@ async def test_two_coordinators_with_same_snapshot_only_submit_one_cleanse(setup
         second.advance(s.value.file_id, s.actor, context=context()),
         return_exceptions=True,
     )
-    assert sum(isinstance(result, Conflict) for result in results) == 1
+    from management.services.knowledge_base.ingestion_journal import (
+        IngestionPhaseChanged,
+    )
+
+    assert sum(isinstance(result, IngestionPhaseChanged) for result in results) == 1
     assert sum(isinstance(result, dict) for result in results) == 1
     s.cleanse.submit.assert_called_once()
 

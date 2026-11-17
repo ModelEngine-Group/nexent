@@ -1,6 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Actual persistent coordination with signed HTTP and a deliberately lost reply."""
 
+import asyncio
+import json
+import os
+import sys
+from collections import Counter
+from pathlib import Path
+from types import SimpleNamespace
+
 import sqlalchemy as sa
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from contracts.knowledge_ingestion import KnowledgeIngestionIntent
@@ -8,6 +16,7 @@ from management.services.file.knowledge_cleanse_service import KnowledgeCleanseS
 from management.services.knowledge_base.ingestion_coordinator import (
     IngestionCoordinator,
 )
+from management.services.knowledge_base.ingestion_dispatch import ingestion_lifespan
 from nexent.core.concurrency import run_blocking
 
 from infrastructure.agentos_identity import ServicePrincipal
@@ -15,7 +24,9 @@ from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
 from infrastructure.rdb.knowledge_jobs import jobs
 
 
-async def check_management_coordinator(api, engine, source, artifact, context):
+async def check_management_coordinator(
+    api, engine, source, artifact, context, requests
+):
     files = KnowledgeFileLifecycle.__table__
     value = KnowledgeIngestionIntent(
         knowledge_id=1,
@@ -61,6 +72,7 @@ async def check_management_coordinator(api, engine, source, artifact, context):
         def __init__(self):
             self.uploads = 0
             self.inspect_ids = []
+            self.discovered = asyncio.Event()
 
         async def get_model(self, *args, **kwargs):
             return await api.get_model(*args, **kwargs)
@@ -74,7 +86,10 @@ async def check_management_coordinator(api, engine, source, artifact, context):
 
         async def inspect_knowledge_file(self, lookup, **kwargs):
             self.inspect_ids.append(lookup.job_id)
-            return await api.inspect_knowledge_file(lookup, **kwargs)
+            result = await api.inspect_knowledge_file(lookup, **kwargs)
+            if len(self.inspect_ids) == 2:
+                self.discovered.set()
+            return result
 
     actor = ServicePrincipal("user-a", "tenant-a")
     cleanse = KnowledgeCleanseService(parser_version="v2")
@@ -122,14 +137,83 @@ async def check_management_coordinator(api, engine, source, artifact, context):
     replacement = IngestionCoordinator(
         KnowledgeCleanseService(parser_version="v2"), transport
     )
-    for _ in range(2):
-        state = await replacement.advance(value.file_id, actor, context=context())
-        assert (
-            state["stage"] == "RUNTIME_PENDING"
-            and state["forward_task_id"] == reserved["forward_task_id"]
-        )
+    state = await replacement.advance(value.file_id, actor, context=context())
+    assert (
+        state["stage"] == "RUNTIME_PENDING"
+        and state["forward_task_id"] == reserved["forward_task_id"]
+    )
+    app = SimpleNamespace(state=SimpleNamespace())
+    async with ingestion_lifespan(app, enabled=True, coordinator=replacement):
+        await asyncio.wait_for(transport.discovered.wait(), timeout=5)
+        (task,) = app.state.required_background_tasks
+        assert not task.done()
+    assert task.done() and app.state.required_background_tasks == ()
     assert transport.uploads == 1
     assert transport.inspect_ids == [reserved["forward_task_id"]] * 2
+    from contracts.agentos import ModelOperation
+    from contracts.agentos_knowledge import KnowledgeOperation
+    from contracts.constants import environment
+
+    process_env = {
+        **os.environ,
+        "RUNTIME_SERVICE_URL": api.runtime_url,
+        "POSTGRES_USER": "postgres",
+        "NEXENT_POSTGRES_PASSWORD": "fixture-password",
+        "POSTGRES_HOST": "127.0.0.1",
+        "POSTGRES_PORT": str(environment.POSTGRES_PORT),
+        "POSTGRES_DB": "postgres",
+        "JWT_SECRET": environment.JWT_SECRET,
+        "NO_PROXY": "127.0.0.1,localhost",
+    }
+    before = len(requests)
+    for _ in range(2):
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(Path(__file__).with_name("dispatch_process.py")),
+            env=process_env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+            assert process.returncode == 0, stderr.decode(errors="replace")
+            observed = json.loads(stdout.decode().splitlines()[-1])
+            assert observed == [
+                {
+                    "file_id": value.file_id,
+                    "stage": "RUNTIME_PENDING",
+                    "job_id": reserved["forward_task_id"],
+                }
+            ]
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await asyncio.wait_for(process.communicate(), timeout=5)
+    calls = Counter(requests[before:])
+    assert (
+        sum(
+            count
+            for path, count in calls.items()
+            if path.endswith(ModelOperation.GET.value)
+        )
+        == 2
+    )
+    assert (
+        sum(
+            count
+            for path, count in calls.items()
+            if path.endswith(KnowledgeOperation.INSPECT.value)
+        )
+        == 2
+    )
+    assert (
+        sum(
+            count
+            for path, count in calls.items()
+            if path.endswith(KnowledgeOperation.UPLOAD.value)
+        )
+        == 0
+    )
     with engine.connect() as connection:
         rows = (
             connection.execute(sa.select(jobs).where(jobs.c.file_id == value.file_id))

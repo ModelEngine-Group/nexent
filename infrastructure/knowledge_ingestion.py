@@ -9,6 +9,19 @@ from nexent.storage.models import StorageScope
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.knowledge_ingestion import bind_ingestion_records
+from infrastructure.rdb.knowledge_ingestion_dispatch import bind_ingestion_dispatch
+
+
+@contextmanager
+def ingestion_dispatch_ports(*, context):
+    engine, records = record_engine(context), None
+    try:
+        records = bind_ingestion_dispatch(engine)
+        yield records
+    finally:
+        close_owned(
+            context, ([records.close] if records is not None else []) + [engine.dispose]
+        )
 
 
 @contextmanager

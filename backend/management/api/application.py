@@ -162,6 +162,7 @@ async def automation_lifespan():
 async def config_lifespan(_app):
     from management.services.agent.prepared_turn import prepared_turn_lifespan
     from management.services.file.cleanse_lifespan import cleanse_lifespan
+    from management.services.knowledge_base.ingestion_dispatch import ingestion_lifespan
 
     # One Management manager owns ordinary and Northbound requests and recovery.
     async with northbound_lifespan(_app):
@@ -175,7 +176,7 @@ async def config_lifespan(_app):
             await validate_external_service_configuration()
             dreaming_started = True
             await start_dreaming_scheduler()
-            async with automation_lifespan(), prepared_turn_lifespan(), cleanse_lifespan(_app):
+            async with automation_lifespan(), prepared_turn_lifespan(), cleanse_lifespan(_app), ingestion_lifespan(_app):
                 yield
         finally:
             try:

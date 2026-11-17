@@ -143,6 +143,9 @@ class TestConfigAppRouterConfiguration:
             "management.api.knowledge_base.idata": {"router": APIRouter()},
             "management.api.knowledge_base.ragflow": {"router": APIRouter()},
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
+            "management.api.file.knowledge_content": {"router": APIRouter()},
+            "management.api.file.agentos_cleanse": {"create_file_cleanse_router": lambda: APIRouter()},
+            "management.api.knowledge_base.agentos_authorization": {"create_knowledge_authorization_router": lambda: APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
             "management.api.file.storage": {"router": APIRouter()},
             "management.api.conversation.conversation_management": {"router": APIRouter()},
@@ -326,6 +329,31 @@ class TestConfigAppRouterConfiguration:
             prepared_turn_lifespan=prepared_lifespan,
         ))
 
+        ingestion_events = []
+
+        @asynccontextmanager
+        async def cleansing_lifespan(app):
+            ingestion_events.append("cleanse-start")
+            try:
+                yield
+            finally:
+                ingestion_events.append("cleanse-stop")
+
+        @asynccontextmanager
+        async def ingestion_lifespan(app):
+            ingestion_events.append("ingestion-start")
+            try:
+                yield
+            finally:
+                ingestion_events.append("ingestion-stop")
+
+        monkeypatch.setitem(sys.modules, "management.services.file.cleanse_lifespan", types.SimpleNamespace(
+            cleanse_lifespan=cleansing_lifespan,
+        ))
+        monkeypatch.setitem(sys.modules, "management.services.knowledge_base.ingestion_dispatch", types.SimpleNamespace(
+            ingestion_lifespan=ingestion_lifespan,
+        ))
+
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
@@ -372,6 +400,7 @@ class TestConfigAppRouterConfiguration:
 
         assert config_app.app.lifespan is config_app.config_lifespan
         assert prepared_events == ["start", "stop"]
+        assert ingestion_events == ["cleanse-start", "ingestion-start", "ingestion-stop", "cleanse-stop"]
         migration.migrate_legacy_outlets.assert_called_once_with()
         concurrency_module.run_blocking.assert_awaited_once_with(
             "model-outlet-upgrade", migration.migrate_legacy_outlets

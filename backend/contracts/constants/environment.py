@@ -420,6 +420,7 @@ KUBERNETES_NAMESPACE = os.getenv('KUBERNETES_NAMESPACE', 'nexent')
 # Northbound API public base URL (used for A2A agent cards and external file proxy links)
 NORTHBOUND_EXTERNAL_URL = os.getenv('NORTHBOUND_EXTERNAL_URL', 'http://localhost:5013/api').rstrip('/')
 APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
+KNOWLEDGE_CLEANSE_PARSER_VERSION = APP_VERSION + "-cleanse-v2"
 
 # =============================================================================
 # Agent Sandbox Configuration

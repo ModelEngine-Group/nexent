@@ -150,7 +150,7 @@ def serve(
 
 
 def main(*, ready_fd=None):
-    from contracts.constants.environment import APP_VERSION
+    from contracts.constants.environment import KNOWLEDGE_CLEANSE_PARSER_VERSION
     from nexent.storage.errors import CapabilityUnsupported
 
     if "fork" not in multiprocessing.get_all_start_methods():
@@ -170,7 +170,7 @@ def main(*, ready_fd=None):
     serve(
         stop,
         owner_id="cleanse-root-" + uuid4().hex,
-        parser_version=APP_VERSION + "-cleanse-v2",
+        parser_version=KNOWLEDGE_CLEANSE_PARSER_VERSION,
     )
 
 

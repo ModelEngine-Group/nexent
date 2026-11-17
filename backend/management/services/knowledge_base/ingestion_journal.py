@@ -17,6 +17,10 @@ from nexent.storage.errors import (
 from nexent.storage.models import FieldPatch, Revision, WriteOutcome
 
 
+class IngestionPhaseChanged(Conflict):
+    """Another participant changed the captured lifecycle revision; do not repeat its effect."""
+
+
 class IngestionJournal:
     def __init__(self, records):
         scope = records.scope
@@ -82,8 +86,10 @@ class IngestionJournal:
         )
         if receipt.outcome is WriteOutcome.UNKNOWN:
             raise OutcomeUnknown(operation_id=context.operation_id)
-        if receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.matched:
+        if receipt.outcome is not WriteOutcome.CONFIRMED:
             raise Conflict()
+        if not receipt.matched:
+            raise IngestionPhaseChanged()
         return self.record(row["file_id"], context=context)
 
     def admit(self, intent, row, *, context):

@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-INGESTION-DISPATCH-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Own persistent Management ingestion discovery in the application lifespan
+  description: Add a minimal read-only discovery catalog, fair bounded cursor traversal and a lifespan-owned task that advances existing intents through the standard coordinator. Reuse the cleansing enable switch and one shared parser version. Public submission callers remain pending.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-INGESTION-JOURNAL-D3-001, DPR-FILE-CLEANSE-D3-001, DPR-CLEANSE-ROOT-D3-001]
+    added: []
+    modified: [DPR-KB-HTTP-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Discover only admitted pending rows with minimal original actor identities and no source or request payload access.
+    - Traverse beyond long-lived first-page pending rows and wrap after the final cursor without writes.
+    - Close discovery before advancing each actor-scoped operation.
+    - Own cancellation and readiness in the Management lifespan with no retry or automatic task restart.
+    - Skip only a confirmed concurrent lifecycle phase loss; resource conflicts and unknown writes still fail without retries.
+    - Share the exact parser version with the existing cleansing root and reuse the established enable switch.
+    reason: The new UT prove SQL projection/read-only scope, pagination and async task ownership. Existing coordinator UT cover submission CAS and live DAC. The HTTP D3 uses actual PostgreSQL discovery and the real ingestion lifespan over a persisted uncertain submission, then repeats observation in two successive fresh Python processes using production ports and signed HTTP. Complete Management application restart, public ingress and final image API deployment remain separate obligations. No duplicate formal D1 is added.
+    test_selectors:
+    - test/backend/infrastructure/test_knowledge_ingestion_dispatch.py
+    - test/backend/services/test_knowledge_ingestion_dispatch.py
+    - test/backend/services/test_knowledge_ingestion_coordinator.py
+    - test/backend/services/test_cleanse_lifespan.py
+    - test/backend/app/test_config_app.py

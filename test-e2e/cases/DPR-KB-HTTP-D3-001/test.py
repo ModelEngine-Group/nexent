@@ -274,6 +274,13 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
         management_app = FastAPI(root_path="/api")
         management_app.include_router(create_knowledge_authorization_router())
         runtime_app = FastAPI(root_path="/api")
+        runtime_requests = []
+
+        @runtime_app.middleware("http")
+        async def observe_runtime_request(request, call_next):
+            runtime_requests.append(request.url.path)
+            return await call_next(request)
+
         runtime_app.add_middleware(AgentOSMiddleware)
         runtime_app.include_router(
             create_model_router(ModelService(load_model, no_provider))
@@ -429,7 +436,7 @@ def test_signed_knowledge_lifecycle(record_property, monkeypatch):
                         == 3
                     )
                 await check_management_coordinator(
-                    api, engine, source, artifact, context
+                    api, engine, source, artifact, context, runtime_requests
                 )
                 with engine.begin() as connection:
                     connection.execute(

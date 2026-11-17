@@ -220,11 +220,12 @@ if role == "management":
                     "management.services.knowledge_base.content_authorization", "management.services.knowledge_base.content",
                     "management.api.file.knowledge_content", "management.services.file.cleanse_jobs",
                     "management.services.knowledge_base.ingestion_journal", "management.services.knowledge_base.ingestion_coordinator", "infrastructure.rdb.knowledge_ingestion",
-                    "infrastructure.knowledge_ingestion"])
+                    "infrastructure.knowledge_ingestion", "management.services.knowledge_base.ingestion_dispatch",
+                    "infrastructure.rdb.knowledge_ingestion_dispatch"])
 
 modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge", "contracts.knowledge_tool",
                 "infrastructure.knowledge_content", "contracts.knowledge_cleanse", "contracts.knowledge_ingestion",
-                "infrastructure.rdb.knowledge_file_record"])
+                "infrastructure.rdb.knowledge_file_record", "contracts.constants.environment"])
 
 evidence["source_hashes"] = {
     name: hashlib.sha256(

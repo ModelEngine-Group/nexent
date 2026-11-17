@@ -34,8 +34,8 @@ case:
     action: Hold a manifest row lock, submit another delete, let the actual HTTP client deadline expire, release the lock and replay the exact request.
     expected: The timed out sender closes; the accepted request commits after release and replay returns one stable cleanup_pending job without another logical admission.
   - order: 6
-    action: Before revocation, admit a second owned file through the Management coordinator, complete its real cleanse job with a controlled artifact, drop the successful signed Runtime upload reply and reconstruct the coordinator.
-    expected: Persisted submission phases precede child effects; the reconstructed coordinator inspects its fixed forward_task_id and observes one queued Runtime job without a second upload or provider invocation.
+    action: Before revocation, admit a second owned file through the Management coordinator, complete its real cleanse job with a controlled artifact, drop the successful signed Runtime upload reply, reconstruct the coordinator, start its ingestion lifespan and run discovery in two successive fresh Python processes.
+    expected: Persisted submission phases precede child effects; direct reconstruction, lifespan discovery and both fresh processes inspect the fixed forward_task_id and observe one queued Runtime job without another upload or provider invocation; owned tasks, processes and ports close.
   - order: 7
     action: Revoke the actor membership, attempt inspection, then close both servers, managed workers, engine and owned container.
     expected: Inspection is denied without falling back to a database read in Runtime; owned resources are reclaimed.
@@ -50,7 +50,7 @@ case:
   - No application data, model provider, actual vector write, parser process or data-process endpoint is accessed.
   integration_boundary:
   - Actual HTTP servers, production routers, signature verification, typed client, Management resource policy and Runtime RecordStore policy against owned PostgreSQL.
-  - Model lookup metadata and completed cleansing publication are controlled fixtures; application lifespans, two final images, worker execution and physical cleanup are not proved.
+  - Model lookup metadata and completed cleansing publication are controlled fixtures; fresh processes prove ingestion lifespan reconstruction, while full Management application restart, two final API images, parser/vector execution and physical cleanup remain outside this case.
   observations:
   - HTTP statuses, stable job IDs, actual Runtime job counts, cancellation state and managed resource closure.
   cleanup:
