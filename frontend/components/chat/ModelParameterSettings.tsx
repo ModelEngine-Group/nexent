@@ -40,6 +40,19 @@ function ParameterLevel({
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
+  const minimum = Math.max(
+    0,
+    typeof schema?.minimum === "number" ? schema.minimum : 0
+  );
+  const maximum = Math.min(
+    field === "temperature" ? 2 : 1,
+    typeof schema?.maximum === "number" ? schema.maximum : Infinity
+  );
+  const range = `${minimum}–${maximum}`;
+  const placeholder =
+    field === "top_p" && minimum === 0
+      ? t("modelParams.rangeWithoutZero", { range })
+      : range;
   const displayValue = value ?? inheritedValue;
   const [draft, setDraft] = useState(displayValue ?? null);
   const [previousValue, setPreviousValue] = useState(displayValue);
@@ -64,7 +77,7 @@ function ParameterLevel({
         value={draft}
         schema={schema}
         disabled={disabled}
-        placeholder={t("modelProfile.thinkingModeOption.default")}
+        placeholder={placeholder}
         onChange={setDraft}
         onCommit={commit}
       />
@@ -135,7 +148,7 @@ export function ModelParameterPopover({
           data-model-parameter-panel
           role="region"
           aria-label={t("workbench.controls.advanced", "高级设置")}
-          className="max-h-[calc(100dvh-48px)] w-64 max-w-[calc(100vw-48px)] space-y-3 overflow-y-auto"
+          className="max-h-[calc(100dvh-48px)] w-52 max-w-[calc(100vw-48px)] space-y-3 overflow-y-auto"
           onKeyDown={(event) => {
             event.stopPropagation();
             if (event.key === "Escape") changeOpen(false);

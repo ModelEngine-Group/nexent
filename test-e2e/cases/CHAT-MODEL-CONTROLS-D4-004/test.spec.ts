@@ -76,10 +76,13 @@ journey("CHAT-MODEL-CONTROLS-D4-004", async ({ page, contract }) => {
     const temperature = panel.getByRole("spinbutton", { name: "Temperature", exact: true });
     const topP = panel.getByRole("spinbutton", { name: "Top P", exact: true });
     const restore = panel.getByRole("button", { name: "Restore defaults", exact: true });
-    for (const field of [temperature, topP]) {
+    for (const [field, placeholder] of [
+      [temperature, "0–2"],
+      [topP, "0–1, excluding 0"],
+    ] as const) {
       await expectWithinViewport(page, field);
       await expect(field).toHaveValue("");
-      await expectReadablePlaceholder(field, "Service default");
+      await expectReadablePlaceholder(field, placeholder);
     }
     await expectWithinViewport(page, restore);
     await topP.fill("0");
@@ -98,7 +101,7 @@ journey("CHAT-MODEL-CONTROLS-D4-004", async ({ page, contract }) => {
     await topP.clear();
     await topP.press("Enter");
     await expect(topP).toHaveValue("");
-    await expectReadablePlaceholder(topP, "Service default");
+    await expectReadablePlaceholder(topP, "0–1, excluding 0");
     await temperature.fill("0");
     await temperature.press("Enter");
     await expect(temperature).toHaveValue("0");
