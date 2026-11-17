@@ -33,7 +33,6 @@ from contracts.knowledge import (
 from contracts.roles import has_any_role
 from permissions.resource_access import resource_read_tenant
 from management.services.permission.identity.session import get_current_user_context, get_current_user_id
-from management.db.knowledge_base.file_lifecycle import get_file_record
 from management.db.knowledge_base.repository import (
     get_index_name_by_knowledge_name,
     get_knowledge_record,
@@ -48,15 +47,14 @@ from management.services.knowledge_base.service import (
     check_knowledge_base_exist_impl,
     get_vector_db_core,
 )
+from management.services.knowledge_base.deletion_public import with_cleanup_summary
 from management.services.knowledge_base.file_reader import read_document_error
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.services.tag.library import TagManagementService
 from management.services.tag.projection import project_authorized_document_tags
@@ -715,102 +713,20 @@ async def delete_documents(
             "full: delete ES documents, MinIO source, and Redis task records"
         ),
     ),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Delete a document by scope: source file only or full removal from the index."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-        if file_id:
-            try:
-
-                lifecycle_record = get_file_record(
-                    file_id=file_id,
-                    index_name=index_name,
-                    tenant_id=tenant_id,
-                    include_hidden=True,
-                )
-            except Exception as lifecycle_exc:
-                logger.warning("Lifecycle file ID lookup unavailable: %s", lifecycle_exc)
-                lifecycle_record = None
-            if lifecycle_record and lifecycle_record.get("object_name"):
-                path_or_url = lifecycle_record["object_name"]
-            elif lifecycle_record and not lifecycle_record.get("object_name"):
-                if scope != "full":
-                    raise HTTPException(
-                        status_code=HTTPStatus.BAD_REQUEST,
-                        detail="A file without a storage object can only use full deletion",
-                    )
-                record_security_event(
-                    "kb_document_delete",
-                    request=http_request,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    details={"index_name": index_name, "file_id": file_id, "scope": scope},
-                )
-                return ElasticSearchService.delete_lifecycle_record_without_object(
-                    lifecycle_record,
-                    requested_by=user_id,
-                )
-        if not path_or_url:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Either path_or_url or file_id is required",
-            )
-        # Pass the durable ID when available so deletion cannot select an older
-        # tombstone that happens to reuse the same object path.  The optional
-        # arguments keep path-only clients on the legacy contract.
-        delete_kwargs = {"requested_by": user_id, "tenant_id": tenant_id}
-        if file_id:
-            delete_kwargs["file_id"] = file_id
+        if not path_or_url and not file_id:
+            raise ValueError("Either path_or_url or file_id is required")
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core, **delete_kwargs
+            index_name, path_or_url, scope, requested_by=user_id, tenant_id=tenant_id,
+            file_id=file_id, remove_tags=True,
         )
-
-        if scope == "full":
-
-            TagManagementService.cleanup_document_assignments(tenant_id, "local", index_name, path_or_url, user_id)
-            # The deletion service performs Redis cleanup for new callers. Keep
-            # the legacy fallback only when an older service implementation did
-            # not include that result, and avoid duplicate deletion calls.
-            if "redis_cleanup" not in result and not result.get("deletion_pending"):
-                try:
-                    redis_service = get_redis_service()
-                    redis_cleanup_result = redis_service.delete_document_records(index_name, path_or_url)
-                    result["redis_cleanup"] = redis_cleanup_result
-                    if redis_cleanup_result.get("errors"):
-                        result["redis_warnings"] = redis_cleanup_result["errors"]
-                except Exception as redis_error:
-                    logger.warning(
-                        "Redis cleanup failed for document %s in index %s: %s",
-                        path_or_url,
-                        index_name,
-                        redis_error,
-                    )
-                    result["redis_cleanup_error"] = str(redis_error)
-
-            # Preserve the response message contract used by existing clients.
-            # The new deletion service may already provide redis_cleanup, while
-            # the fallback above adds it for older service implementations.
-            # Only terminal responses receive the summary; pending responses
-            # must keep their retry-oriented message.
-            if not result.get("deletion_pending"):
-                original_message = result.get("message", "Documents deleted successfully")
-                if result.get("redis_cleanup_error"):
-                    if "Redis cleanup encountered an error" not in original_message:
-                        result["message"] = (
-                            f"{original_message}, but Redis cleanup encountered an error: "
-                            f"{result['redis_cleanup_error']}"
-                        )
-                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
-                    redis_cleanup = result["redis_cleanup"]
-                    result["message"] = (
-                        f"{original_message}. "
-                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
-                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
-                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
-                    )
+        if scope == "full" and not result.get("deletion_pending"):
+            result = with_cleanup_summary(result)
 
         record_security_event(
             "kb_document_delete",
@@ -823,7 +739,7 @@ async def delete_documents(
 
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
-    except PermissionError as exc:
+    except (PermissionError, ScopeDenied) as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except HTTPException:
         raise

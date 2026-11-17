@@ -138,8 +138,8 @@ async def test_delete_adapter_passes_actor_without_new_public_parameters(monkeyp
     payload = {"status": "success", "deleted_minio": True}
     deletion = AsyncMock(return_value=payload)
     monkeypatch.setattr(module.ElasticSearchService, "delete_document_by_scope", deletion)
-    ctx, core = SimpleNamespace(user_id="editor", tenant_id="asset-tenant"), object()
+    ctx = SimpleNamespace(user_id="editor", tenant_id="asset-tenant")
     result = await module.delete_knowledge_document_for_northbound(
-        ctx=ctx, index_name="kb", path_or_url="a", scope="source_only", vdb_core=core)
+        ctx=ctx, index_name="kb", path_or_url="a", scope="source_only")
     assert result is payload
-    deletion.assert_awaited_once_with("kb", "a", "source_only", core, requested_by="editor", tenant_id="asset-tenant")
+    deletion.assert_awaited_once_with("kb", "a", "source_only", requested_by="editor", tenant_id="asset-tenant")

@@ -51,6 +51,9 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
+northbound_service_module.list_knowledge_files_for_northbound = AsyncMock(return_value={"files": []})
+northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
+northbound_service_module.delete_knowledge_document_for_northbound = AsyncMock()
 sys.modules["management.services.northbound"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
@@ -93,17 +96,13 @@ class _ElasticSearchServiceStub:
         }
 
     @staticmethod
-    async def delete_document_by_scope(index_name, path_or_url, scope, vdb_core):
+    async def delete_document_by_scope(index_name, path_or_url, scope, *, requested_by, tenant_id):
         return {
             "status": "success",
             "message": "Documents deleted successfully",
             "scope": scope,
             "deleted_es_count": 1,
         }
-
-    @staticmethod
-    def delete_documents(index_name, path_or_url, vdb_core):
-        return {"message": "Documents deleted successfully", "deleted": 1}
 
     @staticmethod
     def create_knowledge_base(*args, **kwargs):
@@ -393,24 +392,35 @@ class TestGetStorageFile:
 
 
 class TestDeleteDocuments:
-    def test_redis_cleanup_failure_still_returns_200(self, client, mock_northbound_context):
+    @pytest.mark.parametrize('denied', [True, False])
+    def test_delete_permission_and_invalid_input_mapping(self, client, mock_northbound_context, denied):
+        from nexent.storage.errors import ScopeDenied
+
         mock_northbound_context.return_value = ASSET_CTX
-        redis_mock = MagicMock()
-        redis_mock.delete_document_records.side_effect = RuntimeError("redis down")
-        redis_service_module.get_redis_service.return_value = redis_mock
+        with patch('management.api.northbound.delete_knowledge_document_for_northbound',
+                   new_callable=AsyncMock, side_effect=ScopeDenied() if denied else ValueError('Invalid scope')):
+            response = client.delete('/nb/v1/knowledge/indices/kb1/documents', params={'path_or_url': 'key'})
+        assert response.status_code == (403 if denied else 400)
 
-        response = client.delete(
-            "/nb/v1/knowledge/indices/kb1/documents",
-            params={
-                "path_or_url": "minio://path/doc.pdf",
-                "scope": "full",
-            },
-        )
+    def test_delete_rejects_non_asset_tenant_before_service(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = REGULAR_CTX
+        with patch('management.api.northbound.delete_knowledge_document_for_northbound', new_callable=AsyncMock) as adapter:
+            response = client.delete('/nb/v1/knowledge/indices/kb1/documents', params={'path_or_url': 'key'})
+        assert response.status_code == 403
+        adapter.assert_not_called()
 
-        assert response.status_code == 200
-        body = response.json()
-        assert "Redis cleanup encountered an error" in body["message"]
-        assert "redis_cleanup_error" in body
+    def test_full_delete_delegates_without_redis(self, client, mock_northbound_context):
+        """Public route returns the service adapter result without legacy Redis access."""
+        mock_northbound_context.return_value = ASSET_CTX
+        expected = {"status": "success", "scope": "full", "deleted_es_count": 3}
+        with patch("management.api.northbound.delete_knowledge_document_for_northbound",
+                   new_callable=AsyncMock, return_value=expected) as adapter, patch(
+                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+            response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
+                                     params={"path_or_url": "s3://bucket/key", "scope": "full"})
+        assert response.status_code == 200 and response.json() == expected
+        adapter.assert_awaited_once_with(ctx=ASSET_CTX, index_name="kb1", path_or_url="s3://bucket/key", scope="full")
+        redis.assert_not_called()
 
 
 class TestGetIndexChunks:
@@ -736,7 +746,7 @@ class TestIndexManagement:
     def test_get_index_files_returns_service_files(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.list_files",
+            "management.api.northbound.list_knowledge_files_for_northbound",
             new_callable=AsyncMock,
             return_value={"files": [{"name": "guide.pdf"}]},
         ):
@@ -753,7 +763,7 @@ class TestUploadAndDownload:
         file_mgmt_module.upload_files_impl.return_value = (
             [], ["docs/guide.txt"], ["guide.txt"]
         )
-        utils_fm_module.trigger_data_process.return_value = {"status": "queued"}
+        northbound_service_module.process_uploaded_knowledge_for_northbound.return_value = {"status": "queued"}
 
         response = client.post(
             "/nb/v1/knowledge/file/upload",
@@ -772,7 +782,7 @@ class TestUploadAndDownload:
         file_mgmt_module.upload_files_impl.return_value = (
             [], ["docs/guide.txt"], ["guide.txt"]
         )
-        utils_fm_module.trigger_data_process.return_value = {
+        northbound_service_module.process_uploaded_knowledge_for_northbound.return_value = {
             "status": "error", "message": "processor unavailable"
         }
 
@@ -829,34 +839,28 @@ class TestUploadAndDownload:
 
 
 class TestDeleteDocumentsCoverage:
-    def test_full_delete_includes_redis_cleanup_summary(self, client, mock_northbound_context):
+    def test_full_delete_returns_service_envelope(self, client, mock_northbound_context):
+        """Public route returns the service adapter result without legacy Redis access."""
         mock_northbound_context.return_value = ASSET_CTX
-        redis_mock = MagicMock()
-        redis_mock.delete_document_records.return_value = {
-            "total_deleted": 3,
-            "celery_tasks_deleted": 1,
-            "cache_keys_deleted": 2,
-            "errors": ["stale key"],
-        }
-        redis_service_module.get_redis_service.return_value = redis_mock
-
-        response = client.delete(
-            "/nb/v1/knowledge/indices/kb1/documents",
-            params={"path_or_url": "minio://guide", "scope": "full"},
-        )
-
-        assert response.status_code == 200
-        assert "Cleaned up 3 Redis records" in response.json()["message"]
-        assert response.json()["redis_warnings"] == ["stale key"]
+        expected = {"status": "success", "scope": "full", "deleted_es_count": 3}
+        with patch("management.api.northbound.delete_knowledge_document_for_northbound",
+                   new_callable=AsyncMock, return_value=expected) as adapter, patch(
+                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+            response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
+                                     params={"path_or_url": "s3://bucket/key", "scope": "full"})
+        assert response.status_code == 200 and response.json() == expected
+        adapter.assert_awaited_once_with(ctx=ASSET_CTX, index_name="kb1", path_or_url="s3://bucket/key", scope="full")
+        redis.assert_not_called()
 
     def test_source_only_delete_skips_redis_cleanup(self, client, mock_northbound_context):
+        """Public route returns the service adapter result without legacy Redis access."""
         mock_northbound_context.return_value = ASSET_CTX
-        redis_service_module.get_redis_service.reset_mock()
-
-        response = client.delete(
-            "/nb/v1/knowledge/indices/kb1/documents",
-            params={"path_or_url": "minio://guide", "scope": "source_only"},
-        )
-
-        assert response.status_code == 200
-        redis_service_module.get_redis_service.assert_not_called()
+        expected = {"status": "success", "scope": "source_only", "deleted_es_count": 0}
+        with patch("management.api.northbound.delete_knowledge_document_for_northbound",
+                   new_callable=AsyncMock, return_value=expected) as adapter, patch(
+                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+            response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
+                                     params={"path_or_url": "s3://bucket/key", "scope": "source_only"})
+        assert response.status_code == 200 and response.json() == expected
+        adapter.assert_awaited_once_with(ctx=ASSET_CTX, index_name="kb1", path_or_url="s3://bucket/key", scope="source_only")
+        redis.assert_not_called()

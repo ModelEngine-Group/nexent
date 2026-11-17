@@ -51,7 +51,6 @@ from management.services.knowledge_base.common import (
     get_vector_db_core,
     logger,
 )
-from management.services.knowledge_base.document_tasks import _document_delete_tasks
 from management.services.knowledge_base.files import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES as KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
 )
@@ -198,21 +197,11 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                     )
                     lifecycle_cleanup["error"] = str(lifecycle_error)
 
-            # A file deletion request may already have scheduled a local
-            # retry task and installed a Redis fence.  The knowledge-base
-            # index has now been removed, so those per-file coordinators must
-            # not keep retrying against a deleted index or leave stale fences.
+            # Clear only the legacy fences still owned by whole-KB cleanup.
             for lifecycle_row in lifecycle_rows:
                 file_id = lifecycle_row.get("file_id")
                 if not file_id:
                     continue
-                # A per-file deletion retry task is in-memory and can only
-                # exist in this process. A knowledge-base deletion supersedes
-                # it after the index and lifecycle rows have been removed.
-
-                pending_delete_task = _document_delete_tasks.pop(str(file_id), None)
-                if pending_delete_task and not pending_delete_task.done():
-                    pending_delete_task.cancel()
                 try:
                     if get_redis_service().clear_document_delete_fence(file_id=file_id):
                         lifecycle_fence_cleanup["cleared_count"] += 1

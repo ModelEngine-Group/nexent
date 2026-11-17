@@ -25,7 +25,6 @@ from management.services.knowledge_base.storage import (
     resolve_storage_reference,
 )
 from management.services.file.upload import get_file_size
-from management.services.file.preview import build_preview_pdf_object_key
 
 KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES = frozenset(
     {
@@ -460,43 +459,3 @@ class KnowledgeBaseFileService:
         ):
             return file_exists(path_or_url)
         return True
-
-    @staticmethod
-    def delete_source_file(
-        path_or_url: str,
-        tenant_id: Optional[str] = None,
-        updated_by: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Remove MinIO source (and preview cache); does not touch Elasticsearch."""
-        minio_result = delete_file(path_or_url)
-        deleted_minio = bool(minio_result.get("success"))
-
-        if deleted_minio and tenant_id:
-            reference = resolve_storage_reference(path_or_url)
-            if reference:
-                try:
-                    release_storage_charge(
-                        tenant_id=tenant_id,
-                        bucket_name=reference.bucket_name,
-                        object_name=reference.object_name,
-                        updated_by=updated_by,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to release storage charge after deleting '%s'",
-                        path_or_url,
-                    )
-
-        if path_or_url.startswith("knowledge_base/"):
-            preview_key = build_preview_pdf_object_key(path_or_url)
-            try:
-                if file_exists(preview_key):
-                    delete_file(preview_key)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to delete preview cache for '%s': %s",
-                    path_or_url,
-                    exc,
-                )
-
-        return {"deleted_minio": deleted_minio}

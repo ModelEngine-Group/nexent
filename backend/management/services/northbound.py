@@ -70,10 +70,14 @@ async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
                                                 user_id=ctx.user_id, tenant_id=ctx.tenant_id)
 
 
-async def delete_knowledge_document_for_northbound(*, ctx, index_name, path_or_url, scope, vdb_core):
-    """Pass authenticated ownership without changing public delete parameters."""
-    return await ElasticSearchService.delete_document_by_scope(index_name, path_or_url, scope, vdb_core,
-                                                               requested_by=ctx.user_id, tenant_id=ctx.tenant_id)
+async def delete_knowledge_document_for_northbound(*, ctx, index_name, path_or_url, scope):
+    """Preserve Northbound's public response while using the standard deletion owner."""
+    from management.services.knowledge_base.deletion_public import with_cleanup_summary
+
+    result = await ElasticSearchService.delete_document_by_scope(
+        index_name, path_or_url, scope, requested_by=ctx.user_id, tenant_id=ctx.tenant_id,
+    )
+    return with_cleanup_summary(result) if scope == 'full' else result
 
 
 async def process_uploaded_knowledge_for_northbound(*, ctx, index_name, upload_result):

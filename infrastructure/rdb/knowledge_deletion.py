@@ -29,7 +29,8 @@ def deletion_catalog():
         "version", "deleted_at", "created_by", "updated_by", "create_time", "update_time",
         "delete_flag", "bucket_name", "file_size", "storage_object_id", "uploaded_at",
         "upload_owner_service", "source_upload_sha256", "error_code", 'deleted_vector_count',
-        'processed_chunks', 'total_chunks',
+        'processed_chunks', 'total_chunks', 'local_source_path', 'ingestion_request',
+        'process_task_id', 'forward_task_id', 'parent_task_id',
     )
     integers = {"knowledge_id", "source_generation", "version", "file_size", "storage_object_id",
                 'deleted_vector_count', 'processed_chunks', 'total_chunks'}
@@ -37,7 +38,7 @@ def deletion_catalog():
         DELETION_DATASET,
         "file_id",
         tuple(FieldDefinition(
-            name, "object" if name == "deletion_request" else "integer" if name in integers else "string",
+            name, "object" if name in {"deletion_request", "ingestion_request"} else "integer" if name in integers else "string",
             nullable=files.c[name].nullable,
         ) for name in names),
         frozenset({"management"}), frozenset({"management"}), tenant_field="tenant_id",

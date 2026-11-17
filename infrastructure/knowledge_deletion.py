@@ -47,3 +47,19 @@ def deletion_source_objects(row, actor, *, context):
         yield objects
     finally:
         close_owned(context, [objects.close])
+
+
+@contextmanager
+def deletion_preview_objects(row, actor, key, *, context):
+    from nexent.storage.errors import ScopeDenied
+
+    from infrastructure.object_storage.composition import bind_source_objects
+
+    context.remaining()
+    if row['tenant_id'] != actor.tenant_id or not key.startswith('preview/converted/'):
+        raise ScopeDenied()
+    objects = bind_source_objects(actor.tenant_id, actor.user_id, key, row['bucket_name'])
+    try:
+        yield objects
+    finally:
+        close_owned(context, [objects.close])

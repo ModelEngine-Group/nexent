@@ -232,4 +232,6 @@ Runtime lifespan 从持久任务表发现新上传，每轮最多 100 项，按�
 
 Management 源/产物清理、KB 多模态入库、旧检索语义对照及业务入口切换仍待完成。文件 upload/inspect/delete 和文本 search 已有内部接口，上传及文本向量删除的发现和 lifespan 已验证，尚未完成整个知识入库流水线迁移。data-process 仍单独运行，完整退役继续按独立规格实施。
 
+普通与 Northbound 文档删除已统一进入 Management 的持久删除协调器，公开路径和参数保持。full 经标准 File.delete/inspect 确认 Runtime 向量清理，再等待本地清洗排空、源对象与账本终态；source_only 保留 Runtime 向量和文件身份。公开调用共用十秒预算，提交结果未知时返回 pending，后续只查询固定任务，不自动重发。Northbound 响应适配由 northbound service 负责。旧源和旧 ES 数据仍需先完成退役 SPEC 的历史迁移，未经核实的历史文件在接纳前拒绝；当前切换不能作为历史清理完成的证明。
+
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

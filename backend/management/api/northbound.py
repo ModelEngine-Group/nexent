@@ -43,7 +43,7 @@ from fastapi.responses import (
 )
 from management.services.permission.identity.session import get_user_language
 from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
-from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from pydantic import ValidationError as PydanticValidationError
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
@@ -76,7 +76,6 @@ from management.services.knowledge_base.service import (
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,
 )
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.monitor.audit import record_security_event
 from management.services.permission.api_keys import (
     create_api_users_batch,
@@ -1018,37 +1017,13 @@ async def delete_documents(
     """Delete a document by scope. Restricted to asset administrators."""
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-        logger.debug("Deleting documents for index %s scope=%s", index_name, scope)
-        result = await delete_knowledge_document_for_northbound(ctx=ctx, index_name=index_name, path_or_url=path_or_url, scope=scope, vdb_core=vdb_core)
-
-        if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(index_name, path_or_url)
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get("message", "Documents deleted successfully")
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for index %s: %s",
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get("message", "Documents deleted successfully")
-                result["message"] = f"{original_message}, but Redis cleanup encountered an error: {str(redis_error)}"
-
-        return result
+        return await delete_knowledge_document_for_northbound(
+            ctx=ctx, index_name=index_name, path_or_url=path_or_url, scope=scope,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except ScopeDenied:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Permission denied")
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting documents")
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL)

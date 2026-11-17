@@ -419,7 +419,7 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
+            patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
@@ -553,7 +553,7 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
+            patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
@@ -2043,216 +2043,16 @@ async def test_delete_index_auth_exception(vdb_core_mock, auth_data):
         mock_get_user.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_data):
-    """
-    Test deleting documents successfully.
-    Verifies that the endpoint returns the expected response and performs Redis cleanup.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments") as cleanup_document:
-
-        index_name = "test_index"
-        path_or_url = "test_document.pdf"
-
-        es_result = {
-            "status": "success",
-            "message": "Documents deleted successfully",
-            "scope": "full",
-            "deleted_es_count": 5,
-            "source_available": False,
-        }
-        mock_delete_by_scope.return_value = es_result
-
-        redis_result = {
-            "index_name": index_name,
-            "path_or_url": path_or_url,
-            "total_deleted": 3,
-            "celery_tasks_deleted": 2,
-            "cache_keys_deleted": 1
-        }
-        redis_service_mock.delete_document_records.return_value = redis_result
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-        # Verify expected 200 status code
-        assert response.status_code == 200
-
-        # Get the actual response
-        actual_response = response.json()
-
-        # Verify essential response elements
-        assert actual_response["status"] == "success"
-        assert "Documents deleted successfully" in actual_response["message"]
-        assert "Cleaned up 3 Redis records" in actual_response["message"]
-        assert "2 tasks" in actual_response["message"]
-        assert "1 cache keys" in actual_response["message"]
-
-        # Verify structure contains expected keys
-        assert "redis_cleanup" in actual_response
-        assert actual_response["redis_cleanup"] == redis_result
-
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "full", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
-        redis_service_mock.delete_document_records.assert_called_once_with(
-            index_name, path_or_url)
-        cleanup_document.assert_called_once_with(
-            auth_data["tenant_id"], "local", index_name, path_or_url, auth_data["user_id"]
-        )
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_service_mock, auth_data):
-    """New clients can delete a file by durable lifecycle ID."""
-    lifecycle_record = {"file_id": "fid-1", "object_name": "knowledge_base/a.txt"}
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as mock_get_record, \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
-        mock_delete_by_scope.return_value = {"status": "success", "scope": "source_only"}
-
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={"file_id": "fid-1", "scope": "source_only"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-        mock_get_record.assert_called_once_with(
-            file_id="fid-1",
-            index_name=auth_data["index_name"],
-            tenant_id=auth_data["tenant_id"],
-            include_hidden=True,
-        )
-        mock_delete_by_scope.assert_awaited_once_with(
-            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY,
-            file_id="fid-1", requested_by=auth_data["user_id"]
-        , tenant_id=auth_data["tenant_id"])
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
-    vdb_core_mock, auth_data
-):
-    """A temporary lifecycle-table outage must retain the legacy delete contract."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", side_effect=RuntimeError("table unavailable")), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-                return_value={"status": "success", "scope": "full"},
-            ) as mock_delete, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={
-                "file_id": "fid-legacy",
-                "path_or_url": "knowledge_base/legacy.txt",
-                "scope": "full",
-            },
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    mock_delete.assert_awaited_once_with(
-        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY,
-        file_id="fid-legacy", requested_by=auth_data["user_id"]
-    , tenant_id=auth_data["tenant_id"])
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_requires_file_identity(vdb_core_mock, auth_data):
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={"scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Either path_or_url or file_id is required"
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_removes_lifecycle_record_without_object(vdb_core_mock, auth_data):
-    """A failed upload without a storage object can be deleted by file ID."""
-    lifecycle_record = {
-        "file_id": "fid-no-object",
-        "tenant_id": auth_data["tenant_id"],
-        "index_name": auth_data["index_name"],
-        "object_name": None,
-        "status": "FAILED",
-    }
-    delete_result = {
-        "status": "success",
-        "scope": "full",
-        "lifecycle_deleted": True,
-    }
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_lifecycle_record_without_object",
-                return_value=delete_result,
-            ) as mock_delete_lifecycle:
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            # The frontend uses file_id as the legacy path fallback when object_name is empty.
-            params={
-                "path_or_url": "fid-no-object",
-                "file_id": "fid-no-object",
-                "scope": "full",
-            },
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == delete_result
-    mock_delete_lifecycle.assert_called_once_with(lifecycle_record, requested_by=auth_data["user_id"])
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock, auth_data):
-    """Source-only deletion is invalid when upload never created a storage object."""
-    lifecycle_record = {
-        "file_id": "fid-no-object",
-        "tenant_id": auth_data["tenant_id"],
-        "index_name": auth_data["index_name"],
-        "object_name": None,
-        "status": "FAILED",
-    }
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_lifecycle_record_without_object",
-            ) as mock_delete_lifecycle:
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={"file_id": "fid-no-object", "scope": "source_only"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "A file without a storage object can only use full deletion"
-    mock_delete_lifecycle.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2262,8 +2062,8 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-failed'}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -2284,8 +2084,8 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-processing'}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -2306,8 +2106,8 @@ async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_st
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-uploaded'}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -2321,261 +2121,16 @@ async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_st
     native.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
-    """Read-only users must not be able to delete files from a knowledge base."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.require_knowledge_base_edit_permission",
-                side_effect=PermissionError("No permission to modify this knowledge base"),
-            ), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={"path_or_url": "test_document.pdf", "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 403
-        assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_delete_by_scope.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock, auth_data):
-    """source_only scope must not trigger Redis document cleanup."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-
-        index_name = "test_index"
-        path_or_url = "knowledge_base/test.pdf"
-        mock_delete_by_scope.return_value = {
-            "status": "success",
-            "scope": "source_only",
-            "deleted_es_count": 0,
-            "deleted_minio": True,
-            "source_available": False,
-        }
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "source_only"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-        assert response.json()["scope"] == "source_only"
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "source_only", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
-        redis_service_mock.delete_document_records.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, auth_data):
-    """
-    Test deleting documents with Redis error.
-    Verifies that the endpoint still succeeds with ES but reports Redis cleanup error.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-
-        index_name = "test_index"
-        path_or_url = "test_document.pdf"
-
-        es_result = {
-            "status": "success",
-            "message": "Documents deleted successfully",
-            "scope": "full",
-            "deleted_es_count": 5,
-        }
-        mock_delete_by_scope.return_value = es_result
-
-        redis_error_message = "Redis connection failed"
-        redis_service_mock.delete_document_records.side_effect = Exception(
-            redis_error_message)
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-        # Verify expected 200 status code (the operation should still succeed even with Redis errors)
-        assert response.status_code == 200
-
-        # Get the actual response
-        actual_response = response.json()
-
-        # Verify essential response elements
-        assert actual_response["status"] == "success"
-        assert "Documents deleted successfully" in actual_response["message"]
-        assert "Redis cleanup encountered an error" in actual_response["message"]
-        assert redis_error_message in actual_response["message"]
-
-        # Verify structure contains expected keys
-        assert "redis_cleanup_error" in actual_response
-        assert actual_response["redis_cleanup_error"] == redis_error_message
-
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "full", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
-        redis_service_mock.delete_document_records.assert_called_once_with(
-            index_name, path_or_url)
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_es_exception(vdb_core_mock, auth_data):
-    """
-    Test deleting documents with Elasticsearch exception.
-    Verifies that the endpoint returns an appropriate error response when ES deletion fails.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
-
-        index_name = "test_index"
-        path_or_url = "test_document.pdf"
-
-        mock_delete_by_scope.side_effect = Exception(
-            "Elasticsearch deletion failed")
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 500
-        expected_error_detail = "Error delete indexing documents: Elasticsearch deletion failed"
-        assert response.json() == {"detail": expected_error_detail}
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "full", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock, auth_data):
-    """
-    Test deleting documents with Redis warnings.
-    Verifies that the endpoint handles Redis warnings properly.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-
-        index_name = "test_index"
-        path_or_url = "test_document.pdf"
-
-        es_result = {
-            "status": "success",
-            "message": "Documents deleted successfully",
-            "scope": "full",
-            "deleted_es_count": 5,
-        }
-        mock_delete_by_scope.return_value = es_result
-
-        redis_result = {
-            "index_name": index_name,
-            "path_or_url": path_or_url,
-            "total_deleted": 2,
-            "celery_tasks_deleted": 1,
-            "cache_keys_deleted": 1,
-            "errors": ["Some cache keys could not be deleted"]
-        }
-        redis_service_mock.delete_document_records.return_value = redis_result
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-        # Verify expected 200 status code
-        assert response.status_code == 200
-
-        # Get the actual response
-        actual_response = response.json()
-
-        # Verify essential response elements
-        assert actual_response["status"] == "success"
-        assert "Documents deleted successfully" in actual_response["message"]
-        assert "Cleaned up 2 Redis records" in actual_response["message"]
-
-        # Verify structure contains expected keys
-        assert "redis_cleanup" in actual_response
-        assert "redis_warnings" in actual_response
-        assert actual_response["redis_warnings"] == [
-            "Some cache keys could not be deleted"]
-
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "full", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
-        redis_service_mock.delete_document_records.assert_called_once_with(
-            index_name, path_or_url)
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_validation_exception(vdb_core_mock, auth_data):
-    """
-    Test deleting documents with validation exception.
-    Verifies that the endpoint returns an appropriate error response when validation fails.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-                new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
-
-        index_name = "test_index"
-        path_or_url = "test_document.pdf"
-
-        mock_delete_by_scope.side_effect = ValueError(
-            "Invalid document path format")
-
-        response = client.delete(
-            f"/indices/{index_name}/documents",
-            params={"path_or_url": path_or_url, "scope": "source_only"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 400
-        assert response.json() == {"detail": "Invalid document path format"}
-        mock_delete_by_scope.assert_called_once_with(
-            index_name, path_or_url, "source_only", ANY
-        , requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
 
 
 @pytest.mark.asyncio
@@ -2634,8 +2189,8 @@ async def test_get_document_error_info_no_task_id(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -2656,8 +2211,8 @@ async def test_get_document_error_info_json_error_code(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -2678,8 +2233,8 @@ async def test_get_document_error_info_regex_error_code(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -3277,8 +2832,8 @@ async def test_get_document_error_info_regex_fallback(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -3299,8 +2854,8 @@ async def test_get_document_error_info_regex_failure_returns_none(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
     assert response.status_code == 200 and response.json() == expected
@@ -3691,27 +3246,6 @@ async def test_get_index_chunks_preserves_read_permission_error(vdb_core_mock, a
     mock_get_chunks.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_delete_documents_maps_storage_permission_error(vdb_core_mock, auth_data):
-    with patch(
-        "management.api.knowledge_base.vectordatabase.get_vector_db_core",
-        return_value=vdb_core_mock,
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.require_knowledge_base_edit_permission",
-        side_effect=PermissionError("read-only KB"),
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
-        new_callable=AsyncMock,
-    ) as mock_delete:
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/documents",
-            params={"path_or_url": "knowledge_base/doc.txt", "scope": "full"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "read-only KB"
-    mock_delete.assert_not_called()
 
 # TokenExpiredError -> 401 mapping for every VDB endpoint guarded by auth.
 
@@ -3840,7 +3374,7 @@ class TestVectordatabaseAuditEntries:
         with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
                 patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                       return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service_mock), \
+                patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
                 patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
                       new_callable=AsyncMock, return_value={"message": "Documents deleted successfully"}), \
                 patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):

@@ -5,7 +5,6 @@ from test.common.contract_stubs import install_business_constant_stubs, install_
 import asyncio
 import importlib
 import io
-import json
 import sys
 import os
 import time
@@ -503,7 +502,6 @@ with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     # Import utils.document_vector_utils to ensure it's available for patching
     import management.services.knowledge_base.summary
-    from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
     from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
 
@@ -2501,217 +2499,18 @@ class TestElasticSearchService(unittest.TestCase):
 
         assert result["files"][0]["file"] == "data_1.txt"
 
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
-    @patch('management.services.knowledge_base.deletion.get_file_record')
-    @patch('management.services.knowledge_base.deletion.transition_file_record')
-    def test_mark_file_delete_requested_updates_existing_record(
-        self, mock_transition, mock_get_record, mock_get_knowledge
-    ):
-        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
-        mock_get_record.return_value = {"file_id": "fid-delete"}
-        mock_transition.return_value = {"file_id": "fid-delete", "status": "DELETE_REQUESTED"}
 
-        result = ElasticSearchService._mark_file_delete_requested(
-            "test_index", "knowledge_base/a.txt", requested_by="user-1"
-        )
 
-        assert result["status"] == "DELETE_REQUESTED"
-        assert mock_transition.call_args.args == ("fid-delete",)
-        assert mock_transition.call_args.kwargs["status"] == "DELETE_REQUESTED"
 
-    @patch('management.services.knowledge_base.deletion.create_delete_tombstone')
-    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
-    def test_mark_file_delete_requested_creates_legacy_tombstone(
-        self, mock_get_knowledge, _mock_get_record, mock_create_tombstone
-    ):
-        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
-        mock_create_tombstone.return_value = {"file_id": "fid-new", "status": "DELETE_REQUESTED"}
 
-        result = ElasticSearchService._mark_file_delete_requested(
-            "test_index", "knowledge_base/legacy.txt"
-        )
 
-        assert result["file_id"] == "fid-new"
-        assert result["status"] == "DELETE_REQUESTED"
-        mock_create_tombstone.assert_called_once()
 
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={})
-    def test_mark_file_delete_requested_skips_missing_knowledge_identity(self, _mock_get_knowledge):
-        assert ElasticSearchService._mark_file_delete_requested("test_index", "missing.txt") is None
 
-    @patch('management.services.knowledge_base.deletion.get_file_record')
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
-    @patch('management.services.knowledge_base.deletion.delete_file_record')
-    def test_mark_file_deleted_finalizes_existing_record(
-        self, mock_delete, _mock_get_knowledge, mock_get_record
-    ):
-        mock_get_record.return_value = {"file_id": "fid-delete"}
-        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/a.txt", updated_by="user-1")
-        mock_delete.assert_called_once_with(
-            "fid-delete",
-            expected_statuses=("DELETE_REQUESTED", "DELETED"),
-        )
 
-    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
-    @patch('management.services.knowledge_base.deletion.delete_file_record')
-    def test_mark_file_deleted_ignores_missing_record(
-        self, mock_delete, _mock_get_knowledge, _mock_get_record
-    ):
-        """Finalization is best effort when a legacy row does not exist."""
-        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/missing.txt")
-        mock_delete.assert_not_called()
 
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
-    @patch('management.services.knowledge_base.deletion.transition_file_record')
-    def test_delete_lifecycle_record_without_object_hard_deletes(self, mock_transition, mock_delete):
-        mock_transition.return_value = {"file_id": "fid-no-object", "status": "DELETE_REQUESTED"}
 
-        result = ElasticSearchService.delete_lifecycle_record_without_object(
-            {
-                "file_id": "fid-no-object",
-                "tenant_id": "tenant-1",
-                "index_name": "test_index",
-                "object_name": None,
-                "status": "FAILED",
-            },
-            requested_by="user-1",
-        )
 
-        assert result["status"] == "success"
-        assert result["lifecycle_deleted"] is True
-        assert result["source_available"] is False
-        assert mock_transition.call_count == 1
-        assert mock_transition.call_args_list[0].kwargs["status"] == "DELETE_REQUESTED"
-        mock_delete.assert_called_once_with(
-            "fid-no-object",
-            expected_statuses=("DELETE_REQUESTED", "DELETED"),
-        )
 
-    def test_delete_lifecycle_record_without_object_rejects_invalid_identity(self):
-        with pytest.raises(ValueError, match="file ID without an object path"):
-            ElasticSearchService.delete_lifecycle_record_without_object(
-                {"file_id": "fid-with-object", "object_name": "knowledge_base/a.txt"}
-            )
-
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
-    @patch('management.services.knowledge_base.deletion.transition_file_record')
-    def test_delete_lifecycle_record_without_object_hard_deletes_existing_deleted(self, mock_transition, mock_delete):
-        result = ElasticSearchService.delete_lifecycle_record_without_object(
-            {"file_id": "fid-deleted", "object_name": None, "status": "DELETED"}
-        )
-
-        assert result["lifecycle_deleted"] is True
-        assert "already deleted" in result["message"]
-        mock_transition.assert_not_called()
-        mock_delete.assert_called_once_with(
-            "fid-deleted",
-            expected_statuses=("DELETE_REQUESTED", "DELETED"),
-        )
-
-    @patch('management.services.knowledge_base.deletion.get_file_record')
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
-    @patch('management.services.knowledge_base.deletion.transition_file_record')
-    def test_delete_lifecycle_record_without_object_reconciles_stale_delete_request(
-        self, mock_transition, _mock_delete, mock_get_record
-    ):
-        """A concurrent transition to DELETE_REQUESTED can still be finalized."""
-        mock_transition.return_value = None
-        mock_get_record.return_value = {
-            "file_id": "fid-race",
-            "tenant_id": "tenant-1",
-            "index_name": "kb-1",
-            "status": "DELETE_REQUESTED",
-        }
-
-        result = ElasticSearchService.delete_lifecycle_record_without_object(
-            {
-                "file_id": "fid-race",
-                "tenant_id": "tenant-1",
-                "index_name": "kb-1",
-                "object_name": None,
-                "status": "FAILED",
-            }
-        )
-
-        assert result["lifecycle_deleted"] is True
-        assert mock_get_record.call_count == 1
-        assert mock_transition.call_count == 1
-
-    @patch(
-        'management.services.knowledge_base.deletion.get_file_record',
-        side_effect=[{"status": "DELETED"}, None],
-    )
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
-    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
-    def test_delete_lifecycle_record_without_object_reconciles_deleted_race(
-        self, _mock_transition, _mock_delete, _mock_get_record
-    ):
-        """A concurrent delete that already finalized is treated as success."""
-        result = ElasticSearchService.delete_lifecycle_record_without_object(
-            {
-                "file_id": "fid-race-deleted",
-                "tenant_id": "tenant-1",
-                "index_name": "kb-1",
-                "object_name": None,
-                "status": "FAILED",
-            }
-        )
-
-        assert result["lifecycle_deleted"] is True
-
-    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
-    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
-    def test_delete_lifecycle_record_without_object_raises_when_request_is_stale(
-        self, _mock_transition, _mock_delete, _mock_get_record
-    ):
-        with pytest.raises(ValueError, match="could not be deleted"):
-            ElasticSearchService.delete_lifecycle_record_without_object(
-                {
-                    "file_id": "fid-stale",
-                    "tenant_id": "tenant-1",
-                    "index_name": "kb-1",
-                    "object_name": None,
-                    "status": "FAILED",
-                }
-            )
-
-    @patch('management.services.knowledge_base.deletion.get_file_record', return_value={"status": "DELETED"})
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
-    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
-    def test_delete_lifecycle_record_without_object_accepts_concurrent_finalization(
-        self, _mock_transition, _mock_delete, _mock_get_record
-    ):
-        result = ElasticSearchService.delete_lifecycle_record_without_object(
-            {
-                "file_id": "fid-race-final",
-                "tenant_id": "tenant-1",
-                "index_name": "kb-1",
-                "object_name": None,
-                "status": "DELETE_REQUESTED",
-            }
-        )
-
-        assert result["lifecycle_deleted"] is True
-
-    @patch('management.services.knowledge_base.deletion.get_file_record', return_value={"status": "FAILED"})
-    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
-    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
-    def test_delete_lifecycle_record_without_object_raises_when_finalization_is_stale(
-        self, _mock_transition, _mock_delete, _mock_get_record
-    ):
-        with pytest.raises(ValueError, match="could not be finalized"):
-            ElasticSearchService.delete_lifecycle_record_without_object(
-                {
-                    "file_id": "fid-stale-final",
-                    "tenant_id": "tenant-1",
-                    "index_name": "kb-1",
-                    "object_name": None,
-                    "status": "DELETE_REQUESTED",
-                }
-            )
 
     @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_with_chunks(self, mock_get_files_status):
@@ -2816,255 +2615,15 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["files"][0]["chunks"]), 0)
         self.assertEqual(result["files"][0]["chunk_count"], 1)
 
-    @patch('management.services.knowledge_base.deletion.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.deletion.delete_file')
-    def test_delete_documents(self, mock_delete_file, mock_update_last_doc):
-        """
-        Test document deletion by path or URL.
 
-        This test verifies that:
-        1. Documents with the specified path or URL are deleted
-        2. The response contains a success status
-        """
-        # Setup
-        self.mock_vdb_core.delete_documents.return_value = 5
-        # Configure delete_file to return a success response
-        mock_delete_file.return_value = {
-            "success": True, "object_name": "test_path"}
 
-        # Execute
-        result = ElasticSearchService.delete_documents(
-            index_name="test_index",
-            path_or_url="test_path",
-            vdb_core=self.mock_vdb_core
-        )
 
-        # Assert
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["deleted_minio"], True)
-        # Verify that delete_documents was called with correct parameters
-        self.mock_vdb_core.delete_documents.assert_called_once_with(
-            "test_index", "test_path")
-        # Verify that delete_file was called with the correct path
-        mock_delete_file.assert_called_once_with("test_path")
 
-    @patch('management.services.knowledge_base.files.delete_file')
-    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
-    def test_delete_source_file(self, mock_file_exists, mock_delete_file):
-        mock_delete_file.return_value = {"success": True}
-        result = ElasticSearchService.delete_source_file(
-            "knowledge_base/doc.pdf"
-        )
-        self.assertTrue(result["deleted_minio"])
-        mock_delete_file.assert_called()
 
-    @patch('management.services.knowledge_base.files.release_storage_charge')
-    @patch('management.services.knowledge_base.files.resolve_storage_reference')
-    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
-    @patch('management.services.knowledge_base.files.delete_file')
-    def test_delete_source_file_releases_charge_only_after_minio_success(
-        self, mock_delete_file, _mock_exists, mock_resolve, mock_release
-    ):
-        mock_resolve.return_value = SimpleNamespace(
-            bucket_name="kb-bucket", object_name="knowledge_base/doc.pdf"
-        )
-        mock_delete_file.side_effect = [
-            {"success": False, "error": "MinIO unavailable"},
-            {"success": True},
-        ]
 
-        failed = ElasticSearchService.delete_source_file(
-            "knowledge_base/doc.pdf", tenant_id="tenant-1"
-        )
-        succeeded = ElasticSearchService.delete_source_file(
-            "knowledge_base/doc.pdf", tenant_id="tenant-1"
-        )
 
-        self.assertFalse(failed["deleted_minio"])
-        self.assertTrue(succeeded["deleted_minio"])
-        mock_release.assert_called_once_with(
-            tenant_id="tenant-1",
-            bucket_name="kb-bucket",
-            object_name="knowledge_base/doc.pdf",
-            updated_by=None,
-        )
 
-    @patch(
-        'management.services.knowledge_base.deletion.read_knowledge_files',
-        new_callable=AsyncMock,
-    )
-    @patch('management.services.knowledge_base.files.delete_file')
-    def test_delete_document_by_scope_source_only(
-        self, mock_delete_file, mock_get_status
-    ):
-        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/doc.pdf', 'status': 'COMPLETED', 'error_stage': 'PROCESS'}]
-        mock_delete_file.return_value = {"success": True}
 
-        result = asyncio.run(
-            ElasticSearchService.delete_document_by_scope(
-                "test_index",
-                "knowledge_base/doc.pdf",
-                "source_only",
-                self.mock_vdb_core,
-             requested_by="user-1", tenant_id="tenant-1")
-        )
-
-        self.assertEqual(result["scope"], "source_only")
-        self.assertEqual(result["deleted_es_count"], 0)
-        self.mock_vdb_core.delete_documents.assert_not_called()
-
-    @patch.object(
-        KnowledgeBaseDocumentDeletionService,
-        'delete_documents',
-        return_value={"status": "success", "deleted_minio": True},
-    )
-    def test_delete_document_by_scope_does_not_require_storage_ledger(
-        self, mock_delete_documents
-    ):
-        result = asyncio.run(
-            ElasticSearchService.delete_document_by_scope(
-                "test_index",
-                "knowledge_base/doc.pdf",
-                "full",
-                self.mock_vdb_core,
-            )
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["scope"], "full")
-        mock_delete_documents.assert_called_once_with(
-            "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
-        )
-
-    @patch.object(KnowledgeBaseDocumentDeletionService, "_mark_file_deleted")
-    @patch.object(
-        KnowledgeBaseDocumentDeletionService,
-        "delete_documents",
-        return_value={"status": "success", "deleted_minio": True},
-    )
-    @patch.object(KnowledgeBaseDocumentDeletionService, "_mark_file_delete_requested")
-    def test_legacy_delete_request_tombstone_uses_full_delete_flow(
-        self, mock_mark_requested, mock_delete_documents, mock_mark_deleted
-    ):
-        """A newly-created legacy tombstone must not short-circuit deletion."""
-        mock_mark_requested.return_value = {
-            "file_id": "fid-legacy",
-            "status": "DELETE_REQUESTED",
-        }
-
-        result = asyncio.run(
-            ElasticSearchService.delete_document_by_scope(
-                "test_index",
-                "knowledge_base/legacy.txt",
-                "full",
-                self.mock_vdb_core,
-            )
-        )
-
-        self.assertEqual(result["status"], "success")
-        mock_mark_requested.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
-        mock_delete_documents.assert_called_once_with(
-            "test_index", "knowledge_base/legacy.txt", self.mock_vdb_core
-        )
-        mock_mark_deleted.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
-
-    @patch.object(
-        KnowledgeBaseDocumentDeletionService,
-        'delete_source_file',
-        return_value={"deleted_minio": False},
-    )
-    @patch(
-        'management.services.knowledge_base.deletion.get_knowledge_record',
-        return_value={"tenant_id": "tenant-1"},
-    )
-    @patch(
-        'management.services.knowledge_base.deletion.read_knowledge_files',
-        new_callable=AsyncMock,
-    )
-    def test_delete_document_by_scope_source_only_reports_physical_failure(
-        self, mock_get_status, _mock_get_knowledge, _mock_delete_source
-    ):
-        mock_get_status.return_value = {}
-
-        result = asyncio.run(
-            ElasticSearchService.delete_document_by_scope(
-                "test_index",
-                "knowledge_base/doc.pdf",
-                "source_only",
-                self.mock_vdb_core,
-             requested_by="user-1", tenant_id="tenant-1")
-        )
-
-        self.assertEqual(result["status"], "failed")
-        self.assertFalse(result["deleted_minio"])
-        self.assertTrue(result["source_available"])
-
-    @patch(
-        'management.services.knowledge_base.deletion.read_knowledge_files',
-        new_callable=AsyncMock,
-    )
-    def test_delete_document_by_scope_rejects_processing(
-        self, mock_get_status
-    ):
-        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/doc.pdf', 'status': 'PROCESSING', 'error_stage': 'PROCESS'}]
-
-        with self.assertRaises(ValueError):
-            asyncio.run(
-                ElasticSearchService.delete_document_by_scope(
-                    "test_index",
-                    "knowledge_base/doc.pdf",
-                    "source_only",
-                    self.mock_vdb_core,
-                 requested_by="user-1", tenant_id="tenant-1")
-            )
-
-    @patch('management.services.knowledge_base.deletion.release_storage_charge')
-    @patch('management.services.knowledge_base.deletion.delete_file')
-    @patch(
-        'management.services.knowledge_base.deletion.read_knowledge_files',
-        new_callable=AsyncMock,
-    )
-    def test_processing_failure_does_not_delete_source_or_release_charge(
-        self, mock_get_status, mock_delete_file, mock_release
-    ):
-        mock_get_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'knowledge_base/failed.pdf', 'status': 'FAILED', 'error_stage': 'PROCESS'}]
-
-        delete_operation = ElasticSearchService.delete_document_by_scope(
-            "test_index",
-            "knowledge_base/failed.pdf",
-            "source_only",
-            self.mock_vdb_core,
-         requested_by="user-1", tenant_id="tenant-1")
-        with self.assertRaises(ValueError):
-            asyncio.run(delete_operation)
-
-        mock_delete_file.assert_not_called()
-        mock_release.assert_not_called()
-
-    @patch('management.services.knowledge_base.deletion.release_storage_charge')
-    @patch('management.services.knowledge_base.deletion.resolve_storage_reference')
-    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
-    @patch('management.services.knowledge_base.deletion.delete_file')
-    def test_full_document_delete_keeps_charge_when_minio_fails(
-        self, mock_delete_file, mock_get_knowledge, mock_resolve, mock_release
-    ):
-        self.mock_vdb_core.delete_documents.return_value = 4
-        mock_delete_file.return_value = {"success": False, "error": "delete failed"}
-        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
-        mock_resolve.return_value = SimpleNamespace(
-            bucket_name="kb-bucket", object_name="knowledge_base/doc.pdf"
-        )
-
-        with patch(
-            'management.services.knowledge_base.deletion.update_last_doc_update_time'
-        ):
-            result = ElasticSearchService.delete_documents(
-                "kb-1", "knowledge_base/doc.pdf", self.mock_vdb_core
-            )
-
-        self.assertEqual(result["deleted_es_count"], 4)
-        self.assertFalse(result["deleted_minio"])
-        mock_release.assert_not_called()
 
     @patch('management.services.knowledge_base.files.release_storage_charge')
     @patch('management.services.knowledge_base.files.resolve_storage_reference')
@@ -5033,40 +4592,6 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("success", result)
         self.assertTrue(result["success"])
 
-    @patch('management.services.knowledge_base.deletion.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.deletion.delete_file')
-    def test_delete_documents_success_status_200(self, mock_delete_file, mock_update_last_doc):
-        """
-        Test delete_documents method returns status code 200 on success.
-
-        This test verifies that:
-        1. The delete_documents method successfully deletes documents
-        2. The response indicates success
-        3. The method completes without raising exceptions, implying a 200 status code
-        """
-        # Setup
-        self.mock_vdb_core.delete_documents.return_value = 5
-        # Configure delete_file to return a success response
-        mock_delete_file.return_value = {
-            "success": True, "object_name": "test_path"}
-
-        # Execute
-        result = ElasticSearchService.delete_documents(
-            index_name="test_index",
-            path_or_url="test_path",
-            vdb_core=self.mock_vdb_core
-        )
-
-        # Assert
-        # Verify successful response status - 200
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["deleted_minio"], True)
-        # Verify that delete_documents was called with correct parameters
-        self.mock_vdb_core.delete_documents.assert_called_once_with(
-            "test_index", "test_path")
-        # Verify that delete_file was called with the correct path
-        mock_delete_file.assert_called_once_with("test_path")
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_get_summary_success_status_200(self, mock_get_record):
@@ -8691,102 +8216,10 @@ def test_merge_paginated_indices_falls_back_to_index_names_without_info():
     assert "indices_info" not in result
 
 
-@pytest.mark.asyncio
-async def test_finalize_document_delete_waits_for_inflight_tasks(monkeypatch):
-    """External stores must not be touched while a matching worker is active."""
-    redis_mock = MagicMock()
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(
-        ElasticSearchService,
-        "_wait_for_document_tasks",
-        lambda **_: False,
-    )
-    delete_external = MagicMock()
-    monkeypatch.setattr(ElasticSearchService, "delete_documents", delete_external)
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb",
-        path_or_url="knowledge_base/a.txt",
-        scope="full",
-        vdb_core=MagicMock(),
-        lifecycle_record={
-            "file_id": "fid-1",
-            "object_name": "knowledge_base/a.txt",
-            "status": "DELETE_REQUESTED",
-        },
-    )
-
-    assert result["status"] == "pending"
-    assert result["lifecycle_status"] == "DELETE_REQUESTED"
-    delete_external.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_finalize_document_delete_hard_deletes_row_and_clears_fence(monkeypatch):
-    """Successful full cleanup removes the lifecycle row and durable fence."""
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 1}
-    redis_mock.is_document_delete_requested.return_value = False
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService,
-        "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True, "deleted_es_count": 2}),
-    )
-    delete_row = MagicMock(return_value=True)
-    monkeypatch.setattr("management.services.knowledge_base.deletion.delete_file_record", delete_row)
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb",
-        path_or_url="knowledge_base/a.txt",
-        scope="full",
-        vdb_core=MagicMock(),
-        lifecycle_record={
-            "file_id": "fid-1",
-            "object_name": "knowledge_base/a.txt",
-            "status": "DELETE_REQUESTED",
-        },
-    )
-
-    assert result["status"] == "success"
-    assert result["lifecycle_deleted"] is True
-    delete_row.assert_called_once_with("fid-1", expected_statuses=("DELETE_REQUESTED", "DELETED"))
-    redis_mock.clear_document_delete_fence.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_finalize_document_delete_retries_when_external_store_fails(monkeypatch):
-    """Transient ES/MinIO failures retain the tombstone for background retry."""
-    redis_mock = MagicMock()
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService,
-        "delete_documents",
-        MagicMock(side_effect=RuntimeError("ES unavailable")),
-    )
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb",
-        path_or_url="knowledge_base/a.txt",
-        scope="full",
-        vdb_core=MagicMock(),
-        lifecycle_record={
-            "file_id": "fid-1",
-            "object_name": "knowledge_base/a.txt",
-            "status": "DELETE_REQUESTED",
-        },
-    )
-
-    assert result["status"] == "pending"
-    assert "external_delete_error" in result
 
 
 def _install_fake_celery_app(monkeypatch, inspector=None, task_result=None):
@@ -8812,626 +8245,66 @@ def _install_fake_celery_app(monkeypatch, inspector=None, task_result=None):
     return celery_app
 
 
-def test_cancel_document_tasks_marks_and_revokes_lifecycle_and_visible_tasks(monkeypatch):
-    inspector = SimpleNamespace(
-        active=MagicMock(return_value={
-            "worker": [{"id": "visible", "kwargs": {
-                "file_id": "fid-1", "index_name": "kb", "source": "obj"
-            }}]
-        }),
-        reserved=MagicMock(return_value={}),
-    )
-    celery_app = _install_fake_celery_app(monkeypatch, inspector)
-    redis_mock = MagicMock()
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service",
-        lambda: redis_mock,
-    )
-
-    result = ElasticSearchService._cancel_document_tasks(
-        lifecycle_record={"file_id": "fid-1", "parent_task_id": "parent"},
-    )
-
-    assert set(result["task_ids"]) == {"parent", "visible"}
-    assert result["cancelled_count"] == 2
-    assert {call.args[0] for call in redis_mock.mark_task_cancelled.call_args_list} == {
-        "parent", "visible"
-    }
-    assert {call.args[0] for call in celery_app.control.revoke.call_args_list} == {
-        "parent", "visible"
-    }
-
-
-def test_wait_for_document_tasks_uses_real_chain_result(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.return_value = json.dumps({"status": "SUCCESS"})
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    assert ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid-1", "parent_task_id": "chain-1"},
-        timeout_seconds=1,
-    )
-    redis_mock.backend_client.get.assert_called_once_with("celery-task-meta-chain-1")
-
-
-def test_wait_for_document_tasks_returns_false_when_chain_is_not_ready(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.return_value = json.dumps({"status": "PENDING"})
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr("management.services.knowledge_base.deletion.time.sleep", lambda _: None)
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.time.monotonic",
-        MagicMock(side_effect=[0.0, 1.0]),
-    )
-
-    assert not ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid-1", "parent_task_id": "chain-1"},
-        timeout_seconds=0.1,
-    )
-
-
-def test_wait_for_document_tasks_rejects_processing_row_without_parent_task_id():
-    assert not ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid-1", "status": "PROCESSING"},
-        timeout_seconds=1,
-    )
-
-
-def test_wait_for_document_tasks_returns_true_without_a_tracked_chain(monkeypatch):
-    assert ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid-1"},
-        timeout_seconds=1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_keeps_row_when_redis_cleanup_fails(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.side_effect = RuntimeError("redis unavailable")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService,
-        "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": "fid-1", "object_name": "obj", "status": "DELETE_REQUESTED"},
-    )
-
-    assert result["status"] == "pending"
-    assert "redis_cleanup_error" in result
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_keeps_row_when_fence_cannot_clear(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 1}
-    redis_mock.is_document_delete_requested.return_value = True
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService,
-        "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.delete_file_record", MagicMock(return_value=True)
-    )
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": "fid-1", "object_name": "obj", "status": "DELETE_REQUESTED"},
-    )
-
-    assert result["status"] == "pending"
-    assert result["lifecycle_status"] == "DELETE_REQUESTED"
-
-
-def test_mark_file_delete_requested_reports_fence_failure(monkeypatch):
-    lifecycle = {"file_id": "fid-1", "status": "UPLOADED"}
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_knowledge_record",
-        lambda _query: {"tenant_id": "tenant", "knowledge_id": 1},
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_file_record",
-        lambda **_kwargs: lifecycle,
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.transition_file_record",
-        lambda *_args, **_kwargs: {**lifecycle, "status": "DELETE_REQUESTED"},
-    )
-    redis_mock = MagicMock()
-    redis_mock.mark_document_delete_requested.return_value = False
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    result = ElasticSearchService._mark_file_delete_requested("kb", "obj", file_id="fid-1")
-    assert result["status"] == "DELETE_REQUESTED"
-    redis_mock.mark_document_delete_requested.assert_called_once()
-
-
-def test_cancel_document_tasks_handles_malformed_inspection_and_redis_outage(monkeypatch):
-    inspector = SimpleNamespace(
-        active=MagicMock(return_value={"worker": [
-            {"id": "by-path", "kwargs": '{bad-json'},
-            {"id": "by-index", "kwargs": {
-                "index_name": "kb", "path_or_url": "obj"
-            }},
-            {"id": "unrelated", "kwargs": {"file_id": "other"}},
-        ]}),
-        reserved=MagicMock(side_effect=RuntimeError("inspect unavailable")),
-    )
-    celery_app = _install_fake_celery_app(monkeypatch, inspector)
-    redis_mock = MagicMock()
-    redis_mock.mark_task_cancelled.side_effect = RuntimeError("redis unavailable")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    result = ElasticSearchService._cancel_document_tasks(
-        lifecycle_record={"file_id": "fid-1", "process_task_id": "tracked"},
-    )
-    assert result["task_ids"] == ["tracked"]
-    assert celery_app.control.revoke.call_count == 1
-
-
-def test_wait_for_document_tasks_handles_inspection_errors_and_unmatched_tasks(monkeypatch):
-    inspector = SimpleNamespace(
-        active=MagicMock(side_effect=RuntimeError("active unavailable")),
-        reserved=MagicMock(return_value={"worker": [
-            {"id": "unrelated", "kwargs": {"file_id": "other"}},
-            {"id": "malformed", "kwargs": '{bad-json'},
-        ]}),
-    )
-    _install_fake_celery_app(monkeypatch, inspector)
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", MagicMock
-    )
-    assert ElasticSearchService._wait_for_document_tasks(
-        index_name="kb", path_or_url="obj", lifecycle_record={"file_id": "fid"},
-        timeout_seconds=1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_retries_when_redis_cleanup_reports_errors(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": ["broker down"], "total_deleted": 0}
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService, "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": "fid", "object_name": "obj"},
-    )
-    assert result["status"] == "pending"
-    assert result["redis_warnings"] == ["broker down"]
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_retries_when_lifecycle_delete_fails(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 0}
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService, "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.delete_file_record",
-        MagicMock(side_effect=RuntimeError("database unavailable")),
-    )
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": "fid", "object_name": "obj"},
-    )
-    assert result["status"] == "pending"
-    assert "lifecycle_delete_error" in result
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_retries_when_fence_clear_raises(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 0}
-    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis unavailable")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(ElasticSearchService, "_wait_for_document_tasks", lambda **_: True)
-    monkeypatch.setattr(
-        ElasticSearchService, "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.delete_file_record", MagicMock(return_value=True)
-    )
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": "fid", "object_name": "obj"},
-    )
-    assert result["status"] == "pending"
-    assert "fence_cleanup_error" in result
-
-
-@pytest.mark.asyncio
-async def test_retry_document_delete_stops_after_success(monkeypatch):
-    from management.services.knowledge_base import deletion as service_module
-
-    monkeypatch.setattr(
-        ElasticSearchService, "_finalize_document_delete",
-        AsyncMock(return_value={"status": "success"}),
-    )
-    key = "retry-fid"
-    service_module._document_delete_tasks[key] = asyncio.current_task()
-    await ElasticSearchService._retry_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": key, "object_name": "obj"},
-    )
-    assert key not in service_module._document_delete_tasks
-
-
-@pytest.mark.asyncio
-async def test_delete_document_by_scope_schedules_pending_retry(monkeypatch):
-    lifecycle = {"file_id": "fid", "object_name": "obj", "status": "DELETE_REQUESTED"}
-    monkeypatch.setattr(ElasticSearchService, "_mark_file_delete_requested", MagicMock(return_value=lifecycle))
-    monkeypatch.setattr(ElasticSearchService, "_cancel_document_tasks", MagicMock(return_value={}))
-    monkeypatch.setattr(
-        ElasticSearchService, "_finalize_document_delete",
-        AsyncMock(return_value={"status": "pending", "deletion_pending": True}),
-    )
-    schedule = MagicMock()
-    monkeypatch.setattr(ElasticSearchService, "_schedule_document_delete_retry", schedule)
-    result = await ElasticSearchService.delete_document_by_scope(
-        "kb", "obj", "full", MagicMock(), file_id="fid", requested_by="user",
-    )
-    assert result["deletion_pending"] is True
-    schedule.assert_called_once()
-
-
-def test_mark_file_delete_requested_tombstone_survives_redis_outage(monkeypatch):
-    tombstone = {"file_id": "fid-new", "status": "DELETE_REQUESTED"}
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_knowledge_record",
-        lambda _query: {"tenant_id": "tenant", "knowledge_id": 9},
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_file_record",
-        lambda **_kwargs: None,
-    )
-    create = MagicMock(return_value=tombstone)
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.create_delete_tombstone", create
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service",
-        MagicMock(side_effect=RuntimeError("redis unavailable")),
-    )
-
-    assert ElasticSearchService._mark_file_delete_requested(
-        "kb", "knowledge_base/new.txt", requested_by="user", file_id="fid-new"
-    ) == tombstone
-    create.assert_called_once()
-
-
-def test_cancel_document_tasks_handles_non_dict_kwargs_and_revoke_error(monkeypatch):
-    inspector = SimpleNamespace(
-        active=MagicMock(return_value={"worker": [
-            {"id": "matched", "kwargs": ["not-a-mapping"]},
-        ]}),
-        reserved=MagicMock(return_value={}),
-    )
-    celery_app = _install_fake_celery_app(monkeypatch, inspector)
-    celery_app.control.revoke.side_effect = RuntimeError("revoke unavailable")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service",
-        MagicMock(side_effect=RuntimeError("redis unavailable")),
-    )
-
-    result = ElasticSearchService._cancel_document_tasks(
-        lifecycle_record={"file_id": "fid", "parent_task_id": "matched"},
-    )
-    assert result["task_ids"] == ["matched"]
-    celery_app.control.revoke.assert_called_once_with("matched", terminate=False)
-
-
-@pytest.mark.asyncio
-async def test_finalize_document_delete_legacy_path_passes_request_user_to_marker(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 0}
-    redis_mock.clear_document_delete_fence.return_value = 0
-    redis_mock.is_document_delete_requested.return_value = False
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(
-        ElasticSearchService, "delete_documents",
-        MagicMock(return_value={"status": "success", "deleted_minio": True}),
-    )
-    marker = MagicMock()
-    monkeypatch.setattr(ElasticSearchService, "_mark_file_deleted", marker)
-
-    result = await ElasticSearchService._finalize_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record=None, requested_by="user-1",
-    )
-    assert result["lifecycle_deleted"] is True
-    marker.assert_called_once_with("kb", "obj", updated_by="user-1")
-
-
-@pytest.mark.asyncio
-async def test_retry_document_delete_retries_after_exception(monkeypatch):
-    from management.services.knowledge_base import deletion as service_module
-
-    finalize = AsyncMock(side_effect=[RuntimeError("temporary"), {"status": "success"}])
-    monkeypatch.setattr(ElasticSearchService, "_finalize_document_delete", finalize)
-    monkeypatch.setattr("management.services.knowledge_base.deletion.DOCUMENT_DELETE_RETRY_INTERVAL_S", 0)
-    monkeypatch.setattr("management.services.knowledge_base.deletion.asyncio.sleep", AsyncMock())
-    key = "retry-after-error"
-    service_module._document_delete_tasks.pop(key, None)
-    await ElasticSearchService._retry_document_delete(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": key, "object_name": "obj"},
-    )
-    assert finalize.await_count == 2
-    assert key not in service_module._document_delete_tasks
-
-
-@pytest.mark.asyncio
-async def test_retry_document_delete_propagates_cancellation(monkeypatch):
-    from management.services.knowledge_base import deletion as service_module
-
-    monkeypatch.setattr(
-        ElasticSearchService, "_finalize_document_delete",
-        AsyncMock(side_effect=asyncio.CancelledError()),
-    )
-    key = "retry-cancelled"
-    service_module._document_delete_tasks.pop(key, None)
-    with pytest.raises(asyncio.CancelledError):
-        await ElasticSearchService._retry_document_delete(
-            index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-            lifecycle_record={"file_id": key, "object_name": "obj"},
-        )
-    assert key not in service_module._document_delete_tasks
-
-
-@pytest.mark.asyncio
-async def test_schedule_document_delete_retry_avoids_duplicate_running_task(monkeypatch):
-    from management.services.knowledge_base import deletion as service_module
-
-    running = SimpleNamespace(done=lambda: False)
-    key = "already-scheduled"
-    service_module._document_delete_tasks[key] = running
-    create_task = MagicMock()
-    monkeypatch.setattr("management.services.knowledge_base.deletion.asyncio.create_task", create_task)
-    ElasticSearchService._schedule_document_delete_retry(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": key, "object_name": "obj"},
-    )
-    create_task.assert_not_called()
-    service_module._document_delete_tasks.pop(key, None)
-
-
-@pytest.mark.asyncio
-async def test_schedule_document_delete_retry_creates_task_when_not_running(monkeypatch):
-    from management.services.knowledge_base import deletion as service_module
-
-    created = []
-
-    def fake_create_task(coro):
-        created.append(coro)
-        coro.close()
-        return SimpleNamespace(done=lambda: False)
-
-    monkeypatch.setattr("management.services.knowledge_base.deletion.asyncio.create_task", fake_create_task)
-    key = "new-schedule"
-    service_module._document_delete_tasks.pop(key, None)
-    ElasticSearchService._schedule_document_delete_retry(
-        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
-        lifecycle_record={"file_id": key, "object_name": "obj"},
-    )
-    assert len(created) == 1
-    service_module._document_delete_tasks.pop(key, None)
-
-
-def test_delete_lifecycle_record_without_object_handles_fence_and_cancel_errors(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.mark_document_delete_requested.side_effect = RuntimeError("redis down")
-    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis down")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(
-        KnowledgeBaseDocumentDeletionService, "_cancel_document_tasks",
-        MagicMock(side_effect=RuntimeError("celery down")),
-    )
-    delete = MagicMock(return_value=True)
-    monkeypatch.setattr("management.services.knowledge_base.deletion.delete_file_record", delete)
-
-    result = ElasticSearchService.delete_lifecycle_record_without_object({
-        "file_id": "fid", "index_name": "kb", "status": "DELETED", "object_name": None,
-    })
-    assert result["status"] == "success"
-    delete.assert_called_once()
-
-
-def test_delete_lifecycle_record_without_object_logs_fence_clear_error(monkeypatch):
-    redis_mock = MagicMock()
-    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis down")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr(KnowledgeBaseDocumentDeletionService, "_cancel_document_tasks", MagicMock())
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.transition_file_record",
-        MagicMock(return_value={"file_id": "fid", "status": "DELETE_REQUESTED"}),
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.delete_file_record", MagicMock(return_value=True)
-    )
-
-    result = ElasticSearchService.delete_lifecycle_record_without_object({
-        "file_id": "fid", "index_name": "kb", "status": "UPLOADED", "object_name": None,
-    })
-    assert result["lifecycle_deleted"] is True
-
-
-def test_wait_for_document_tasks_decodes_bytes_result(monkeypatch):
-    """Celery's Redis backend may return bytes for a terminal chain result."""
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.return_value = b'{"state":"SUCCESS"}'
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    assert ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
-        timeout_seconds=1,
-    )
-
-
-def test_wait_for_document_tasks_returns_false_for_malformed_result(monkeypatch):
-    """Malformed task metadata is treated as an unfinished chain rather than deleting early."""
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.return_value = b"not-json"
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    assert not ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
-        timeout_seconds=1,
-    )
-
-
-def test_wait_for_document_tasks_returns_false_for_backend_error(monkeypatch):
-    """A Redis result-backend error must not be interpreted as a completed chain."""
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.side_effect = RuntimeError("backend unavailable")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-
-    assert not ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
-        timeout_seconds=1,
-    )
-
-
-def test_wait_for_document_tasks_polls_before_timeout(monkeypatch):
-    """A non-terminal result is polled until the configured deadline."""
-    redis_mock = MagicMock()
-    redis_mock.backend_client.get.return_value = '{"status":"PENDING"}'
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
-    )
-    monkeypatch.setattr("management.services.knowledge_base.deletion.time.sleep", lambda _: None)
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.time.monotonic",
-        MagicMock(side_effect=[0.0, 0.0, 1.0]),
-    )
-
-    assert not ElasticSearchService._wait_for_document_tasks(
-        index_name="kb",
-        path_or_url="obj",
-        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
-        timeout_seconds=0.1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_delete_document_by_scope_rejects_unknown_scope():
-    """Only the documented source-only and full deletion scopes are accepted."""
-    with pytest.raises(ValueError, match="Invalid scope"):
-        await ElasticSearchService.delete_document_by_scope(
-            "kb", "obj", "unknown", MagicMock()
-        )
-
-
-@pytest.mark.asyncio
-async def test_delete_document_by_scope_supports_legacy_lookup(monkeypatch):
-    """Callers without file metadata continue to use the path-based lifecycle lookup."""
-    marker = MagicMock(return_value={"file_id": "fid", "object_name": "obj"})
-    canceller = MagicMock(return_value={"task_ids": []})
-    finalizer = AsyncMock(return_value={"status": "success"})
-    monkeypatch.setattr(ElasticSearchService, "_mark_file_delete_requested", marker)
-    monkeypatch.setattr(ElasticSearchService, "_cancel_document_tasks", canceller)
-    monkeypatch.setattr(ElasticSearchService, "_finalize_document_delete", finalizer)
-
-    result = await ElasticSearchService.delete_document_by_scope(
-        "kb", "obj", "full", MagicMock()
-    )
-
-    assert result["status"] == "success"
-    marker.assert_called_once_with("kb", "obj")
-    canceller.assert_called_once_with(lifecycle_record={"file_id": "fid", "object_name": "obj"})
-
-
-def test_delete_documents_releases_storage_charge_after_minio_delete(monkeypatch):
-    """Successful MinIO deletion also reconciles the tenant storage ledger."""
-    from management.services.knowledge_base import deletion as deletion_module
-
-    vdb_core = MagicMock()
-    vdb_core.delete_documents.return_value = 3
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.delete_file",
-        MagicMock(return_value={"success": True}),
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.get_knowledge_record",
-        MagicMock(return_value={"tenant_id": "tenant-1"}),
-    )
-    reference = SimpleNamespace(bucket_name="bucket", object_name="obj")
-    monkeypatch.setattr(
-        "management.services.knowledge_base.deletion.resolve_storage_reference",
-        MagicMock(return_value=reference),
-    )
-    release = MagicMock()
-    monkeypatch.setattr("management.services.knowledge_base.deletion.release_storage_charge", release)
-    update_time = MagicMock()
-    monkeypatch.setattr("management.services.knowledge_base.deletion.update_last_doc_update_time", update_time)
-
-    result = ElasticSearchService.delete_documents("kb", "obj", vdb_core)
-
-    assert result == {"status": "success", "deleted_es_count": 3, "deleted_minio": True}
-    release.assert_called_once_with(
-        tenant_id="tenant-1", bucket_name="bucket", object_name="obj"
-    )
-    update_time.assert_called_once_with("kb")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def test_knowledge_base_delete_guard_returns_non_ingesting_rows(monkeypatch):
@@ -9490,8 +8363,6 @@ def test_knowledge_base_delete_guard_wraps_lifecycle_read_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_full_delete_knowledge_base_cleans_lifecycle_rows_and_fences(monkeypatch):
     """A successful KB deletion hard-deletes lifecycle rows and clears file fences."""
-    from management.services.knowledge_base import deletion as deletion_module
-
     rows = [
         {"file_id": "fid-1", "status": "DELETE_REQUESTED"},
         {"file_id": "fid-2", "status": "DELETED"},
@@ -9522,18 +8393,12 @@ async def test_full_delete_knowledge_base_cleans_lifecycle_rows_and_fences(monke
         lambda: redis_mock,
     )
 
-    pending = SimpleNamespace(done=lambda: False, cancel=MagicMock())
-    deletion_module._document_delete_tasks["fid-1"] = pending
-    try:
-        result = await KnowledgeBaseManagementService.full_delete_knowledge_base(
-            index_name="kb", vdb_core=MagicMock(), user_id="user-1"
-        )
-    finally:
-        deletion_module._document_delete_tasks.pop("fid-1", None)
+    result = await KnowledgeBaseManagementService.full_delete_knowledge_base(
+        index_name="kb", vdb_core=MagicMock(), user_id="user-1"
+    )
 
     assert result["lifecycle_cleanup"] == {"deleted_count": 2}
     assert result["lifecycle_fence_cleanup"] == {"cleared_count": 1, "failed_count": 0}
-    pending.cancel.assert_called_once()
     lifecycle_delete.assert_called_once_with(index_name="kb")
 
 
