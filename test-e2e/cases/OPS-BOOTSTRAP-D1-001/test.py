@@ -46,7 +46,7 @@ fake_compose() {
 }
 docker_compose_command=fake_compose
     prepare_core_service_deployment() { return 0; }
-    stop_old_business_services() { return 0; }
+    stop_legacy_workbench_writers() { return 0; }
     publish_shared_workbench() { return 0; }
 '''
     harness += '\n' + function.group(0) + '\nFAIL_COMPOSE="$5"\ndeploy_core_services\n'
@@ -145,13 +145,17 @@ deployment_render_helm_chart_values
             assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
                 'name': 'nexent-env', 'key': name, 'optional': True,
             }
-        for name in (
-            'POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PORT',
-            'NEXENT_POSTGRES_PASSWORD', 'REDIS_URL', 'JWT_SECRET',
-        ):
-            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
-                'name': 'nexent-env', 'key': name,
+        for name in ('POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PORT', 'ELASTICSEARCH_HOST'):
+            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['configMapKeyRef'] == {
+                'name': 'nexent-config', 'key': name, 'optional': True,
             }
+        for name in ('NEXENT_POSTGRES_PASSWORD', 'JWT_SECRET', 'ELASTICSEARCH_API_KEY'):
+            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
+                'name': 'nexent-secrets', 'key': name, 'optional': True,
+            }
+        assert next(env for env in container['env'] if env['name'] == 'REDIS_URL')['valueFrom']['secretKeyRef'] == {
+            'name': 'nexent-env', 'key': 'REDIS_URL',
+        }
         assert next(env for env in container['env'] if env['name'] == 'JWT_ISSUER')['valueFrom']['secretKeyRef'] == {
             'name': 'nexent-env', 'key': 'JWT_ISSUER', 'optional': True,
         }

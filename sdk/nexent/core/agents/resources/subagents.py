@@ -210,6 +210,7 @@ class SubAgentToolWrapper:
                 agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
                 agent_version_no=self._runtime_identity.get("version_no"),
                 agent_version_name=self._agent_version_name,
+                monitoring_run_id=str(invocation_id),
             )
             attributes = manager.build_agent_run_attributes(metadata, attributes={
                 "subagent.invocation_id": invocation_id,

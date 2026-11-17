@@ -92,6 +92,9 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 COPY VERSION /opt/nexent/VERSION
 RUN /opt/backend/.venv/bin/python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
+COPY deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
+COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
 
 # Create SSH key directory for Terminal tool

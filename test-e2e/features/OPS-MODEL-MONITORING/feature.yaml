@@ -1,0 +1,22 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-MODEL-MONITORING
+  name: Model monitoring on the shared operations data plane
+  status: planned
+  description: Capture model request attempts and publish tenant-scoped monitoring results from the independent operations database and shared Elasticsearch indexes.
+  business_rules:
+  - rule_id: OPS-MODEL-MONITORING-RULE-01
+    description: Deploy operations control tables into the independent Ops database and apply shared monitoring mappings.
+  - rule_id: OPS-MODEL-MONITORING-RULE-02
+    description: Count real model attempts and publish matching daily results without duplicating replayed events or mixing tenant or fact types.
+  - rule_id: OPS-MODEL-MONITORING-RULE-03
+    description: Automatically remove superseded daily documents while preserving current publications, captured read snapshots and source facts.
+  - rule_id: OPS-MODEL-MONITORING-RULE-04
+    description: Share measurements with recorded model attempt spans and retain the trace association in sanitized facts.
+  required_test_stages: [D3, D5]
+  source:
+    requirement_ids: [OPS-MODEL-MONITORING-20261116, OPS-MONITORING-DAILY-CLEANUP-20261117, OPS-MODEL-TRACE-20261117]
+    notes: Model monitoring detailed design, independent operations control store and shared monitoring data plane.

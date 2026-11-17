@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_web_dispatches_trajectory_queries_to_ops_only():
-    source = (ROOT / "frontend/server.js").read_text()
+    source = (ROOT / "frontend/server.js").read_text(encoding="utf-8")
     start = source.index("function handleAllApiProxy(")
     end = source.index("function sendJsonResponse(", start)
     helper = source[source.index("function isTrajectoryOpsRequest(") :]
@@ -59,6 +59,7 @@ for (const [url, method, target] of """
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
     )
     assert result.returncode == 0, result.stderr

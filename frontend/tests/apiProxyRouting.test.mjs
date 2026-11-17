@@ -14,7 +14,7 @@ const trajectoryHelperStart = source.indexOf(
 );
 assert.ok(trajectoryHelperStart > end);
 
-function dispatch(method, pathname) {
+function dispatch(method, url) {
   const calls = [];
   const context = vm.createContext({
     AUTH_INTERCEPT_ENDPOINTS: new Set([
@@ -23,6 +23,7 @@ function dispatch(method, pathname) {
     ]),
     HTTP_BACKEND: "http://config:5010",
     OPS_HTTP_BACKEND: "http://ops:5016",
+    URL,
     PROXY_TIMEOUT_MS: 100,
     SSE_PROXY_TIMEOUT_MS: 200,
     forwardAuthRequest: (_req, _res, target) =>
@@ -37,7 +38,8 @@ function dispatch(method, pathname) {
     source.slice(start, end) + source.slice(trajectoryHelperStart),
     context
   );
-  const req = { method, url: pathname };
+  const pathname = new URL(url, "http://localhost").pathname;
+  const req = { method, url };
   const handled = context.handleAllApiProxy(pathname, req, {});
   return { handled, calls, req };
 }
@@ -58,6 +60,12 @@ for (const [method, path, target] of [
   ["GET", "/api/trajectory/conversations/42/snapshot", "ops"],
   ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "ops"],
   ["POST", "/api/trajectory/cleanup", "ops"],
+  ["GET", "/api/conversation/agent_groups?view=trajectory", "ops"],
+  ["GET", "/api/conversation/agent_groups?view=chat", "runtime"],
+  ["GET", "/api/ops/v1/monitoring/models/summary?start_date=2026-11-17", "ops"],
+  ["POST", "/api/ops/v1/monitoring/models/refresh", "ops"],
+  ["GET", "/api/ops/v1/monitoring/models/refreshes/signed-reference", "ops"],
+  ["GET", "/api/ops/v1/monitoring-other/models", "config"],
   ["GET", "/api/trajectory_config", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
@@ -66,9 +74,7 @@ for (const [method, path, target] of [
     assert.equal(result.calls.length, 1);
     assert.equal(
       result.calls[0].target,
-      `http://${target}:${
-        target === "config" ? 5010 : target === "ops" ? 5016 : 5014
-      }`
+      `http://${target}:${{ config: 5010, runtime: 5014, ops: 5016 }[target]}`
     );
   });
 }

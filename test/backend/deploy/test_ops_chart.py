@@ -76,7 +76,7 @@ deployment_render_helm_chart_values
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_enabled(
+def test_ops_chart_mounts_trajectory_only_when_enabled_and_supplies_service_configuration(
     enabled,
 ):
     helm = shutil.which("helm")
@@ -106,10 +106,21 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
     )
     spec = deployment["spec"]["template"]["spec"]
     container = spec["containers"][0]
+    environment = {item["name"]: item for item in container["env"]}
     mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
     assert ("ops-trajectory" in mounts) is enabled
     assert ("envFrom" in container) is enabled
+    for key in ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_DB", "ELASTICSEARCH_HOST"):
+        assert environment[key]["valueFrom"]["configMapKeyRef"] == {
+            "name": "nexent-config", "key": key, "optional": True,
+        }
+    for key in ("NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "ELASTICSEARCH_API_KEY"):
+        assert environment[key]["valueFrom"]["secretKeyRef"] == {
+            "name": "nexent-secrets", "key": key, "optional": True,
+        }
+    for key in ("OPS_MONITORING_ENABLED", "OPS_POSTGRES_HOST", "OPS_POSTGRES_PASSWORD"):
+        assert environment[key]["valueFrom"]["secretKeyRef"]["name"] == "nexent-env"
     if enabled:
         assert mounts["ops-trajectory"]["mountPath"] == "/srv/trajectory"
         assert (

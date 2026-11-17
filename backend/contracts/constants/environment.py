@@ -18,6 +18,14 @@ NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
+OPS_MONITORING_ENABLED = os.getenv('OPS_MONITORING_ENABLED', 'false').lower() == 'true'
+OPS_MONITORING_TIMEZONE = os.getenv('OPS_MONITORING_TIMEZONE', 'UTC')
+OPS_MONITORING_REPLICAS = int(os.getenv('OPS_MONITORING_REPLICAS', '0'))
+OPS_POSTGRES_HOST = os.getenv('OPS_POSTGRES_HOST')
+OPS_POSTGRES_PORT = parse_port(os.getenv('OPS_POSTGRES_PORT'), 'OPS_POSTGRES_PORT', 5432)
+OPS_POSTGRES_USER = os.getenv('OPS_POSTGRES_USER')
+OPS_POSTGRES_PASSWORD = os.getenv('OPS_POSTGRES_PASSWORD')
+OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB')
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')

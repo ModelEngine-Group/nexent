@@ -5,11 +5,15 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
-import ops_service
 import pytest
 from fastapi.testclient import TestClient
+
+import ops_service
+from ops import lifespan
 from ops.api.application import create_app
 from ops.lifespan import ops_lifespan
 
@@ -51,6 +55,43 @@ async def test_exceptional_shutdown_clears_readiness():
             assert app.state.ready is True
             raise RuntimeError('owned task failed')
     assert app.state.ready is False
+
+
+@pytest.mark.asyncio
+async def test_trajectory_and_monitoring_share_ops_readiness(monkeypatch):
+    app = create_app()
+    manager = Mock(shutdown=AsyncMock())
+    workers = Mock(stop=AsyncMock())
+    events = []
+
+    @asynccontextmanager
+    async def monitoring(application):
+        assert application.state.ready is False
+        events.append("monitoring started")
+        try:
+            yield
+        finally:
+            assert application.state.ready is False
+            events.append("monitoring stopped")
+
+    monkeypatch.setattr(lifespan.config, "TRAJECTORY_READ_ENABLED", True)
+    monkeypatch.setattr(lifespan.config, "OPS_MONITORING_ENABLED", True)
+    monkeypatch.setattr(lifespan, "create_thread_manager", lambda: manager)
+    monkeypatch.setattr(lifespan, "create_trajectory_workers", lambda: workers)
+    monkeypatch.setattr("ops.monitoring.runtime.ops_monitoring_lifespan", monitoring)
+    dispose = Mock()
+    monkeypatch.setattr(lifespan.configuration_database, "dispose", dispose)
+
+    async with ops_lifespan(app):
+        assert app.state.ready is True
+        assert app.state.thread_manager is manager
+        manager.start.assert_called_once()
+        workers.start.assert_called_once_with(manager)
+        assert events == ["monitoring started"]
+    workers.stop.assert_awaited_once_with(manager)
+    manager.shutdown.assert_awaited_once()
+    dispose.assert_called_once()
+    assert events == ["monitoring started", "monitoring stopped"]
 
 
 def test_app_instances_do_not_share_readiness():
