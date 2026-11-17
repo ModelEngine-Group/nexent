@@ -1,8 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import json
 import logging
-import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -50,7 +48,9 @@ from management.services.knowledge_base.service import (
     check_knowledge_base_exist_impl,
     get_vector_db_core,
 )
-from management.services.knowledge_base.status import get_all_files_status
+from management.services.knowledge_base.file_reader import read_document_error
+from infrastructure.agentos_identity import ServicePrincipal
+from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
@@ -842,98 +842,27 @@ async def get_document_error_info(
     file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
     authorization: Optional[str] = Header(None),
 ):
-    """Get error information for a document"""
+    """Get persisted error information under the current reader's KB permission."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
-        try:
-
-            lifecycle_record = get_file_record(
-                file_id=file_id,
-                index_name=index_name,
-                tenant_id=tenant_id,
-                object_name=None if file_id else path_or_url,
-                include_hidden=True,
-            )
-        except Exception as lifecycle_exc:
-            logger.warning("Lifecycle error lookup unavailable: %s", lifecycle_exc)
-            lifecycle_record = None
-        lifecycle_has_error = bool(
-            lifecycle_record
-            and any(
-                lifecycle_record.get(field) for field in ("error_code", "error_message", "error_stage", "failed_at")
-            )
-        )
-        lifecycle_stage = (
-            (lifecycle_record.get("error_stage") or lifecycle_record.get("stage")) if lifecycle_record else None
-        )
-        if lifecycle_has_error:
-            return {
-                "status": "success",
-                "error_code": lifecycle_record.get("error_code"),
-                "error_message": lifecycle_record.get("error_message"),
-                "error_stage": lifecycle_record.get("error_stage") or lifecycle_record.get("stage"),
-                "failed_at": lifecycle_record.get("failed_at"),
-            }
-        celery_task_files = await get_all_files_status(index_name)
-        file_status = celery_task_files.get(path_or_url)
-
-        if not file_status:
-            if lifecycle_record:
-                return {
-                    "status": "success",
-                    "error_code": None,
-                    "error_message": None,
-                    "error_stage": lifecycle_stage,
-                    "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
-                }
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail=f"Document {path_or_url} not found in index {index_name}"
-            )
-
-        task_id = file_status.get("latest_task_id", "")
-        if not task_id:
-            return {
-                "status": "success",
-                "error_code": None,
-                "error_message": None,
-                "error_stage": lifecycle_stage,
-                "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
-            }
-
-        redis_service = get_redis_service()
-        raw_error = redis_service.get_error_info(task_id)
-        error_code = None
-
-        if raw_error:
-            # Try to parse JSON (new format with error_code only)
-            try:
-                parsed = json.loads(raw_error)
-                if isinstance(parsed, dict) and "error_code" in parsed:
-                    error_code = parsed.get("error_code")
-            except Exception:
-                # Fallback: regex extraction if JSON parsing fails
-                try:
-                    match = re.search(r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', raw_error)
-                    if match:
-                        error_code = match.group(1)
-                except Exception:
-                    pass
-
-        return {
-            "status": "success",
-            "error_code": error_code,
-            "error_message": raw_error,
-            "error_stage": file_status.get("stage") or lifecycle_stage,
-            "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
-        }
+        return await read_document_error(index_name, path_or_url, ServicePrincipal(user_id, tenant_id), file_id=file_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from None
+    except NotFound:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                            detail=f"Document {path_or_url} not found in index {index_name}") from None
+    except ScopeDenied:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="No permission to access this knowledge base") from None
+    except (TimeoutError, DeadlineExceeded):
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Error getting error info: Knowledge file lookup timed out") from None
     except HTTPException:
         raise
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
-        logger.error(f"Error getting error info for document {path_or_url}: {str(e)}")
+        logger.error("Knowledge file error lookup failed error_type=%s", type(e).__name__)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting error info: {str(e)}")
 
 

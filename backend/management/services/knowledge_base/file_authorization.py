@@ -29,18 +29,9 @@ class KnowledgeFileAuthorization:
             raise ScopeDenied()
         return rows[0]
 
-    def resolve_knowledges(self, knowledge_ids, *, edit, context):
+    def identity(self, *, context):
         member = self._one("cleanse_memberships", "user_id", self.user_id, context)
         account = self._one("cleanse_accounts", "user_id", self.user_id, context)
-        page = self.records.query(
-            "cleanse_knowledge", RecordQuery(where=Comparison("knowledge_id", "in", knowledge_ids)),
-            PageRequest(limit=len(knowledge_ids)), context=context,
-        )
-        rows = {row["knowledge_id"]: row for row in page.items}
-        if (page.next_cursor or set(rows) != set(knowledge_ids) or len(page.items) != len(knowledge_ids)
-            or any(not row["index_name"] for row in rows.values())
-            or len({row["index_name"] for row in rows.values()}) != len(rows)):
-            raise ScopeDenied()
         links = self._rows(
             "cleanse_group_memberships", "user_id", self.user_id, context, limit=1000
         )
@@ -59,11 +50,24 @@ class KnowledgeFileAuthorization:
             if page.next_cursor:
                 raise ScopeDenied()
             groups = [group["group_id"] for group in page.items]
+        return {**member, "user_roles": account["user_roles"]}, groups
+
+    def resolve_knowledges(self, knowledge_ids, *, edit, context):
+        member, groups = self.identity(context=context)
+        page = self.records.query(
+            "cleanse_knowledge", RecordQuery(where=Comparison("knowledge_id", "in", knowledge_ids)),
+            PageRequest(limit=len(knowledge_ids)), context=context,
+        )
+        rows = {row["knowledge_id"]: row for row in page.items}
+        if (page.next_cursor or set(rows) != set(knowledge_ids) or len(page.items) != len(knowledge_ids)
+            or any(not row["index_name"] for row in rows.values())
+            or len({row["index_name"] for row in rows.values()}) != len(rows)):
+            raise ScopeDenied()
         permissions = resolve_knowledge_permissions(
             list(rows.values()),
             self.user_id,
             self.records.scope.tenant_id,
-            {**member, "user_roles": account["user_roles"]},
+            member,
             groups,
             speed_mode=False,
         )

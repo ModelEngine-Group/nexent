@@ -2256,109 +2256,68 @@ async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_returns_lifecycle_error(auth_data):
-    """Durable lifecycle errors take precedence over Redis task metadata."""
-    lifecycle_record = {
-        "file_id": "fid-failed",
-        "error_code": "PARSE_FAILED",
-        "error_message": "unsupported format",
-        "error_stage": "PROCESS",
-        "failed_at": "2026-08-22T00:00:00",
-    }
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': 'PARSE_FAILED', 'error_message': 'unsupported format', 'error_stage': 'PROCESS', 'failed_at': '2026-08-22T00:00:00'}
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as mock_get_record, \
-            patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new_callable=AsyncMock) as mock_legacy:
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-failed"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-        assert response.json() == {
-            "status": "success",
-            "error_code": "PARSE_FAILED",
-            "error_message": "unsupported format",
-            "error_stage": "PROCESS",
-            "failed_at": "2026-08-22T00:00:00",
-        }
-        mock_get_record.assert_called_once_with(
-            file_id="fid-failed",
-            index_name=auth_data["index_name"],
-            tenant_id=auth_data["tenant_id"],
-            object_name=None,
-            include_hidden=True,
-        )
-        mock_legacy.assert_not_awaited()
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={"file_id": 'fid-failed'}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": 'fid-failed'}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data):
-    """A lifecycle row without error metadata must not hide legacy Redis errors."""
-    lifecycle_record = {
-        "file_id": "fid-processing",
-        "tenant_id": auth_data["tenant_id"],
-        "index_name": auth_data["index_name"],
-        "status": "PROCESSING",
-        "error_code": None,
-        "error_message": None,
-        "error_stage": None,
-        "failed_at": None,
-    }
-    redis_service = MagicMock()
-    redis_service.get_error_info.return_value = '{"error_code":"LEGACY_PARSE_FAILED"}'
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': 'LEGACY_PARSE_FAILED', 'error_message': '{"error_code":"LEGACY_PARSE_FAILED"}', 'error_stage': None, 'failed_at': None}
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.get_all_files_status",
-                new=AsyncMock(return_value={"knowledge_base/a.txt": {"latest_task_id": "task-legacy"}}),
-            ), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service):
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-processing"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "error_code": "LEGACY_PARSE_FAILED",
-        "error_message": '{"error_code":"LEGACY_PARSE_FAILED"}',
-        "error_stage": None,
-        "failed_at": None,
-    }
-    redis_service.get_error_info.assert_called_once_with("task-legacy")
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={"file_id": 'fid-processing'}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": 'fid-processing'}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_status(auth_data):
-    """A durable row with no task ID still returns a stable success payload."""
-    lifecycle_record = {
-        "file_id": "fid-uploaded",
-        "status": "UPLOADED",
-        "stage": "UPLOAD",
-        "error_code": None,
-        "error_message": None,
-        "error_stage": None,
-        "failed_at": None,
-    }
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': None, 'error_message': None, 'error_stage': 'UPLOAD', 'failed_at': None}
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
-            patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new_callable=AsyncMock, return_value={}):
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-uploaded"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "error_code": None,
-        "error_message": None,
-        "error_stage": "UPLOAD",
-        "failed_at": None,
-    }
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={"file_id": 'fid-uploaded'}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": 'fid-uploaded'}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2646,123 +2605,91 @@ async def test_health_check_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_document_error_info_not_found(vdb_core_mock, auth_data):
-    """
-    Test document error info when document is not found.
-    """
-    with patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new=AsyncMock(return_value={})):
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/missing_doc/error-info",
-            headers=auth_data["auth_header"],
-        )
+@pytest.mark.parametrize("fault,expected_status", [("missing", 404), ("missing-kb", 404), ("denied", 403), ("timeout", 500)])
+async def test_get_document_error_info_not_found(vdb_core_mock, auth_data, fault, expected_status):
+    from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 
-    assert response.status_code == 404
-    assert "not found" in response.json()["detail"]
+    error = {"missing": NotFound(), "missing-kb": ValueError("Knowledge base 'missing_kb' not found"), "denied": ScopeDenied(), "timeout": DeadlineExceeded()}[fault]
+
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission"), \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(side_effect=error)):
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/missing_doc/error-info", headers=auth_data["auth_header"])
+    assert response.status_code == expected_status
+    if fault == "missing":
+        assert response.json() == {"detail": f"Document missing_doc not found in index {auth_data['index_name']}"}
+    elif fault == "missing-kb":
+        assert response.json() == {"detail": "Knowledge base 'missing_kb' not found"}
+    elif fault == "denied":
+        assert response.json() == {"detail": "No permission to access this knowledge base"}
+    else:
+        assert response.json() == {"detail": "Error getting error info: Knowledge file lookup timed out"}
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_no_task_id(auth_data):
-    """
-    Test document error info when task id is empty.
-    """
-    with patch(
-        "management.api.knowledge_base.vectordatabase.get_all_files_status",
-        new=AsyncMock(
-            return_value={
-                "doc-1": {
-                    "latest_task_id": ""
-                }
-            }
-        ),
-    ), patch("management.api.knowledge_base.vectordatabase.get_redis_service") as mock_redis:
-        response = client.get(
-            "/indices/test_index/documents/doc-1/error-info",
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "error_code": None,
-        "error_message": None,
-        "error_stage": None,
-        "failed_at": None,
-    }
-    mock_redis.assert_not_called()
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': None, 'error_message': None, 'error_stage': None, 'failed_at': None}
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": None}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_json_error_code(auth_data):
-    """
-    Test document error info JSON parsing for error_code.
-    """
-    redis_mock = MagicMock()
-    redis_mock.get_error_info.return_value = '{"error_code": "INVALID_FORMAT"}'
-
-    with patch(
-        "management.api.knowledge_base.vectordatabase.get_all_files_status",
-        new=AsyncMock(
-            return_value={
-                "doc-1": {
-                    "latest_task_id": "task-123"
-                }
-            }
-        ),
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.get_redis_service",
-        return_value=redis_mock,
-    ):
-        response = client.get(
-            "/indices/test_index/documents/doc-1/error-info",
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "error_code": "INVALID_FORMAT",
-        "error_message": '{"error_code": "INVALID_FORMAT"}',
-        "error_stage": None,
-        "failed_at": None,
-    }
-    redis_mock.get_error_info.assert_called_once_with("task-123")
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': 'INVALID_FORMAT', 'error_message': '{"error_code": "INVALID_FORMAT"}', 'error_stage': None, 'failed_at': None}
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": None}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_regex_error_code(auth_data):
-    """
-    Test document error info regex extraction when JSON parsing fails.
-    """
-    redis_mock = MagicMock()
-    redis_mock.get_error_info.return_value = "oops {'error_code': 'TIMEOUT_ERROR'}"
-
-    with patch(
-        "management.api.knowledge_base.vectordatabase.get_all_files_status",
-        new=AsyncMock(
-            return_value={
-                "doc-1": {
-                    "latest_task_id": "task-999"
-                }
-            }
-        ),
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.get_redis_service",
-        return_value=redis_mock,
-    ):
-        response = client.get(
-            "/indices/test_index/documents/doc-1/error-info",
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "error_code": "TIMEOUT_ERROR",
-        "error_message": "oops {'error_code': 'TIMEOUT_ERROR'}",
-        "error_stage": None,
-        "failed_at": None,
-    }
-    redis_mock.get_error_info.assert_called_once_with("task-999")
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': 'TIMEOUT_ERROR', 'error_message': "oops {'error_code': 'TIMEOUT_ERROR'}", 'error_stage': None, 'failed_at': None}
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": None}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3344,23 +3271,46 @@ async def test_update_embedding_model_endpoint_branches(auth_data):
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_regex_fallback(auth_data):
-    with patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as mock_redis:
-        mock_redis.return_value.get_error_info.return_value = '{"bad":1, "error_code":"E123"'
-        response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
-    assert response.status_code == 200
-    assert response.json()["error_code"] == "E123"
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': 'E123', 'error_message': '{"bad":1, "error_code":"E123"', 'error_stage': None, 'failed_at': None}
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": None}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_regex_failure_returns_none(auth_data):
-    with patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
-            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as mock_redis, \
-            patch("management.api.knowledge_base.vectordatabase.re.search", side_effect=RuntimeError("regex boom")):
-        mock_redis.return_value.get_error_info.return_value = "not-json"
-        response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
-    assert response.status_code == 200
-    assert response.json()["error_code"] is None
+    """Preserve the public error payload after legacy error metadata has been archived."""
+    expected = {'status': 'success', 'error_code': None, 'error_message': 'not-json', 'error_stage': None, 'failed_at': None}
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
+            patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
+            patch("management.api.knowledge_base.vectordatabase.get_redis_service") as redis, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record") as native:
+        response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+                              params={}, headers=auth_data["auth_header"])
+    assert response.status_code == 200 and response.json() == expected
+    permission.assert_not_called()
+    read.assert_awaited_once()
+    args = read.await_args.args
+    assert args[:2] == (auth_data["index_name"], "knowledge_base/a.txt")
+    assert (args[2].user_id, args[2].tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+    assert read.await_args.kwargs == {"file_id": None}
+    redis.assert_not_called()
+    native.assert_not_called()
 
 
 # ============================================================================

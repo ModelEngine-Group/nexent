@@ -14,6 +14,8 @@ from pydantic import Field, model_validator
 
 INGESTION_DATASET = "knowledge_ingestion_files"
 LOCAL_SOURCE_DATASET = "management_local_sources"
+FILE_READ_DATASET = "management_file_lifecycle"
+FILE_KNOWLEDGE_READ_DATASET = "management_file_knowledge"
 
 
 class KnowledgeIngestionIntent(KnowledgeFileReference):
