@@ -50,6 +50,14 @@ def default_deletion_coordinator(coordinator):
     return DeletionCoordinator(coordinator.cleanse, coordinator.client)
 
 
+def default_base_deletion_coordinator(coordinator):
+    from management.services.knowledge_base.base_deletion_coordinator import (
+        KnowledgeBaseDeletionCoordinator,
+    )
+
+    return KnowledgeBaseDeletionCoordinator(default_deletion_coordinator(coordinator), coordinator.client)
+
+
 async def dispatch_once(coordinator, *, stop, cursor=None):
     if stop.is_set():
         return 0, cursor

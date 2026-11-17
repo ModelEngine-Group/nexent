@@ -30,6 +30,7 @@ from nexent.storage.models import (
     WriteReceipt,
 )
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 
 def _predicate(table, value):
@@ -230,7 +231,7 @@ class SQLRecordStore:
             raise CapabilityUnsupported(operation_id=context.operation_id)
         try:
             connection = self._engine.connect()
-        except DBAPIError:
+        except (DBAPIError, PoolTimeoutError):
             raise Unavailable(operation_id=context.operation_id) from None
         bound = SQLRecordStore(
             self.scope,

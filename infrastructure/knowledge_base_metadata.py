@@ -22,7 +22,7 @@ from infrastructure.rdb.knowledge_base_metadata import bind_base_metadata_record
 
 @contextmanager
 def knowledge_base_metadata_ports(actor, *, context):
-    engine, owned = record_engine(context), []
+    engine, owned = record_engine(context, connections=2), []
     try:
         scope = StorageScope('management', actor.tenant_id, actor.user_id, {
             KNOWLEDGE_ADMISSION_DATASET, UPLOAD_ADMISSION_DATASET, KNOWLEDGE_CONVERSATIONS,

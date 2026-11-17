@@ -56,7 +56,6 @@ from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
 from management.services.permission.identity.session import get_current_user_context, get_current_user_id
-from management.services.tag.library import TagManagementService
 from management.services.tag.projection import project_authorized_document_tags
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 from nexent.core.concurrency import run_blocking
@@ -217,7 +216,6 @@ async def get_knowledge_base_bound_agents(
 async def delete_index(
     http_request: Request,
     index_name: str = Path(..., description="Name of the index to delete"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Delete an index and all its related data by calling the centralized service."""
@@ -226,10 +224,7 @@ async def delete_index(
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
-        result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
-
-        TagManagementService.cleanup_resource_assignments(tenant_id, "knowledge_base", index_name, user_id)
-        TagManagementService.cleanup_document_assignments_for_knowledge_base(tenant_id, "local", index_name, user_id)
+        result = await ElasticSearchService.delete_knowledge_base(index_name, requested_by=user_id, tenant_id=tenant_id)
         record_security_event(
             "kb_index_delete",
             request=http_request,
@@ -241,6 +236,8 @@ async def delete_index(
     except AppException:
         # Preserve the EDS code/details for the common application handler.
         raise
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='No permission to modify this knowledge base') from exc
     except HTTPException:
         raise
     except TokenExpiredError as e:

@@ -85,6 +85,7 @@ from management.services.permission.api_keys import (
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
+    delete_knowledge_base_for_northbound,
     list_knowledge_files_for_northbound,
     delete_knowledge_document_for_northbound,
     generate_conversation_title,
@@ -843,14 +844,15 @@ async def delete_index(
     logger.debug("Received northbound request to delete knowledge base")
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-        return await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, ctx.user_id)
+        return await delete_knowledge_base_for_northbound(ctx=ctx, index_name=index_name)
     except AppException:
         # Preserve the EDS code/details for northbound clients.
         raise
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting index")
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL)
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='No permission to modify this knowledge base') from exc
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:

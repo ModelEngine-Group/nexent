@@ -37,3 +37,12 @@ async def test_adapter_propagates_resource_denial(monkeypatch):
             ctx=SimpleNamespace(user_id='editor', tenant_id='asset-tenant'), index_name='kb', path_or_url='key', scope='full',
         )
     invoke.assert_awaited_once()
+
+
+async def test_whole_base_adapter_keeps_actual_scope_and_original_success(monkeypatch):
+    expected = {'status': 'success', 'message': 'original result', 'minio_cleanup': {'deleted_count': 2}}
+    invoke = AsyncMock(return_value=expected)
+    monkeypatch.setattr(module.ElasticSearchService, 'delete_knowledge_base', invoke)
+    ctx = SimpleNamespace(user_id='editor', tenant_id='asset-tenant')
+    assert await module.delete_knowledge_base_for_northbound(ctx=ctx, index_name='kb') is expected
+    invoke.assert_awaited_once_with('kb', requested_by='editor', tenant_id='asset-tenant')

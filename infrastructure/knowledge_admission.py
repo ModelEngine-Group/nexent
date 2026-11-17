@@ -14,7 +14,7 @@ from infrastructure.rdb.knowledge_admission import bind_admission_records
 
 @contextmanager
 def knowledge_admission_ports(actor, *, context, readonly=False):
-    engine, owned = record_engine(context), []
+    engine, owned = record_engine(context, connections=2), []
     try:
         records = bind_admission_records(StorageScope('management', actor.tenant_id, actor.user_id, {KB, FILES}), engine,
                                          readonly=readonly)

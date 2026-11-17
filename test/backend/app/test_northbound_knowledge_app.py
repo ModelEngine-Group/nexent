@@ -54,6 +54,7 @@ northbound_service_module.upload_files_for_northbound = MagicMock()
 northbound_service_module.list_knowledge_files_for_northbound = AsyncMock(return_value={"files": []})
 northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_document_for_northbound = AsyncMock()
+northbound_service_module.delete_knowledge_base_for_northbound = AsyncMock()
 sys.modules["management.services.northbound"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
@@ -107,10 +108,6 @@ class _ElasticSearchServiceStub:
     @staticmethod
     def create_knowledge_base(*args, **kwargs):
         return {"index_name": kwargs["knowledge_name"]}
-
-    @staticmethod
-    async def full_delete_knowledge_base(*args, **kwargs):
-        return {"status": "success"}
 
     @staticmethod
     async def list_files(*args, **kwargs):
@@ -695,7 +692,7 @@ class TestIndexManagement:
     def test_delete_index_success(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.delete_knowledge_base_for_northbound",
             new_callable=AsyncMock,
             return_value={"status": "success"},
         ) as mock_delete:
@@ -713,7 +710,7 @@ class TestIndexManagement:
             details={"index_name": "kb1", "blocking_files": []},
         )
         with patch(
-            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.delete_knowledge_base_for_northbound",
             new_callable=AsyncMock,
             side_effect=expected,
         ):
@@ -735,7 +732,7 @@ class TestIndexManagement:
     ):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.delete_knowledge_base_for_northbound",
             new_callable=AsyncMock,
             side_effect=exception,
         ):

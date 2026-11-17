@@ -80,6 +80,13 @@ async def delete_knowledge_document_for_northbound(*, ctx, index_name, path_or_u
     return with_cleanup_summary(result) if scope == 'full' else result
 
 
+async def delete_knowledge_base_for_northbound(*, ctx, index_name):
+    """Keep the public Northbound result while passing the actual actor scope."""
+    return await ElasticSearchService.delete_knowledge_base(
+        index_name, requested_by=ctx.user_id, tenant_id=ctx.tenant_id,
+    )
+
+
 async def process_uploaded_knowledge_for_northbound(*, ctx, index_name, upload_result):
     """Adapt standard ingestion to the existing northbound upload response contract."""
     from management.services.knowledge_base.ingestion import submit_knowledge_files

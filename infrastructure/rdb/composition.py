@@ -4,13 +4,15 @@
 import logging
 from math import ceil
 
-from nexent.storage.errors import OutcomeUnknown
+from nexent.storage.errors import InvalidInput, OutcomeUnknown
 from sqlalchemy import URL, create_engine
 
 
-def record_engine(context, *, snapshot=False):
+def record_engine(context, *, snapshot=False, connections=1):
     from contracts.constants import environment
 
+    if type(connections) is not int or connections not in (1, 2):
+        raise InvalidInput()
     remaining = context.remaining()
     return create_engine(
         URL.create(
@@ -22,7 +24,7 @@ def record_engine(context, *, snapshot=False):
             database=environment.POSTGRES_DB,
         ),
         connect_args={"connect_timeout": max(1, ceil(min(5, remaining)))},
-        pool_size=1,
+        pool_size=connections,
         max_overflow=0,
         pool_timeout=min(5, remaining),
         hide_parameters=True,

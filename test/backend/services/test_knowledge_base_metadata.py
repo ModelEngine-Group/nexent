@@ -302,3 +302,22 @@ def test_late_revocation_or_cancellation_rolls_back_all_metadata(metadata, monke
     assert all(row['params']['index_names'] == ['kb-one', 'other'] for row in m.rows('tools'))
     assert all(row['delete_flag'] == 'N' for row in m.rows('tags'))
     assert len(m.rows('projections')) == 4
+
+
+@pytest.mark.parametrize('different_revision,expected', [(False, 1), (True, 2)])
+def test_source_summary_counts_confirmed_exact_resource_identities(metadata, different_revision, expected):
+    m = metadata
+    for number, file_id in enumerate(('b' * 32, 'c' * 32)):
+        source = {'space': 'files', 'key': 'source.txt', 'version': 'etag:' + str(number if different_revision else 0),
+                  'sha256': 'a' * 64}
+        intent = KnowledgeDeletionIntent(knowledge_id=1, file_id=file_id, file_version=0, user_id='user-a', scope='full',
+                                         index_name='kb-one', filename='source.txt', object_name='source.txt', source=source)
+        m.s.records.create(FILES, {'file_id': file_id, 'knowledge_id': 1, 'index_name': 'kb-one',
+                                   'status': 'DELETED', 'stage': 'DELETE_DONE', 'original_filename': 'source.txt',
+                                   'object_name': 'source.txt', 'source_generation': 0, 'processing_attempt': 0,
+                                   'deletion_request': intent.model_dump(mode='json'), 'deleted_vector_count': 0,
+                                   'source_space': source['space'], 'source_key': source['key'],
+                                   'source_revision': source['version'], 'source_sha256': source['sha256']}, context=context())
+    result = finalize_knowledge_base_deletion(m.records, m.s.authorized, m.row, m.s.actor, context=context())
+    assert result['metadata_cleanup']['files_deleted'] == 2
+    assert result['metadata_cleanup']['source_objects_deleted'] == expected

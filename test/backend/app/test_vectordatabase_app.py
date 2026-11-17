@@ -422,7 +422,7 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
+            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
 
@@ -443,7 +443,7 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
         }
         redis_service_mock.delete_knowledgebase_records.return_value = redis_result
 
-        # Setup full_delete_knowledge_base to return a complete response
+        # Setup delete_knowledge_base to return a complete response
         mock_full_delete.return_value = {
             "status": "success",
             "message": f"Index {auth_data['index_name']} deleted successfully. MinIO: 0 files deleted, 0 failed. Redis: Cleaned up 10 records.",
@@ -475,19 +475,14 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
         assert "redis_cleanup" in actual_response
         assert "minio_cleanup" in actual_response
 
-        # Verify full_delete_knowledge_base was called with the correct parameters
+        # Verify delete_knowledge_base was called with the correct parameters
         # Use ANY for the vdb_core parameter because the actual object may differ
         mock_full_delete.assert_called_once_with(
             auth_data["index_name"],
-            ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
-            auth_data["user_id"]
+            requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"]
         )
-        cleanup_resource.assert_called_once_with(
-            auth_data["tenant_id"], "knowledge_base", auth_data["index_name"], auth_data["user_id"]
-        )
-        cleanup_documents.assert_called_once_with(
-            auth_data["tenant_id"], "local", auth_data["index_name"], auth_data["user_id"]
-        )
+        cleanup_resource.assert_not_called()
+        cleanup_documents.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -502,7 +497,7 @@ async def test_delete_index_preserves_eds_blocking_error(vdb_core_mock, auth_dat
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base",
+            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base",
                   new_callable=AsyncMock,
                   side_effect=AppException(ErrorCode.KNOWLEDGE_DELETE_BLOCKED,
                                             details=blocking_details)):
@@ -525,7 +520,7 @@ async def test_delete_index_forbidden_for_read_only(vdb_core_mock, auth_data):
                 side_effect=PermissionError("No permission to modify this knowledge base"),
             ) as mock_require_permission, \
             patch(
-                "management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base",
+                "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base",
                 new_callable=AsyncMock,
             ) as mock_full_delete:
 
@@ -556,7 +551,7 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_index") as mock_delete, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
+            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
 
@@ -573,7 +568,7 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
         redis_service_mock.delete_knowledgebase_records.side_effect = Exception(
             redis_error_message)
 
-        # Setup full_delete_knowledge_base to return a response with redis error
+        # Setup delete_knowledge_base to return a response with redis error
         mock_full_delete.return_value = {
             "status": "success",
             "message": f"Index {auth_data['index_name']} deleted successfully, but Redis cleanup encountered an error: {redis_error_message}",
@@ -610,12 +605,11 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
         assert "error" in actual_response["message"].lower(
         ) or "error" in str(actual_response).lower()
 
-        # Verify full_delete_knowledge_base was called with the correct parameters
+        # Verify delete_knowledge_base was called with the correct parameters
         # Use ANY for the vdb_core parameter because the actual object may differ
         mock_full_delete.assert_called_once_with(
             auth_data["index_name"],
-            ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
-            auth_data["user_id"]
+            requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"]
         )
 
 
@@ -1991,7 +1985,7 @@ async def test_delete_index_exception(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete:
+            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete:
 
         # Setup the mock to raise an exception
         mock_full_delete.side_effect = Exception("Database connection failed")
@@ -2007,11 +2001,10 @@ async def test_delete_index_exception(vdb_core_mock, auth_data):
         expected_error_detail = f"Error deleting index: Database connection failed"
         assert response.json() == {"detail": expected_error_detail}
 
-        # Verify full_delete_knowledge_base was called with the correct parameters
+        # Verify delete_knowledge_base was called with the correct parameters
         mock_full_delete.assert_called_once_with(
             auth_data["index_name"],
-            ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
-            auth_data["user_id"]
+            requested_by=auth_data["user_id"], tenant_id=auth_data["tenant_id"]
         )
 
 
@@ -3329,7 +3322,7 @@ class TestVectordatabaseAuditEntries:
         with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
                 patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                       return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.full_delete_knowledge_base",
+                patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base",
                       new_callable=AsyncMock, return_value={"message": "deleted"}), \
                 patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
                 patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):

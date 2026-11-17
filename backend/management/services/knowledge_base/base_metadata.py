@@ -161,6 +161,7 @@ def finalize_knowledge_base_deletion(records, resources, previous, actor, *, con
                                 actor, context=context)
         counts = _remove_bindings(transaction, row, context)
         counts.update(tag_assignments_deleted=0, tag_projections_deleted=0, files_deleted=0)
+        sources = set()
         for tag in _rows(transaction, TAGS, ('assignment_id',), context=context,
                          where=Comparison('resource_type', 'in', ['knowledge_base', 'knowledge_document'])):
             selected = tag['resource_id'] == row['index_name'] if tag['resource_type'] == 'knowledge_base' else (
@@ -175,9 +176,12 @@ def finalize_knowledge_base_deletion(records, resources, previous, actor, *, con
             counts['tag_projections_deleted'] += 1
         for file in _rows(transaction, FILES, ('file_id',), context=context,
                           where=Comparison('knowledge_id', 'eq', row['knowledge_id'])):
+            if file['source_key'] is not None:
+                sources.add((file['source_space'], file['source_key'], file['source_revision']))
             _confirmed(transaction.delete(FILES, file['file_id'], expected=Revision(str(file['version'])), context=context),
                         context, delete=True)
             counts['files_deleted'] += 1
+        counts['source_objects_deleted'] = len(sources)
         KnowledgeFileAuthorization(resources, user_id=actor.user_id).resolve_knowledge(
             row['knowledge_id'], edit=True, cleanup=True, context=context,
         )
