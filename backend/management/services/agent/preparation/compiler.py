@@ -683,7 +683,7 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
                 )
             except Exception as exc:
                 logger.warning("event=memory_recall_hits_skipped error_type=%s", type(exc).__name__)
-        return long_term_items, _create_fixed_search_memory_tool()._format_context(context)
+        return long_term_items, _create_fixed_search_memory_tool().format_search_context(context, external)
     except Exception as exc:
         logger.warning("event=memory_context_selection_failed error_type=%s", type(exc).__name__)
         return long_term_items, None
