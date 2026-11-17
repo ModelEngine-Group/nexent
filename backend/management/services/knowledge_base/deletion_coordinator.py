@@ -71,7 +71,7 @@ class DeletionCoordinator:
         journal = DeletionJournal(records)
         row = journal.record(file_id, context=context)
         knowledge = KnowledgeFileAuthorization(resources, user_id=actor.user_id).resolve_knowledge(
-            row['knowledge_id'], edit=True, context=context,
+            row['knowledge_id'], edit=True, cleanup=True, context=context,
         )
         if row['tenant_id'] != actor.tenant_id or row['index_name'] != knowledge['index_name']:
             raise ScopeDenied()
@@ -121,7 +121,7 @@ class DeletionCoordinator:
                 raise ScopeDenied()
             current = DeletionJournal(records).record(row['file_id'], context=context)
             knowledge = KnowledgeFileAuthorization(resources, user_id=actor.user_id).resolve_knowledge(
-                current['knowledge_id'], edit=True, context=context,
+                current['knowledge_id'], edit=True, cleanup=True, context=context,
             )
             if (current['tenant_id'] != actor.tenant_id or current['index_name'] != knowledge['index_name']
                     or current['knowledge_id'] != row['knowledge_id']):

@@ -120,7 +120,7 @@ def prepare_deletion(records, resources, index_name, path, scope, actor, *, file
             raise ScopeDenied()
     authorization = KnowledgeFileAuthorization(resources, user_id=actor.user_id)
     knowledge = authorization._one('cleanse_knowledge', 'index_name', index_name, context)
-    authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, context=context)
+    authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, cleanup=True, context=context)
     terms = [Comparison('knowledge_id', 'eq', knowledge['knowledge_id']), Comparison('index_name', 'eq', index_name)]
     if file_id is not None:
         try:

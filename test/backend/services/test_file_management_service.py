@@ -86,7 +86,7 @@ sys.modules['management.services.knowledge_base.storage'] = knowledge_storage_st
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
 
 
-def _stub_create_file_records(specs):
+async def _stub_admit_knowledge_uploads(specs, *, actor):
     """Return deterministic lifecycle rows for service tests outside the repository layer."""
     return [
         {
@@ -133,8 +133,8 @@ def setup_patches():
         patch('management.db.file.attachment.get_file_stream', MagicMock()),
         patch('management.db.file.attachment.delete_file', MagicMock()),
         patch('management.db.file.attachment.list_files', MagicMock()),
-        patch_import_context('management.services.file.service.create_file_records',
-              side_effect=_stub_create_file_records),
+        patch_import_context('management.services.file.service.admit_knowledge_uploads',
+              side_effect=_stub_admit_knowledge_uploads),
         patch_import_context('management.services.file.service.transition_file_record',
               side_effect=_stub_transition_file_record),
         patch_import_context('management.services.file.service.get_file_size_from_minio', MagicMock(return_value=0)),
@@ -455,7 +455,7 @@ class TestUploadFilesImpl:
             return dict(current)
 
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=records), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=minio_results)), \
                 patch_import_context("management.services.file.service.get_vector_db_core", MagicMock()), \
@@ -473,8 +473,8 @@ class TestUploadFilesImpl:
                 list_files_payload={"files": []}, transitions=[], context=context):
             result = await upload_files_impl(destination="minio", file=[upload], folder="knowledge_base", index_name="kb",
                                              user_id="u", uploader_tenant_id="t", lifecycle_file_ids=[target])
-            file_management_service.create_file_records.assert_called_once()
-            spec = file_management_service.create_file_records.call_args.args[0][0]
+            file_management_service.admit_knowledge_uploads.assert_called_once()
+            spec = file_management_service.admit_knowledge_uploads.call_args.args[0][0]
             assert spec["file_id"] == target and spec["tenant_id"] == "t" and spec["knowledge_id"] == 7
             quota = sys.modules["management.services.knowledge_base.quota"].QuotaService.return_value
             quota.check_hard_limit.assert_called_once_with(4, index_name="kb")
@@ -530,7 +530,7 @@ class TestUploadFilesImpl:
         """The conflict scan must not treat the current batch's lifecycle rows as existing documents.
 
         list_files merges durable lifecycle rows into the file list, so right after
-        create_file_records the upload's own row is visible there. Without the
+        admit_knowledge_uploads the upload's own row is visible there. Without the
         batch exclusion every first upload of a name renamed itself to <name>_1.
         """
         records = [
@@ -648,7 +648,7 @@ class TestUploadFilesImpl:
         quota_module = types.ModuleType("management.services.knowledge_base.quota")
         quota_module.QuotaService = FakeQuota
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[record]) as create_records, \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition) as transition_record, \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-1", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3}
@@ -685,7 +685,7 @@ class TestUploadFilesImpl:
             ingroup_permission="SHARED",
         )
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records",
+                patch_import_context("management.services.file.service.admit_knowledge_uploads",
                       side_effect=RuntimeError("lifecycle table unavailable")), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock:
             with pytest.raises(RuntimeError, match="lifecycle table unavailable"):
@@ -718,12 +718,12 @@ class TestUploadFilesImpl:
 
         monkeypatch.setitem(sys.modules, "management.services.knowledge_base.quota", quota_module)
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[record]) as create_records, \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
                 patch_import_context("management.services.file.service.transition_file_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt"}
                 ])):
-            result = await upload_files_impl(destination="minio", file=uploads, folder="folder")
+            result = await upload_files_impl(destination="minio", file=uploads, folder="folder", user_id="user-1")
 
         assert result[1] == ["folder/a.txt"]
         specs = create_records.call_args.args[0]
@@ -738,10 +738,10 @@ class TestUploadFilesImpl:
             tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1"
         )
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[]), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[]), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock:
             with pytest.raises(RuntimeError, match="incomplete result"):
-                await upload_files_impl(destination="minio", file=[upload], folder="folder")
+                await upload_files_impl(destination="minio", file=[upload], folder="folder", user_id="user-1")
 
         upload_mock.assert_not_awaited()
 
@@ -789,7 +789,7 @@ class TestUploadFilesImpl:
         quota_module = types.ModuleType("management.services.knowledge_base.quota")
         quota_module.QuotaService = FakeQuota
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=records), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {
@@ -841,12 +841,12 @@ class TestUploadFilesImpl:
         quota_module = types.ModuleType("management.services.knowledge_base.quota")
         quota_module.QuotaService = FakeQuota
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[record]), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
                 patch_import_context("management.services.file.service.transition_file_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock, \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
             with pytest.raises(QuotaExceededError, match="quota exceeded"):
-                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1")
 
         transition.assert_called_once()
         assert transition.call_args.kwargs["status"] == "FAILED"
@@ -885,7 +885,7 @@ class TestUploadFilesImpl:
         quota_module = types.ModuleType("management.services.knowledge_base.quota")
         quota_module.QuotaService = FakeQuota
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[record]), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
                 patch_import_context("management.services.file.service.transition_file_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(side_effect=[
                     [{"success": False, "file_id": "fid-upload", "file_name": "broken.txt", "error": "read failed"}],
@@ -894,13 +894,13 @@ class TestUploadFilesImpl:
                 patch_import_object_context(knowledge_storage_stub, "commit_uploaded_object", side_effect=RuntimeError("commit failed")), \
                 patch_import_object_context(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
-            result = await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+            result = await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1")
             assert transition.call_args_list[0].kwargs["error_code"] == "000402"
             assert transition.call_args_list[0].kwargs["error_message"] is None
             assert result[0] == ["Failed to upload broken.txt: read failed"]
 
         with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
-                patch_import_context("management.services.file.service.create_file_records", return_value=[{"file_id": "fid-commit", "object_name": "folder/commit.txt", "status": "UPLOADING"}]), \
+                patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[{"file_id": "fid-commit", "object_name": "folder/commit.txt", "status": "UPLOADING"}]), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=[
                     {"file_id": "fid-commit", "status": "UPLOADED"},
                     {"file_id": "fid-commit", "status": "FAILED"},
@@ -912,7 +912,7 @@ class TestUploadFilesImpl:
                 patch_import_object_context(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
             with pytest.raises(RuntimeError, match="post-write failed"):
-                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1")
 
         assert commit_transition.call_args_list[-1].kwargs["stage"] == "STORAGE_COMMIT"
         assert commit_transition.call_args_list[-1].kwargs["error_code"] == "060107"
@@ -1696,8 +1696,7 @@ class TestUploadQuotaEnforcement:
                 destination="minio",
                 file=[first, second],
                 index_name="kb-index",
-                uploader_tenant_id="tenant-id",
-            )
+                uploader_tenant_id="tenant-id", user_id="user-1")
 
         quota_service.check_hard_limit.assert_called_once_with(
             500,
@@ -1731,8 +1730,7 @@ class TestUploadQuotaEnforcement:
                 destination="minio",
                 file=[upload],
                 index_name="kb-index",
-                uploader_tenant_id="tenant-id",
-            )
+                uploader_tenant_id="tenant-id", user_id="user-1")
 
         quota_service.check_hard_limit.assert_called_once_with(
             len(b"spooled-content"),
@@ -1763,8 +1761,7 @@ class TestUploadQuotaEnforcement:
                 destination="minio",
                 file=[upload],
                 index_name="kb-index",
-                uploader_tenant_id="tenant-id",
-            )
+                uploader_tenant_id="tenant-id", user_id="user-1")
 
         quota_service.check_hard_limit.assert_called_once_with(
             len(b"actual-content"),
@@ -1798,8 +1795,7 @@ class TestUploadQuotaEnforcement:
                     destination="minio",
                     file=uploads,
                     index_name="kb-index",
-                    uploader_tenant_id="tenant-id",
-                )
+                    uploader_tenant_id="tenant-id", user_id="user-1")
 
         assert raised.value is quota_error
         quota_service.check_hard_limit.assert_called_once_with(
@@ -1871,8 +1867,7 @@ class TestUploadQuotaEnforcement:
                     destination="minio",
                     file=[upload],
                     index_name="kb-index",
-                    uploader_tenant_id="tenant-id",
-                )
+                    uploader_tenant_id="tenant-id", user_id="user-1")
 
         assert raised.value is failure
         knowledge_storage_stub.compensate_uploaded_objects.assert_called_once_with(
@@ -1881,7 +1876,7 @@ class TestUploadQuotaEnforcement:
                 "knowledge_base/quota.txt",
                 "knowledge_base/quota-2.txt",
             ],
-            updated_by=None,
+            updated_by="user-1",
         )
         assert quota_service.invalidate_usage_cache.call_count == 2
         quota_service.invalidate_usage_cache.assert_called_with("tenant-id")
@@ -1920,8 +1915,7 @@ class TestUploadQuotaEnforcement:
                 destination="minio",
                 file=uploads,
                 index_name="kb-index",
-                uploader_tenant_id="tenant-id",
-            )
+                uploader_tenant_id="tenant-id", user_id="user-1")
 
         knowledge_storage_stub.commit_uploaded_object.assert_not_called()
         assert set(result[1]) == {"knowledge_base/object-a", "knowledge_base/object-b"}

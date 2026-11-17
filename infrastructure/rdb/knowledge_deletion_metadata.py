@@ -39,15 +39,22 @@ knowledge = sa.Table(
     sa.Column('updated_by', sa.String(100), comment='Existing last updating actor'),
     sa.Column('delete_flag', sa.String(1), comment='Existing soft-delete marker'),
     sa.Column('version', sa.Integer, nullable=False, server_default='0', comment='Revision for StorageInterface metadata updates'),
+    sa.Column('deletion_request', sa.JSON, nullable=True, comment='Management-owned KB deletion admission snapshot'),
+    sa.Column('embedding_model_id', sa.Integer),
+    sa.Column('group_ids', sa.String),
+    sa.Column('ingroup_permission', sa.String(30)),
+    sa.Column('knowledge_sources', sa.String(300)),
     schema='nexent',
 )
 
 
 def metadata_catalog():
+    names = ('knowledge_id', 'tenant_id', 'index_name', 'last_doc_update_time', 'create_time', 'update_time',
+             'created_by', 'updated_by', 'delete_flag', 'version')
     definition = DatasetDefinition(
         DELETION_KNOWLEDGE_DATASET, 'knowledge_id',
         tuple(FieldDefinition(c.name, 'integer' if c.name in {'knowledge_id', 'version'} else 'string', nullable=c.nullable)
-              for c in knowledge.c),
+              for c in (knowledge.c[name] for name in names)),
         frozenset({'management'}), frozenset({'management'}), tenant_field='tenant_id', active_field='delete_flag',
     )
     return definition, knowledge, RecordAudit('create_time', 'update_time', 'created_by', 'updated_by',

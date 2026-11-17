@@ -22,7 +22,8 @@ from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
 from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_size_from_minio_strict, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj
-from management.db.knowledge_base.file_lifecycle import create_file_records, transition_file_record
+from management.db.knowledge_base.file_lifecycle import transition_file_record
+from management.services.file.upload_admission import admit_knowledge_uploads
 from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -30,7 +31,7 @@ from management.services.model.names import get_model_name_from_config
 from contracts.errors.ingestion import ingestion_error_fields
 from infrastructure.trace.knowledge import trace_knowledge_operation
 from management.services.file.source_upload import upload_knowledge_source
-from nexent.storage.errors import OutcomeUnknown
+from nexent.storage.errors import OutcomeUnknown, ScopeDenied
 
 
 # Create upload directory
@@ -294,6 +295,8 @@ async def upload_files_impl(
         from management.services.knowledge_base.storage import resolve_storage_context
 
         storage_context = resolve_storage_context(index_name, uploader_tenant_id)
+        if index_name and _is_knowledge_base_upload(folder, index_name) and storage_context is None:
+            raise ScopeDenied()
         if lifecycle_file_ids is not None:
             import re
 
@@ -333,7 +336,11 @@ async def upload_files_impl(
                 # Lifecycle persistence is a required upload precondition. The
                 # repository creates the whole batch in one transaction; any
                 # database error must stop before MinIO is touched.
-                lifecycle_records = create_file_records(lifecycle_record_specs)
+                from infrastructure.agentos_identity import ServicePrincipal
+
+                lifecycle_records = await admit_knowledge_uploads(
+                    lifecycle_record_specs, actor=ServicePrincipal(user_id, storage_context.tenant_id),
+                )
                 if len(lifecycle_records) != len(lifecycle_record_indices):
                     raise RuntimeError("Lifecycle record batch creation returned an incomplete result")
                 lifecycle_records_by_index = dict(

@@ -4,7 +4,7 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nexent.storage.errors import OutcomeUnknown
+from nexent.storage.errors import OutcomeUnknown, ScopeDenied
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
     mocker.patch.object(
         service, "_get_complete_upload_batch_size", new=AsyncMock(return_value=6)
     )
-    mocker.patch.object(service, "create_file_records", return_value=[record])
+    mocker.patch.object(service, "admit_knowledge_uploads", new=AsyncMock(return_value=[record]))
     mocker.patch.object(
         service, "generate_object_name", return_value=record["object_name"]
     )
@@ -128,3 +128,20 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
         assert transition.call_args.kwargs["status"] == "UPLOADED"
     errors, paths, names = result
     assert errors and not paths and not names
+
+
+@pytest.mark.parametrize('folder', ['knowledge_base', None])
+async def test_deleted_or_missing_knowledge_cannot_fall_through_to_unowned_upload(mocker, folder):
+    from management.services.file import service
+    from management.services.knowledge_base import storage
+
+    mocker.patch.object(storage, 'resolve_storage_context', return_value=None)
+    mocker.patch.object(service, '_validate_knowledge_file_sizes', new=AsyncMock())
+    mocker.patch.object(service, 'resolve_minio_upload_folder', return_value='knowledge_base')
+    admit = mocker.patch.object(service, 'admit_knowledge_uploads', new=AsyncMock())
+    upload = mocker.patch.object(service, 'upload_to_minio', new=AsyncMock())
+    with pytest.raises(ScopeDenied):
+        await service.upload_files_impl('minio', [Mock(filename='source.txt')], folder=folder,
+                                        index_name='deleted-kb', user_id='user-a', uploader_tenant_id='tenant-a')
+    admit.assert_not_called()
+    upload.assert_not_called()

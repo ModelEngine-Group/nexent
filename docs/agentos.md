@@ -234,4 +234,6 @@ Management 源/产物清理、KB 多模态入库、旧检索语义对照及业�
 
 普通与 Northbound 文档删除已统一进入 Management 的持久删除协调器，公开路径和参数保持。full 经标准 File.delete/inspect 确认 Runtime 向量清理，再等待本地清洗排空、源对象与账本终态；source_only 保留 Runtime 向量和文件身份。公开调用共用十秒预算，提交结果未知时返回 pending，后续只查询固定任务，不自动重发。Northbound 响应适配由 northbound service 负责。旧源和旧 ES 数据仍需先完成退役 SPEC 的历史迁移，未经核实的历史文件在接纳前拒绝；当前切换不能作为历史清理完成的证明。
 
+Management 的 KB 上传批次已通过 StorageInterface 原子接纳，上传更新并锁住 KB revision 后复核删除意图，合法并发上传顺序提交。KB 删除意图只保存在 Management；标准授权拒绝新的执行与读取，文件 delete/inspect 和清洗取消仍按当前资源权限完成清理，没有新增 AgentOS operation。KB 整体删除的公开执行链仍待切换，删除意图和上传接纳的并发证明不能替代整个 KB 的物理清理验收。
+
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

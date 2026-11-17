@@ -10,8 +10,8 @@ from infrastructure.rdb.account_record import (
     UserAccount,
     UserTenant,
 )
+from infrastructure.rdb.knowledge_deletion_metadata import knowledge
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
-from infrastructure.rdb.knowledge_search_records import KnowledgeRecord
 from infrastructure.rdb.record_store import SQLRecordStore
 from infrastructure.storage.catalog import (
     DatasetCatalog,
@@ -26,7 +26,7 @@ groups = TenantGroupInfo.__table__
 TABLES = {
     "cleanse_files": KnowledgeFileLifecycle.__table__,
     "knowledge_file_history": KnowledgeFileLifecycle.__table__,
-    "cleanse_knowledge": KnowledgeRecord.__table__,
+    "cleanse_knowledge": knowledge,
     "cleanse_memberships": UserTenant.__table__,
     "cleanse_accounts": select(
         accounts.c.account_id,
@@ -52,7 +52,7 @@ TABLES = {
 }
 FIELDS = {
     "cleanse_files": "file_id tenant_id knowledge_id original_filename status source_generation source_space source_key source_revision source_sha256 bucket_name object_name local_source_path deletion_request delete_flag",
-    "cleanse_knowledge": "knowledge_id tenant_id index_name embedding_model_id created_by group_ids ingroup_permission knowledge_sources delete_flag",
+    "cleanse_knowledge": "knowledge_id tenant_id index_name embedding_model_id created_by group_ids ingroup_permission knowledge_sources deletion_request delete_flag",
     "cleanse_memberships": "user_tenant_id user_id tenant_id delete_flag",
     "cleanse_accounts": "account_id tenant_id user_id user_roles delete_flag",
     "cleanse_group_memberships": "group_user_id tenant_id user_id group_id delete_flag",

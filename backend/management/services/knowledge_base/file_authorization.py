@@ -52,7 +52,7 @@ class KnowledgeFileAuthorization:
             groups = [group["group_id"] for group in page.items]
         return {**member, "user_roles": account["user_roles"]}, groups
 
-    def resolve_knowledges(self, knowledge_ids, *, edit, context):
+    def resolve_knowledges(self, knowledge_ids, *, edit, context, cleanup=False):
         member, groups = self.identity(context=context)
         page = self.records.query(
             "cleanse_knowledge", RecordQuery(where=Comparison("knowledge_id", "in", knowledge_ids)),
@@ -72,16 +72,18 @@ class KnowledgeFileAuthorization:
             speed_mode=False,
         )
         for row in rows.values():
+            if not cleanup and row['deletion_request'] is not None:
+                raise ScopeDenied()
             permission = permissions[row["index_name"]]
             if permission is None or edit and permission not in {"EDIT", "CREATOR"}:
                 raise ScopeDenied()
         return [rows[key] for key in knowledge_ids]
 
-    def resolve_knowledge(self, knowledge_id, *, edit, context):
-        return self.resolve_knowledges([knowledge_id], edit=edit, context=context)[0]
+    def resolve_knowledge(self, knowledge_id, *, edit, context, cleanup=False):
+        return self.resolve_knowledges([knowledge_id], edit=edit, context=context, cleanup=cleanup)[0]
 
-    def resolve(self, reference, *, edit, context, history=False):
-        knowledge = self.resolve_knowledge(reference.knowledge_id, edit=edit, context=context)
+    def resolve(self, reference, *, edit, context, history=False, cleanup=False):
+        knowledge = self.resolve_knowledge(reference.knowledge_id, edit=edit, context=context, cleanup=cleanup)
         file = self._one(
             "knowledge_file_history" if history else "cleanse_files", "file_id", reference.file_id, context,
         )

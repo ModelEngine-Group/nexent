@@ -29,6 +29,7 @@ class KnowledgeAuthorization:
             request,
             edit=request.action != "inspect",
             history=not execution,
+            cleanup=not execution,
             context=context,
         )
         source = None

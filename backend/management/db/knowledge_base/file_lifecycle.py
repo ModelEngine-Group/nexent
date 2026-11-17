@@ -7,91 +7,12 @@ from __future__ import annotations
 from contracts.constants.constants import ACTIVE_STATUSES, HIDDEN_STATUSES
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
-from uuid import uuid4
 
 from sqlalchemy import and_, or_
 
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import KnowledgeFileLifecycle
-
-
-def new_file_id() -> str:
-    """Generate a stable, opaque file ID without exposing object paths."""
-    return uuid4().hex
-
-
-def create_file_record(
-    *,
-    file_id: Optional[str],
-    tenant_id: str,
-    knowledge_id: int,
-    index_name: str,
-    original_filename: str,
-    bucket_name: Optional[str] = None,
-    object_name: Optional[str] = None,
-    file_size: Optional[int] = None,
-    upload_owner_service: Optional[str] = None,
-    status: str = "UPLOADING",
-    stage: str = "UPLOAD",
-    created_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Create one lifecycle record before upload; filename may later be made unique."""
-    row = KnowledgeFileLifecycle(
-        file_id=file_id or new_file_id(),
-        tenant_id=str(tenant_id),
-        knowledge_id=int(knowledge_id),
-        index_name=index_name,
-        original_filename=original_filename or "",
-        bucket_name=bucket_name,
-        object_name=object_name,
-        file_size=file_size,
-        upload_owner_service=upload_owner_service,
-        status=status,
-        stage=stage,
-        created_by=created_by,
-        updated_by=created_by,
-    )
-    with get_db_session() as session:
-        session.add(row)
-        session.flush()
-        return as_dict(row)
-
-
-def create_file_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Create a batch of lifecycle records in one transaction.
-
-    The upload workflow must not persist a partial batch.  Keeping the whole
-    insert in one session means a constraint or database failure rolls back
-    every row before any object is written to MinIO.
-    """
-    rows = []
-    for record in records:
-        rows.append(
-            KnowledgeFileLifecycle(
-                file_id=record.get("file_id") or new_file_id(),
-                tenant_id=str(record["tenant_id"]),
-                knowledge_id=int(record["knowledge_id"]),
-                index_name=record["index_name"],
-                original_filename=record.get("original_filename") or "",
-                bucket_name=record.get("bucket_name"),
-                object_name=record.get("object_name"),
-                file_size=record.get("file_size"),
-                upload_owner_service=record.get("upload_owner_service"),
-                status=record.get("status", "UPLOADING"),
-                stage=record.get("stage", "UPLOAD"),
-                created_by=record.get("created_by"),
-                updated_by=record.get("updated_by", record.get("created_by")),
-            )
-        )
-
-    if not rows:
-        return []
-
-    with get_db_session() as session:
-        session.add_all(rows)
-        session.flush()
-        return [as_dict(row) for row in rows]
 
 
 def get_file_record(
@@ -301,51 +222,3 @@ def delete_file_records_for_knowledge_base(
         if knowledge_id is not None:
             query = query.filter(KnowledgeFileLifecycle.knowledge_id == int(knowledge_id))
         return int(query.delete(synchronize_session=False) or 0)
-
-
-def create_delete_tombstone(
-    *,
-    tenant_id: str,
-    knowledge_id: int,
-    index_name: str,
-    object_name: str,
-    original_filename: str = "",
-    file_id: Optional[str] = None,
-    requested_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Create or update a hidden tombstone for legacy paths."""
-    existing = get_file_record(
-        file_id=file_id,
-        tenant_id=tenant_id,
-        index_name=index_name,
-        object_name=object_name,
-        include_hidden=True,
-    )
-    if existing:
-        if str(existing.get("status") or "").upper() == "DELETED":
-            return existing
-        updated = transition_file_record(
-            existing["file_id"],
-            status="DELETE_REQUESTED",
-            stage="DELETE",
-            updated_by=requested_by,
-        )
-        return updated or existing
-    created = create_file_record(
-        file_id=file_id,
-        tenant_id=tenant_id,
-        knowledge_id=knowledge_id,
-        index_name=index_name,
-        original_filename=original_filename,
-        object_name=object_name,
-        status="DELETE_REQUESTED",
-        stage="DELETE",
-        created_by=requested_by,
-    )
-    return (
-        transition_file_record(
-            created["file_id"],
-            updated_by=requested_by,
-        )
-        or created
-    )

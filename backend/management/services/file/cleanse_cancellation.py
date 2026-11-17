@@ -25,7 +25,7 @@ def cancel_knowledge_executions(jobs, resources, reference, *, user_id, context)
     ):
         raise ScopeDenied()
     file, _ = KnowledgeFileAuthorization(resources, user_id=user_id).resolve(
-        reference, edit=True, history=True, context=context,
+        reference, edit=True, history=True, cleanup=True, context=context,
     )
     if file["status"] != "DELETE_REQUESTED" or file.get("deletion_request") is None:
         raise ScopeDenied()
