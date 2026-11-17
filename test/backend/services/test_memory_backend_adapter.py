@@ -574,7 +574,7 @@ def test_backend_search_hook_serializes_string_layer(fake_retrieval_service):
 
 
 def test_build_memory_service_for_fa_extraction_returns_memory_service():
-    svc = memory_backend_adapter.build_memory_service_for_fa_extraction()
+    svc = memory_backend_adapter.build_memory_service_for_fa_extraction(tenant_id="t", user_id="u", agent_id="a")
     assert isinstance(svc, MemoryService)
     assert callable(svc.kwargs.get("backend_store"))
     assert svc.kwargs.get("backend_search") is None

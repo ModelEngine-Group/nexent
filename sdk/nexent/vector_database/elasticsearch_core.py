@@ -1029,7 +1029,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             )
             raise
 
-    def search(self, index_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
+    def search(
+        self, index_name: str, query: Dict[str, Any], *, request_timeout: float | None = None,
+    ) -> Dict[str, Any]:
         """
         Execute a search query on an index.
 
@@ -1040,7 +1042,10 @@ class ElasticSearchCore(VectorDatabaseCore):
         Returns:
             Dict containing search results
         """
-        return self.client.search(index=index_name, body=query)
+        client = self.client
+        if request_timeout is not None:
+            client = client.options(request_timeout=request_timeout, max_retries=0, retry_on_timeout=False)
+        return client.search(index=index_name, body=query)
 
     def multi_search(self, body: List[Dict[str, Any]], index_name: str) -> Dict[str, Any]:
         """

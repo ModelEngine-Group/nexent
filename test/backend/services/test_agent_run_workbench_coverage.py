@@ -148,7 +148,9 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     create_run = AsyncMock(return_value=run_info)
     register = MagicMock()
 
-    monkeypatch.setattr(agent_run, "build_memory_context", MagicMock(return_value="memory"))
+    prepared_memory = SimpleNamespace(user_config=SimpleNamespace(memory_switch=False))
+    executable_config.automatic_memory_enabled = not is_debug
+    monkeypatch.setattr(agent_run, "build_memory_context", MagicMock(return_value=prepared_memory))
     monkeypatch.setattr(agent_run, "create_agent_run_info", create_run)
     monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=41))
     monkeypatch.setattr(agent_run, "load_historical_context", MagicMock(return_value=SimpleNamespace(turns=[], summaries=[], items=[])))
@@ -199,7 +201,8 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     register.assert_called_once_with(
         123, result, "user-a", reservation_token="reservation-a"
     )
-    assert memory == "memory"
+    assert memory is prepared_memory
+    assert memory.user_config.memory_switch is not is_debug
 
 
 @pytest.mark.asyncio

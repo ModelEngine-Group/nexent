@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime
+from time import monotonic
 from typing import Any, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
@@ -126,6 +127,7 @@ class MemoryRetrievalService:
         *,
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
         write_hits: bool = True,
+        deadline: float | None = None,
     ) -> List[MemorySearchResult]:
         """Run a retrieval against the requested layers.
 
@@ -153,6 +155,7 @@ class MemoryRetrievalService:
                         layer=layer.value,
                         top_k=top_k,
                         embedding_model_info=embedding_model_info,
+                        **({"deadline": deadline} if deadline is not None else {}),
                     )
                 )
             else:
@@ -248,6 +251,7 @@ class MemoryRetrievalService:
         layer: str,
         top_k: int,
         embedding_model_info: Optional[EmbeddingModelInfo],
+        deadline: float | None = None,
     ) -> List[MemorySearchResult]:
         embedding = request.embedding
         if embedding is None or not embedding_model_info:
@@ -280,6 +284,12 @@ class MemoryRetrievalService:
                     "Failed to build embedding client for hybrid: search_similar will fall back to kNN.",
                 )
 
+        timeout_options = {}
+        if deadline is not None:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return []
+            timeout_options = {"request_timeout": remaining}
         raw_hits = self.index_service.search_similar(
             index_name=index_name,
             embedding=list(embedding),
@@ -292,6 +302,7 @@ class MemoryRetrievalService:
             query_text=request.query if getattr(request, "hybrid", False) else None,
             weight_accurate=getattr(request, "weight_accurate", 0.3),
             embedding_model=embedding_client,
+            **timeout_options,
         )
 
         if not raw_hits:
