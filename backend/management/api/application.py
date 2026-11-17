@@ -44,6 +44,7 @@ from management.api.file.file_management import (
     file_management_config_router as file_manager_router,
 )
 from management.api.file.image import router as proxy_router
+from management.api.file.knowledge_content import router as knowledge_content_router
 from management.api.file.storage import router as file_storage_router
 from management.api.identity.api_key import router as api_key_router
 from management.api.identity.cas import router as cas_router
@@ -227,6 +228,7 @@ app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)
 app.include_router(datamate_router)
 app.include_router(file_manager_router)
+app.include_router(knowledge_content_router)
 app.include_router(file_storage_router)
 app.include_router(proxy_router)
 app.include_router(tool_config_router)

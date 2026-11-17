@@ -63,6 +63,8 @@ def test_runtime_knowledge_upload(record_property):
         "sdk_standard_search",
         "model_metadata_catalog",
         "knowledge_trial_agentos",
+        "signed_content_read",
+        "pinned_image_read",
         "visible_rerank",
         "search_scope_denial",
         "deleted_search_absent",

@@ -28,8 +28,8 @@ case:
     action: Deliver the same completed job again and inspect both the new vector index and a preexisting legacy sentinel index.
     expected: Model invocation and physical chunk counts stay unchanged; the legacy sentinel remains intact.
   - order: 4
-    action: Search through the signed Runtime HTTP endpoint in accurate, semantic and hybrid modes, use Model.invoke rerank, and submit wrong-user, wrong-tenant and tampered requests. Run the bound tool search component, resolve exact source paths through Management RecordStore and pass its versioned references to Runtime; also query an unknown path and deny an unknown actor.
-    expected: Only the visible authorized generation is returned; rerank receives its content and rejected calls do not invoke models. Weighted lexical hits expose plain matched terms, and hybrid score_details retain both normalized branch scores. Exact paths resolve authorized file IDs and source versions; unknown paths and an empty fixed file scope cannot become unrestricted queries.
+    action: Search through the signed Runtime HTTP endpoint in accurate, semantic and hybrid modes, use Model.invoke rerank, and submit wrong-user, wrong-tenant and tampered requests. Run the bound tool search component, resolve exact source paths through Management RecordStore and pass its versioned references to Runtime; also query an unknown path and deny an unknown actor. Publish a separate file's image manifest and read its source and image through signed content authorization and Runtime pinned ObjectStore reads; forge file and image versions.
+    expected: Only the visible authorized generation is returned; rerank receives its content and rejected calls do not invoke models. Weighted lexical hits expose plain matched terms, and hybrid score_details retain both normalized branch scores. Exact paths resolve authorized file IDs and source versions; unknown paths and an empty fixed file scope cannot become unrestricted queries. Authorized source and image bytes equal the published content; forged file/image versions return 403.
   - order: 5
     action: Admit a version-zero deletion, let lifespan discover it, then inspect real vector keys for the deleted generation, a newer version, another file and another tenant.
     expected: The covered version is physically absent and the job confirms cleanup; newer and other scope vectors remain, and no model is called for deletion or completed redelivery. A subsequent signed search returns no deleted or unpublished generation.
@@ -45,7 +45,7 @@ case:
   - Completed duplicate delivery does not rerun inference or multiply vectors, and legacy data is preserved.
   - Revocation prevents the next storage side effect and owner resources close.
   - Physical cleanup removes only the authorized file versions without depending on model configuration.
-  - Signed text search and rerank preserve current KB scope and return only authoritative visible generations before and after deletion, including matched terms and normalized hybrid score_details. Management path selection supplies authorized file IDs and versions to Runtime; unknown paths and empty fixed scopes return no files.
+  - Signed text search and rerank preserve current KB scope and return only authoritative visible generations before and after deletion, including matched terms and normalized hybrid score_details. Management path selection supplies authorized file IDs and versions to Runtime; unknown paths and empty fixed scopes return no files. Signed content grants yield the exact published source and image bytes and reject forged file/image versions with 403.
   forbidden_side_effects:
   - No application storage, external model provider, data-process service, fallback query or automatic retry is used.
   integration_boundary:
@@ -98,6 +98,11 @@ case:
     forbidden_side_effects: [1]
   - id: AC-09
     description: SDK knowledge search consumes the Runtime standard retrieval callback over actual visible data, preserves reference identity and never constructs a legacy ES client.
+    steps: [4]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-10
+    description: Signed content authorization checks the current file version and exact completed manifest image membership; Runtime reads source and image through pinned read-only ObjectStore ports and rejects forged versions.
     steps: [4]
     expected_results: [6]
     forbidden_side_effects: [1]

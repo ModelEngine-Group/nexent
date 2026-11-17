@@ -17,6 +17,7 @@ sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
 
 import httpx
 import uvicorn
+from content_probe import prepare_content, prove_content
 from contracts.agentos_knowledge import (
     KnowledgeFileReference,
     KnowledgeFileUpload,
@@ -472,6 +473,8 @@ def main(run_id):
                     inputs={"query": "worker"}), actor.user_id, actor.tenant_id)
                 assert content.decode() in trial.result
                 evidence["knowledge_trial_agentos"] = True
+                content_request, image_ref, image_bytes = await db(prepare_content, engine, source, clean_policy, actor, context)
+                evidence.update(await prove_content(rpc, actor, content_request, image_ref, image_bytes, content, context))
 
                 assert await db(resolve_tool_files, resources, actor.user_id, [1], ["unknown"], context=context()) == []
                 from nexent.storage.errors import ScopeDenied
@@ -552,6 +555,9 @@ def main(run_id):
                 for path in (
                     "backend/runtime/knowledge_base/worker.py",
                     "backend/runtime/knowledge_base/search.py",
+                    "backend/runtime/knowledge_base/content.py",
+                    "backend/management/services/knowledge_base/content_authorization.py",
+                    "infrastructure/knowledge_content.py",
                     "backend/management/services/knowledge_base/search_authorization.py",
                     "backend/management/services/knowledge_base/file_authorization.py",
                     "backend/contracts/agentos_knowledge.py",

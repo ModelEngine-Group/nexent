@@ -21,6 +21,11 @@ def test_role_parser_images(record_property):
     sources = {
         "contracts.agentos": "backend/contracts/agentos.py",
         "contracts.knowledge_tool": "backend/contracts/knowledge_tool.py",
+        "infrastructure.knowledge_content": "infrastructure/knowledge_content.py",
+        "management.services.knowledge_base.content_authorization": "backend/management/services/knowledge_base/content_authorization.py",
+        "management.services.knowledge_base.content": "backend/management/services/knowledge_base/content.py",
+        "management.api.file.knowledge_content": "backend/management/api/file/knowledge_content.py",
+        "runtime.knowledge_base.content": "backend/runtime/knowledge_base/content.py",
         "management.services.tool.knowledge_validation": "backend/management/services/tool/knowledge_validation.py",
         "management.services.tool.discovery": "backend/management/services/tool/discovery.py",
         "management.services.agent.preparation.knowledge_search": "backend/management/services/agent/preparation/knowledge_search.py",

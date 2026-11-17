@@ -211,14 +211,17 @@ else:
                "runtime.text_cleanse", "runtime.knowledge_images", "runtime.agentos.tools",
                "nexent.core.tools.analyze_text_file_tool", "runtime.knowledge_base.tool",
                "runtime.knowledge_base.sdk_tool", "runtime.agentos.prepared_knowledge",
-               "infrastructure.rdb.model_metadata"]
+               "infrastructure.rdb.model_metadata", "runtime.knowledge_base.content"]
 
 if role == "management":
     modules.extend(["management.services.tool.text_validation", "management.services.file.image_content",
                     "infrastructure.file_processing.image_sources", "management.services.tool.knowledge_validation",
-                    "management.services.tool.discovery", "management.services.agent.preparation.knowledge_search"])
+                    "management.services.tool.discovery", "management.services.agent.preparation.knowledge_search",
+                    "management.services.knowledge_base.content_authorization", "management.services.knowledge_base.content",
+                    "management.api.file.knowledge_content"])
 
-modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge", "contracts.knowledge_tool"])
+modules.extend(["nexent.multi_modal.image_codec", "contracts.agentos", "contracts.agentos_knowledge", "contracts.knowledge_tool",
+                "infrastructure.knowledge_content"])
 
 evidence["source_hashes"] = {
     name: hashlib.sha256(

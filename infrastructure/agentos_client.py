@@ -39,6 +39,7 @@ from contracts.agentos import (
 from contracts.agentos_knowledge import (
     FileCleanseReleased,
     FileCleanseState,
+    KnowledgeContentGrant,
     KnowledgeFileGrant,
     KnowledgeJobState,
     KnowledgeOperation,
@@ -115,6 +116,9 @@ class AgentOSClient:
 
     async def authorize_knowledge_search(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
+
+    async def authorize_knowledge_content(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, payload, user_id, tenant_id, KnowledgeContentGrant)
 
     async def search_knowledge(self, payload, user_id, tenant_id):
         try:

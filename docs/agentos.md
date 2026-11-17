@@ -170,6 +170,11 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 | Runtime 查询 Management 的实时资源授权 | `/internal/agentos/v1/knowledge/authorize` | `authorize_knowledge(KnowledgeAuthorizationRequest, user_id, tenant_id)`，返回 `KnowledgeFileGrant` |
 | 文本检索与重排 | `/internal/agentos/v1/knowledge/search` | `search_knowledge(KnowledgeSearch, user_id, tenant_id)`，返回 `KnowledgeSearchResult`，HTTP 200 |
 | Runtime 查询 Management 的 KB 读权限 | `/internal/agentos/v1/knowledge/authorize-search` | `authorize_knowledge_search(KnowledgeSearchAuthorization, user_id, tenant_id)`，返回 `KnowledgeSearchGrant` |
+| Runtime 查询来源/图片只读授权 | `/internal/agentos/v1/knowledge/authorize-content` | `authorize_knowledge_content(KnowledgeContentRequest, user_id, tenant_id)`，返回 `KnowledgeContentGrant` |
+
+`KnowledgeContentRequest` 携带 knowledge_id、file_id、file_version。不传 image_ref 时读取该版本的来源；传入时必须是该文件已完成清洗 manifest 中的精确图片引用。Management 检查当前用户和租户的 KB 读权限、文件版本、来源及 manifest 成员，返回 object_ref 和 filename；授权不包含凭据或任意对象前缀。Runtime 的 `KnowledgeContentReader` 在同一截止内获取授权、经只读 ObjectStore 校验版本/hash 并读取、再复核授权，权限或来源变化时不返回字节。该过程不调用普通文件 HTTP，不增加重试。
+
+Management 的公开 `POST /api/file/knowledge/content` 接收同一 typed 请求，来源以 attachment 返回，图片以 inline 返回，均禁止缓存。前端 typed 引用消费和 Runtime 图片筛选仍需接入；旧 URL 消费者尚未全部撤除。新接口不能读取缺少固定 source revision/hash 的历史文件，历史维护按退役计划处理。
 
 文件生命周期和 search 发往 Runtime，两种授权查询发往 Management，均复用 `AgentOSClient` 的方向隔离签名。Management 校验当前 DAC、源代次与已完成清洗任务，返回固定对象引用、文件名、逻辑集合及 KB 模型 ID。Runtime 校验 grant 和实际模型 revision 后接纳，不读取 Management 业务表。上传要求已有确认产物；新建幂等键不能绕过版本或删除墓碑。
 

@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-CONTENT-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Authorize versioned knowledge source and image content
+  description: Establish signed content grants, exact read-only StorageInterface bindings, Runtime reads and the public Management content endpoint. Browser consumption and Runtime image filtering cutover remain subsequent tasks in batch two.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Resolve current KB read permission and exact file generation before source or image reads.
+    - Match images to completed manifest source, parser, key, hash and version, including shared read-only resources.
+    - Bind one read-only object and preserve actor, tenant, revision, checksum, deadline and close ownership.
+    - Withhold content when reauthorization fails, cancel timed-out requests without replay, and return redacted public errors.
+    reason: New UT covers content-specific authorization and ports while existing file authorization tests remain. The existing worker D3 adds actual signed HTTP, PG and MinIO reads; D5 proves image packaging. Cases own uniquely labelled containers and close their ports, workers and sockets in finally. No duplicate formal D1 is added.
+    test_selectors:
+    - test/backend/services/test_knowledge_content_authorization.py
+    - test/backend/services/test_knowledge_content_reader.py
+    - test/backend/services/test_knowledge_content_service.py
+    - test/backend/app/test_knowledge_content_api.py
+    - test/backend/infrastructure/test_knowledge_content_port.py
+    - test/backend/services/test_knowledge_authorization.py

@@ -87,6 +87,21 @@ class KnowledgeFileReference(Contract):
     file_version: int = Field(ge=0)
 
 
+class KnowledgeContentRequest(KnowledgeFileReference):
+    image_ref: ObjectReference | None = None
+
+
+class KnowledgeContentGrant(KnowledgeContentRequest):
+    object_ref: ObjectReference
+    filename: str = Field(min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def exact_image(self):
+        if self.object_ref.space != "files" or self.image_ref is not None and self.object_ref != self.image_ref:
+            raise ValueError("Content grant must bind the selected file object")
+        return self
+
+
 class KnowledgeFileUpload(KnowledgeFileReference):
     artifact: ObjectReference
     parser_version: str = Field(min_length=1, max_length=128)

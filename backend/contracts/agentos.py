@@ -795,6 +795,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 class ManagementOperation(str, Enum):
     KNOWLEDGE_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize"
     KNOWLEDGE_SEARCH_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize-search"
+    KNOWLEDGE_CONTENT_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize-content"
     FILE_CLEANSE = NAMESPACE + "v1/file/cleanse"
     FILE_CLEANSE_STATUS = NAMESPACE + "v1/file/cleanse-status"
     FILE_CLEANSE_CANCEL = NAMESPACE + "v1/file/cleanse-cancel"

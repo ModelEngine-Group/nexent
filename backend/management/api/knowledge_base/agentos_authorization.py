@@ -9,11 +9,15 @@ from uuid import uuid4
 from contracts.agentos import ManagementOperation
 from contracts.agentos_knowledge import (
     KnowledgeAuthorizationRequest,
+    KnowledgeContentRequest,
     KnowledgeSearchAuthorization,
 )
 from fastapi import APIRouter, HTTPException, Request
 from management.api.agentos_request import read_agentos_callback
 from management.services.knowledge_base.authorization import authorize_knowledge
+from management.services.knowledge_base.content_authorization import (
+    authorize_knowledge_content,
+)
 from management.services.knowledge_base.search_authorization import (
     authorize_knowledge_search,
 )
@@ -26,7 +30,8 @@ from backend.http.server.knowledge_errors import knowledge_error
 logger = logging.getLogger(__name__)
 
 
-def create_knowledge_authorization_router(service=authorize_knowledge, search_service=authorize_knowledge_search):
+def create_knowledge_authorization_router(service=authorize_knowledge, search_service=authorize_knowledge_search,
+                                         content_service=authorize_knowledge_content):
     router = APIRouter()
 
     async def dispatch(request, operation, schema, action):
@@ -66,5 +71,9 @@ def create_knowledge_authorization_router(service=authorize_knowledge, search_se
     @router.post(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE.value, include_in_schema=False)
     async def authorize_search(request: Request):
         return await dispatch(request, ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, KnowledgeSearchAuthorization, search_service)
+
+    @router.post(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE.value, include_in_schema=False)
+    async def authorize_content(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, KnowledgeContentRequest, content_service)
 
     return router
