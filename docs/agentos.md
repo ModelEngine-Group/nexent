@@ -251,7 +251,11 @@ Runtime 对权威可见文件做蓄水池抽样，通过 StorageInterface 的 `V
 
 `data_revision` 是当前全部可见文件版本、generation 和发布 job 的摘要，覆盖未被抽中的文件。分页使用逻辑键游标，不承诺数据库快照隔离，Runtime 返回前重新核对可见集合和当前授权。Runtime 总截止与客户端总截止均为 180 秒，单次 ES 请求最多 5 秒且禁用驱动重试；HTTP 超时会取消请求并关闭客户端。向量扫描游标绑定实际 actor、租户、集合、schema/维度与过滤条件，不能用于其他范围。
 
-当前已交付样本契约、Runtime 实现和签名客户端。手动摘要及自动摘要仍有旧取样调用，继续按退役 SPEC 切换；聚类和 MapReduce 组装保留在 Management，模型调用继续使用 Model.invoke。新操作先部署 Runtime，再切换 Management 消费者；回滚先撤回消费者。当前没有新增公开摘要路径或备用协议。
+Management 手动摘要已切换到 `KnowledgeSummaryService`。它通过 SI 查询当前租户下的 index_name，核对实际用户的编辑权限，再调用 `sample_knowledge`。样本必须匹配知识资源 revision、模型 ID 和文件范围，返回后及模型阶段结束后都复查权限。原内容长度加权向量、KMeans、文档 100 词与簇 150 词 MapReduce 保留在 Management，所有模型请求继续使用 Model.invoke。旧 `ElasticSearchService.summary_index_name` 已无调用方并删除。
+
+公开 `/{index_name}/auto_summary` 的 batch_size、model_id、认证与 SSE 事件保持。原 VDB 依赖隐式暴露的 db_type、tenant_id 查询参数仍被校验，tenant_id 不覆盖登录租户。DataMate 原 search 明确不支持原始查询，本次保持失败，不增加其他读取路径。逐字 success、completed 和 error 事件采用 JSON 序列化，保留原文中的引号、换行与反斜杠。
+
+自动摘要仍有旧 ES 取样与 data-process 调度调用，继续按退役 SPEC 迁移其实际启用者、版本接纳和受管生命周期。发布前仍需完成 P4 历史源与旧索引维护，不能直接把旧 ES 数据当作 Runtime 已发布文件。先部署 Runtime 样本操作并确认维护完成，再切换 Management 消费者，回滚先消费者。当前没有新增公开摘要路径或备用协议，整个 data-process 退役尚未完成。
 
 `legacy_resume.py` 仍承接旧数据的只读续传，Management 的历史消息适配与后台来源恢复也仍有调用方。它们不允许启动旧进程内 Agent。无调用方的 legacy admission/tracking/producer、Management 混合执行链、LegacyRunFactory 和旧工作区实现已删除。
 

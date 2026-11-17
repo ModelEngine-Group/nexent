@@ -19,11 +19,11 @@ class KnowledgeSearchAuthorizationPolicy:
     def __init__(self, records, *, user_id):
         self.resources = KnowledgeFileAuthorization(records, user_id=user_id)
 
-    def authorize(self, request, *, context):
+    def authorize(self, request, *, context, edit=False):
         if not isinstance(request, KnowledgeSearchAuthorization):
             raise ScopeDenied()
         grants = []
-        rows = self.resources.resolve_knowledges(request.knowledge_ids, edit=False, context=context)
+        rows = self.resources.resolve_knowledges(request.knowledge_ids, edit=edit, context=context)
         for row in rows:
             if row.get("knowledge_sources") != "elasticsearch" or type(row.get("embedding_model_id")) is not int or row["embedding_model_id"] <= 0:
                 raise ScopeDenied()

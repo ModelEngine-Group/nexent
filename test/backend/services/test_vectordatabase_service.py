@@ -15,11 +15,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
-import numpy as np
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from fastapi.responses import StreamingResponse
 
 
 from test.common.module_stubs import capture_module_stubs
@@ -409,17 +407,6 @@ backend_utils_mock = types.ModuleType('backend.utils')
 backend_utils_mock.__path__ = []  # Empty __path__ makes it a namespace package
 sys.modules['backend.utils'] = backend_utils_mock
 
-# Create a mock document_vector_utils module with required functions
-document_vector_utils_mock = types.ModuleType('management.services.knowledge_base.summary')
-document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
-document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
-document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
-document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
-sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
-setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
-setattr(sys.modules['backend.utils'], 'document_vector_utils', document_vector_utils_mock)
-
 file_management_utils_mock = types.ModuleType('management.services.file.upload')
 file_management_utils_mock.get_file_size = MagicMock(return_value=0)
 sys.modules['management.services.file.upload'] = file_management_utils_mock
@@ -491,8 +478,6 @@ for module_name, functions in {
 # Apply patches AFTER loading the module (so patch targets resolve)
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
-    # Import utils.document_vector_utils to ensure it's available for patching
-    import management.services.knowledge_base.summary
     from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
 
@@ -3004,353 +2989,13 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertIn("Health check failed", str(context.exception))
 
-    @patch('management.db.model.repository.get_model_by_model_id')
-    def test_summary_index_name(self, mock_get_model_by_model_id):
-        """
-        Test generating a summary for an index.
-
-        This test verifies that:
-        1. Random documents are retrieved for summarization
-        2. The summary generation stream is properly initialized using Map-Reduce approach
-        3. A StreamingResponse object is returned for streaming the summary tokens
-        """
-        # Setup
-        mock_get_model_by_model_id.return_value = {
-            'api_key': 'test_api_key',
-            'base_url': 'https://api.test.com',
-            'model_name': 'test-model',
-            'model_repo': 'test-repo'
-        }
-
-        # Mock the new Map-Reduce functions
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
-                patch('management.db.model.repository.get_model_by_model_id') as mock_get_model_internal:
-
-            # Mock return values
-            mock_process_docs.return_value = (
-                # document_samples
-                {"doc1": {"chunks": [{"content": "test content"}]}},
-                {"doc1": np.array([0.1, 0.2, 0.3])}  # doc_embeddings
-            )
-            mock_cluster.return_value = {"doc1": 0}  # clusters
-            mock_summarize.return_value = {
-                0: "Test cluster summary"}  # cluster_summaries
-            mock_merge.return_value = "Final merged summary"  # final_summary
-            mock_get_model_internal.return_value = {
-                'api_key': 'test_api_key',
-                'base_url': 'https://api.test.com',
-                'model_name': 'test-model'
-            }
-
-            # Execute
-            async def run_test():
-                result = await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=1000,
-                    vdb_core=self.mock_vdb_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id="test_tenant"
-                )
-
-                # Consume part of the stream to trigger the generator function
-                generator = result.body_iterator
-                # Get at least one item from the generator to trigger execution
-                try:
-                    async for item in generator:
-                        break  # Just get one item to trigger execution
-                except StopAsyncIteration:
-                    pass
-
-                return result
-
-            result = asyncio.run(run_test())
-
-            # Assert
-            self.assertIsInstance(result, StreamingResponse)
             # Basic functionality test - just verify the response is correct type
             # The detailed function calls are tested in their own unit tests
 
-    def test_summary_index_name_no_tenant_id(self):
-        """
-        Test summary_index_name raises exception when tenant_id is missing.
 
-        This test verifies that:
-        1. An exception is raised when tenant_id is None
-        2. The exception message contains "Tenant ID is required"
-        """
 
-        # Execute and Assert
-        async def run_test():
-            with self.assertRaises(Exception) as context:
-                await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=1000,
-                    vdb_core=self.mock_vdb_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id=None  # Missing tenant_id
-                )
-            self.assertIn("Tenant ID is required", str(context.exception))
 
-        asyncio.run(run_test())
 
-    def test_summary_index_name_no_documents(self):
-        """
-        Test summary_index_name when no documents are found in index.
-
-        This test verifies that:
-        1. An exception is raised when document_samples is empty
-        2. The exception message contains "No documents found in index"
-        """
-        # Mock the new Map-Reduce functions
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents'), \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce'), \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries'):
-            # Mock return empty document_samples
-            mock_process_docs.return_value = (
-                {},  # Empty document_samples
-                {}  # Empty doc_embeddings
-            )
-
-            # Execute
-            async def run_test():
-                with self.assertRaises(Exception) as context:
-                    result = await self.es_service.summary_index_name(
-                        index_name="test_index",
-                        batch_size=1000,
-                        vdb_core=self.mock_vdb_core,
-                        language='en',
-                        model_id=1,
-                        tenant_id="test_tenant"
-                    )
-                    # Consume the stream to trigger execution
-                    generator = result.body_iterator
-                    async for item in generator:
-                        break
-
-                self.assertIn("No documents found in index",
-                              str(context.exception))
-
-            asyncio.run(run_test())
-
-    def test_summary_index_name_uses_managed_blocking_execution(self):
-        """
-        Test summary_index_name delegates blocking work to the managed executor.
-
-        This test verifies that:
-        1. Blocking Map-Reduce work uses the model-tool-io lane
-        2. The summary generation still works correctly
-        """
-        # Mock the new Map-Reduce functions
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
-
-            # Mock return values
-            mock_process_docs.return_value = (
-                # document_samples
-                {"doc1": {"chunks": [{"content": "test content"}]}},
-                {"doc1": np.array([0.1, 0.2, 0.3])}  # doc_embeddings
-            )
-            mock_cluster.return_value = {"doc1": 0}  # clusters
-            mock_summarize.return_value = {
-                0: "Test cluster summary"}  # cluster_summaries
-            mock_merge.return_value = "Final merged summary"  # final_summary
-
-            async def run_inline(_task_name, func, *args, **kwargs):
-                return func(*args)
-
-            with patch(
-                'management.services.knowledge_base.service.run_blocking',
-                new_callable=AsyncMock,
-                side_effect=run_inline,
-            ) as mock_run_blocking:
-
-                # Execute
-                async def run_test():
-                    result = await self.es_service.summary_index_name(
-                        index_name="test_index",
-                        batch_size=1000,
-                        vdb_core=self.mock_vdb_core,
-                        language='en',
-                        model_id=1,
-                        tenant_id="test_tenant"
-                    )
-
-                    # Consume part of the stream to trigger execution
-                    generator = result.body_iterator
-                    try:
-                        async for item in generator:
-                            break
-                    except StopAsyncIteration:
-                        pass
-
-                    return result
-
-                result = asyncio.run(run_test())
-
-                # Assert
-                self.assertIsInstance(result, StreamingResponse)
-                mock_run_blocking.assert_awaited_once()
-                self.assertEqual(mock_run_blocking.call_args.args[0], "knowledge-summary")
-                self.assertEqual(mock_run_blocking.call_args.kwargs["lane"], "model-tool-io")
-                self.assertEqual(mock_run_blocking.call_args.kwargs["owner"], "config")
-
-    def test_summary_index_name_generator_exception(self):
-        """
-        Test summary_index_name handles exceptions in the generator function.
-
-        This test verifies that:
-        1. Exceptions in the generator are caught and streamed as error messages
-        2. The error status is properly formatted
-        """
-        # Mock the new Map-Reduce functions
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
-
-            # Mock return values
-            mock_process_docs.return_value = (
-                # document_samples
-                {"doc1": {"chunks": [{"content": "test content"}]}},
-                {"doc1": np.array([0.1, 0.2, 0.3])}  # doc_embeddings
-            )
-            mock_cluster.return_value = {"doc1": 0}  # clusters
-            mock_summarize.return_value = {
-                0: "Test cluster summary"}  # cluster_summaries
-            mock_merge.return_value = "Final merged summary"  # final_summary
-
-            # Execute
-            async def run_test():
-                result = await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=1000,
-                    vdb_core=self.mock_vdb_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id="test_tenant"
-                )
-
-                # Consume the stream completely
-                generator = result.body_iterator
-                items = []
-                try:
-                    async for item in generator:
-                        items.append(item)
-                except Exception:
-                    pass
-
-                return result, items
-
-            result, items = asyncio.run(run_test())
-
-            # Assert
-            self.assertIsInstance(result, StreamingResponse)
-            # Verify that items were generated (at least the completed message)
-            self.assertGreater(len(items), 0)
-
-    def test_summary_index_name_sample_count_calculation(self):
-        """
-        Test summary_index_name correctly calculates sample_count from batch_size.
-
-        This test verifies that:
-        1. sample_count is calculated as min(batch_size // 5, 200)
-        2. The sample_doc_count parameter is passed correctly to process_documents_for_clustering
-        """
-        # Test with batch_size=1000 -> sample_count should be min(200, 200) = 200
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
-
-            # Mock return values
-            mock_process_docs.return_value = (
-                # document_samples
-                {"doc1": {"chunks": [{"content": "test content"}]}},
-                {"doc1": np.array([0.1, 0.2, 0.3])}  # doc_embeddings
-            )
-            mock_cluster.return_value = {"doc1": 0}  # clusters
-            mock_summarize.return_value = {
-                0: "Test cluster summary"}  # cluster_summaries
-            mock_merge.return_value = "Final merged summary"  # final_summary
-
-            # Execute with batch_size=1000
-            async def run_test():
-                result = await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=1000,
-                    vdb_core=self.mock_vdb_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id="test_tenant"
-                )
-
-                # Consume part of the stream to trigger execution
-                generator = result.body_iterator
-                try:
-                    async for item in generator:
-                        break
-                except StopAsyncIteration:
-                    pass
-
-                return result
-
-            asyncio.run(run_test())
-
-            # Verify sample_doc_count was called with 200 (min(1000 // 5, 200) = 200)
-            self.assertTrue(mock_process_docs.called)
-            call_args = mock_process_docs.call_args
-            self.assertEqual(call_args.kwargs['sample_doc_count'], 200)
-
-        # Test with batch_size=50 -> sample_count should be min(10, 200) = 10
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
-
-            # Mock return values
-            mock_process_docs.return_value = (
-                {"doc1": {"chunks": [{"content": "test content"}]}},
-                {"doc1": np.array([0.1, 0.2, 0.3])}
-            )
-            mock_cluster.return_value = {"doc1": 0}
-            mock_summarize.return_value = {0: "Test cluster summary"}
-            mock_merge.return_value = "Final merged summary"
-
-            # Execute with batch_size=50
-            async def run_test_small():
-                result = await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=50,
-                    vdb_core=self.mock_vdb_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id="test_tenant"
-                )
-
-                # Consume part of the stream to trigger execution
-                generator = result.body_iterator
-                try:
-                    async for item in generator:
-                        break
-                except StopAsyncIteration:
-                    pass
-
-                return result
-
-            asyncio.run(run_test_small())
-
-            # Verify sample_doc_count was called with 10 (min(50 // 5, 200) = 10)
-            self.assertTrue(mock_process_docs.called)
-            call_args = mock_process_docs.call_args
-            self.assertEqual(call_args.kwargs['sample_doc_count'], 10)
 
     def test_get_random_documents(self):
         """
@@ -4418,9 +4063,6 @@ class TestElasticSearchService(unittest.TestCase):
         })
         self.assertEqual(result["status"], "exists_in_tenant")
 
-    # Note: generate_knowledge_summary_stream function has been removed
-    # These tests are no longer relevant as the function was replaced with summary_index_name
-
     def test_get_vdb_core(self):
         """
         Test get_vdb_core function returns the elastic_core instance.
@@ -4943,41 +4585,6 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(file_info["chunk_count"], 2)
         self.assertEqual(len(file_info["chunks"]), 1)
 
-    def test_summary_index_name_streams_generator_error(self):
-        """summary_index_name streams error payloads when generator fails."""
-
-        class BadIterable:
-            def __iter__(self):
-                raise RuntimeError("stream failure")
-
-        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value=BadIterable()):
-            mock_process_docs.return_value = (
-                {"doc1": {"chunks": [{"content": "x"}]}},
-                {"doc1": MagicMock()}
-            )
-            mock_cluster.return_value = {"doc1": 0}
-            mock_summarize.return_value = {0: "summary"}
-
-            async def run_test():
-                response = await self.es_service.summary_index_name(
-                    index_name="idx",
-                    batch_size=100,
-                    vdb_core=self.mock_vdb_core,
-                    language="en",
-                    model_id=None,
-                    tenant_id="tenant-1",
-                )
-                messages = []
-                async for chunk in response.body_iterator:
-                    messages.append(chunk)
-                    break
-                return messages
-
-            messages = asyncio.run(run_test())
-            self.assertTrue(any("error" in msg for msg in messages))
 
     # Tests for get_rerank_model function
     @patch('management.services.model.resolver.get_model_records')

@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 import pytest
 
+# Load shared error types before installing SDK doubles without model-service packages.
+import contracts.errors.exceptions  # noqa: F401
+
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 

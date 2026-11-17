@@ -13,6 +13,8 @@ import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
+from nexent.storage.errors import ScopeDenied
+
 import pytest
 from pydantic import BaseModel
 
@@ -84,6 +86,10 @@ def mock_get_vector_db_core():
 vectordatabase_service_mock.ElasticSearchService = MockElasticSearchService
 vectordatabase_service_mock.get_vector_db_core = mock_get_vector_db_core
 sys.modules['management.services.knowledge_base.service'] = vectordatabase_service_mock
+
+summary_service_mock = types.ModuleType('management.services.knowledge_base.summary_service')
+summary_service_mock.KnowledgeSummaryService = MagicMock()
+sys.modules['management.services.knowledge_base.summary_service'] = summary_service_mock
 
 # Mock other services that might be imported
 sys.modules['management.services.knowledge_base.task_state'] = types.ModuleType('management.services.knowledge_base.task_state')
@@ -184,19 +190,16 @@ def test_permission_utils_maps_permission_error_to_403(monkeypatch):
 class TestAutoSummary:
     """Test auto summary generation endpoint"""
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    def test_auto_summary_success(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+    def test_auto_summary_success(self, mock_user_info, mock_service_class, test_data):
         """Test successful auto summary generation"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_instance.generate = AsyncMock(return_value="summary")
         mock_service_class.return_value = mock_service_instance
 
         response = client.post(
@@ -205,62 +208,37 @@ class TestAutoSummary:
         )
 
         assert response.status_code == 200
-        assert mock_service_instance.summary_index_name.call_count == 1
+        assert mock_service_instance.generate.call_count == 1
 
-        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
         assert call_kwargs['batch_size'] == 500
         assert call_kwargs['tenant_id'] == mock_user_info_value[1]
         assert call_kwargs['language'] == mock_user_info_value[2]
         assert call_kwargs['model_id'] == 1
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    @patch('management.api.knowledge_base.knowledge_summary.require_knowledge_base_edit_permission')
-    def test_auto_summary_forbidden_for_read_only(
-        self,
-        mock_require_permission,
-        mock_user_info,
-        mock_vdb_core,
-        mock_service_class,
-        test_data,
-    ):
-        """Read-only users must not be able to regenerate knowledge base summary."""
-        mock_vdb_core.return_value = MagicMock()
-        mock_user_info.return_value = test_data["user_info"]
-        mock_require_permission.side_effect = HTTPException(
-            status_code=403,
-            detail="No permission to modify this knowledge base",
-        )
-
-        response = client.post(
-            f"/summary/{test_data['index_name']}/auto_summary",
-            headers=test_data["auth_header"]
-        )
-
+    def test_auto_summary_forbidden_for_read_only(self, mock_user_info, mock_service_class, test_data):
+        """The SI-backed service must deny a read-only summary requester."""
+        mock_user_info.return_value = test_data['user_info']
+        service = mock_service_class.return_value
+        service.generate = AsyncMock(side_effect=ScopeDenied())
+        response = client.post(f"/summary/{test_data['index_name']}/auto_summary", headers=test_data['auth_header'])
         assert response.status_code == 403
-        assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_require_permission.assert_called_once_with(
-            test_data["index_name"],
-            test_data["user_info"][0],
-            test_data["user_info"][1],
-        )
-        mock_service_class.assert_not_called()
+        assert response.json()['detail'] == 'No permission to modify this knowledge base'
+        service.generate.assert_awaited_once()
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    def test_auto_summary_without_model_id(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+    def test_auto_summary_without_model_id(self, mock_user_info, mock_service_class, test_data):
         """Test successful auto summary generation without model_id parameter"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_instance.generate = AsyncMock(return_value="summary")
         mock_service_class.return_value = mock_service_instance
 
         response = client.post(
@@ -269,26 +247,23 @@ class TestAutoSummary:
         )
 
         assert response.status_code == 200
-        assert mock_service_instance.summary_index_name.call_count == 1
+        assert mock_service_instance.generate.call_count == 1
 
-        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
         assert call_kwargs['batch_size'] == 500
         assert call_kwargs['model_id'] is None
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    def test_auto_summary_exception(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+    def test_auto_summary_exception(self, mock_user_info, mock_service_class, test_data):
         """Test auto summary generation with exception"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(
+        mock_service_instance.generate = AsyncMock(
             side_effect=Exception("Error generating summary")
         )
         mock_service_class.return_value = mock_service_instance
@@ -302,16 +277,13 @@ class TestAutoSummary:
         assert "text/event-stream" in response.headers["content-type"]
         assert "Knowledge base summary generation failed" in response.text
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_uses_tenant_llm_id(
-        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+        self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
         """Test that auto summary uses LLM_ID from tenant config when model_id is not provided"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
@@ -321,7 +293,7 @@ class TestAutoSummary:
         mock_config_manager.load_config.return_value = mock_config
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_instance.generate = AsyncMock(return_value="summary")
         mock_service_class.return_value = mock_service_instance
 
         response = client.post(
@@ -332,19 +304,16 @@ class TestAutoSummary:
         assert response.status_code == 200
         mock_config_manager.load_config.assert_called_once_with("test_tenant_id")
 
-        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['model_id'] == 5
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_tenant_config_no_llm_id(
-        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+        self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
         """Test auto summary when tenant config has no LLM_ID"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
@@ -354,7 +323,7 @@ class TestAutoSummary:
         mock_config_manager.load_config.return_value = mock_config
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_instance.generate = AsyncMock(return_value="summary")
         mock_service_class.return_value = mock_service_instance
 
         response = client.post(
@@ -363,19 +332,16 @@ class TestAutoSummary:
         )
 
         assert response.status_code == 200
-        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['model_id'] is None
 
-    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
-    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_tenant_config_exception(
-        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+        self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
         """Test auto summary when loading tenant config raises exception"""
-        mock_vdb_core_instance = MagicMock()
-        mock_vdb_core.return_value = mock_vdb_core_instance
 
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
@@ -383,7 +349,7 @@ class TestAutoSummary:
         mock_config_manager.load_config.side_effect = Exception("Config error")
 
         mock_service_instance = MagicMock()
-        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_instance.generate = AsyncMock(return_value="summary")
         mock_service_class.return_value = mock_service_instance
 
         response = client.post(
@@ -392,7 +358,7 @@ class TestAutoSummary:
         )
 
         assert response.status_code == 200
-        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['model_id'] is None
 
 

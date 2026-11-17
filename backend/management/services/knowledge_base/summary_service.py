@@ -1,0 +1,132 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Management summary orchestration consumes only authorized AgentOS document samples."""
+
+import asyncio
+import logging
+from time import monotonic
+from uuid import uuid4
+
+from contracts.agentos_knowledge import (
+    KnowledgeSample,
+    KnowledgeSampleResult,
+    KnowledgeSearchAuthorization,
+)
+from contracts.constants import environment
+from management.services.knowledge_base.search_authorization import (
+    KnowledgeSearchAuthorizationPolicy,
+)
+from nexent.core.concurrency import run_blocking
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    ScopeDenied,
+)
+from nexent.storage.models import Comparison, OperationContext, PageRequest, RecordQuery
+
+from backend.http.client import create_httpx_client
+from infrastructure.agentos_client import AgentOSClient
+from infrastructure.knowledge_cleanse import knowledge_resource_ports
+
+logger = logging.getLogger(__name__)
+
+
+class KnowledgeSummaryService:
+    def __init__(self, *, client=None, resources=knowledge_resource_ports, operation_seconds=180):
+        if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
+            raise InvalidInput()
+        self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
+        self.resources, self.operation_seconds = resources, operation_seconds
+
+    def _resolve(self, index_name, user_id, tenant_id, *, context):
+        if not user_id or not tenant_id:
+            raise ScopeDenied()
+        with self.resources(tenant_id, user_id, context=context) as records:
+            page = records.query('cleanse_knowledge', RecordQuery(where=Comparison('index_name', 'eq', index_name)),
+                                 PageRequest(limit=2), context=context)
+            if not page.items:
+                raise NotFound()
+            if len(page.items) != 1 or page.next_cursor:
+                raise ScopeDenied()
+            grants = KnowledgeSearchAuthorizationPolicy(records, user_id=user_id).authorize(
+                KnowledgeSearchAuthorization(knowledge_ids=[page.items[0]['knowledge_id']]), edit=True, context=context)
+            return grants.knowledge_bases[0]
+
+    async def _resource(self, index_name, user_id, tenant_id, *, context):
+        def resolve():
+            context.remaining()
+            result = self._resolve(index_name, user_id, tenant_id, context=context)
+            context.remaining()
+            return result
+        return await run_blocking('knowledge-summary-authorize', resolve, lane='control-io', owner='management.knowledge.summary')
+
+    @staticmethod
+    def _validate(result, resource, limit):
+        if (not isinstance(result, KnowledgeSampleResult) or result.knowledge_id != resource.knowledge_id
+            or result.knowledge_revision != resource.revision
+            or result.embedding_model.model_id != resource.embedding_model_id or len(result.documents) > limit):
+            raise Conflict()
+        files, dimensions = set(), None
+        for document in result.documents:
+            if document.file_ref.knowledge_id != resource.knowledge_id:
+                raise ScopeDenied()
+            if document.file_ref.file_id in files:
+                raise Conflict()
+            files.add(document.file_ref.file_id)
+            for index, chunk in enumerate(document.chunks):
+                if chunk.chunk_index != index:
+                    raise Conflict()
+                if dimensions is None:
+                    dimensions = len(chunk.embedding)
+                if len(chunk.embedding) != dimensions:
+                    raise Conflict()
+
+    async def sample(self, index_name, *, batch_size=1000, user_id, tenant_id, context=None):
+        count = min(batch_size // 5, 200)
+        if count <= 0:
+            raise ValueError('No documents found in index.')
+        context = context or OperationContext('knowledge-summary-sample-' + uuid4().hex,
+                                               monotonic() + self.operation_seconds)
+        threshold = context.remaining()
+        try:
+            async with asyncio.timeout(threshold):
+                resource = await self._resource(index_name, user_id, tenant_id, context=context)
+                result = await self.client.sample_knowledge(KnowledgeSample(knowledge_id=resource.knowledge_id,
+                    expected_revision=resource.revision, document_limit=count), user_id, tenant_id)
+                self._validate(result, resource, count)
+                if await self._resource(index_name, user_id, tenant_id, context=context) != resource:
+                    raise Conflict()
+                return result
+        except (TimeoutError, DeadlineExceeded) as error:
+            logger.warning('knowledge_summary_sample_timeout operation_id=%s threshold_seconds=%s exception_type=%s',
+                           context.operation_id, threshold, type(error).__name__)
+            raise DeadlineExceeded(operation_id=context.operation_id) from error
+
+    @staticmethod
+    def _summarize(sample, language, model_id, user_id, tenant_id):
+        from management.services.knowledge_base.clustering import (
+            kmeans_cluster_documents,
+        )
+        from management.services.knowledge_base.summary import (
+            merge_cluster_summaries,
+            sample_documents_for_clustering,
+            summarize_clusters_map_reduce,
+        )
+
+        documents, embeddings = sample_documents_for_clustering(sample)
+        if not documents:
+            raise ValueError('No documents found in index.')
+        clusters = kmeans_cluster_documents(embeddings, k=None)
+        summaries = summarize_clusters_map_reduce(document_samples=documents, clusters=clusters, language=language,
+            doc_max_words=100, cluster_max_words=150, model_id=model_id, user_id=user_id, tenant_id=tenant_id)
+        return merge_cluster_summaries(summaries)
+
+    async def generate(self, *, index_name, batch_size=1000, user_id, tenant_id, language='zh', model_id=None):
+        sample = await self.sample(index_name, batch_size=batch_size, user_id=user_id, tenant_id=tenant_id)
+        summary = await run_blocking('knowledge-summary', self._summarize, sample, language, model_id, user_id, tenant_id,
+                                    lane='model-tool-io', owner='management.knowledge.summary')
+        context = OperationContext('knowledge-summary-final-' + uuid4().hex, monotonic() + 10)
+        resource = await self._resource(index_name, user_id, tenant_id, context=context)
+        self._validate(sample, resource, min(batch_size // 5, 200))
+        return summary

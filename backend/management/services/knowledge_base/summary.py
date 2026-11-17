@@ -7,18 +7,44 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from contracts.agentos_knowledge import KnowledgeSampleResult
 from contracts.constants.constants import LANGUAGE
+from contracts.errors.exceptions import RuntimeUpstreamError
+from management.clients.model import invoke_chat_prompt_in_worker
 from management.services.knowledge_base.clustering import (
     analyze_cluster_coherence,
     calculate_document_embedding,
 )
-from management.clients.model import invoke_chat_prompt_in_worker
-from contracts.errors.exceptions import RuntimeUpstreamError
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.document import compose_document_cluster_summary
 from nexent.vector_database.base import VectorDatabaseCore
 
 logger = logging.getLogger(__name__)
+
+
+def document_embeddings(document_samples):
+    """Use the established content-length weighted document representation."""
+    embeddings = {}
+    for doc_id, doc_info in document_samples.items():
+        embedding = calculate_document_embedding(doc_info['chunks'], use_weighted=True)
+        if embedding is not None:
+            embeddings[doc_id] = embedding
+        else:
+            logger.warning('Failed to calculate embedding for document %s', doc_id)
+    return embeddings
+
+
+def sample_documents_for_clustering(sample: KnowledgeSampleResult):
+    """Adapt published neutral samples to the existing Management MapReduce inputs."""
+    documents = {}
+    for document in sample.documents:
+        if not document.chunks:
+            continue
+        doc_id = f'doc_{len(documents):04d}'
+        documents[doc_id] = {'doc_id': doc_id, 'path_or_url': document.file_ref.file_id,
+            'filename': document.filename or 'unknown', 'chunk_count': len(document.chunks), 'file_size': 0,
+            'chunks': [chunk.model_dump() for chunk in document.chunks]}
+    return documents, document_embeddings(documents)
 
 
 def get_documents_from_es(
@@ -136,15 +162,7 @@ def process_documents_for_clustering(
             return {}, {}
 
         # Step 2: Calculate document-level embeddings
-        doc_embeddings = {}
-        for doc_id, doc_info in document_samples.items():
-            chunks = doc_info["chunks"]
-            doc_embedding = calculate_document_embedding(chunks, use_weighted=True)
-
-            if doc_embedding is not None:
-                doc_embeddings[doc_id] = doc_embedding
-            else:
-                logger.warning(f"Failed to calculate embedding for document {doc_id}")
+        doc_embeddings = document_embeddings(document_samples)
 
         logger.info(
             f"Successfully calculated embeddings for {len(doc_embeddings)} documents"

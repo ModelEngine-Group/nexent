@@ -12,17 +12,14 @@ Main features include:
 4. Health check interface
 """
 
-import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.constants import LANGUAGE
 from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest
 from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
 from fastapi import Body, Depends, Path, Query
-from fastapi.responses import StreamingResponse
 from management.services.knowledge_base.common import (
     ALLOWED_CHUNK_FIELDS,
     KnowledgeBaseNeedsModelConfigError,
@@ -39,7 +36,6 @@ from management.services.knowledge_base.deletion import (
 from management.services.model.resolver import (
     get_embedding_model_by_id,
 )
-from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
 
 __all__ = (
@@ -77,117 +73,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         except Exception as e:
             raise Exception(f"Health check failed: {str(e)}")
 
-    async def summary_index_name(
-        self,
-        index_name: str = Path(
-            ..., description="Name of the index to get documents from"
-        ),
-        batch_size: int = Query(
-            1000, description="Number of documents to retrieve per batch"
-        ),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        user_id: Optional[str] = Body(
-            None, description="ID of the user delete the knowledge base"
-        ),
-        tenant_id: Optional[str] = Body(None, description="ID of the tenant"),
-        language: str = LANGUAGE["ZH"],
-        model_id: Optional[int] = None,
-    ):
-        """
-        Generate a summary for the specified index using advanced Map-Reduce approach
-
-        New implementation:
-        1. Get documents and cluster them by semantic similarity
-        2. Map: Summarize each document individually
-        3. Reduce: Merge document summaries into cluster summaries
-        4. Return: Combined knowledge base summary
-
-        Args:
-            index_name: Name of the index to summarize
-            batch_size: Number of documents to sample (default: 1000)
-            vdb_core: VectorDatabaseCore instance
-            user_id: ID of the user delete the knowledge base
-            tenant_id: ID of the tenant
-            language: Language of the summary (default: 'zh')
-            model_id: Model ID for LLM summarization
-
-        Returns:
-            StreamingResponse containing the generated summary
-        """
-        try:
-            if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
-
-            from management.services.knowledge_base.clustering import (
-                kmeans_cluster_documents,
-            )
-            from management.services.knowledge_base.summary import (
-                merge_cluster_summaries,
-                process_documents_for_clustering,
-                summarize_clusters_map_reduce,
-            )
-
-            # Use new Map-Reduce approach
-            # Sample reasonable number of documents
-            sample_count = min(batch_size // 5, 200)
-
-            # Define a helper function to run all blocking operations in a thread pool
-            def _generate_summary_sync():
-                """Synchronous function that performs all blocking operations"""
-                # Step 1: Get documents and calculate embeddings
-                document_samples, doc_embeddings = process_documents_for_clustering(
-                    index_name=index_name,
-                    vdb_core=vdb_core,
-                    sample_doc_count=sample_count,
-                )
-
-                if not document_samples:
-                    raise Exception("No documents found in index.")
-
-                # Step 2: Cluster documents (CPU-intensive operation)
-                clusters = kmeans_cluster_documents(doc_embeddings, k=None)
-
-                # Step 3: Map-Reduce summarization (contains blocking LLM calls)
-                cluster_summaries = summarize_clusters_map_reduce(
-                    document_samples=document_samples,
-                    clusters=clusters,
-                    language=language,
-                    doc_max_words=100,
-                    cluster_max_words=150,
-                    model_id=model_id,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                )
-
-                # Step 4: Merge into final summary
-                final_summary = merge_cluster_summaries(cluster_summaries)
-                return final_summary
-
-            final_summary = await run_blocking(
-                "knowledge-summary",
-                _generate_summary_sync,
-                lane="model-tool-io",
-                owner="config",
-            )
-
-            # Stream the result
-            async def generate_summary():
-                try:
-                    # Stream the summary character by character
-                    for char in final_summary:
-                        yield f'data: {{"status": "success", "message": "{char}"}}\n\n'
-                        await asyncio.sleep(0.01)
-                    yield 'data: {"status": "completed"}\n\n'
-                except Exception as e:
-                    yield f'data: {{"status": "error", "message": "{e}"}}\n\n'
-
-            return StreamingResponse(generate_summary(), media_type="text/event-stream")
-
-        except Exception as e:
-            logger.error(
-                f"Knowledge base summary generation failed: {str(e)}", exc_info=True
-            )
-            raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod
     def get_random_documents(
