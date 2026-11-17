@@ -49,7 +49,9 @@ class NexentOutputAdapter:
             return []
         error = result.get("error") if isinstance(result.get("error"), dict) else {}
         return [_converted(source, "error", content=run.get("invalid") or error.get("safe_message")
-                           or result.get("end_reason") or "NEXENT_TERMINAL_MISSING")]
+                           or result.get("end_reason") or "NEXENT_TERMINAL_MISSING",
+                           **({"error_code": error["category"], "retryable": error.get("retryable", False),
+                               "request_id": error.get("request_id")} if error.get("category") and not run.get("invalid") else {}))]
 
     def push(self, event):
         if not _native(event):
