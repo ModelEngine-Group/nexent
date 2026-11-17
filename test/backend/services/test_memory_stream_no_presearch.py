@@ -303,9 +303,14 @@ async def test_only_transient_http_failures_open_embedding_circuit(cache, monkey
     assert second == (None if opens_circuit else [0.25, 0.75])
     assert client.get_embeddings_with_deadline.await_count == (1 if opens_circuit else 2)
 
+@pytest.mark.parametrize("long_term_failed", [False, True])
 @pytest.mark.asyncio
-async def test_external_memory_survives_missing_embedding_and_counts_no_local_hits(monkeypatch, memory_thread_manager):
-    service = Mock(build_context=AsyncMock(return_value=MemorySearchContext()))
+async def test_external_memory_survives_other_sources(monkeypatch, memory_thread_manager, long_term_failed):
+    long_term = AsyncMock(
+        return_value=MemorySearchContext(),
+        side_effect=RuntimeError("database read failed") if long_term_failed else None,
+    )
+    service = Mock(build_context=long_term)
     provider_service = Mock(search_all_enabled=AsyncMock(return_value=[
         MemorySearchResult(layer=MemoryLayer.AGENT, external_id="external-1", content="external fact", score=0.9,
                            source="test-provider", is_external=True),
@@ -327,6 +332,7 @@ async def test_external_memory_survives_missing_embedding_and_counts_no_local_hi
     assert provider_service.search_all_enabled.await_args.kwargs["limit"] == 3
     assert service.pipeline.run.call_args.kwargs["external_results"][0].content == "external fact"
     service.retrieval_service._record_hits.assert_not_called()
+    long_term.assert_awaited_once()
 
 @pytest.mark.parametrize("writer_unavailable", [False, True])
 @pytest.mark.asyncio
