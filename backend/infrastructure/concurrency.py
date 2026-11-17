@@ -31,6 +31,14 @@ runtime_thread_manager = ThreadManager(
             cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
+        "memory-read": LanePolicy(
+            name="memory-read", max_workers=16, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=2, shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
+        "memory-write": LanePolicy(
+            name="memory-write", max_workers=8, max_queue_size=0, queue_timeout_seconds=0,
+            cancel_grace_seconds=2, shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "mcp-session": LanePolicy(
             name="mcp-session",
             max_workers=RUNTIME_AGENT_THREAD_MAX_WORKERS,

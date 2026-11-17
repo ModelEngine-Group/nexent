@@ -6816,5 +6816,8 @@
   "ops.noPermission": "Access denied",
   "ops.loadError": "Failed to load. Please retry.",
   "ops.empty": "No data yet",
-  "ops.readOnly": "Read-only mode"
+  "ops.readOnly": "Read-only mode",
+  "dreaming.reason.no_candidates": "No recent Agent memories were available.",
+  "dreaming.reason.no_eligible_candidates": "No memories reached the promotion thresholds.",
+  "dreaming.reason.no_new_evidence": "The current version already contains the available evidence."
 }

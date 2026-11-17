@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI-compatible text embedding adapter."""
 
 from __future__ import annotations
@@ -6,6 +8,7 @@ import asyncio
 import logging
 from typing import List
 
+import httpx
 import requests
 
 from nexent.core.concurrency import run_blocking
@@ -15,6 +18,23 @@ from nexent.monitor import record_model_call
 from ...multimodal_adapter import ModelInfo
 from ...registry import register_adapter
 from .embedding_adapter import EmbeddingAdapter, EmbeddingRequest
+
+
+class InvalidEmbeddingResponse(ValueError):
+    """The embedding service returned an invalid vector payload."""
+
+
+def _embedding_vectors(response, expected_count):
+    rows = response.get("data") if isinstance(response, dict) else None
+    if not isinstance(rows, list) or len(rows) != expected_count:
+        raise InvalidEmbeddingResponse("Invalid embedding data or result count")
+    vectors = []
+    for row in rows:
+        vector = row.get("embedding") if isinstance(row, dict) else None
+        if not isinstance(vector, list) or not vector:
+            raise InvalidEmbeddingResponse("Missing embedding vector")
+        vectors.append(vector)
+    return vectors
 
 
 @register_adapter("openai", "embedding")
@@ -58,9 +78,24 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
                 response = self._make_request(data, timeout=current)
                 if with_metadata:
                     return response
-                return [item["embedding"] for item in response["data"]]
+                return _embedding_vectors(response, len(data["input"]))
 
             return self._retry(attempts, base_timeout, retry_timeout_step, _do, "OpenAI")
+
+    async def get_embeddings_with_deadline(self, inputs, *, timeout: float):
+        """Perform one request with a deadline for the complete HTTP response."""
+        data = self._prepare_input(inputs)
+        body = {**(self._context.extra_body or {}), **data}
+        with record_model_call("embedding", self._model_name, display_name=self._model_name):
+            async with asyncio.timeout(timeout):
+                async with httpx.AsyncClient(verify=self._ssl_verify, trust_env=False, timeout=timeout) as client:
+                    response = await client.post(self._base_url, headers=self._headers, json=body)
+                    response.raise_for_status()
+                    try:
+                        payload = response.json()
+                    except ValueError as exc:
+                        raise InvalidEmbeddingResponse("Invalid embedding JSON") from exc
+                    return _embedding_vectors(payload, len(data["input"]))
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         """Runs a connectivity check with a sample text input.
