@@ -21,10 +21,13 @@ from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTi
 from services import nl2skill_service
 
 
-def test_creator_redis_claim_lease_and_stale_generation_fences():
+def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
+    monkeypatch.setattr(
+        "management.services.agent.run_state.RUNTIME_STATE_REDIS_URL",
+        "redis://controlled-fixture",
+    )
     state = RuntimeStateService()
     state._client = fakeredis.FakeRedis(decode_responses=True)
-    state._redis_url = "redis://controlled-fixture"
     assert state.claim_creator_run("user", 91, "old")
     assert not state.claim_creator_run("user", 91, "concurrent")
     assert state.creator_lease("user", 91, "old", renew=True)
