@@ -47,6 +47,8 @@ def _mod(name):
 
 
 nexent_pkg = _mod("nexent")
+# Keep unmocked SDK packages importable without relying on prior collection.
+nexent_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent")]
 nexent_utils = _mod("nexent.utils")
 nexent_http_mgr = _mod("nexent.utils.http_client_manager")
 nexent_http_mgr.http_client_manager = MagicMock()
@@ -89,6 +91,7 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
+from ext_components.aidp.apps import aidp_mgmt_app
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -2754,13 +2757,9 @@ class TestNormalizeKbConfigFields:
 
 def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
     """The delete flow keeps document assignment usage in sync."""
-    from importlib import import_module
-
-    tag_service = import_module("management.services.tag.library")
-    from ext_components.aidp.apps import aidp_mgmt_app
 
     sentinel = MagicMock()
-    monkeypatch.setattr(tag_service, "TagManagementService", sentinel)
+    monkeypatch.setattr(aidp_mgmt_app, "TagManagementService", sentinel)
 
     aidp_mgmt_app._cleanup_document_assignments_for_deleted_knowledge_base(
         "tenant-1", "kb-9", "user-1"

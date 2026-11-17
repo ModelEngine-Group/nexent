@@ -100,13 +100,14 @@ def _ensure_index_name(
 
 def _resolve_tenant_embedding_model_info(
     tenant_id: str,
+    config_record: Optional[dict] = None,
 ) -> Optional[EmbeddingModelInfo]:
     """Return the embedding model selected by the tenant, or ``None``."""
     try:
         from management.db.configuration.tenant import get_single_config_info
         from management.services.configuration.tenant.settings import tenant_config_manager
 
-        record = get_single_config_info(tenant_id, "EMBEDDING_ID")
+        record = config_record if config_record is not None else get_single_config_info(tenant_id, "EMBEDDING_ID")
         if not record or not record.get("config_value"):
             logger.warning(
                 "No embedding model configured for tenant %s",
@@ -157,6 +158,18 @@ def _resolve_tenant_embedding_model_info(
             tenant_id,
         )
         return None
+
+
+def get_tenant_embedding_status(tenant_id: str) -> dict:
+    """Resolve status and index using the same active configuration lookup."""
+    from management.db.configuration.tenant import get_single_config_info
+
+    record = get_single_config_info(tenant_id, "EMBEDDING_ID")
+    info = _resolve_tenant_embedding_model_info(tenant_id, config_record=record or {})
+    return {
+        "configured": bool(record and record.get("config_value")),
+        "current_es_index_name": info.get_index_name() if info is not None else None,
+    }
 
 
 def is_tenant_embedding_configured(tenant_id: str) -> bool:

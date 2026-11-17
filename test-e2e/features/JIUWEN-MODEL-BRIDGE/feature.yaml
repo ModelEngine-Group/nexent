@@ -1,0 +1,35 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-MODEL-BRIDGE
+  name: Jiuwen unified model bridge and controlled execution protocol
+  status: active
+  description: M1/M2 integration with shared model service; no generic NativeAgent or CodeAgent implementation.
+  business_rules:
+  - rule_id: JIUWEN-MODEL-BRIDGE-RULE-001
+    description: Jiuwen uses an injected detached trusted outlet snapshot and the canonical ModelService only; complete
+      normalized responses control execution.
+  - rule_id: JIUWEN-MODEL-BRIDGE-RULE-002
+    description: Native or registered controlled-text protocol is fixed per run; complete authorized calls execute
+      once and actual results return to the same Jiuwen loop.
+  - rule_id: JIUWEN-MODEL-BRIDGE-RULE-003
+    description: Partial streams, invalid responses and cancellation fail without incomplete tool execution, retries
+      multiplying or resource leaks.
+  - rule_id: JIUWEN-MODEL-BRIDGE-RULE-004
+    description: Identical repeated stream usage is idempotent and counted once; conflicting usage still fails without
+      replay.
+  - rule_id: JIUWEN-MODEL-BRIDGE-RULE-005
+    description: Ordinary Jiuwen chat exposes the shared terminal clarification form in native and controlled-text
+      modes; a validated exclusive request publishes one human_interaction and awaits input without another model
+      request or resource side effects.
+  required_test_stages:
+  - D3
+  - D5
+  - D4
+  source:
+    requirement_ids:
+    - JIUWEN-MODEL-BRIDGE-20261015
+    - JIUWEN-M6-20261016
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

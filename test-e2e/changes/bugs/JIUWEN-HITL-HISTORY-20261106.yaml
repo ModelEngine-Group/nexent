@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-HITL-HISTORY-20261106
+  change_type: bugfix
+  bug_id: JIUWEN-HITL-HISTORY-20261106
+  title: Preserve valid empty clarification terminals in saved history
+  description: Restore completed awaiting_input results without requiring a final answer, retaining ordinary final validation.
+  observed_behavior: Correct persisted ask_user terminals become JIUWEN_FINAL_OUTPUT_INVALID only in history projection.
+  expected_behavior: Pending and submitted clarification history preserves its completed awaiting_input result and never rewrites audit rows.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing real journey checks restored form values and raw database status but not projected terminal errors or page error banners.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-OUTPUT, JIUWEN-MODEL-BRIDGE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-OUTPUT-D3-001, JIUWEN-CLARIFICATION-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Root and child empty awaiting_input results survive read projection with consistent inner and outer terminal data.
+    - Ordinary empty or malformed answers and invalid nonempty waiting results remain rejected; projection does not mutate records.
+    reason: Read-boundary tests complement actual Runner/HTTP/PostgreSQL D3 and real-provider browser D4, with no duplicate D1.
+    test_selectors:
+    - test/backend/utils/test_runtime_history_projection.py
+  notes: >-
+    SPEC runtime-agent-core-factory proposal/design AC-HH-01..03. Reuse existing Feature responsibility routing.
+    D3 self-owns isolated schema, loopback HTTP, managed sessions/threads and cleans all; D4 owns only its cloned
+    fortune assistant, conversations and private auth state. Existing explicit preparation declarations remain.
+    No new logical shared assets or deployment exception; the Case uses the operator-selected Local Jiuwen deployment.
+    Deploying latest is a separately authorized deploy.sh action. No user history migration or frontend product change.

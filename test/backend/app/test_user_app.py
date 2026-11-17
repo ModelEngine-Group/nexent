@@ -3,7 +3,7 @@
 import types
 import importlib.machinery
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, call, patch
 import sys
 import os
 import logging
@@ -17,34 +17,6 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
-sys.modules['nexent'] = MagicMock()
-sys.modules['nexent.core'] = types.ModuleType('nexent.core')
-# Keep the real, dependency-free name validator importable beneath the SDK stub.
-sys.modules['nexent.core'].__path__ = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/core'))
-]
-sys.modules['nexent.core.agents'] = MagicMock()
-# Create a mock ToolConfig class
-from pydantic import BaseModel
-
-
-class MockToolConfig(BaseModel):
-    name: str = ""
-    description: str = ""
-    parameters: dict = {}
-
-
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
-sys.modules['nexent.storage'] = MagicMock()
-sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
-sys.modules['nexent.storage.minio_config'] = MagicMock()
-
-# Mock for memory_service import used in delete_user_and_cleanup
-nexent_memory_service = MagicMock()
-sys.modules['nexent.memory'] = MagicMock()
-sys.modules['nexent.memory.memory_service'] = nexent_memory_service
-
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -53,7 +25,8 @@ minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
@@ -370,10 +343,9 @@ class TestUpdateUserEndpoint:
             assert data["data"]["id"] == "user1"
             assert data["data"]["role"] == "ADMIN"
             mock_get_user_id.assert_called_once_with("Bearer token123")
-            # Pydantic model includes all fields with None defaults
             mock_update_user.assert_called_once_with(
                 "user1",
-                {"username": None, "email": None, "role": "ADMIN"},
+                {"role": "ADMIN"},
                 updated_by="updater123",
                 requester_tenant_id="tenant1",
                 requester_role="ADMIN",
@@ -470,7 +442,10 @@ class TestDeleteUserEndpoint:
              patch('management.api.identity.user.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_get_tenant.side_effect = [
+                {"tenant_id": "tenant1", "user_id": "user1", "user_roles": ["USER"]},
+                {"tenant_id": "tenant1", "user_id": "deleter123", "user_roles": ["ADMIN", "OPS"]},
+            ]
             mock_cleanup.return_value = None
 
             response = client.delete(
@@ -482,8 +457,8 @@ class TestDeleteUserEndpoint:
             data = response.json()
             assert data["message"] == "User deleted successfully"
             mock_get_user_id.assert_called_once_with("Bearer token123")
-            mock_get_tenant.assert_called_once_with("user1")
-            mock_cleanup.assert_called_once_with("user1", "tenant1")
+            assert mock_get_tenant.call_args_list == [call("user1"), call("deleter123")]
+            mock_cleanup.assert_awaited_once_with("user1", "tenant1", actor_id="deleter123")
 
     def test_delete_user_validation_error(self):
         """Test user deletion with user not found"""
@@ -509,7 +484,10 @@ class TestDeleteUserEndpoint:
              patch('management.api.identity.user.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_get_tenant.side_effect = [
+                {"tenant_id": "tenant1", "user_id": "user1", "user_roles": ["USER"]},
+                {"tenant_id": "tenant1", "user_id": "deleter123", "user_roles": ["ADMIN", "OPS"]},
+            ]
             mock_cleanup.side_effect = Exception("Database connection failed")
 
             response = client.delete(
@@ -530,7 +508,10 @@ class TestDeleteUserEndpoint:
              patch('management.api.identity.user.delete_user_and_cleanup') as mock_delete:
 
             mock_get_user.return_value = ("admin-1", "operator-tenant")
-            mock_get_user_tenant.return_value = {"user_id": "user-9", "tenant_id": "tenant-9"}
+            mock_get_user_tenant.side_effect = [
+                {"user_id": "user-9", "tenant_id": "tenant-9", "user_roles": ["USER"]},
+                {"user_id": "admin-1", "tenant_id": "operator-tenant", "user_roles": ["SU"]},
+            ]
             mock_delete.return_value = None
 
             with caplog.at_level(logging.INFO, logger="audit.security"):
@@ -612,10 +593,9 @@ class TestDataValidation:
             )
 
             assert response.status_code == HTTPStatus.OK
-            # Pydantic model converts empty dict to dict with None values for all optional fields
             mock_update_user.assert_called_once_with(
                 "user1",
-                {"username": None, "email": None, "role": None},
+                {},
                 updated_by="updater123",
                 requester_tenant_id="tenant1",
                 requester_role="ADMIN",
@@ -648,12 +628,12 @@ class TestUserAppCoverageGaps:
         assert response.status_code == HTTPStatus.BAD_REQUEST
         assert response.json()["detail"] == "role cannot be changed"
 
-    def test_delete_user_authentication_error_is_internal_error(self):
+    def test_delete_user_rejects_invalid_token(self):
         with patch("management.api.identity.user.get_current_user_id", side_effect=UnauthorizedError("invalid token")):
             response = client.delete("/users/user1")
 
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        assert "Failed to delete user" in response.json()["detail"]
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert response.json()["detail"] == "invalid token"
 
 
 if __name__ == "__main__":

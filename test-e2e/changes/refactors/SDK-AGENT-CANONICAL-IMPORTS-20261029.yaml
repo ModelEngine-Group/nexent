@@ -1,0 +1,94 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-CANONICAL-IMPORTS-20261029
+  change_type: refactor
+  title: Migrate repository callers and remove historical Agent import facades
+  description: Follow explicit user authorization to remove old Agent SDK import paths, split composite imports
+    by canonical owner and migrate runtime patch/file-loading sites. Preserve CM algorithms, resource ownership,
+    HTTP/SSE/history formats and frozen models.
+  feature_contract_changed: false
+  no_case_change_reason: This deliberately breaks Python import compatibility only. Existing runtime resource context
+    output and cancellation contracts remain valid; fixed scripts update imports and source bindings without weakening
+    business assertions.
+  affected_features:
+    existing:
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-RESOURCES
+    - JIUWEN-CONTEXT
+    - JIUWEN-OUTPUT
+    - SAI-001
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-OUTPUT-D3-001
+    modified:
+    - AGT-AUTO-01804EF17A1DF51B
+    - CMSR-D1-003
+    - CMSR-D1-004
+    - FAF-D1-001
+    - JIUWEN-CONTEXT-D3-001
+    - JIUWEN-CONTEXT-D5-001
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-RECOVERY-D5-001
+    - JIUWEN-RELEASE-D3-001
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - REL-AUTO-1FAFCA5A681580F5
+    - SAI-D1-001
+    - SAI-D1-002
+    - SAI-D1-005
+    - SAI-D3-001
+    - SEARCH-DEEPSEEK-D3-001
+    - TFP-D1-001
+    - TFP-D1-004
+    - TFP-D1-005
+    - TFP-D1-006
+    - TFP-D5-001
+    - UT-BE-AUTO-4781AB28D8956C3F
+    - UT-BE-AUTO-F2215F8782D68127
+    - UT-SDK-016
+    - UT-SDK-017
+    - UT-SDK-018
+    - UT-SDK-019
+    - UT-SDK-AUTO-35C9D72B4533593E
+    - UT-SDK-AUTO-74430BEE8438F486
+    - UT-SDK-AUTO-85A0FBE8116B9F9A
+    - UT-SDK-AUTO-AA4383E2E3B57AD8
+    - UT-SDK-AUTO-E6DDFB4661E0D8B4
+    - UT-SDK-AUTO-ED416510CCE29002
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Canonical factory contracts Core adapters and sandbox submodules import without historical facades.
+    - Removed Python paths and historical pickle globals no longer resolve in a clean process or wheel.
+    - Configuration imports remain lightweight and optional Jiuwen failures do not fall back to another Core.
+    - JSON and canonical type serialization, CM history budgets and resource lifecycle remain unchanged.
+    - Every internal import dynamic lookup mock patch and file loader uses its actual canonical owner.
+    - Models and model-service compatibility directories retain their exact file sets and bytes.
+    reason: Replace obsolete compatibility-only assertions with canonical and removal checks, retain all business
+      UT and formal D1 assets, and reuse existing runtime D3/D5.
+    test_selectors:
+    - test/sdk/core/agents/test_canonical_agent_imports.py
+    - test/sdk/core/agents/test_context_canonical_imports.py
+    - test/sdk/core/agents/test_sandbox_directory_boundaries.py
+    - test/sdk/core/agents/test_context_directory_boundaries.py
+    - test/sdk/core/agents/test_resource_orchestration_boundaries.py
+    - test/sdk/core/agents/test_agent_model.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_core_agent_planning.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/sdk/core/agents/test_sandbox.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/services/test_agent_service.py
+  notes: User instruction on 2026-10-29 explicitly supersedes the R1 to R4 old-import retention contract. No external
+    consumer compatibility or old Python pickle support is promised. Library-specific execution compatibility modules
+    and the unchanged legacy memory API algorithm seam are not import-alias files and remain. No deployment is requested.
+    Historical R1 to R4 UT selector bindings now point to the replacement canonical/removal tests; their original
+    execution evidence remains historical. Other listed Case scripts receive import/source binding updates only;
+    execution is claimed only for the eight selected Jiuwen and SAI Cases recorded in SPEC section 18.

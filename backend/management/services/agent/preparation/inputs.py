@@ -11,7 +11,7 @@ from contracts.constants.environment import AGENT_WORKSPACE_ROOT, MINIO_DEFAULT_
 from contracts.errors.exceptions import WorkbenchError
 from management.services.agent.prompt import load_agent_prompt_bundle
 from management.services.file.service import validate_urls_access
-from nexent.core.agents.agent_model import AgentHistory
+from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.agents.prompt.user_context import render_user_context
 from runtime.workspace import create_run_workspace
@@ -88,6 +88,9 @@ def _materialize_runtime_skill_snapshot(
 ) -> List[Dict[str, Any]]:
     """Materialize frozen Skill files below the run workspace without mutating input."""
     effective = copy.deepcopy(snapshot)
+    skill_names = [str(skill.get("name") or "") for skill in effective]
+    if len(skill_names) != len(set(skill_names)):
+        raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
     snapshot_root = (Path(workspace_path).resolve() / ".skill_snapshot").resolve()
     tenant_root = (snapshot_root / tenant_id).resolve()
     if not tenant_root.is_relative_to(snapshot_root):

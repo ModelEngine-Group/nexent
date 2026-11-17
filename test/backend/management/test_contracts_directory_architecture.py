@@ -78,12 +78,14 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "evaluation",
         "file",
         "identity",
+        "roles",
         "knowledge",
         "memory",
         "model",
         "skill",
         "tag",
         "tool",
+        "trajectory",
         "voice",
     }
 
@@ -131,6 +133,7 @@ def test_error_definitions_have_one_canonical_directory():
         "codes.py",
         "messages.py",
         "exceptions.py",
+        "trajectory.py",
     }
     assert not any(
         (CONTRACTS / name).exists()

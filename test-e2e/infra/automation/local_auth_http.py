@@ -29,12 +29,12 @@ def native_runtime():
             "DEPLOYMENT_VERSION": "full",
         }.items():
             patch.setenv(name, value)
+        from contracts.errors.exceptions import AppException
+        from gateway.authentication import auth as helpers
+        from management.api.identity import user_management as routes
         from management.db import models
         from management.db.client import db_client
         from management.services.permission.identity import authentication as auth
-        from gateway.authentication import auth as helpers
-        from management.api.identity import user_management as routes
-        from contracts.errors.exceptions import AppException
 
         tables = [
             models.UserAccount,
@@ -96,6 +96,7 @@ def runtime(native_runtime):
                 expiry_date=datetime.utcnow() + timedelta(days=1),
                 status="IN_USE",
                 code_type="USER_INVITE",
+                roles=["USER"],
                 created_by="test",
                 updated_by="test",
                 delete_flag="N",
@@ -120,3 +121,14 @@ def register(client):
 
 def bearer(token):
     return {"Authorization": "Bearer " + token}
+
+
+def seed_membership_roles(user_id, roles):
+    """Fixture setup for identity/API-key contracts, not an authorization bypass in product code."""
+    from sqlalchemy import update
+
+    from management.db.client import get_db_session
+    from management.db.models import UserAccount
+    with get_db_session() as session:
+        session.execute(update(UserAccount).where(UserAccount.user_id == user_id).values(user_roles=roles))
+    return True

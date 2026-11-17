@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-BUILTIN-VERSION-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-BUILTIN-VERSION-20261116
+  title: 系统内置智能体的轨迹展示固定V1
+  description: 按受信SYSTEM定义确认身份，在查询响应统一展示V1，保留实际归档版本及普通智能体草稿。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 受信内置身份筛选及普通同名资源排除，固定版本转换覆盖列表、节点及执行摘要。
+    - 普通草稿/未知/发布版本不变；错误不生成版本；历史文件及PG列表查询边界保持。
+    reason: 既有版本测试未覆盖内置展示例外，复用目录和查询UT及D2，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_builtin_versions.py
+    - test/backend/services/trajectory/test_catalog.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/services/trajectory/test_pg_numeric_serialization.py
+  notes: Baseline 5d1b30ea4; SPEC chat-local-file-trajectory/changes/chat-trajectory-builtin-version.
+    Existing runtime ownership and private D2 preparation/cleanup remain unchanged.
+    No shared assets; formal runtime acceptance remains deferred.

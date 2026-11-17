@@ -1,0 +1,85 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-QUERY-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_trj_query
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and product OTLP file storage/reader.
+  Shared-reference variants use two independent service/cache clients with one owned FakeServer,
+  execute actual Redis Lua and close every client in finally; this is HTTP contract evidence,
+  not a real Redis or multi-Pod deployment claim.
+  The tenant-facet variants execute actual catalog ORM on owned in-memory SQLite membership rows, dispose the engine,
+  and assert the connection is released; PostgreSQL syntax is covered separately by traditional UT compilation.
+  Global schedule tests control only the configuration persistence boundary; repository transaction/lock
+  assertions remain traditional UT and do not establish live PostgreSQL atomicity. Manual scope tests
+  delete real owned tenant files and verify another tenant remains readable. The retained-summary regression
+  controls the PG persistence result while checking actual HTTP file cleanup, preserved metric DTOs and no
+  archive access from subsequent list requests; it does not claim real PostgreSQL retention validation.
+  Only PG authority/catalog and existing unrelated directory services are controlled; no live PG, provider or deployed
+  multiworker proof is claimed. Each fixture owns its temporary root and TestClient, shuts down the managed workers
+  in finally and asserts zero active workers. No shared preparation family, deployment, browser or business asset
+  is required. The after-read content transition variants invoke the actual decoder before controlled expiry, real
+  local cleanup or catalog membership revocation. Final HTTP responses must reject that already-read chunk without
+  a success body. These assertions are prepared; their current execution remains deferred by the user.
+acceptance_bindings:
+  AC-08:
+  - test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed
+  - test_trj_query_shared_references_survive_service_switch
+  AC-01:
+  - test_trj_query_su_all_routes_use_platform_identity_recheck
+  - test_trj_query_effective_operations_roles
+  - test_trj_query_existing_directory_admin_branch_and_user_reuse
+  - test_trj_query_storage_states_and_tenant_migration
+  - test_trj_query_unauthorized_identity_is_401_and_private
+  - test_trj_query_content_chunk_rechecks_state_after_physical_read
+  AC-02:
+  - test_trj_query_complete_subtree_and_static_node_paging
+  - test_trj_query_conversation_and_message_snapshot_bounds
+  - test_trj_query_unarchived_partial_missing_and_snapshot_cleanup
+  AC-03:
+  - test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry
+  - test_trj_query_large_unicode_content_roundtrip_and_reference_scope
+  - test_trj_query_incremental_parser_memory_and_source_boundaries
+  - test_trj_query_fragment_final_precedence_and_unknown_metrics
+  - test_trj_query_source_fallback_namespace_and_absent_reasoning
+  - test_trj_query_storage_states_and_tenant_migration
+  - test_trj_query_unarchived_partial_missing_and_snapshot_cleanup
+  - test_trj_query_content_chunk_rechecks_state_after_physical_read
+  - test_trj_query_phase_nodes_retain_hierarchy_time_and_bodies_without_counting_calls
+  AC-04:
+  - test_trj_query_large_unicode_content_roundtrip_and_reference_scope
+  - test_trj_query_facets_and_only_declared_trajectory_routes
+  - test_trj_query_private_validation_under_api_root
+  AC-05:
+  - test_trj_query_cleaned_files_keep_persisted_summary_metrics
+  - test_trj_query_su_manual_cleanup_deletes_only_the_selected_tenant
+  - test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry
+  - test_trj_query_cleanup_batches_and_cursor_scope
+  - test_trj_query_managed_lane_capacity_rejection
+  AC-06:
+  - test_trj_query_existing_directory_admin_branch_and_user_reuse
+  - test_trj_query_facets_and_only_declared_trajectory_routes
+  AC-07:
+  - test_trj_query_tenant_facets_exclude_empty_members
+  - test_trj_query_whole_result_metrics_filters_and_stable_membership
+  - test_trj_query_facets_and_only_declared_trajectory_routes
+  - test_trj_query_complete_subtree_and_static_node_paging
+  - test_trj_query_expiry_rechecks_cached_records_and_content
+  - test_trj_query_pg_list_uses_snapshot_without_opening_archives
+  AC-09:
+  - test_trj_query_whole_result_metrics_filters_and_stable_membership
+  AC-10:
+  - test_trj_query_cleaned_files_keep_persisted_summary_metrics
+  - test_trj_query_pg_list_uses_snapshot_without_opening_archives
+  - test_trj_query_unarchived_filter_reaches_pg_without_opening_files
+  AC-11:
+  - test_trj_query_su_syncs_schedule_for_all_tenants_with_explicit_scope
+  - test_trj_query_tenant_cleanup_schedule_persists_and_rejects_other_scopes
+  AC-12:
+  - test_trj_query_builtin_versions_preserve_archived_values
+  - test_trj_query_pg_list_uses_snapshot_without_opening_archives

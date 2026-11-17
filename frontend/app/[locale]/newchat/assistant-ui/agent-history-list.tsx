@@ -5,6 +5,7 @@
 import {
   Fragment,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -40,6 +41,9 @@ import type {
 } from "@/types/conversation";
 import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
+import { ConversationRunIndicator } from "@/components/common/ConversationRunIndicator";
+import { ConversationHistoryLabel } from "@/components/common/ConversationHistoryLabel";
+import { ConversationRunIndicatorsContext } from "@/hooks/chat/useConversationRunIndicators";
 import agentChatStyles from "../agent-chat.module.css";
 import { usePinnedThreads } from "./thread-pins";
 import {
@@ -84,6 +88,7 @@ type ThreadListItemData = {
 
 export interface AgentHistoryListProps {
   searchQuery: string;
+  serverConversationIds?: ReadonlyMap<string, string>;
   selectedAgentId?: number;
   generatedTitles?: ReadonlyMap<string, string>;
   onHistoryAgentSelected?: (agentId: number) => void;
@@ -220,6 +225,7 @@ export function AgentHistoryViewport({
 
 export function AgentHistoryList({
   searchQuery,
+  serverConversationIds,
   selectedAgentId,
   generatedTitles,
   onHistoryAgentSelected,
@@ -238,7 +244,10 @@ export function AgentHistoryList({
   const normalizedSearch = searchQuery.trim();
   const activeThread = threadItems.find((item) => item.id === mainThreadId);
   const activeThreadRunning = useAuiState((state) => state.thread.isRunning);
-  const activeConversationId = toConversationId(activeThread?.remoteId);
+  const activeConversationId = toConversationId(
+    (activeThread && serverConversationIds?.get(activeThread.id)) ??
+      activeThread?.remoteId
+  );
   const activeAgentId = activeThread
     ? resolveThreadAgentId(
         activeThread.custom?.agentId,
@@ -1459,6 +1468,7 @@ function AgentHistoryRow({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const conversationId = String(item.conversation_id);
+  const indicators = useContext(ConversationRunIndicatorsContext);
   const selected = batch?.isSelected(conversationId) ?? false;
   const timestamp = item.last_activity_time ?? item.create_time;
 
@@ -1529,8 +1539,10 @@ function AgentHistoryRow({
     <div
       data-active={active || undefined}
       data-pinned={pinned || undefined}
+      data-conversation-id={conversationId}
+      onClickCapture={() => indicators.acknowledge(conversationId)}
       className={cn(
-        "group/item flex h-10 w-full min-w-0 items-center rounded-lg hover:bg-[#e5e7eb]",
+        "group/item relative flex h-10 w-full min-w-0 items-center rounded-lg hover:bg-[#e5e7eb]",
         active && "bg-[#e5e7eb]"
       )}
     >
@@ -1585,12 +1597,12 @@ function AgentHistoryRow({
                   selected && "bg-accent"
                 )}
                 onClick={() => batch.toggle(conversationId)}
-                title={title}
               >
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-                <span className="shrink-0 text-xs text-[#8c8c8c]">
-                  {relativeTime(timestamp, t)}
-                </span>
+                <ConversationHistoryLabel
+                  title={title}
+                  time={relativeTime(timestamp, t)}
+                  showActions={false}
+                />
               </button>
             </div>
           ) : (
@@ -1613,7 +1625,6 @@ function AgentHistoryRow({
                     message.error(t("chat.threadList.historyLoadFailed"));
                   });
               }}
-              title={title}
             >
               {pinned && (
                 <PinIcon
@@ -1621,18 +1632,20 @@ function AgentHistoryRow({
                   aria-label={t("chat.threadList.pinned")}
                 />
               )}
-              <span className="min-w-0 flex-1 truncate">{title}</span>
-              {running ? (
-                <LoaderCircle
-                  role="status"
-                  aria-label={t("chat.threadList.running")}
-                  className="size-3 shrink-0 animate-spin text-[#808080]"
-                />
-              ) : (
-                <span className="shrink-0 text-xs text-[#808080]">
-                  {relativeTime(timestamp, t)}
-                </span>
-              )}
+              <ConversationHistoryLabel
+                title={title}
+                time={
+                  !running && !indicators.running.has(conversationId)
+                    ? relativeTime(timestamp, t)
+                    : undefined
+                }
+                status={
+                  <ConversationRunIndicator
+                    running={running || indicators.running.has(conversationId)}
+                    completed={indicators.completed.has(conversationId)}
+                  />
+                }
+              />
             </button>
           )}
           {!batch?.batchMode && (
@@ -1657,7 +1670,7 @@ function AgentHistoryRow({
               <button
                 type="button"
                 aria-label={t("chat.threadList.moreActions", { title })}
-                className="mr-1 size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
+                className="absolute right-2 top-1/2 size-7 -translate-y-1/2 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreHorizontalIcon className="mx-auto size-4" />

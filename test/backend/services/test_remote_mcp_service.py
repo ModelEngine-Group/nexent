@@ -53,7 +53,7 @@ sys.modules['nexent.storage.minio_config'] = nexent_minio
 
 # Pre-mock all nexent submodules that may be referenced downstream
 for _mod_name in [
-    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.agent_model',
+    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.contracts.config',
     'nexent.core.models', 'nexent.core.utils',
     'nexent.container', 'nexent.memory',
 ]:
@@ -69,7 +69,7 @@ for _mod_name in [
         sys.modules[_mod_name] = _mod
 
 # Ensure specific attributes needed by imports are present
-nexent_agent_model = sys.modules['nexent.core.agents.agent_model']
+nexent_agent_model = sys.modules['nexent.core.agents.contracts.config']
 nexent_agent_model.AgentVerificationConfig = MagicMock()
 nexent_agent_model.ToolConfig = MagicMock()
 
@@ -2646,8 +2646,8 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""
 
-    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
-    @patch_import_context('management.services.tool.configuration.delete_openapi_service')
+    @patch_import_context('management.services.mcp.service._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.mcp.service.delete_openapi_service')
     @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
     @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
     @patch_import_context('management.services.mcp.service.MCPContainerManager')

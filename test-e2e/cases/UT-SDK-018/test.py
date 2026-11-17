@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 unit contracts for sandboxed skill-script execution (UT-SDK-018).
 
 The Docker execution target is a recording stub: no container is started and
@@ -79,7 +80,7 @@ def _skill_manager(tmp_path):
 
 
 def _runner(container, *, timeout_seconds: int = 300, workspace: str = "/ws"):
-    from nexent.core.agents.sandbox import SandboxSkillScriptRunner
+    from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
 
     return SandboxSkillScriptRunner(
         _StubExecutor(container), timeout_seconds=timeout_seconds, workspace_path=workspace,
@@ -170,7 +171,7 @@ def test_sandbox_skill_runner_stage_execute_return_and_trust_boundary(tmp_path, 
         assert bash_exec and bash_exec[0][3] == "bash"
 
         # Default mapped timeout is 300 seconds.
-        from nexent.core.agents.sandbox import SandboxSkillScriptRunner
+        from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
 
         default_runner = SandboxSkillScriptRunner(_StubExecutor(_StubContainer()))
         assert default_runner._timeout_seconds == 300

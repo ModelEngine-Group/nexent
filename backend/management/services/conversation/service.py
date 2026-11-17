@@ -18,20 +18,30 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.constants.constants import MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.agent import AgentRequest
-from contracts.conversation import MessageRequest, MessageUnit
+from contracts.conversation import (
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    MessageRequest,
+    MessageUnit,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
-from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from infrastructure.observability.trajectory_runtime import request_conversation_cleanup
+from management.db.conversation.repository import branch_conversation, create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
     get_last_unit_for_message,
     get_latest_assistant_message,
 )
 from management.db.model.repository import get_model_by_model_id
+from management.db.conversation.repository import append_conversation_user_message, resolve_conversation_retry_user
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
+from infrastructure.runtime_output import is_runtime_event, project_runtime_history
+from infrastructure.nexent_output import normalize_nexent_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -91,6 +101,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     }
     if message_data.get('clarification_response') is not None:
         message_data_copy['clarification_response'] = message_data['clarification_response']
+    if message_data.get('annotations') is not None:
+        message_data_copy['annotations'] = message_data['annotations']
     return create_conversation_message(
         message_data_copy, user_id, status=status, message_source=message_source,
     )
@@ -254,28 +266,33 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist readable user text and any structured clarification response atomically."""
-    user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
-
-    # Strip the locale-specific current-time prefix before persisting so historical
-    # messages do not show the time marker. The prefix is injected by
-    # run_agent_stream for the LLM call only.
-    raw_query = strip_current_time_prefix(request.query)
-
-    conversation_req = MessageRequest(
-        conversation_id=request.conversation_id,
-        message_idx=user_role_count * 2,
-        role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=raw_query)],
-        minio_files=request.minio_files,
-        **({'clarification_response': request.clarification_response}
-           if getattr(request, 'clarification_response', None) is not None else {}),
-    )
-    save_message(
-        conversation_req, user_id=user_id, tenant_id=tenant_id,
-        message_source=MessageSource(getattr(request, "_message_source", MessageSource.CHAT)),
-    )
+    """Reserve one user turn and bind its committed identity to trajectory capture."""
+    request.__dict__.pop("_trajectory_message_receipt", None)
+    source = MessageSource(getattr(request, "_message_source", MessageSource.CHAT))
+    retry_id = getattr(request, "retry_user_message_id", None)
+    if type(retry_id) is int:
+        message_id, message_index = resolve_conversation_retry_user(
+            request.conversation_id, user_id, retry_id, request.retry_message_index,
+            strip_current_time_prefix(request.query), request.minio_files,
+        )
+    else:
+        annotations = normalize_message_annotations(getattr(request, "annotations", None))
+        message_id, message_index = append_conversation_user_message(
+            request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
+            **({"message_source": source} if source != MessageSource.CHAT else {}),
+            **({"annotations": annotations} if annotations is not None else {}),
+            **({"clarification_response": request.clarification_response.model_dump(mode="json")}
+               if getattr(request, "clarification_response", None) is not None else {}),
+        )
+    request._runtime_user_message_id = message_id
+    request._runtime_user_message_index = message_index
+    if type(message_id) is int and 0 < message_id <= 2147483647:
+        request.__dict__["_trajectory_message_receipt"] = {
+            "message_id": str(message_id),
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "conversation_id": str(request.conversation_id),
+        }
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -427,6 +444,52 @@ def create_new_conversation(
         raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
+        raise Exception(str(e))
+
+
+def branch_conversation_service(
+    conversation_id: int,
+    turn_index: int,
+    user_id: str,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Branch a conversation into a new one up to and including the given turn
+
+    Args:
+        conversation_id: Source conversation ID
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User ID that must own the source conversation
+        source_message_id: Exact persisted answer in the requested turn
+        answer_index: 1-based runtime answer version when no persisted ID is available
+
+    Returns:
+        Dict[str, Any]: New conversation data
+
+    Raises:
+        ConversationNotFoundError: When the source conversation does not exist
+    """
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+    try:
+        target = {}
+        if source_message_id is not None:
+            target["source_message_id"] = source_message_id
+        if answer_index is not None:
+            target["answer_index"] = answer_index
+        conversation_data = branch_conversation(
+            conversation_id, turn_index, user_id=user_id, **target
+        )
+        if conversation_data is None:
+            raise ConversationNotFoundError(
+                "Conversation does not exist or has been deleted"
+            )
+        return conversation_data
+    except (AppException, ConversationNotFoundError, ValueError):
+        raise
+    except Exception as e:
+        logging.error(f"Failed to branch conversation: {str(e)}")
         raise Exception(str(e))
 
 
@@ -674,6 +737,22 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
         raise Exception(str(e))
 
 
+def _request_trajectory_cleanup(conversation_ids, user_id):
+    """Keep committed deletes successful; maintenance retries a missed handoff."""
+    if not conversation_ids:
+        return
+    try:
+        if request_conversation_cleanup(conversation_ids, user_id):
+            return
+    except Exception as error:  # noqa: BLE001 - A telemetry handoff cannot roll back the committed conversation delete.
+        logger.warning(
+            "trajectory.conversation_cleanup_deferred count=%s exception_type=%s",
+            len(conversation_ids), type(error).__name__,
+        )
+        return
+    logger.warning("trajectory.conversation_cleanup_deferred count=%s", len(conversation_ids))
+
+
 def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     """
     Delete specified conversation
@@ -700,6 +779,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
 
+        _request_trajectory_cleanup([conversation_id], user_id)
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -741,6 +821,7 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
             )
 
         deleted_ids = delete_conversations_batch(conversation_ids, user_id)
+        _request_trajectory_cleanup(deleted_ids, user_id)
         deleted_set = set(deleted_ids)
         failed_ids = [cid for cid in conversation_ids if cid not in deleted_set]
 
@@ -764,7 +845,12 @@ def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[
     """
     for msg in reversed(message_records):
         if msg.get('status') == 'streaming' and msg.get('role') == MESSAGE_ROLE["ASSISTANT"]:
-            units = msg.get('units') or []
+            raw_units = msg.get('units') or []
+            units, _ = normalize_nexent_history([
+                {**u, "type": u.get("unit_type"), "content": u.get("unit_content", "")}
+                for u in raw_units
+            ], "streaming")
+            units = [{**u, "unit_type": u["type"], "unit_content": u["content"]} for u in units]
             last_unit = units[-1] if units else None
             return {
                 'message_id': msg['message_id'],
@@ -883,12 +969,27 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 message_item['clarification_response'] = response
                         except (ValueError, TypeError):
                             logger.warning("Skipping invalid clarification response message_id=%s", message_id)
+                    elif unit.get('unit_type') == MESSAGE_ANNOTATIONS_UNIT_TYPE:
+                        annotations = parse_message_annotation_unit(unit.get('unit_content'))
+                        if annotations is not None:
+                            message_item['annotations'] = [
+                                item.model_dump(mode="json") for item in annotations
+                            ]
 
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:
                     message_item['minio_files'] = msg['minio_files']
             else:
                 # Assistant message: message is an array, need to process search_content_placeholder
+                config = history_data.get("workbench_config")
+                if (history_data.get("agent_system_key") == "nl2skill_main"
+                        or isinstance(config, dict) and config.get("mode") == "skill_create"):
+                    from management.services.skill.stream_parser import project_skill_history_units
+
+                    message_units = project_skill_history_units(message_units)
+                message_content, message_units, invalid_runtime_answer = project_runtime_history(
+                    message_content, message_units
+                )
                 processed_units = []
                 for unit in message_units:
                     unit_id = unit.get('unit_id')
@@ -943,7 +1044,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 tool_data = json.loads(unit_content)
                             except (json.JSONDecodeError, TypeError):
                                 tool_data = None
-                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                            if (isinstance(tool_data, dict) and 'content' in tool_data
+                                    and not is_runtime_event(tool_data)):
                                 processed_unit['content'] = tool_data.get('content', '')
                                 processed_unit['tool_name'] = tool_data.get('tool_name')
                                 processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
@@ -959,6 +1061,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                         'content': message_content
                     })
 
+                processed_units, public_status = normalize_nexent_history(processed_units, msg.get("status"))
+                if public_status == "failed":
+                    invalid_runtime_answer = True
+
                 message_item = {
                     'role': role,
                     'message': processed_units,
@@ -972,6 +1078,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
 
             message_item["status"] = msg.get("status", "completed")
+            if role != MESSAGE_ROLE["USER"] and invalid_runtime_answer:
+                message_item["status"] = "failed"
 
             # Keep the logical message position so clients can distinguish a
             # regenerated branch from a separate turn with identical text.

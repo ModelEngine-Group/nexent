@@ -64,18 +64,45 @@ async def test_northbound_answer_modes_match_finalized_history(tenant_a_user, no
                 events = await collect_events(response)
             history = await api.get(f"/nb/v1/conversations/{conversation_id}")
             assert_status(history, 200)
+        async with client("runtime", token=tenant_a_user.access_token) as api:
+            detail = await api.get(f"/conversation/{conversation_id}")
+            assert_status(detail, 200)
+        assistant_messages = [message for group in detail.json()["data"] for message in group["message"]
+                              if message["role"] == "assistant"]
+        assert len(assistant_messages) == 1
+        units = assistant_messages[0]["message"]
+        if isinstance(units, str):
+            units = json.loads(units)
         assert not any(event.get("type") == "error" for event in events)
         persisted = [message["content"] for message in history.json()["data"]["history"]
                      if message["role"] == "assistant"]
         assert len(persisted) == 1
         final_events = [event for event in events if event.get("type") == "final_answer"]
+        previews = [event for event in events if event.get("answer_preview")]
+        assert not any(unit.get("answer_preview") for unit in units)
+        assert [unit["content"] for unit in units if unit["type"] == "final_answer"
+                and not unit.get("invocation_id")] == [persisted[0]]
         if mode != "delta":
             assert len(final_events) == 1, "A first-answer consumer must receive exactly one complete answer"
             assert not final_events[0].get("invocation_id")
             assert final_events[0].get("answer_phase") == "complete"
             assert final_events[0]["content"] == persisted[0]
             assert marker in final_events[0]["content"] and end in final_events[0]["content"]
+            assert previews, "Smolagents complete mode must expose answer previews before final confirmation"
+            assert all(event["type"] == "model_output_thinking" and event.get("answer_phase") == "delta"
+                       and not event.get("invocation_id") and event.get("step_id") for event in previews)
+            final_step = final_events[0]["step_id"]
+            assert "".join(event["content"] for event in previews if event["step_id"] == final_step) == persisted[0]
+            assert all(events.index(event) < events.index(final_events[0]) for event in previews)
+            rolled_back = {event["attempt_id"] for event in events
+                           if event.get("type") == "model_attempt_control" and event.get("phase") == "rollback"}
+            thinking = "".join(event["content"] for event in events
+                               if event.get("type") == "model_output_thinking" and not event.get("answer_preview")
+                               and event.get("attempt_id") not in rolled_back)
+            assert "".join(unit["content"] for unit in units
+                           if unit["type"] == "model_output_thinking") == thinking
         else:
+            assert previews == [], "Explicit delta must retain its existing event types"
             root = [event for event in final_events if not event.get("invocation_id")]
             assert any(event.get("answer_phase") == "delta" for event in root)
             assert root[-1].get("answer_phase") == "complete"

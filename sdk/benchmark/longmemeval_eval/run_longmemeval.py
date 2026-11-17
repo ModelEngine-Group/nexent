@@ -65,7 +65,7 @@ from agent_runner import (
     run_agent_with_tracking,
     ContextManagerConfig,
 )
-from nexent.core.agents.agent_model import AgentHistory
+from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.context import ContextManager
 
 from dataset import load_dialogues, LongMemEvalDialogue, LongMemEvalSession
