@@ -243,4 +243,3 @@ async def test_idle_shutdown_does_not_reserve_or_cancel_a_worker(worker, monkeyp
     assert await runtime.shutdown_creator_streams(0) == 0
     worker.manager.register_agent_run.assert_not_called()
     worker.manager.unregister_agent_run.assert_not_called()
-

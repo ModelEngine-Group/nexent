@@ -151,4 +151,3 @@ async def test_interruption_drains_committed_units_before_appending_the_error(re
     assert replay.rows[-1]["status"] == "failed"
     assert [unit["unit_index"] for unit in replay.rows[-1]["units"]] == [0, 1, 2]
     assert replay.state._run_managed.await_args.args[-1] == "old"
-

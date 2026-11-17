@@ -98,4 +98,3 @@ async def test_missing_checkpoint_after_wait_is_an_error_instead_of_false_comple
     with pytest.raises(RuntimeError, match="no longer available"):
         async for _ in subscribe_shared_checkpoint(state, "owner", 91, checkpoint([])):
             pytest.fail("Missing replay must not synthesize a successful event")
-

@@ -121,4 +121,3 @@ async def test_cancellation_during_a_write_settles_it_before_the_terminal_flush(
     assert [call[-1] for call in saved] == ["streaming", "stopped"]
     assert [unit["unit_index"] for unit in saved[0][3]] == [0]
     assert saved[1][3] == []
-

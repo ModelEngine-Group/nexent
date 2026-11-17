@@ -168,4 +168,3 @@ async def test_failed_preparation_releases_the_request_fence_and_its_heartbeat(t
     execution.release_request.assert_awaited_once_with("creator-request:tenant:owner:request")
     turn.stream.aclose.assert_awaited_once()
     turn.save.assert_not_called()
-
