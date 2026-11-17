@@ -13,6 +13,7 @@ from contracts.knowledge_cleanse import KnowledgeCleanseRequest
 from pydantic import Field, model_validator
 
 INGESTION_DATASET = "knowledge_ingestion_files"
+LOCAL_SOURCE_DATASET = "management_local_sources"
 
 
 class KnowledgeIngestionIntent(KnowledgeFileReference):

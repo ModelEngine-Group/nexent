@@ -31,6 +31,7 @@ case:
   - Migration is repeatable and preserves legacy rows without guessed local ownership.
   - Current Management authority registers a local alias while retaining the pinned object identity used by Runtime.
   - Tenant scope and bounded storage reject invalid access without altering the valid alias.
+  - The shipped staging migration is repeatable, audited and actor-scoped; binding checks current KB authority and rejects stale CAS without changing the fixed target.
   forbidden_side_effects:
   - No user application data, source object, model provider, data-process endpoint or Runtime shared volume is accessed.
   risk_type: DEPLOYMENT
@@ -48,6 +49,11 @@ case:
   cleanup:
   - Dispose owned engines and ports and remove only the unique-label PostgreSQL container and its anonymous volumes; pytest owns the temporary directory.
   acceptance:
+  - id: AC-04
+    description: Actual PostgreSQL staging migration and default ports preserve actor ownership, audited state, fixed binding and constraints; public staging upload remains outside this proof.
+    steps: [2, 3]
+    expected_results: [4]
+    forbidden_side_effects: [1]
   - id: AC-01
     description: Actual migration is idempotent and preserves nullable legacy state.
     steps: [1]

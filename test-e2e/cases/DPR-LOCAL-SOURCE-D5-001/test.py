@@ -16,7 +16,12 @@ import pytest
 @pytest.mark.stage("D5")
 def test_local_source_alias_deployment(monkeypatch, tmp_path, record_property):
     root = Path(__file__).resolve().parents[3]
-    sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
+    sys.path[:0] = [
+        str(Path(__file__).parent),
+        str(root),
+        str(root / "backend"),
+        str(root / "sdk"),
+    ]
     import sqlalchemy as sa
     from contracts.constants import environment
     from contracts.knowledge_ingestion import INGESTION_DATASET
@@ -198,6 +203,10 @@ def test_local_source_alias_deployment(monkeypatch, tmp_path, record_property):
                 ).scalar_one()
                 == 1
             )
+        from staging_probe import prove_staging
+
+        prove_staging(engine, root, context)
+        record_property("local_staging_migration_and_actor_binding", "passed")
         actor = ServicePrincipal("user-a", "tenant-a")
         with knowledge_ingestion_ports(
             actor.tenant_id, actor.user_id, context=context()

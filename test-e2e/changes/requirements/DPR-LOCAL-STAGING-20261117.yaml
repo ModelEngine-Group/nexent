@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-LOCAL-STAGING-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Establish actor-owned local staging before public upload binding
+  description: Add Management-only scoped records and a CAS journal for unbound local source ownership and a fixed authorized KB target. Verify shipped migration and default ports on PostgreSQL. Public upload and process wiring remain pending; no new replay or recovery worker.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-HTTP-D3-001]
+    added: []
+    modified: [DPR-LOCAL-SOURCE-D5-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Scope exact local aliases to their tenant and uploading actor, never infer ownership from a basename.
+    - Recheck KB edit authority and CAS a single fixed target without unknown-write replay.
+    - Reject invalid source metadata and deny Runtime access to the staging dataset.
+    reason: New journal UT use actual SQLite StorageInterface records with controlled authorization failures. Existing local publication tests remain. Extend existing deployment Case for real SQL migration, default ports and actual DAC rather than add a duplicate D1.
+    test_selectors:
+    - test/backend/services/test_local_source_staging.py
+    - test/backend/services/test_local_knowledge_registration.py
