@@ -19,10 +19,9 @@ from infrastructure.storage.catalog import (
 files = KnowledgeFileLifecycle.__table__
 
 
-def bind_admission_records(scope, engine, *, readonly=False):
+def admission_mapping(*, readonly=False):
+    """Share the same admission tables, audit policy and revisions in finalization."""
     tables = {KB: knowledge, FILES: files}
-    if scope.system or scope.service_role != 'management' or not scope.namespaces <= tables.keys():
-        raise ScopeDenied()
     names = {KB: ('knowledge_id', 'tenant_id', 'index_name', 'version', 'deletion_request', 'create_time',
                   'update_time', 'created_by', 'updated_by', 'delete_flag'), FILES: tuple(c.name for c in files.c)}
     definitions = []
@@ -37,11 +36,18 @@ def bind_admission_records(scope, engine, *, readonly=False):
             frozenset({'management'}), frozenset() if readonly else frozenset({'management'}),
             tenant_field='tenant_id', active_field='delete_flag',
         ))
-    return SQLRecordStore(scope, DatasetCatalog(tuple(definitions)),
-                          {name: tables[name] for name in scope.namespaces}, engine,
-                          revision_fields={KB: 'version', FILES: 'version'},
-                          audit_mappings={name: RecordAudit(
+    audits = {name: RecordAudit(
                               'create_time', 'update_time', 'created_by', 'updated_by',
                               extra_dates=frozenset(c.name for c in tables[name].c
                                                     if isinstance(c.type, sa.DateTime) and c.name not in {'create_time', 'update_time'})
-                          ) for name in tables})
+                          ) for name in tables}
+    return tables, definitions, {KB: 'version', FILES: 'version'}, audits
+
+
+def bind_admission_records(scope, engine, *, readonly=False):
+    tables, definitions, revisions, audits = admission_mapping(readonly=readonly)
+    if scope.system or scope.service_role != 'management' or not scope.namespaces <= tables.keys():
+        raise ScopeDenied()
+    return SQLRecordStore(scope, DatasetCatalog(tuple(definitions)),
+                          {name: tables[name] for name in scope.namespaces}, engine,
+                          revision_fields=revisions, audit_mappings=audits)

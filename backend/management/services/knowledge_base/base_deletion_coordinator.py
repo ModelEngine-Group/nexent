@@ -33,6 +33,7 @@ from nexent.storage.models import (
 )
 
 from infrastructure.knowledge_admission import knowledge_admission_ports
+from infrastructure.knowledge_base_metadata import knowledge_base_metadata_ports
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,9 @@ logger = logging.getLogger(__name__)
 class KnowledgeBaseDeletionCoordinator:
     """A request advances known work once; uncertain writes are only inspected."""
 
-    def __init__(self, files, client, *, ports=knowledge_admission_ports):
+    def __init__(self, files, client, *, ports=knowledge_admission_ports, metadata_ports=knowledge_base_metadata_ports):
         self.files, self.client, self.ports = files, client, ports
+        self.metadata_ports = metadata_ports
 
     async def _blocking(self, name, fn, *args, **kwargs):
         return await run_blocking('knowledge-base-deletion-' + name, fn, *args,
@@ -69,6 +71,15 @@ class KnowledgeBaseDeletionCoordinator:
         with self.ports(actor, context=context) as (records, resources):
             return getattr(KnowledgeBaseDeletionJournal(records, resources, actor), method)(row, *args, context=context)
 
+    def _finalize(self, row, actor, context):
+        from management.services.knowledge_base.base_metadata import (
+            finalize_knowledge_base_deletion,
+        )
+
+        context.remaining()
+        with self.metadata_ports(actor, context=context) as (records, resources):
+            return finalize_knowledge_base_deletion(records, resources, row, actor, context=context)
+
     async def request(self, index_name, actor, *, context=None):
         context = context or OperationContext('kb-base-delete-' + uuid4().hex, monotonic() + 10)
         stopped = Event()
@@ -80,8 +91,10 @@ class KnowledgeBaseDeletionCoordinator:
                 row = await self._blocking('admit', self._admit, index_name, actor, operation)
                 intent = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
                 # A different editor may acknowledge the intent but cannot execute as its owner.
-                if intent.user_id != actor.user_id or intent.phase == 'metadata_pending':
+                if intent.user_id != actor.user_id:
                     return row
+                if intent.phase == 'metadata_pending':
+                    return await self._blocking('finalize', self._finalize, row, actor, operation)
                 if intent.phase == 'files':
                     complete, cursor = True, None
                     while True:
@@ -92,7 +105,7 @@ class KnowledgeBaseDeletionCoordinator:
                             if file['status'] == 'DELETED' and file['stage'] == 'DELETE_DONE':
                                 continue
                             result = await self.files.request(index_name, None, 'full', actor,
-                                                              file_id=file['file_id'], context=operation, remove_tags=True)
+                                                              file_id=file['file_id'], context=operation, remove_tags=False)
                             complete &= result['status'] == 'DELETED' and result['stage'] == 'DELETE_DONE'
                         if page.next_cursor is None:
                             break
@@ -110,7 +123,10 @@ class KnowledgeBaseDeletionCoordinator:
                         if error.status_code != 404:
                             raise
                         return row
-                return await self._blocking('observe', self._journal, row, actor, operation, 'observe_collection', state)
+                row = await self._blocking('observe', self._journal, row, actor, operation, 'observe_collection', state)
+                if KnowledgeBaseDeletionIntent.model_validate(row['deletion_request']).phase == 'metadata_pending':
+                    return await self._blocking('finalize', self._finalize, row, actor, operation)
+                return row
         except (TimeoutError, DeadlineExceeded, OutcomeUnknown, Unavailable,
                 RuntimeServiceTimeoutError, RuntimeServiceUnavailableError) as error:
             logger.warning('knowledge_base_deletion_pending operation_id=%s error_type=%s',

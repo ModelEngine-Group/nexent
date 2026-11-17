@@ -89,14 +89,19 @@ class SQLRecordStore:
     )
 
     def __init__(
-        self, scope, catalog, tables, engine, *, revision_fields, audit_mappings=None
+        self, scope, catalog, tables, engine, *, revision_fields, audit_mappings=None, write_tables=None
     ):
         self._audits = MappingProxyType(dict(audit_mappings or {}))
         self._scope = scope
         self._catalog = catalog
         self._tables = MappingProxyType(dict(tables))
+        self._write_tables = MappingProxyType(dict(write_tables or {}))
+        if not self._write_tables.keys() <= self._tables.keys():
+            raise InvalidInput()
         self._engine = engine
         self._revisions = MappingProxyType(dict(revision_fields))
+        if not any(value is not None for value in self._revisions.values()):
+            self.capabilities = CapabilitySet(self.capabilities.supported - {'record.cas'})
         self._connection = None
         self._thread = None
         self._closed = False
@@ -116,16 +121,20 @@ class SQLRecordStore:
                 if hasattr(table.primary_key, "columns")
                 else table.primary_key
             )
-            if [column.name for column in keys] != [definition.primary_key]:
+            keys = tuple(column.name for column in keys)
+            if not keys or keys[0] != definition.primary_key:
                 raise CapabilityUnsupported()
-            if definition.write_roles and not isinstance(table, sa.Table):
+            target = self._write_tables.get(name, table)
+            if definition.write_roles and not isinstance(target, sa.Table):
+                raise CapabilityUnsupported()
+            if name in self._write_tables and tuple(c.name for c in target.primary_key.columns) != keys:
                 raise CapabilityUnsupported()
             fields = {field.name for field in definition.fields}
             revision = self._revisions.get(name)
-            if not fields <= set(table.c.keys()):
+            if not fields <= set(table.c.keys()) or not set(keys) <= fields:
                 raise InvalidInput()
             if revision is None:
-                if definition.write_roles:
+                if definition.write_roles and (name not in self._revisions or name not in self._audits):
                     raise InvalidInput()
             elif revision not in fields:
                 raise InvalidInput()
@@ -230,6 +239,7 @@ class SQLRecordStore:
             self._engine,
             revision_fields=self._revisions,
             audit_mappings=self._audits,
+            write_tables=self._write_tables,
         )
         bound._connection = connection
         bound._thread = get_ident()
@@ -290,16 +300,31 @@ class SQLRecordStore:
         definition = self._catalog.authorize(name, self.scope, write=write)
         if name not in self._tables:
             raise ScopeDenied()
-        return definition, self._tables[name]
+        return definition, self._write_tables.get(name, self._tables[name]) if write else self._tables[name]
 
-    def _where(self, name, key):
-        definition, table = self._definition(name)
+    def _where(self, name, key, *, write=False):
+        _, table = self._definition(name)
+        keys = tuple(c.name for c in table.primary_key)
+        values = key if isinstance(key, tuple) else (key,)
+        if len(values) != len(keys) or any(type(value) not in (str, int) for value in values):
+            raise InvalidInput()
         query = self._catalog.query(
             name,
             self.scope,
-            RecordQuery(where=Comparison(definition.primary_key, "eq", key)),
+            RecordQuery(where=Junction('and', tuple(Comparison(field, 'eq', value) for field, value in zip(keys, values)))),
         )
-        return _predicate(table, query.where)
+        predicate = _predicate(table, query.where)
+        if write and name in self._write_tables:
+            target = self._write_tables[name]
+            target_key = target.c[keys[0]] if len(keys) == 1 else sa.tuple_(*(target.c[field] for field in keys))
+            return target_key.in_(sa.select(*(table.c[field] for field in keys)).where(predicate))
+        return predicate
+
+    def _write_revision(self, dataset, expected, context):
+        revision = self._revisions.get(dataset)
+        if revision is None and (self._connection is None or expected is not None):
+            raise CapabilityUnsupported(operation_id=context.operation_id)
+        return revision
 
     def _values(self, name, values):
         # Catalog validation reuses the same typed field checks as query literals.
@@ -361,7 +386,10 @@ class SQLRecordStore:
             return result
 
     def create(self, dataset, values, *, context):
+        if dataset in self._write_tables:
+            raise CapabilityUnsupported(operation_id=context.operation_id)
         definition, table = self._definition(dataset, write=True)
+        revision = self._write_revision(dataset, None, context)
         audit = self._audits.get(dataset)
         if audit is not None and audit.fields & values.keys():
             raise ScopeDenied()
@@ -380,10 +408,10 @@ class SQLRecordStore:
             ):
                 raise ScopeDenied()
             data[definition.active_field] = definition.active_value
-        revision = self._revisions[dataset]
         if revision in data:
             raise InvalidInput()
-        data[revision] = 1
+        if revision is not None:
+            data[revision] = 1
         if audit is not None:
             data.update(self._audit_values(dataset, create=True))
         with self._session(context) as connection:
@@ -409,12 +437,15 @@ class SQLRecordStore:
             definition.primary_key,
             definition.tenant_field,
             definition.active_field,
-            self._revisions[dataset],
+            self._revisions.get(dataset),
         }
+        protected.update(c.name for c in table.primary_key)
         audit = self._audits.get(dataset)
         if audit is not None:
             protected.update(audit.fields)
         if names & protected:
+            raise ScopeDenied()
+        if not names <= set(table.c.keys()):
             raise ScopeDenied()
         if len(names) != len(patch.set_values) + len(patch.unset_fields) + len(
             patch.increments
@@ -434,9 +465,10 @@ class SQLRecordStore:
 
     def patch(self, dataset, key, patch: FieldPatch, *, expected=None, context):
         _, table, data = self._patch_values(dataset, patch)
-        revision = self._revisions[dataset]
-        data[revision] = table.c[revision] + 1
-        where = self._where(dataset, key)
+        revision = self._write_revision(dataset, expected, context)
+        if revision is not None:
+            data[revision] = table.c[revision] + 1
+        where = self._where(dataset, key, write=True)
         if expected is not None:
             if not isinstance(expected, Revision) or not expected.value.isdecimal():
                 raise InvalidInput()
@@ -444,20 +476,22 @@ class SQLRecordStore:
         with self._session(context) as connection:
             row = self._execute(
                 connection,
-                table.update().where(where).values(**data).returning(table.c[revision]),
+                table.update().where(where).values(**data).returning(
+                    table.c[revision] if revision is not None else sa.literal(1)),
                 context,
             ).first()
             return WriteReceipt(
                 context.operation_id,
                 row is not None,
-                Revision(str(row[0])) if row else None,
+                Revision(str(row[0])) if row and revision is not None else None,
             )
 
     def delete(self, dataset, key, *, expected=None, context):
         definition, table = self._definition(dataset, write=True)
+        revision = self._write_revision(dataset, expected, context)
         if definition.active_field and dataset not in self._audits:
             raise CapabilityUnsupported(operation_id=context.operation_id)
-        where = self._where(dataset, key)
+        where = self._where(dataset, key, write=True)
         if expected is not None:
             if not isinstance(expected, Revision) or not expected.value.isdecimal():
                 raise InvalidInput()
@@ -470,7 +504,8 @@ class SQLRecordStore:
                 audit = self._audits[dataset]
                 values = self._audit_values(dataset)
                 values[definition.active_field] = audit.inactive_value
-                values[self._revisions[dataset]] = table.c[self._revisions[dataset]] + 1
+                if revision is not None:
+                    values[revision] = table.c[revision] + 1
                 statement = table.update().where(where).values(**values)
             result = self._execute(connection, statement, context)
             return DeleteReceipt(context.operation_id, bool(result.rowcount))

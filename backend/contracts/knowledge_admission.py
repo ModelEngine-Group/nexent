@@ -30,4 +30,4 @@ class KnowledgeBaseDeletionIntent(Contract):
     knowledge_id: int = Field(gt=0, le=2**31 - 1)
     index_name: str = Field(min_length=1, max_length=100)
     user_id: str = Field(min_length=1, max_length=100)
-    phase: Literal['files', 'collection_submitting', 'metadata_pending'] = 'files'
+    phase: Literal['files', 'collection_submitting', 'metadata_pending', 'deleted'] = 'files'

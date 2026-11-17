@@ -57,6 +57,8 @@ def parent(sqlite_threads, admission, monkeypatch):  # noqa: F811
     client = SimpleNamespace(delete_knowledge_base=AsyncMock(), inspect_knowledge_base_deletion=AsyncMock())
     files = SimpleNamespace(request=AsyncMock())
     coordinator = KnowledgeBaseDeletionCoordinator(files, client, ports=ports)
+    # Final metadata has its own actual-SI test group; isolate this parent/RPC boundary.
+    monkeypatch.setattr(coordinator, '_finalize', lambda row, actor, context: row)
     journal = KnowledgeBaseDeletionJournal(s.records, s.authorized, s.actor)
 
     def admit():
@@ -149,7 +151,7 @@ def test_pending_file_prevents_collection_and_shares_parent_deadline(parent):
     assert row['deletion_request']['phase'] == 'files'
     args, kwargs = p.files.request.call_args
     assert args == ('kb-one', None, 'full', s.actor)
-    assert kwargs['file_id'] == 'a' * 32 and kwargs['remove_tags'] is True
+    assert kwargs['file_id'] == 'a' * 32 and kwargs['remove_tags'] is False
     assert kwargs['context'].deadline <= outer.deadline
     assert kwargs['context'].cancelled.is_set()
     p.client.delete_knowledge_base.assert_not_awaited()

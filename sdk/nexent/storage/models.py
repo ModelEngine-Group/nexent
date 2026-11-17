@@ -12,7 +12,7 @@ from .errors import CapabilityUnsupported, DeadlineExceeded, InvalidInput, Opera
 
 JSONValue: TypeAlias = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
 Record: TypeAlias = dict[str, JSONValue]
-RecordKey: TypeAlias = str | int
+RecordKey: TypeAlias = str | int | tuple[str | int, ...]
 T = TypeVar("T")
 
 

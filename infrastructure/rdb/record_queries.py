@@ -5,18 +5,21 @@ import base64
 import hashlib
 import json
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import sqlalchemy as sa
 from nexent.storage.errors import CapabilityUnsupported, Conflict, InvalidInput
-from nexent.storage.models import Page, PageRequest, RecordQuery, Revision
+from nexent.storage.models import Page, PageRequest, RecordQuery, Revision, Sort
 
 
 def _normalized(store, dataset, query):
     if not isinstance(query, RecordQuery):
         raise InvalidInput()
     definition, table = store._definition(dataset)
-    return definition, table, store._catalog.query(dataset, store.scope, query)
+    normalized = store._catalog.query(dataset, store.scope, query)
+    keys = tuple(column.name for column in table.primary_key)
+    order = normalized.order_by + tuple(Sort(key) for key in keys if key not in {item.field for item in normalized.order_by})
+    return definition, table, replace(normalized, order_by=order)
 
 
 def _fingerprint(store, dataset, query, limit):
@@ -122,7 +125,9 @@ def claim_records(store, dataset, query, patch, *, limit, context):
     definition, table = store._definition(dataset, write=True)
     store._patch_values(dataset, patch)
     _, _, query = _normalized(store, dataset, query)
-    revision = store._revisions[dataset]
+    revision = store._revisions.get(dataset)
+    if revision is None or len(tuple(table.primary_key)) != 1:
+        raise CapabilityUnsupported(operation_id=context.operation_id)
     statement = (
         sa.select(table.c[definition.primary_key], table.c[revision])
         .where(_predicate(table, query.where))
