@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+
+from nexent.core.agents.prompt.policies import common_behavior_guidance
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemRenderer,
@@ -135,6 +137,7 @@ def test_empty_inputs_do_not_emit_empty_resource_sections():
         "system:manager_orchestration",
         "system:final_answer_guidance",
         "system:code_norms",
+        "system:common_behavior",
     ]
     assert all(item.type == ContextItemType.SYSTEM for item in items)
 
@@ -218,7 +221,7 @@ def test_retrieval_citation_prompt_requires_sentence_level_marks(
     language, expected_text
 ):
     bundle = load_agent_prompt_bundle(is_manager=False, language=language)
-    prompt = AgentPromptComposer(bundle).render_system_section("final_answer_guidance")
+    prompt = common_behavior_guidance(language)
 
     assert expected_text in prompt
     assert "一个或多个引用标记" in prompt or "matching mark or marks" in prompt

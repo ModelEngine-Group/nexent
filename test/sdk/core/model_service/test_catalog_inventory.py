@@ -28,7 +28,7 @@ def test_reviewed_inventory_is_pinned_and_complete():
     paths = [source["path"] for source in sources]
     assert len(paths) == len(set(paths))
     actual = {
-        str(path.relative_to(CATALOG_ROOT))
+        path.relative_to(CATALOG_ROOT).as_posix()
         for folder in ("models", "providers")
         for path in (CATALOG_ROOT / folder).rglob("*.toml")
     }

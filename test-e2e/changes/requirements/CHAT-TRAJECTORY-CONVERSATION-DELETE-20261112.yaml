@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
+  title: 会话删除联动本地轨迹清理
+  description: 单个和批量删除成功后立即向受管文件线程提交定向清理，全部轮次先撤引用再删除；占用/失败重试，关闭定期清理仍生效。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 数据库删除成功后才提交，批量只提交确认删除ID，失败不提交。
+    - 有界队列及定向归属查找，多轮文件删除与占用/失败重试，关闭定期清理与重启补偿。
+    reason: 既有会话服务UT与轨迹巡检UT之间缺少联动断言，在其拥有套件补齐；正式D5保留真实运行风险边界，不新增D1。
+    test_selectors:
+    - test/backend/services/test_conversation_trajectory_cleanup.py
+    - test/backend/utils/test_trajectory_conversation_cleanup.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - test/backend/database/test_conversation_lock_order.py
+    - test/backend/database/test_conversation_db.py
+  notes: 'SPEC: nexent-doc/docs/Developing/chat-local-file-trajectory/design.md, AC-008. Baseline dev/trace 746cc2d45. Runtime
+    responsibility inherited. RETENTION-D5 remains blocked at the user-deferred real PG and managed runtime acceptance boundary;
+    UT will use owned temporary files and controlled DB checks, with cleanup by tmp_path.'

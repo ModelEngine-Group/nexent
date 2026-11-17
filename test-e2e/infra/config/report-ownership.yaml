@@ -75,6 +75,13 @@ domains:
 feature_overrides:
   SI-STORAGE: system
   GW-AUTH: system
+  AGENT-CORE-CONFIG: agent_config
+  JIUWEN-CONTEXT: context
+  JIUWEN-MODEL-BRIDGE: runtime
+  JIUWEN-OUTPUT: runtime
+  JIUWEN-RECOVERY: runtime
+  JIUWEN-RELEASE: runtime
+  JIUWEN-RESOURCES: runtime
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
   SDK-MODEL-OUTLET-RESOLUTION: model
@@ -97,6 +104,7 @@ feature_overrides:
   CHAT-CLARIFICATION-HISTORY: runtime
   CHAT-MODEL-CONTROLS: model
   CHAT-SIDEBAR: runtime
+  CHAT-TRAJECTORY: runtime
   FAF-001: runtime
   MSRF-001: model
   NAV-MENU-VISIBILITY: system

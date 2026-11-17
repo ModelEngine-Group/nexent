@@ -173,8 +173,10 @@ def test_service_passes_annotations_to_atomic_message_save(monkeypatch):
 
     captured = []
     monkeypatch.setattr(
-        service, 'create_conversation_message',
-        lambda data, *args, **kwargs: captured.append(data) or 20,
+        service, 'append_conversation_user_message',
+        lambda conversation_id, content, files, user_id, **kwargs: (
+            captured.append({'content': content, **kwargs}) or (20, 0)
+        ),
     )
     request = AgentRequest(query='why stop?', conversation_id=1, history=[],
                            annotations=[ANNOTATION, {'quoted_text': ' '}])
@@ -182,7 +184,9 @@ def test_service_passes_annotations_to_atomic_message_save(monkeypatch):
 
     assert captured[0]['content'] == 'why stop?'
     # The unusable second entry is dropped by normalization.
-    assert captured[0]['annotations'] == [ANNOTATION]
+    assert [item.model_dump(mode='json') for item in captured[0]['annotations']] == [ANNOTATION]
+    assert request._runtime_user_message_id == 20
+    assert request._runtime_user_message_index == 0
 
 
 def test_history_returns_annotations_without_replacing_readable_text(monkeypatch):
@@ -230,6 +234,7 @@ def message_db(monkeypatch):
             'CREATE TABLE nexent.conversation_message_unit_t '
             '(unit_id INTEGER PRIMARY KEY, conversation_id INTEGER, message_id INTEGER, '
             'unit_index INTEGER, unit_type TEXT, unit_content TEXT, unit_status TEXT, '
+            'tool_call_id TEXT, invocation_id TEXT, '
             'delete_flag TEXT, created_by TEXT, updated_by TEXT, create_time DATETIME, '
             'update_time DATETIME)')
         connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (1, 'owner', 'N')")
@@ -271,6 +276,46 @@ def _session_factory(engine):
             yield current
 
     return session
+
+
+
+def test_reserved_turn_persists_annotations_in_the_same_transaction(message_db, monkeypatch):
+    module, _, _, engine = message_db
+    monkeypatch.setattr(module, '_lock_conversation_limit_scope', lambda *args: None)
+    message_id, index = module.append_conversation_user_message(
+        1, 'why stop?', [], 'owner', annotations=normalize_message_annotations([ANNOTATION]),
+    )
+    assert index == 0
+    with Session(engine) as session:
+        row = session.execute(text(
+            'SELECT message_content FROM nexent.conversation_message_t WHERE message_id = :id'
+        ), {'id': message_id}).one()
+        unit = session.execute(text(
+            'SELECT unit_content FROM nexent.conversation_message_unit_t '
+            'WHERE message_id = :id AND unit_type = :kind'
+        ), {'id': message_id, 'kind': 'message_annotations'}).one()
+    assert row.message_content == 'why stop?'
+    assert json.loads(unit.unit_content) == [ANNOTATION]
+
+
+@pytest.mark.parametrize('annotations', [None, []])
+def test_reserved_turn_without_annotations_has_no_structured_unit(message_db, monkeypatch, annotations):
+    module, _, _, engine = message_db
+    monkeypatch.setattr(module, '_lock_conversation_limit_scope', lambda *args: None)
+    message_id, _ = module.append_conversation_user_message(1, 'plain', [], 'owner', annotations=annotations)
+    with Session(engine) as session:
+        assert session.scalar(text(
+            'SELECT count(*) FROM nexent.conversation_message_unit_t WHERE message_id = :id'
+        ), {'id': message_id}) == 0
+
+
+def test_reserved_turn_rejects_another_owner_before_annotation_write(message_db, monkeypatch):
+    module, _, _, engine = message_db
+    monkeypatch.setattr(module, '_lock_conversation_limit_scope', lambda *args: None)
+    with pytest.raises(module.ConversationNotFoundError):
+        module.append_conversation_user_message(1, 'forged', [], 'other', annotations=[ANNOTATION])
+    with Session(engine) as session:
+        assert session.scalar(text('SELECT count(*) FROM nexent.conversation_message_unit_t')) == 0
 
 
 def test_create_message_persists_annotations_as_structured_unit(message_db):

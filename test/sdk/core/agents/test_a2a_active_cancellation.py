@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 
 import pytest
-from nexent.core.agents.a2a_agent_proxy import A2AAgentInfo, ExternalA2AAgentProxy
+from nexent.core.agents.resources.a2a import A2AAgentInfo, ExternalA2AAgentProxy
 from nexent.core.concurrency import RunCancellationScope
 
 
@@ -52,7 +53,7 @@ async def test_ut_sdk_tlm_030_run_cancel_cancels_active_a2a_task(monkeypatch):
     entered = asyncio.Event()
     client = _BlockingClient(entered)
     monkeypatch.setattr(
-        "nexent.core.agents.a2a_agent_proxy.httpx.AsyncClient",
+        "nexent.core.agents.resources.a2a.httpx.AsyncClient",
         lambda **kwargs: client,
     )
     scope = RunCancellationScope()
@@ -79,7 +80,7 @@ async def test_ut_sdk_tlm_030_total_deadline_closes_a2a_client(monkeypatch, capl
     entered = asyncio.Event()
     client = _BlockingClient(entered)
     monkeypatch.setattr(
-        "nexent.core.agents.a2a_agent_proxy.httpx.AsyncClient",
+        "nexent.core.agents.resources.a2a.httpx.AsyncClient",
         lambda **kwargs: client,
     )
     proxy = ExternalA2AAgentProxy(
@@ -108,7 +109,7 @@ async def test_ut_sdk_tlm_030_total_deadline_covers_partial_stream_stall(monkeyp
     entered = asyncio.Event()
     client = _BlockingStreamingClient(entered)
     monkeypatch.setattr(
-        "nexent.core.agents.a2a_agent_proxy.httpx.AsyncClient",
+        "nexent.core.agents.resources.a2a.httpx.AsyncClient",
         lambda **kwargs: client,
     )
     proxy = ExternalA2AAgentProxy(

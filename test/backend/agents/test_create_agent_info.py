@@ -218,8 +218,8 @@ class MockAgentVerificationConfig:
         return types.SimpleNamespace(enabled=bool((value or {}).get("enabled", False)))
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
-sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
-    "nexent.core.agents.agent_model",
+sys.modules['nexent.core.agents.contracts.config'] = _create_stub_module(
+    "nexent.core.agents.contracts.config",
     AgentHistory=AgentHistory,
     ModelConfig=MagicMock(),
     AgentConfig=MagicMock(),
@@ -229,8 +229,11 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
 )
-sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
-    "nexent.core.agents.agent_context",
+sys.modules['nexent.core.agents.contracts.run'] = _create_stub_module(
+    "nexent.core.agents.contracts.run", AgentHistory=AgentHistory, AgentRunInfo=MagicMock(),
+)
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
@@ -271,8 +274,8 @@ def _load_stub_prompt_bundle(*, is_manager, language, **kwargs):
 
 _prompt_loader_stub.load_agent_prompt_bundle = _load_stub_prompt_bundle
 sys.modules[_prompt_loader_stub.__name__] = _prompt_loader_stub
-sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
-    "nexent.core.agents.summary_config",
+sys.modules['nexent.core.agents.context.config'] = _create_stub_module(
+    "nexent.core.agents.context.config",
     ContextManagerConfig=MagicMock(),
 )
 sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
@@ -399,13 +402,13 @@ class MockSandboxConfig:
 
 
 sandbox_module = _create_stub_module(
-    "nexent.core.agents.sandbox",
+    "nexent.core.agents.sandbox.config",
     SandboxConfig=MockSandboxConfig,
 )
 nexent_agents_module.sandbox = sandbox_module
 
 nexent_agent_module = _create_stub_module(
-    "nexent.core.agents.nexent_agent",
+    "nexent.core.agents.cores.smolagents.agent",
     get_local_python_authorized_imports=MagicMock(
         return_value=["sdk_default_import"]
     ),
@@ -506,11 +509,11 @@ mock_model_config = MagicMock()
 mock_tool_config = MagicMock()
 mock_agent_run_info = MagicMock()
 
-sys.modules['nexent.core.agents.agent_model'].AgentConfig = mock_agent_config
-sys.modules['nexent.core.agents.agent_model'].ModelConfig = mock_model_config
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = mock_tool_config
-sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
-sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
+sys.modules['nexent.core.agents.contracts.config'].AgentConfig = mock_agent_config
+sys.modules['nexent.core.agents.contracts.config'].ModelConfig = mock_model_config
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = mock_tool_config
+sys.modules['nexent.core.agents.contracts.run'].AgentRunInfo = mock_agent_run_info
+sys.modules['nexent.core.agents.contracts.config'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
 # Stub parallel_executor so that create_agent_info can import ParallelExecutorTool
@@ -878,6 +881,9 @@ class TestGetSkillScriptTools:
         assert "write_skill_file" not in child_names
         run_skill_call = mock_tool_config.call_args_list[0]
         assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+        for call in mock_tool_config.call_args_list[:3]:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+            assert call.kwargs["metadata"] == {"agent_id": 2, "tenant_id": "tenant_1", "version_no": 0}
         from nexent.core.prompts import load_prompt
 
         assert run_skill_call.kwargs["description"] == load_prompt(
@@ -1030,6 +1036,24 @@ class TestGetSkillScriptTools:
         for call in calls[3:]:
             assert call[1]["metadata"] == file_context
             assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
+
+    @pytest.mark.parametrize("snapshot", [None, [{"name": "test_skill", "config_values": {}}]])
+    def test_all_skill_tools_receive_detached_authorization_with_empty_configuration(self, snapshot):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", version_no=13, runtime_skill_snapshot=snapshot)
+        calls = mock_tool_config.call_args_list[:3]
+        for call in calls:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+            assert call.kwargs["metadata"] == {"agent_id": 42, "tenant_id": "tenant", "version_no": 13}
+        calls[0].kwargs["params"]["authorized_skill_names"].append("not_authorized")
+        assert calls[1].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+        assert calls[2].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+
+    def test_explicit_empty_snapshot_does_not_use_saved_skill_bindings(self):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", runtime_skill_snapshot=[])
+        assert [call.kwargs["name"] for call in mock_tool_config.call_args_list] == [
+            "download_from_s3", "upload_to_s3"]
 
 
 class TestDiscoverLangchainTools:
@@ -2249,6 +2273,7 @@ class TestCreateAgentConfig:
             mock_build_memory.return_value = Mock(
                 user_config=Mock(
                     memory_switch=memory_switch,
+                    external_provider_top_k=5,
                     agent_share_option="always",
                     disable_agent_ids=[],
                     disable_user_agent_ids=[],
@@ -2258,7 +2283,10 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_tool.return_value.forward.return_value = fixed_search_result
+            if isinstance(fixed_search_result, Exception):
+                mock_search_tool.return_value.forward.side_effect = fixed_search_result
+            else:
+                mock_search_tool.return_value.forward.return_value = fixed_search_result
             mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
@@ -2391,6 +2419,83 @@ class TestCreateAgentConfig:
                 "content": result_text,
             },
         ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("enabled,fail", [(False, False), (True, False), (True, True)])
+    async def test_memory_phase_boundaries_keep_original_calls_and_fallback(self, enabled, fail):
+        from contextlib import contextmanager
+
+        events = []
+
+        @contextmanager
+        def phase(name, **kwargs):
+            event = {"name": name, "attributes": kwargs.get("attributes"), "input": kwargs.get("input_value"), "output": None, "error": None}
+            events.append(event)
+            try:
+                yield types.SimpleNamespace(set_output=lambda value: event.update(output=value))
+            except BaseException as error:
+                event["error"] = type(error).__name__
+                raise
+
+        with patch('management.services.agent.preparation.compiler.trace_phase', phase), patch(
+            'management.services.agent.preparation.compiler._get_external_provider_service_for_search',
+            return_value=None,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True, prepared_prompt="", memory_switch=enabled,
+                fixed_search_result=RuntimeError("private") if fail else "Found 1 memory",
+            )
+        if not enabled:
+            assert events == []
+            mocks["search_tool"].assert_not_called()
+            return
+        search = mocks["search_tool"].return_value.forward
+        assert all(event["attributes"]["agent.name"] == "test_agent" for event in events)
+        assert all(event["attributes"]["agent.display_name"] == "知识助手" for event in events)
+        search.assert_called_once_with("test query", 5)
+        assert [event["name"] for event in events] == [
+            "memory.initialize", "memory.initialize", "memory.load_context", "memory.presearch",
+        ]
+        assert events[0]["error"] == "RuntimeError"
+        assert events[1]["output"] == {"service": "context", "ready": True}
+        assert events[2]["output"] == []
+        assert events[-1]["input"] == {"query": "test query", "top_k": 5}
+        assert events[-1]["error"] == ("RuntimeError" if fail else None)
+        assert events[-1]["output"] == (None if fail else "Found 1 memory")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fail", [False, True])
+    async def test_external_memory_phase_keeps_request_and_recoverable_error(self, fail):
+        from contextlib import contextmanager
+
+        events = []
+
+        @contextmanager
+        def phase(name, **kwargs):
+            event = {"name": name, "input": kwargs.get("input_value"), "output": None, "error": None}
+            events.append(event)
+            try:
+                yield types.SimpleNamespace(set_output=lambda value: event.update(output=value))
+            except BaseException as error:
+                event["error"] = type(error).__name__
+                raise
+
+        provider = types.SimpleNamespace(search_all_enabled=AsyncMock(
+            side_effect=RuntimeError("private") if fail else None, return_value=[],
+        ))
+        with patch('management.services.agent.preparation.compiler.trace_phase', phase), patch(
+            'management.services.agent.preparation.compiler._get_external_provider_service_for_search',
+            return_value=provider,
+        ), patch.object(preparation_compiler.memory_models, 'MemorySearchRequest', MagicMock(), create=True):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True, prepared_prompt="", memory_switch=True,
+            )
+        provider.search_all_enabled.assert_awaited_once()
+        event = next(e for e in events if e["name"] == "memory.external_search")
+        assert event["input"] == {"query": "test query", "top_k": 5}
+        assert event["error"] == ("RuntimeError" if fail else None)
+        assert event["output"] == (None if fail else [])
+        mocks["search_tool"].return_value.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -2615,7 +2720,7 @@ class TestCreateAgentConfig:
 
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
-                    name="test_agent",
+                        name="test_agent",
                     display_name=None,
                     description="test description",
                     prompt_templates=ANY,
@@ -4610,9 +4715,11 @@ class TestCreateAgentRunInfo:
 
 
     @pytest.mark.asyncio
-    async def test_create_agent_run_info_success(self):
+    async def test_create_agent_run_info_success(self, mocker):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
+        mocker.patch("management.services.agent.preparation.run.RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", 900)
+        mocker.patch("management.services.agent.preparation.run.DEFAULT_TOOL_CALL_TIMEOUT", 1200)
         with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
                 patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
                 patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
@@ -4662,6 +4769,8 @@ class TestCreateAgentRunInfo:
                     "transport": "streamable-http"
                 }],
                 mcp_request_timeout_seconds=10,
+                collaboration_timeout_seconds=900,
+                tool_call_timeout_seconds=1200,
                 history=[],
                 stop_event="stop_event",
                 mcp_tool_timeout_seconds=ANY,

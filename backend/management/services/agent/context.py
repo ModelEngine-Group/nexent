@@ -6,10 +6,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
-from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.context_input import ContextInput
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.constants.environment import APP_VERSION
+from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
     has_current_time_marker,
@@ -156,18 +156,45 @@ def strip_current_time_prefix(query: str | None) -> str | None:
     return query
 
 
+def trajectory_source_message_id(request, user_id, tenant_id):
+    """Accept only the identity-bound receipt produced by server-side message saving."""
+    receipt = request.__dict__.get("_trajectory_message_receipt")
+    if getattr(request, "is_debug", False) or not isinstance(receipt, dict):
+        return None
+    if (receipt.get("tenant_id"), receipt.get("user_id"), receipt.get("conversation_id")) != (
+        tenant_id, user_id, str(request.conversation_id),
+    ):
+        return None
+    value = receipt.get("message_id")
+    if (
+        type(value) is str and value.isascii() and value.isdecimal()
+        and 0 < len(value) <= 10 and value[0] != "0" and int(value) <= 2147483647
+    ):
+        return value
+    return None
+
+
 def build_agent_run_context(
-    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
+    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict,
+    user_query: str | None = None,
 ):
     """Preview memory once and bind the metadata shared by both consumers."""
     from management.services.configuration.user.memory import build_memory_context
     from infrastructure.trace.bootstrap import monitoring_manager
     from management.services.monitor.identity import resolve_monitoring_user_email
+    from nexent.monitor.local_content import local_capture_enabled
 
     memory = build_memory_context(
         user_id, tenant_id, request.agent_id, skip_query=request.is_debug
     )
     enabled = memory.user_config.memory_switch
+    extra_metadata = {**extra_metadata}
+    extra_metadata.pop("trajectory_source_message_id", None)
+    if local_capture_enabled(monitoring_manager):
+        extra_metadata["app_version"] = APP_VERSION
+        source = trajectory_source_message_id(request, user_id, tenant_id)
+        if source is not None:
+            extra_metadata["trajectory_source_message_id"] = source
     metadata = monitoring_manager.bind_agent_context(
         AgentRunMetadata(
             agent_id=request.agent_id,
@@ -175,7 +202,7 @@ def build_agent_run_context(
             user_id=user_id,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
-            query=request.query,
+            query=user_query if user_query is not None else request.query,
             is_debug=request.is_debug,
             language=language,
             memory_enabled=enabled,

@@ -121,7 +121,7 @@ def test_global_thread_pool_removal_and_run_async_migration(monkeypatch) -> None
     recording = RecordingManager()
     monkeypatch.setattr('nexent.core.concurrency.get_current_thread_manager', lambda: None)
     monkeypatch.setattr(
-        'nexent.core.agents.run_agent._get_default_agent_thread_manager',
+        'nexent.core.agents.orchestration.entry._get_default_agent_thread_manager',
         lambda: recording,
     )
     real_import = builtins.__import__

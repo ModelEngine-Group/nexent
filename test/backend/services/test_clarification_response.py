@@ -111,6 +111,7 @@ def storage(monkeypatch):
         monkeypatch.setattr(db, 'get_db_session', sessions)
         monkeypatch.setattr(db, '_enforce_conversation_turn_limit', lambda **kwargs: None)
         monkeypatch.setattr(db, '_touch_conversation_activity', lambda *args: None)
+        monkeypatch.setattr(db, '_lock_conversation_limit_scope', lambda *args: None)
         yield connection
     engine.dispose()
 
@@ -132,6 +133,30 @@ def test_user_text_and_structured_answers_commit_together(storage):
     assert stored['source_message_id'] == 10
     assert stored['unit_index'] == 7
     assert stored['answers'] == RESPONSE['answers']
+
+
+def test_append_reserves_database_index_and_commits_clarification_atomically(storage):
+    message_id, index = db.append_conversation_user_message(
+        1, 'Readable answers', [], 'owner', clarification_response=RESPONSE,
+    )
+    row = storage.execute(text('SELECT message_index, message_content FROM nexent.conversation_message_t '
+                               'WHERE message_id=:id'), {'id': message_id}).one()
+    stored = json.loads(storage.execute(text('SELECT unit_content FROM nexent.conversation_message_unit_t '
+                                             'WHERE message_id=:id'), {'id': message_id}).scalar_one())
+    assert index == row.message_index == 2
+    assert row.message_content == 'Readable answers'
+    assert stored['answers'] == RESPONSE['answers']
+    assert stored['source_message_id'] == 10
+
+
+def test_append_rejects_stale_clarification_without_writing_message(storage):
+    storage.execute(text("UPDATE nexent.conversation_message_t SET status='stopped'"))
+    storage.commit()
+    with pytest.raises(AppException, match='Clarification'):
+        db.append_conversation_user_message(
+            1, 'Readable answers', [], 'owner', clarification_response=RESPONSE,
+        )
+    assert storage.execute(text('SELECT count(*) FROM nexent.conversation_message_t')).scalar() == 1
 
 
 @pytest.mark.parametrize('variant', [
@@ -211,12 +236,18 @@ def test_service_passes_structured_answers_to_atomic_message_save(monkeypatch):
     from management.services.conversation import service
 
     captured = []
-    monkeypatch.setattr(service, 'create_conversation_message', lambda data, *a, **kw: captured.append(data) or 20)
+    def append(conversation_id, content, files, user_id, **kwargs):
+        captured.append({'content': content, **kwargs})
+        return 20, 2
+
+    monkeypatch.setattr(service, 'append_conversation_user_message', append)
     request = AgentRequest(query='Readable answers', conversation_id=1, history=[],
                            clarification_response=RESPONSE)
     service.save_conversation_user(request, 'owner', 'tenant')
     assert captured[0]['content'] == 'Readable answers'
     assert captured[0]['clarification_response']['answers'] == RESPONSE['answers']
+    assert request._runtime_user_message_id == 20
+    assert request._runtime_user_message_index == 2
 
 
 @pytest.mark.parametrize('content', [None, '{malformed', json.dumps({**RESPONSE, 'source_message_id': 10})])
@@ -236,3 +267,30 @@ def test_history_returns_structured_response_without_replacing_readable_text(mon
         assert result['clarification_response']['source_message_id'] == 10
     else:
         assert 'clarification_response' not in result
+
+
+@pytest.mark.parametrize("content", ["native", "wrong_type", "wrong_schema", "missing_turn", "nested"])
+def test_saved_native_form_keeps_the_same_owned_atomic_response_contract(storage, content):
+    envelope = {"schema_version": 1, "runtime_mode": "native_agent", "type": "human_interaction",
+                "agent_core": "jiuwen", "turn_id": "turn", "sequence": 4, "content": json.dumps(FORM)}
+    if content == "wrong_type":
+        envelope["type"] = "tool_result"
+    elif content == "wrong_schema":
+        envelope["schema_version"] = 2
+    elif content == "missing_turn":
+        envelope.pop("turn_id")
+    elif content == "nested":
+        envelope["content"] = json.dumps(dict(envelope))
+    storage.execute(text("UPDATE nexent.conversation_message_unit_t SET unit_content=:form WHERE message_id=10"),
+                    {"form": json.dumps(envelope)})
+    storage.commit()
+    if content == "native":
+        message_id = save()
+        saved = json.loads(storage.execute(text("SELECT unit_content FROM nexent.conversation_message_unit_t WHERE message_id=:id"),
+                                           {"id": message_id}).scalar_one())
+        assert saved["source_message_id"] == 10 and saved["unit_index"] == 7
+        assert saved["answers"] == RESPONSE["answers"]
+    else:
+        with pytest.raises(AppException, match="Clarification"):
+            save()
+        assert storage.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 1

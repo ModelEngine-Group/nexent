@@ -12,10 +12,15 @@ import secrets
 import threading
 from pathlib import Path
 
-from nexent.core.agents import agent_model, nexent_agent, sandbox, subagent_wrapper
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
+import nexent.core.agents.sandbox as sandbox_package
+from nexent.core.agents.contracts import config as agent_configuration, run as agent_running
+from nexent.core.agents.cores.smolagents import agent as nexent_agent
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.resources import subagents as subagent_wrapper
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.sandbox import execution, config, compatibility, tls
 from nexent.core.concurrency import LanePolicy, ThreadManager, cancellation
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.concurrency.context import (
@@ -80,7 +85,8 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
 
     fingerprints = {
         module.__name__: hashlib.sha256(Path(inspect.getfile(module)).read_bytes()).hexdigest()
-        for module in (nexent_agent, sandbox, subagent_wrapper, agent_model, cancellation)
+        for module in (nexent_agent, sandbox_package, execution, config, compatibility, tls, subagent_wrapper,
+                       agent_configuration, agent_running, cancellation)
     }
     if expected_sources:
         assert fingerprints == expected_sources, 'Image source differs from worktree'

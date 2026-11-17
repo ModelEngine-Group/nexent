@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D5-001
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-001
+  title: Jiuwen resource execution D5
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove real resource protocol execution and lifecycle.
+  preconditions:
+  - Installed Jiuwen and ModelService; controlled local model/MCP endpoints and authorized
+    skill root.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Execute the resource scenario through the actual factory and controlled
+      protocol endpoints.
+    expected: MCP stall timeout and cancellation prevent later calls and terminate
+      within configured grace.
+  - order: 2
+    action: Execute the resource scenario through the actual factory and controlled
+      protocol endpoints.
+    expected: One tool worker does not deadlock on nested text-resource calls; subsequent
+      isolated run completes with zero leaked workers.
+  expected_results:
+  - MCP stall timeout and cancellation prevent later calls and terminate within configured
+    grace.
+  - One tool worker does not deadlock on nested text-resource calls; subsequent isolated
+    run completes with zero leaked workers.
+  forbidden_side_effects:
+  - No unauthorized effects, hidden identity exposure, alternate agent loop, repeated
+    historical tools or leaked workers.
+  acceptance:
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  risk_type: RELIABILITY
+  risk: Blocked MCP or nested bounded lane waits leak resources.
+  condition:
+  - One model-tool-io worker; MCP timeout or cancellation during a blocked call.
+  metrics:
+  - Terminal outcome, subsequent calls, active futures/workers and elapsed close time.
+  thresholds:
+  - Exit within 10 seconds; zero leaked workers or calls after stop.
+  recovery_expectations:
+  - Subsequent isolated resource run completes.

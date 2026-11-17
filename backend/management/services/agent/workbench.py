@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
+from nexent.core.agents.contracts.config import AgentConfig
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.constants.constants import (
@@ -45,7 +46,6 @@ from management.services.skill.permission import (
     can_view_skill,
 )
 from management.services.skill.service import SkillService
-from nexent.core.agents.agent_model import AgentConfig
 
 
 @dataclass(frozen=True)

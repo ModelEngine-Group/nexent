@@ -207,6 +207,16 @@ data: {"type":"final_answer","content":"Analysis complete","unit_index":2}
 
 When `final_answer_mode` is omitted or set to `complete`, process events still stream immediately. After successful execution and persistence, one root `final_answer` contains the entire answer. Legacy clients can read the full result from the first `final_answer`. Child answers are not published as final results; failed or stopped runs do not promote partial answers to success.
 
+For smolagents, root answer fragments also stream as `model_output_thinking` with `answer_preview: true` and `answer_phase: "delta"`. These are unconfirmed answer previews, distinct from ordinary thinking. Use their `step_id`, `attempt_id` and invocation scope to update one answer slot; the final full `final_answer` confirms or replaces that slot rather than appending another copy. Honor `model_attempt_control` rollback events to discard rejected previews. Previews are not stored as thinking units; reloaded history contains the canonical answer once. Delta mode and jiuwen retain their existing event behavior.
+
+```text
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"Analysis "}
+
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"complete"}
+
+data: {"type":"final_answer","answer_phase":"complete","step_id":"s1","content":"Analysis complete"}
+```
+
 Clients requiring incremental answers must send `"final_answer_mode":"delta"` in the request body. The event type remains `final_answer`, with `answer_phase` identifying the stage:
 
 ```text

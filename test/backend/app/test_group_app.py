@@ -44,7 +44,7 @@ from fastapi import FastAPI
 # Create a test client with a fresh FastAPI app
 from management.api.identity.group import router
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from permissions.models import CurrentUser
 
 app = FastAPI()

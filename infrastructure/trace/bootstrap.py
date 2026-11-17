@@ -14,14 +14,60 @@ Usage:
         return {"status": "ok"}
 """
 
-from nexent.monitor import (
-    MonitoringConfig,
-    get_monitoring_manager
-)
+from nexent.monitor import MonitoringConfig, get_monitoring_manager
+
 try:
-    from contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_PROVIDER, MONITORING_PROJECT_NAME, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_METRICS_ENABLED, MONITORING_INSTRUMENT_REQUESTS, MONITORING_FASTAPI_INCLUDED_URLS, MONITORING_FASTAPI_EXCLUDED_URLS, MONITORING_FASTAPI_EXCLUDE_SPANS, MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS, MONITORING_EXCLUDED_SPAN_NAMES, MONITORING_TRACE_CONTENT_MODE, MONITORING_TRACE_MAX_CHARS, MONITORING_TRACE_MAX_ITEMS, OTLP_HEADERS, TELEMETRY_SAMPLE_RATE
+    from contracts.constants import environment as trajectory_config
+    from contracts.constants.environment import (
+        ENABLE_TELEMETRY,
+        MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
+        MONITORING_EXCLUDED_SPAN_NAMES,
+        MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_FASTAPI_EXCLUDED_URLS,
+        MONITORING_FASTAPI_INCLUDED_URLS,
+        MONITORING_INSTRUMENT_REQUESTS,
+        MONITORING_PROJECT_NAME,
+        MONITORING_PROVIDER,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
+        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+        OTEL_EXPORTER_OTLP_PROTOCOL,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+        OTEL_SERVICE_NAME,
+        OTLP_HEADERS,
+        TELEMETRY_SAMPLE_RATE,
+    )
+    from infrastructure.trace.trajectory_runtime import create_local_processor
 except ImportError:
-    from backend.contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_PROVIDER, MONITORING_PROJECT_NAME, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_METRICS_ENABLED, MONITORING_INSTRUMENT_REQUESTS, MONITORING_FASTAPI_INCLUDED_URLS, MONITORING_FASTAPI_EXCLUDED_URLS, MONITORING_FASTAPI_EXCLUDE_SPANS, MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS, MONITORING_EXCLUDED_SPAN_NAMES, MONITORING_TRACE_CONTENT_MODE, MONITORING_TRACE_MAX_CHARS, MONITORING_TRACE_MAX_ITEMS, OTLP_HEADERS, TELEMETRY_SAMPLE_RATE
+    from backend.contracts.constants import environment as trajectory_config
+    from backend.contracts.constants.environment import (
+        ENABLE_TELEMETRY,
+        MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS,
+        MONITORING_EXCLUDED_SPAN_NAMES,
+        MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_FASTAPI_EXCLUDED_URLS,
+        MONITORING_FASTAPI_INCLUDED_URLS,
+        MONITORING_INSTRUMENT_REQUESTS,
+        MONITORING_PROJECT_NAME,
+        MONITORING_PROVIDER,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
+        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+        OTEL_EXPORTER_OTLP_PROTOCOL,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+        OTEL_SERVICE_NAME,
+        OTLP_HEADERS,
+        TELEMETRY_SAMPLE_RATE,
+    )
+    from infrastructure.trace.trajectory_runtime import (
+        create_local_processor,
+    )
 
 import logging
 
@@ -30,8 +76,18 @@ logger = logging.getLogger(__name__)
 monitoring_manager = get_monitoring_manager()
 
 
+def _agent_metadata():
+    from nexent.monitor import get_agent_monitoring_context
+    return get_agent_monitoring_context()
+
+
+local_trajectory_processor = create_local_processor(trajectory_config, _agent_metadata)
+
+
 def _initialize_monitoring():
     """Initialize monitoring configuration with OTLP settings."""
+    from infrastructure.trace.trajectory_execution import execution_observer
+
     config = MonitoringConfig(
         enable_telemetry=ENABLE_TELEMETRY,
         service_name=OTEL_SERVICE_NAME,
@@ -52,7 +108,12 @@ def _initialize_monitoring():
         telemetry_sample_rate=TELEMETRY_SAMPLE_RATE,
         trace_content_mode=MONITORING_TRACE_CONTENT_MODE,
         trace_max_chars=MONITORING_TRACE_MAX_CHARS,
-        trace_max_items=MONITORING_TRACE_MAX_ITEMS
+        trace_max_items=MONITORING_TRACE_MAX_ITEMS,
+        local_span_processor=local_trajectory_processor,
+        local_execution_observer=execution_observer(
+            capturing=ENABLE_TELEMETRY and MONITORING_PROVIDER == "local_file",
+            store=local_trajectory_processor.store if local_trajectory_processor is not None else None,
+        ) if local_trajectory_processor is not None else None,
     )
 
     monitoring_manager.configure(config)

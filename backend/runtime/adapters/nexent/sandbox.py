@@ -4,7 +4,7 @@
 
 from typing import Any
 
-from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.sandbox.config import SandboxConfig
 
 
 def resolve_sandbox_config(

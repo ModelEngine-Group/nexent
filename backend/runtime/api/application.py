@@ -6,15 +6,21 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from runtime.api.agent.execution import agent_runtime_router as agent_router
-from management.api.automation.agent_automation import (
-    conversation_automation_router,
-    router as agent_automation_router,
-)
 from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from management.api.conversation.conversation_management import router as conversation_management_router
+from management.api.automation.agent_automation import (
+    conversation_automation_router,
+)
+from management.api.automation.agent_automation import (
+    router as agent_automation_router,
+)
+from management.api.conversation.conversation_management import (
+    router as conversation_management_router,
+)
+from management.api.conversation.conversation_share import (
+    router as conversation_share_router,
+)
 from management.api.conversation.workbench_pins import router as workbench_pins_router
-from management.api.conversation.conversation_share import router as conversation_share_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
@@ -22,6 +28,7 @@ from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.identity_routes import is_runtime_service_request
 from nexent.core.concurrency import (
     ManagedTaskSpec,
+    ManagedThreadSpec,
     ManagerState,
     clear_default_thread_manager,
     set_default_thread_manager,
@@ -33,9 +40,9 @@ logger = logging.getLogger("runtime_app")
 
 
 async def start_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
     from management.recovery import recover_runtime_tasks
-    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
+    from management.services.automation.scheduler import agent_automation_scheduler
+    from management.services.agent.workspace_cleanup import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
         "control-io",
@@ -61,31 +68,53 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
-    await start_agent_automation_scheduler()
+    from infrastructure.trace.bootstrap import local_trajectory_processor
+
     try:
+        if local_trajectory_processor is not None:
+            from infrastructure.trace.trajectory_runtime import (
+                conversation_deleted,
+            )
+
+            local_trajectory_processor.deleted_conversation_check = conversation_deleted
+            local_trajectory_processor.start(
+                runtime_thread_manager,
+                ManagedThreadSpec(
+                    task_name="trajectory-file-writer",
+                    owner="infrastructure.trace.trajectory_runtime",
+                    close_hook=local_trajectory_processor.request_stop,
+                ),
+            )
+        await start_agent_automation_scheduler()
         yield
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-        await stop_agent_automation_scheduler()
-        from management.services.agent.execution import (
-            shutdown_agent_stream_tasks,
-        )
-
-        pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
-        if pending_stream_tasks:
-            logger.warning(
-                "Agent stream tasks exceeded shutdown grace pending=%s",
-                pending_stream_tasks,
-            )
-        from nexent.core.agents.sandbox import SandboxPoolManager
-
-        sandbox_pool = SandboxPoolManager._instance
-        if sandbox_pool is not None:
-            sandbox_pool.shutdown(logger)
         try:
-            await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+            await stop_agent_automation_scheduler()
+            from management.services.agent.execution import shutdown_agent_stream_tasks
+
+            pending = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
+            if pending:
+                logger.warning("Agent stream tasks exceeded shutdown grace pending=%s", pending)
+            from nexent.core.agents.sandbox.execution import SandboxPoolManager
+
+            sandbox_pool = SandboxPoolManager._instance
+            if sandbox_pool is not None:
+                sandbox_pool.shutdown(logger)
         finally:
-            clear_default_thread_manager(runtime_thread_manager)
+            try:
+                if local_trajectory_processor is not None:
+                    local_trajectory_processor.request_stop()
+                    await runtime_thread_manager.run(
+                        "control-io",
+                        ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                        local_trajectory_processor.shutdown,
+                    )
+            finally:
+                try:
+                    await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                finally:
+                    clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(

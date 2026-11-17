@@ -520,7 +520,7 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
     ok = delete_conversation(999)
 
     assert ok is False
-    assert session.execute.call_count == 5
+    assert session.execute.call_count == 1
 
 
 # =============================================================================
@@ -3649,12 +3649,14 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None, status="completed"),
     ]
+    records_result = MagicMock()
+    records_result.all.return_value = []
     # Reply-annotation units for the historical user messages (none here).
     annotations_result = MagicMock()
     annotations_result.all.return_value = []
     session.execute.side_effect = [
         current_result, candidates_result, boundary_result, messages_result,
-        annotations_result]
+        annotations_result, records_result]
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")
@@ -3751,3 +3753,31 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def isolated_trajectory_projection(monkeypatch):
+    """Keep the new persistence collaborator outside this legacy SQL-double unit."""
+    projection = types.SimpleNamespace(seed_conversation=MagicMock(), delete_summaries=MagicMock())
+    monkeypatch.setitem(sys.modules, "management.db.trajectory.repository", projection)
+    return projection
+
+
+def test_delete_trajectory_participates_in_the_conversation_transaction(monkeypatch, mock_session_ctx, isolated_trajectory_projection):
+    session, ctx = mock_session_ctx
+    session.execute.return_value.rowcount = 1
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    assert delete_conversation(123, "owner")
+    isolated_trajectory_projection.delete_summaries.assert_called_once_with(session, [123], "owner")
+    session.commit.assert_not_called()
+
+
+def test_trajectory_delete_failure_aborts_the_owned_transaction(monkeypatch, mock_session_ctx, isolated_trajectory_projection):
+    session, ctx = mock_session_ctx
+    session.execute.return_value.rowcount = 1
+    isolated_trajectory_projection.delete_summaries.side_effect = RuntimeError("projection unavailable")
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    with pytest.raises(RuntimeError, match="projection unavailable"):
+        delete_conversation(123, "owner")
+    assert ctx.__exit__.call_args.args[0] is RuntimeError
+    session.commit.assert_not_called()

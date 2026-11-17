@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TFP-D1-001: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -8,9 +9,7 @@ import pytest
 from shared.tool_fastpath import make_wrapper
 from shared.tool_fastpath_aidp import aidp_runtime as aidp_runtime
 
-from nexent.core.agents.tool_fastpath import (
-    DeferredToolExecutor,
-)
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.utils.observer import MessageObserver, ProcessType
 
 
@@ -19,8 +18,8 @@ pytestmark = [pytest.mark.case_id("TFP-D1-001"), pytest.mark.stage("D1")]
 def test_tfp_d1_001(monkeypatch):
     """TFP-D1-001: assignment, logs and saved final answer without acquisition."""
     wrapper, ordinary, calls, acquisitions, releases = make_wrapper(monkeypatch)
-    from nexent.core.agents.core_agent import _wrap_tool_for_observer
-    from nexent.core.agents.nexent_agent import _wrap_tool_with_monitoring
+    from nexent.core.agents.cores.smolagents.core_agent import _wrap_tool_for_observer
+    from nexent.core.agents.cores.smolagents.agent import _wrap_tool_with_monitoring
 
     observer = MessageObserver()
     events = []
