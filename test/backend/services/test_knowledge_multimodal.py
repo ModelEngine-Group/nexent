@@ -129,6 +129,7 @@ def test_image_subgrant_rejects_other_versions_and_sources(setup, mocker):
     image = add_image(s)
     grant = KnowledgeFileGrant(**s.request.model_dump(include={"knowledge_id", "file_id", "file_version", "artifact", "parser_version"}),
                                action="execute", source=s.value.source, filename="file.pdf", collection="kb")
+    grant.artifact = grant.artifact.model_copy(update={'key': 'artifacts/' + grant.artifact.sha256 + '.json'})
     mocker.patch.object(knowledge_objects, "_configured_environment", return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET="files"))
     client = mocker.patch.object(knowledge_objects, "_configured_client")
     with knowledge_objects.bind_knowledge_image_objects(s.actor, grant, image.value, context=s.arguments["context"]) as objects:
@@ -141,3 +142,35 @@ def test_image_subgrant_rejects_other_versions_and_sources(setup, mocker):
     with pytest.raises(ScopeDenied), knowledge_objects.bind_knowledge_image_objects(s.actor, grant, bad, context=s.arguments["context"]):
         pass
     client.assert_not_called()
+
+
+@pytest.mark.parametrize('foreign', [None, 'file', 'version', 'job'])
+def test_private_images_are_pinned_to_the_authorized_manifest_job(setup, mocker, foreign):
+    s = setup
+    image = add_image(s)
+    start = f'knowledge-cleanse/1/{s.request.file_id}/{s.request.file_version}/{"c" * 32}/'
+    artifact = s.request.artifact.model_copy(update={'key': start + 'artifacts/' + s.value.source.sha256 + '/' + s.request.artifact.sha256 + '.json'})
+    ref = image.ref.model_copy(update={'key': start + image.ref.key})
+    if foreign:
+        parts = ref.key.split('/')
+        position = {'file': 2, 'version': 3, 'job': 4}[foreign]
+        parts[position] = 'd' * 32 if foreign != 'version' else '5'
+        ref = ref.model_copy(update={'key': '/'.join(parts)})
+    value = image.value.model_copy(update={'blocks': [CleanseBlock(ordinal=0, kind='image', sha256=ref.sha256, object_ref=ref)]})
+    grant = KnowledgeFileGrant(knowledge_id=1, file_id=s.request.file_id, file_version=s.request.file_version,
+                               action='execute', artifact=artifact, source=s.value.source, parser_version=value.parser_version,
+                               filename='file.pdf', collection='kb')
+    mocker.patch.object(knowledge_objects, '_configured_environment', return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET='files'))
+    native = Mock(scope=StorageScope('runtime', 'tenant', 'user', {'files'}))
+    native.stat.return_value = 'pinned-only'
+    factory = mocker.patch.object(knowledge_objects, 'S3ObjectStore', return_value=native)
+    if foreign:
+        with pytest.raises(ScopeDenied), knowledge_objects.bind_knowledge_image_objects(s.actor, grant, value, context=s.arguments['context']):
+            pass
+        factory.assert_not_called()
+    else:
+        pinned = ObjectRef('files', ref.key, Revision(ref.version))
+        with knowledge_objects.bind_knowledge_image_objects(s.actor, grant, value, context=s.arguments['context']) as objects:
+            assert objects.stat(pinned, context=s.arguments['context']) == 'pinned-only'
+        native.stat.assert_called_once_with(pinned, context=s.arguments['context'])
+        native.close.assert_called_once()

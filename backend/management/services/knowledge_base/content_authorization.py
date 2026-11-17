@@ -8,7 +8,7 @@ from contracts.agentos_knowledge import (
     KnowledgeContentRequest,
     ObjectReference,
 )
-from contracts.knowledge_cleanse import parse_cleanse_request
+from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
@@ -42,14 +42,7 @@ class KnowledgeContentAuthorization:
             raise ScopeDenied()
         selected = source
         if request.image_ref is not None:
-            if request.image_ref.space != "files" or not re.fullmatch(
-                "images/"
-                + source.sha256
-                + "/"
-                + request.image_ref.sha256
-                + r"\.(?:png|jpg|jpeg|gif|webp|bmp|tiff)",
-                request.image_ref.key,
-            ):
+            if request.image_ref.space != "files":
                 raise ScopeDenied()
             self._image(request, source, context)
             selected = request.image_ref
@@ -83,6 +76,13 @@ class KnowledgeContentAuthorization:
                 if cleanse.source != source:
                     continue
                 reference = ObjectReference.model_validate(row["artifact"])
+                try:
+                    prefix = knowledge_artifact_prefix(request, reference, job_id=row['job_id'])
+                except (TypeError, ValueError):
+                    raise ScopeDenied() from None
+                if not re.fullmatch(re.escape(prefix) + 'images/' + source.sha256 + '/' + request.image_ref.sha256
+                                    + r'\.(?:png|jpg|jpeg|gif|webp|bmp|tiff)', request.image_ref.key):
+                    continue
                 manifest = self.load_manifest(reference, context=context)
                 if (
                     manifest.source != source

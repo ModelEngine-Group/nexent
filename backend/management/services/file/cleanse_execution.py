@@ -2,7 +2,11 @@
 """Scoped run/KB dispatch without importing the retired task service."""
 
 from contracts.agentos_knowledge import FileCleanseLookup, FileCleanseRequest
-from contracts.knowledge_cleanse import KnowledgeCleanseLookup, KnowledgeCleanseRequest
+from contracts.knowledge_cleanse import (
+    KnowledgeCleanseLookup,
+    KnowledgeCleanseRequest,
+    cleanse_lookup,
+)
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.cleanse_executor import CleanseExecutor
 from management.services.file.cleanse_jobs import CleanseJobs
@@ -34,11 +38,7 @@ def execute_cleanse(row, request, *, tick, context, on_finished=None):
     def factory(*, context):
         from contracts.constants import environment
 
-        run = (
-            FileCleanseLookup(run_id=row["run_id"], job_id=row["job_id"])
-            if isinstance(request, FileCleanseRequest)
-            else None
-        )
+        run = cleanse_lookup(row, request)
         runtime = DocumentParserRuntime(
             environment.DP_PARSE_THREADS_PER_PROCESS,
             [

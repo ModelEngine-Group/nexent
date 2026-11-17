@@ -12,6 +12,7 @@ from nexent.storage.errors import DeadlineExceeded
 from nexent.storage.models import OperationContext
 
 from test.backend.services.test_file_cleanse_objects import Store, source
+from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
 from test.backend.services.test_run_cleanse_service import request as run_request
 
 
@@ -27,8 +28,9 @@ def test_executor_preserves_structure_and_pinned_version():
         runtime=runtime, objects=store, parser_version="parser-v1"
     )
     ref = executor(
-        {"parser_version": "parser-v1"},
-        SimpleNamespace(source=source(), filename="source.txt"),
+        {"parser_version": "parser-v1", 'scope_kind': 'knowledge', 'knowledge_id': 1, 'file_id': 'b' * 32,
+         'file_version': 0, 'job_id': 'c' * 32, 'request_payload': knowledge_request(source=source()).model_dump(mode='json')},
+        knowledge_request(source=source()),
         context=OperationContext("test", monotonic() + 5),
     )
     output = CleanseArtifact.model_validate_json(store.data[ref.key])
@@ -76,7 +78,9 @@ def test_deadline_expired_during_warmup_does_not_read_source():
         runtime=runtime, objects=objects, parser_version="parser-v1"
     )
     with pytest.raises(DeadlineExceeded):
-        executor({"parser_version": "parser-v1"}, Mock(), context=context)
+        request = run_request()
+        executor({'parser_version': 'parser-v1', 'scope_kind': 'run', 'run_id': request.run_id, 'job_id': 'c' * 32,
+                  'request_payload': request.model_dump(mode='json')}, request, context=context)
     runtime.ensure_initialized.assert_called_once()
     objects.stat.assert_not_called()
 
@@ -90,7 +94,8 @@ def test_run_executor_uses_the_admitted_job_directory():
     )
     executor = CleanseExecutor(runtime=parser, objects=store, parser_version="v1")
     result = executor(
-        {"parser_version": "v1", "run_id": request.run_id, "job_id": "2" * 32},
+        {"parser_version": "v1", "run_id": request.run_id, "job_id": "2" * 32,
+         'scope_kind': 'run', 'request_payload': request.model_dump(mode='json')},
         request,
         context=OperationContext("test", monotonic() + 5),
     )
@@ -103,7 +108,8 @@ def test_invalid_admitted_scope_never_initializes_parser(run_id, job_id):
     executor = CleanseExecutor(runtime=runtime, objects=objects, parser_version="v1")
     with pytest.raises(ValueError):
         executor(
-            {"parser_version": "v1", "run_id": run_id, "job_id": job_id},
+            {"parser_version": "v1", "run_id": run_id, "job_id": job_id,
+             'scope_kind': 'run', 'request_payload': run_request().model_dump(mode='json')},
             run_request(),
             context=OperationContext("test", monotonic() + 5),
         )

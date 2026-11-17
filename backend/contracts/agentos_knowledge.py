@@ -283,12 +283,21 @@ class FileCleanseLookup(Contract):
     job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
-def cleanse_output_prefix(run: FileCleanseLookup | None = None) -> str:
-    """Keep durable KB keys and give temporary run outputs an admitted identity."""
+class KnowledgeCleanseLookup(KnowledgeFileReference):
+    knowledge_id: int = Field(gt=0, le=2**31 - 1)
+    file_version: int = Field(ge=0, le=2**31 - 1)
+    job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
+def cleanse_output_prefix(run: FileCleanseLookup | KnowledgeCleanseLookup | None = None) -> str:
+    """Scope outputs to the exact admitted run or durable knowledge job."""
     if run is None:
         return ""
+    if isinstance(run, KnowledgeCleanseLookup):
+        checked = KnowledgeCleanseLookup.model_validate(run.model_dump())
+        return f'knowledge-cleanse/{checked.knowledge_id}/{checked.file_id}/{checked.file_version}/{checked.job_id}/'
     if not isinstance(run, FileCleanseLookup):
-        raise TypeError("Expected a run cleansing lookup")
+        raise TypeError("Expected an admitted cleansing lookup")
     checked = FileCleanseLookup.model_validate(run.model_dump())
     return f"run-cleanse/{checked.run_id}/{checked.job_id}/"
 

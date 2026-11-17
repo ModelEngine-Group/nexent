@@ -149,6 +149,12 @@ def test_default_parser_factory_defers_all_handles_until_child(mocker, kind):
     if kind == "run":
         snapshot.update(run_id=request.run_id, job_id="1" * 32)
         run = FileCleanseLookup(run_id=request.run_id, job_id=snapshot["job_id"])
+    else:
+        snapshot.update(request.model_dump(include={'knowledge_id', 'file_id', 'file_version'}))
+        snapshot['job_id'] = '1' * 32
+        from contracts.knowledge_cleanse import KnowledgeCleanseLookup
+        run = KnowledgeCleanseLookup(**request.model_dump(include={'knowledge_id', 'file_id', 'file_version'}), job_id='1' * 32)
+    snapshot.update(scope_kind=kind, request_payload=request.model_dump(mode='json'))
     ctx = context()
     tick = Mock()
     worker.execute_cleanse(snapshot, request, tick=tick, context=ctx)

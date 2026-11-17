@@ -5,6 +5,7 @@ import re
 from contextlib import contextmanager
 
 from contracts.agentos_knowledge import CleanseArtifact, KnowledgeFileGrant
+from contracts.knowledge_cleanse import knowledge_artifact_prefix
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import ObjectRef, Revision, StorageScope
 
@@ -81,12 +82,16 @@ def bind_knowledge_image_objects(actor, grant, artifact, *, context):
             or grant.parser_version != artifact.parser_version):
         raise ScopeDenied()
     references = []
+    try:
+        prefix = knowledge_artifact_prefix(grant, grant.artifact)
+    except (TypeError, ValueError):
+        raise ScopeDenied() from None
     for block in artifact.blocks:
         if block.kind != "image":
             continue
         ref = block.object_ref
         if (ref.space != "files" or not re.fullmatch(
-                "images/" + re.escape(artifact.source.sha256) + "/" + re.escape(ref.sha256)
+                re.escape(prefix) + "images/" + re.escape(artifact.source.sha256) + "/" + re.escape(ref.sha256)
                 + r"\.(?:png|jpg|jpeg|gif|webp|bmp|tiff)", ref.key)):
             raise ScopeDenied()
         references.append(ObjectRef(ref.space, ref.key, Revision(ref.version)))

@@ -28,7 +28,7 @@ from test.backend.services.test_knowledge_cleanse_jobs import knowledge_request
 
 @pytest.fixture
 def content(setup):
-    policy, payload, update, resource_policy, jobs = setup
+    _policy, payload, update, resource_policy, jobs = setup
     source = knowledge_request().source
     image = ObjectReference(
         space="files",
@@ -130,3 +130,29 @@ def test_manifest_identity_is_checked_after_loading(content):
         policy.authorize(
             request.model_copy(update={"image_ref": image}), context=context()
         )
+
+
+@pytest.mark.parametrize('foreign', [None, 'file', 'version', 'job'])
+def test_private_manifest_directory_controls_image_authority(content, foreign):
+    policy, request, image, load, _ = content
+    row, = policy.jobs.query('file_cleanse_jobs', RecordQuery(), PageRequest(limit=1), context=context()).items
+    start = f'knowledge-cleanse/{request.knowledge_id}/{request.file_id}/{request.file_version}/{row["job_id"]}/'
+    reference = ObjectReference.model_validate(row['artifact'])
+    reference = reference.model_copy(update={'key': start + 'artifacts/' + knowledge_request().source.sha256 + '/' + reference.sha256 + '.json'})
+    policy.jobs.patch('file_cleanse_jobs', row['id'], FieldPatch(set_values={'artifact': reference.model_dump(mode='json')}),
+                      expected=Revision(str(row['revision'])), context=context())
+    selected = image.model_copy(update={'key': start + image.key})
+    load.return_value = load.return_value.model_copy(update={'blocks': [
+        CleanseBlock(ordinal=0, kind='image', sha256=selected.sha256, object_ref=selected),
+    ]})
+    if foreign:
+        parts = selected.key.split('/')
+        position = {'file': 2, 'version': 3, 'job': 4}[foreign]
+        parts[position] = 'd' * 32 if foreign != 'version' else '1'
+        selected = selected.model_copy(update={'key': '/'.join(parts)})
+        with pytest.raises(ScopeDenied):
+            policy.authorize(request.model_copy(update={'image_ref': selected}), context=context())
+        load.assert_not_called()
+    else:
+        assert policy.authorize(request.model_copy(update={'image_ref': selected}), context=context()).object_ref == selected
+        load.assert_called_once()

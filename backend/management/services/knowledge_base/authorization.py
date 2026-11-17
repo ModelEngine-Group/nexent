@@ -6,7 +6,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileGrant,
     ObjectReference,
 )
-from contracts.knowledge_cleanse import parse_cleanse_request
+from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
@@ -83,6 +83,11 @@ class KnowledgeAuthorization:
                     row["artifact"] == request.artifact.model_dump(mode="json")
                     and parse_cleanse_request(row).source == source
                 ):
+                    if request.artifact.key.startswith('knowledge-cleanse/'):
+                        try:
+                            knowledge_artifact_prefix(request, request.artifact, job_id=row['job_id'])
+                        except (TypeError, ValueError):
+                            raise ScopeDenied() from None
                     return
             if page.next_cursor is None:
                 raise ScopeDenied()
