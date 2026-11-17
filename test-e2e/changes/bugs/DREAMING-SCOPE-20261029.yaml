@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: DREAMING-SCOPE-20261029
+  change_type: bugfix
+  bug_id: DREAMING-SCOPE-20261029
+  title: Fix default model observer and grounded durable preference extraction
+  description: Restore Dreaming model summarization and reject request-local or assistant-derived preferences before persistence.
+  observed_behavior: Omitted observer binds instance methods to the class; summary falls back. Untyped FA extraction turns local answer limits and assistant procedures into persistent preferences.
+  expected_behavior: Default observers are isolated instances; semantic summaries succeed. Durable user preferences require original user evidence and lasting scope.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: AGT-049 checks run completion without eligible evidence or semantic-summary audit; extraction UT accepts unsupported untyped model claims.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-122]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AGT-DREAMING-SEMANTIC-01]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/models/test_openai_default_observer.py
+      - test/sdk/core/utils/test_observer_model_attempts.py
+      - test/sdk/core/models/test_model_silent_retry.py
+      - test/backend/services/test_fa_memory_extractor.py
+      - test/backend/services/test_agent_service.py
+      - test/backend/services/test_memory_extraction_scope.py
+      - test/backend/services/test_memory_dreaming_summarizer.py
+      - test/backend/services/test_memory_dreaming_service.py
+    behaviors:
+      - Isolate default observer state and preserve explicit observer lifecycle and retries.
+      - Reject local constraints even if the model omits their qualifier or calls them durable.
+      - Reject invented evidence and assistant-derived preferences while keeping grounded stable preferences and confirmed outcomes.
+      - Preserve no-write behavior for invalid model output and ordinary storage/model failures.
+    reason: Unit proof stays in traditional UT. New D3 adds actual provider, worker and version-generation evidence that mocked constructor tests and completion-only AGT-049 do not prove.
+  notes: >-
+    Design nexent-doc/nexent/dreaming-summary-memory-scope/00-02 documents; approved 2026-10-29.
+    Preserve AGT-049 and other historical Cases. AGT-050 validates invalid schedule input and is unaffected by the changed wrapper/extraction boundary; its schema behavior is not part of this execution selection.
+    Browser mixed-scope, local-only requests, diverse recalls and post-Dreaming prompt/output are separately required current-change acceptance; no duplicate D1 is added.
+    The new D3 uses zero selection thresholds only to isolate semantic generation and never fabricates recall events. User-facing browser acceptance retains real recall/diversity gates.

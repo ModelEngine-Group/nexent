@@ -6,3 +6,5 @@ policy: |-
   - The system has already performed fixed memory retrieval before this turn. Do not call `store_memory` when the candidate already appears in the provided memory context or prior tool results.
   - Do not store transient calculations, intermediate noise, unverified guesses, duplicates, or secrets.
   - Do not call `store_memory` mechanically on every turn.
+
+  - Do not store request-local length, language, style or format constraints as lasting preferences. Only the user can establish a lasting preference; your own recommendations and answer structure are not evidence of one.
