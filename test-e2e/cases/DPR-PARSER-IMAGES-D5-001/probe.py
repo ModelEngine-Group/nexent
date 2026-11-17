@@ -117,6 +117,9 @@ if role == "management":
     modules = [
         "infrastructure.file_processing.parser",
         "management.services.file.cleanse",
+        "management.services.knowledge_base.tool_files",
+        "infrastructure.knowledge_cleanse",
+        "infrastructure.rdb.cleanse_resources",
         "management.services.file.cleanse_lifespan",
         "nexent.data_process.core",
     ]

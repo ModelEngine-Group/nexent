@@ -34,6 +34,20 @@ def test_search_resource_revisions_are_complete_and_json_round_trippable(revisio
             KnowledgeSearch(**values)
 
 
+@pytest.mark.parametrize("versions", [{"a" * 32: 0}, {"a" * 32: -1}, {"b" * 32: 0}])
+def test_file_versions_match_the_selected_file_ids(versions):
+    from contracts.agentos_knowledge import KnowledgeSearch, ModelVersion
+
+    values = {"knowledge_ids": [1], "query": "query", "embedding_model": ModelVersion(model_id=2, revision="v1"),
+              "file_ids": ["a" * 32], "file_versions": versions}
+    if versions == {"a" * 32: 0}:
+        request = KnowledgeSearch(**values)
+        assert KnowledgeSearch.model_validate_json(request.model_dump_json()) == request
+    else:
+        with pytest.raises(ValidationError):
+            KnowledgeSearch(**values)
+
+
 def test_artifact_round_trip_and_order():
     block = CleanseBlock(
         ordinal=0,

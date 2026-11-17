@@ -158,6 +158,21 @@ async def test_file_filter_is_applied_in_storage_before_visibility(search):
                for t in s.vectors.search.call_args.args[1].where.terms)
 
 
+async def test_file_version_filter_precedes_top_k_and_refuses_new_generation(search):
+    from contracts.agentos_knowledge import KnowledgeSearch
+
+    s, request, _, hit, service = search
+    payload = request.model_dump() | {"file_ids": [s.request.file_id], "file_versions": {s.request.file_id: 0}}
+    request = KnowledgeSearch.model_validate(payload)
+    await service.search(request, s.actor)
+    terms = s.vectors.search.call_args.args[1].where.terms
+    pair = terms[-1].terms[0]
+    assert [(t.field, t.value) for t in pair.terms] == [("file_id", s.request.file_id), ("file_version", 0)]
+    s.vectors.search.return_value = (replace(hit, payload=hit.payload | {"file_version": 1}),)
+    with pytest.raises(ScopeDenied):
+        await service.search(request, s.actor)
+
+
 async def test_wrong_embedding_model_is_refused_before_provider_or_storage(search):
     s, request, grant, _, service = search
     s.client.authorize_knowledge_search.return_value = grant.model_copy(update={"knowledge_bases": [

@@ -45,3 +45,28 @@ def test_composition_closes_every_constructed_resource(mocker, failure):
     assert engine_scope.namespaces == {composition.DATASET}
     assert resource_scope.namespaces == set(composition.TABLES)
     composition.record_engine.assert_called_once_with(ctx)
+
+
+@pytest.mark.parametrize("include_files", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_read_resource_scope_includes_files_only_when_explicit_and_always_closes(mocker, include_files, fail):
+    engine = mocker.patch.object(composition, "record_engine").return_value
+    bind = mocker.patch.object(composition, "bind_cleanse_resources")
+    ctx = context()
+
+    def exercise():
+        with composition.knowledge_resource_ports("tenant-a", "user-a", context=ctx, include_files=include_files):
+            if fail:
+                raise ValueError("controlled query failure")
+
+    if fail:
+        with pytest.raises(ValueError):
+            exercise()
+    else:
+        exercise()
+    scope = bind.call_args.args[0]
+    assert ("cleanse_files" in scope.namespaces) is include_files
+    assert "knowledge_file_history" not in scope.namespaces
+    assert scope.tenant_id == "tenant-a" and scope.actor_id == "user-a" and not scope.system
+    bind.return_value.close.assert_called_once()
+    engine.dispose.assert_called_once()

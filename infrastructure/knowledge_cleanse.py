@@ -51,10 +51,12 @@ def cleanse_dispatch_ports(*, context):
 
 
 @contextmanager
-def knowledge_resource_ports(tenant_id, user_id, *, context):
+def knowledge_resource_ports(tenant_id, user_id, *, context, include_files=False):
     engine, resources = record_engine(context), None
     try:
         namespaces = set(TABLES) - {"cleanse_files", "knowledge_file_history"}
+        if include_files:
+            namespaces.add("cleanse_files")
         resources = bind_cleanse_resources(StorageScope("management", tenant_id, user_id, namespaces), engine)
         yield resources
     finally:

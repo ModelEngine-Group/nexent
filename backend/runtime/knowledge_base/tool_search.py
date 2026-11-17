@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from contracts.agentos import RerankInvocation
 from contracts.agentos_knowledge import (
+    KnowledgeFileReference,
     KnowledgeSearch,
     KnowledgeSearchAuthorization,
     ModelVersion,
@@ -29,7 +30,7 @@ def _identity(hit):
 class KnowledgeToolSearch:
     """Bindings and file restrictions come from authorized assembly, never tool input."""
 
-    def __init__(self, service, actor, bindings, *, file_ids=None):
+    def __init__(self, service, actor, bindings, *, file_refs=None):
         self.service, self.actor = service, actor
         self.bindings = {}
         ids = set()
@@ -39,12 +40,12 @@ class KnowledgeToolSearch:
                 raise ValueError("Invalid knowledge tool binding")
             ids.add(resource.knowledge_id)
             self.bindings[resource.collection] = (resource.model_copy(deep=True), model.model_copy(deep=True))
-        file_ids = None if file_ids is None else tuple(file_ids)
-        if file_ids is not None:
-            # Reuse wire validation and preserve the distinction between no filter and deny-all.
-            KnowledgeSearch(knowledge_ids=[1], query="validate", embedding_model=ModelVersion(model_id=1, revision="v1"),
-                            file_ids=list(file_ids))
-        self.file_ids = None if file_ids is None else tuple(file_ids)
+        self.files = None if file_refs is None else tuple(
+            KnowledgeFileReference.model_validate(ref.model_dump()) for ref in file_refs
+        )
+        if self.files is not None and (len(self.files) > 1000 or len({f.file_id for f in self.files}) != len(self.files)
+                                      or any(f.knowledge_id not in ids for f in self.files)):
+            raise ValueError("Invalid fixed file references")
 
     @staticmethod
     def _merge(results, limit):
@@ -75,7 +76,7 @@ class KnowledgeToolSearch:
         names = list(dict.fromkeys(collections))
         if any(name not in self.bindings for name in names):
             raise ScopeDenied()
-        if not names or self.file_ids == ():
+        if not names or self.files == ():
             return []
         if len(names) > 100:
             raise InvalidInput()
@@ -93,13 +94,21 @@ class KnowledgeToolSearch:
                 results = []
                 for (model_id, revision), scoped in groups.items():
                     context.remaining()
+                    scope_ids = {r.knowledge_id for r in scoped}
+                    files = None if self.files is None else [f for f in self.files if f.knowledge_id in scope_ids]
+                    if files == []:
+                        continue
                     response = await self.service.search(KnowledgeSearch(
                         knowledge_ids=[r.knowledge_id for r in scoped], query=query, search_mode=search_mode, top_k=limit,
                         embedding_model=ModelVersion(model_id=model_id, revision=revision),
-                        file_ids=list(self.file_ids or ()), expected_revisions={r.knowledge_id: r.revision for r in scoped},
+                        file_ids=[f.file_id for f in files or ()],
+                        file_versions={f.file_id: f.file_version for f in files or ()},
+                        expected_revisions={r.knowledge_id: r.revision for r in scoped},
                     ), self.actor, context=context)
-                    if any(h.knowledge_id not in {r.knowledge_id for r in scoped}
-                           or (self.file_ids is not None and h.file_id not in self.file_ids) for h in response.hits):
+                    if any(h.knowledge_id not in scope_ids
+                           or (files is not None and not any(h.knowledge_id == f.knowledge_id and h.file_id == f.file_id
+                                                            and h.file_version == f.file_version for f in files))
+                           for h in response.hits):
                         raise ScopeDenied()
                     results.append(response.hits)
                 candidates = self._merge(results, limit)

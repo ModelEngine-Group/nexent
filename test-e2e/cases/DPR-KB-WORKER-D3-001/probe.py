@@ -18,6 +18,7 @@ sys.path[:0] = [str(root), str(root / "backend"), str(root / "sdk")]
 import httpx
 import uvicorn
 from contracts.agentos_knowledge import (
+    KnowledgeFileReference,
     KnowledgeFileUpload,
     KnowledgeJobLookup,
     ObjectReference,
@@ -33,6 +34,7 @@ from management.api.knowledge_base.agentos_authorization import (
 from management.services.file.cleanse import cleanse_object
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.file.cleanse_jobs import CleanseJobs
+from management.services.knowledge_base.tool_files import resolve_tool_files
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
@@ -399,13 +401,27 @@ def main(run_id):
                 grant = await rpc.authorize_knowledge_search(
                     KnowledgeSearchAuthorization(knowledge_ids=[1]), actor.user_id, actor.tenant_id)
                 bindings = [(grant.knowledge_bases[0], request.embedding_model)]
-                bound = KnowledgeToolSearch(search_service, actor, bindings, file_ids=[request.file_id])
+                bound = KnowledgeToolSearch(search_service, actor, bindings, file_refs=[KnowledgeFileReference(knowledge_id=1, file_id=request.file_id, file_version=0)])
                 hits = await bound.search("worker", ["kb-worker"], search_mode="accurate")
                 assert len(hits) == 1 and hits[0].file_id == request.file_id
                 assert hits[0].content == content.decode() and hits[0].file_version == 0
-                denied = KnowledgeToolSearch(search_service, actor, bindings, file_ids=[])
+                denied = KnowledgeToolSearch(search_service, actor, bindings, file_refs=[])
                 assert await denied.search("worker", ["kb-worker"]) == []
                 evidence["bound_tool_search"] = True
+                refs = await db(resolve_tool_files, resources, actor.user_id, [1], [source.key], context=context())
+                assert {ref.file_id for ref in refs} == {"a" * 32, "b" * 32}
+                assert all(ref.knowledge_id == 1 and ref.file_version == 0 for ref in refs)
+                resolved_tool = KnowledgeToolSearch(search_service, actor, bindings, file_refs=refs)
+                selected_hits = await resolved_tool.search("worker", ["kb-worker"], search_mode="accurate")
+                assert len(selected_hits) == 1 and selected_hits[0].file_id == request.file_id
+                assert await db(resolve_tool_files, resources, actor.user_id, [1], ["unknown"], context=context()) == []
+                from nexent.storage.errors import ScopeDenied
+                try:
+                    await db(resolve_tool_files, resources, "unknown-user", [1], [source.key], context=context())
+                    raise AssertionError("Unknown actor cannot resolve document paths")
+                except ScopeDenied:
+                    pass
+                evidence["authorized_tool_files"] = True
                 evidence.update(await prove_deletion(
                     api, actor, request, vectors, vector, workers, db, owned, calls,
                 ))

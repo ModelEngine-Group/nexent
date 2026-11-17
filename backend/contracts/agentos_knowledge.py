@@ -171,10 +171,16 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
     file_ids: list[str] = Field(default_factory=list, max_length=1000)
+    file_versions: dict[str, int] = Field(default_factory=dict, max_length=1000)
     expected_revisions: dict[int, str] = Field(default_factory=dict, max_length=100)
 
     @model_validator(mode="after")
     def pinned_resources(self):
+        if self.file_versions and (
+            set(self.file_versions) != set(self.file_ids)
+            or any(type(value) is not int or value < 0 for value in self.file_versions.values())
+        ):
+            raise ValueError("Expected a nonnegative version for every selected file")
         if self.expected_revisions and (
             set(self.expected_revisions) != set(self.knowledge_ids)
             or any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value)

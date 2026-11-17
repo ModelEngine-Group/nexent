@@ -137,6 +137,8 @@ class KnowledgeSearchService:
                 raise ScopeDenied()
             if request.file_ids and reference.file_id not in request.file_ids:
                 raise ScopeDenied()
+            if request.file_versions and request.file_versions[reference.file_id] != reference.file_version:
+                raise ScopeDenied()
             if (hit.payload.get("embedding_model_id") != request.embedding_model.model_id
                 or normalize_model_revision(hit.payload.get("embedding_revision"))
                 != normalize_model_revision(request.embedding_model.revision)):
@@ -158,6 +160,10 @@ class KnowledgeSearchService:
                      Comparison("embedding_model_id", "eq", request.embedding_model.model_id)]
             if request.file_ids:
                 terms.append(Comparison("file_id", "in", request.file_ids))
+            if request.file_versions:
+                terms.append(Junction("or", tuple(Junction("and", (
+                    Comparison("file_id", "eq", file_id), Comparison("file_version", "eq", version),
+                )) for file_id, version in request.file_versions.items())))
             where = Junction("and", tuple(terms))
             if request.search_mode in {"accurate", "hybrid"}:
                 lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="weighted_text", where=where, limit=limit), context=context))

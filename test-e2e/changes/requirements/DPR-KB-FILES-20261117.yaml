@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-FILES-20261117
+  change_type: requirement
+  requirement_id: DPR-003
+  title: Resolve knowledge tool document paths to authorized file identities
+  description: Management resolves exact object paths through scoped RecordStore and live KB permissions; unknown paths deny every file and pinned source versions remain explicit.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: []
+    modified: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Resolve exact source keys, object names and bucket-qualified S3 paths within current authorized knowledge IDs.
+    - Preserve unset path semantics while unknown nonempty paths produce an empty file scope.
+    - Reject stale or absent source identity, foreign records, denied users and truncated query results.
+    - Preserve file versions across Runtime model grouping and apply paired ID/version constraints before top-k.
+    reason: Existing search and file authorization UT do not resolve document paths. Strengthen the existing worker D3 with actual PG and current Management permissions; reuse its labelled stores and cleanup. No product SQL migration or provider change is needed.
+    test_selectors:
+    - test/backend/services/test_knowledge_tool_files.py
+    - test/backend/services/test_knowledge_tool_search.py
+    - test/backend/services/test_knowledge_search.py
+    - test/backend/app/test_agentos_knowledge_contract.py
+    - test/backend/infrastructure/test_knowledge_cleanse_composition.py
+    - test/backend/services/test_cleanse_authorization.py

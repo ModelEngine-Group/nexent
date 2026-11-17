@@ -9,6 +9,7 @@ import pytest
 from contracts.agentos import ModelResult
 from contracts.agentos_knowledge import (
     KnowledgeBaseGrant,
+    KnowledgeFileReference,
     KnowledgeSearchGrant,
     KnowledgeSearchHit,
     ModelVersion,
@@ -60,20 +61,21 @@ async def test_fixed_files_and_single_group_preserve_scores_and_model_rerank(ser
     service.search.return_value = SimpleNamespace(hits=[hit()])
     service.client.authorize_knowledge_search.return_value = KnowledgeSearchGrant(knowledge_bases=[resource])
     service.models.invoke.return_value = ModelResult(revision="v2", output=[{"index": 0, "relevance_score": .95}])
-    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [(resource, model)], file_ids=["f" * 32])
+    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [(resource, model)], file_refs=[KnowledgeFileReference(knowledge_id=1, file_id="f" * 32, file_version=0)])
     plain = await tool.search("query", ["kb-1"], top_k=1)
     assert plain[0].score == .8 and plain[0].score_kind == "elasticsearch.cosine"
     rows = await tool.search("query", ["kb-1"], top_k=1, rerank_model=ModelVersion(model_id=4, revision="v2"))
     assert rows[0].score == .95 and rows[0].score_kind == "model.rerank"
     payload = service.search.await_args.args[0]
     assert payload.file_ids == ["f" * 32] and payload.rerank_model is None
+    assert payload.file_versions == {"f" * 32: 0}
     invoke = service.models.invoke.await_args.args[0]
     assert invoke.input.documents == ["visible content"] and invoke.model_id == 4
 
 
 @pytest.mark.asyncio
 async def test_empty_files_deny_all_and_unknown_collection_is_rejected(service):
-    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [binding()], file_ids=[])
+    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [binding()], file_refs=[])
     assert await tool.search("query", ["kb-1"]) == []
     with pytest.raises(ScopeDenied):
         await tool.search("query", ["kb-foreign"])
@@ -150,7 +152,7 @@ async def test_multiple_model_groups_rerank_once_and_reject_stale_model(service)
 @pytest.mark.parametrize("row", [hit(2), hit().model_copy(update={"file_id": "a" * 32})])
 async def test_out_of_scope_service_result_is_never_returned(service, row):
     service.search.return_value = SimpleNamespace(hits=[row])
-    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [binding()], file_ids=["f" * 32])
+    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [binding()], file_refs=[KnowledgeFileReference(knowledge_id=1, file_id="f" * 32, file_version=0)])
     with pytest.raises(ScopeDenied):
         await tool.search("query", ["kb-1"])
     service.models.invoke.assert_not_called()
@@ -161,3 +163,19 @@ def test_invalid_binding_rejected_before_io(service, bindings):
     with pytest.raises(ValueError):
         KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), bindings)
     service.search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fixed_references_skip_other_model_groups_without_changing_single_group_score(service):
+    bindings = [binding(), binding(2, 3)]
+    service.search.return_value = SimpleNamespace(hits=[hit()])
+    service.client.authorize_knowledge_search.return_value = KnowledgeSearchGrant(knowledge_bases=[b[0] for b in bindings])
+    actor = SimpleNamespace(user_id="user", tenant_id="tenant")
+    tool = KnowledgeToolSearch(service, actor, bindings, file_refs=[
+        KnowledgeFileReference(knowledge_id=1, file_id="f" * 32, file_version=0)])
+    rows = await tool.search("query", ["kb-1", "kb-2"])
+    assert service.search.await_count == 1 and service.search.await_args.args[0].knowledge_ids == [1]
+    assert rows[0].score == .8
+    service.search.return_value = SimpleNamespace(hits=[hit().model_copy(update={"file_version": 1})])
+    with pytest.raises(ScopeDenied):
+        await tool.search("query", ["kb-1"])

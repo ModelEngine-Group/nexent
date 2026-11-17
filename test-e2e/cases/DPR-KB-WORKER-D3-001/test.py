@@ -59,6 +59,7 @@ def test_runtime_knowledge_upload(record_property):
         "delete_without_model",
         "signed_search",
         "bound_tool_search",
+        "authorized_tool_files",
         "visible_rerank",
         "search_scope_denial",
         "deleted_search_absent",
