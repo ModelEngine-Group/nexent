@@ -6813,5 +6813,8 @@
   "ops.noPermission": "暂无访问权限",
   "ops.loadError": "加载失败，请重试",
   "ops.empty": "暂无数据",
-  "ops.readOnly": "当前为只读模式"
+  "ops.readOnly": "当前为只读模式",
+  "dreaming.reason.no_candidates": "近期没有可用于整理的智能体记忆。",
+  "dreaming.reason.no_eligible_candidates": "没有记忆达到晋升门槛。",
+  "dreaming.reason.no_new_evidence": "现有版本已包含可用证据。"
 }

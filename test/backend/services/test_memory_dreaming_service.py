@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 import pytest
 from management.services.memory.dreaming.service import (
@@ -169,6 +170,10 @@ def test_ac008_failure_is_audited(monkeypatch):
         lambda *_: lock(True),
     )
     monkeypatch.setattr(
+        "management.services.memory.dreaming.service.memory_record_db.list_memory_records",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
         MagicMock(side_effect=ValueError("bad data")),
     )
@@ -271,3 +276,55 @@ def test_get_memory_dreaming_service_singleton(monkeypatch):
     assert isinstance(svc1, MemoryDreamingService)
 
     monkeypatch.setattr(mod, "_service", None)
+
+
+def test_expired_window_evidence_does_not_count_toward_promotion(monkeypatch):
+    from management.services.memory.dreaming import service as dreaming
+
+    monkeypatch.setattr(dreaming.memory_record_db, "update_memory_record", MagicMock())
+    monkeypatch.setattr(dreaming.memory_record_db, "apply_dreaming_phase", MagicMock())
+    record = {
+        "memory_id": 1, "tenant_id": "t", "user_id": "u", "agent_id": "1",
+        "content": "Use this durable release policy",
+        "recall_count": 30, "daily_count": 3, "grounded_count": 3,
+        "query_hashes": ["old1", "old2", "old3"], "recall_days": ["2026-08-01"],
+    }
+    candidate, = MemoryDreamingService(record_service=MagicMock())._run_rem("t", [record], {})
+    assert candidate.recall_count == 0
+    assert candidate.daily_count == 0
+    assert candidate.query_hashes == []
+    assert candidate.last_recalled_at is None
+
+
+@pytest.mark.parametrize(
+    ("decision_kind", "reason"),
+    [(None, "no_candidates"), (False, "no_eligible_candidates"), (True, "no_new_evidence")],
+)
+def test_dreaming_no_publication_reports_specific_audit_reason(monkeypatch, decision_kind, reason):
+    from management.services.memory.dreaming import service as dreaming
+
+    finish = MagicMock()
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "try_scope_lock", lambda *_: lock(True))
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "update_audit", MagicMock())
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "get_thresholds", lambda *_: {})
+    monkeypatch.setattr(dreaming.memory_dreaming_db, "finish_audit", finish)
+    service = MemoryDreamingService(record_service=MagicMock())
+    candidate = SimpleNamespace(memory_id=1, noise=0)
+    decision = SimpleNamespace(
+        candidate=candidate, promote=decision_kind, score=1.0, reason="test",
+        metrics=SimpleNamespace(signal_count=1, context_diversity=1), archive_suggested=False,
+    )
+    release = MagicMock(return_value=None)
+    monkeypatch.setattr(service, "_source_records", lambda *_: [])
+    monkeypatch.setattr(service, "_run_light", lambda *_: {})
+    monkeypatch.setattr(service, "_run_rem", lambda *_: [] if decision_kind is None else [candidate])
+    monkeypatch.setattr(service, "_build_version", release)
+    monkeypatch.setattr(dreaming, "select_candidates", lambda *_args, **_kwargs: [] if decision_kind is None else [decision])
+
+    result = service.run(tenant_id="t", user_id="u", agent_id="__user__", run_id=5)
+    assert result["status"] == "completed"
+    assert result["reason"] == reason
+    assert result["version"] is None
+    assert finish.call_args.kwargs["reason"] == reason
+    assert finish.call_args.kwargs["published_version_id"] is None
+    assert release.called is (decision_kind is True)
