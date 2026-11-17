@@ -87,7 +87,7 @@ class MemoryDreamingService:
     def _eligible_source_records(tenant_id, user_id, agent_id):
         records = memory_record_db.list_memory_records(
             tenant_id, user_id=user_id, agent_id=None if agent_id == USER_DREAMING_SCOPE else agent_id,
-            layer="agent", memory_type="short_term", status="active", limit=None, strict=True,
+            layer="agent", memory_type="short_term", status="active", limit=None,
         )
         config = get_user_configs(user_id)
         allowed = {}
