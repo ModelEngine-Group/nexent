@@ -23,7 +23,8 @@ def admission_mapping(*, readonly=False):
     """Share the same admission tables, audit policy and revisions in finalization."""
     tables = {KB: knowledge, FILES: files}
     names = {KB: ('knowledge_id', 'tenant_id', 'index_name', 'version', 'deletion_request', 'create_time',
-                  'update_time', 'created_by', 'updated_by', 'delete_flag'), FILES: tuple(c.name for c in files.c)}
+                  'update_time', 'created_by', 'updated_by', 'delete_flag', 'ingroup_permission',
+                  'knowledge_sources'), FILES: tuple(c.name for c in files.c)}
     definitions = []
     for name in tables:
         definitions.append(DatasetDefinition(

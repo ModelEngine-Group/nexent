@@ -20,6 +20,11 @@ from management.services.knowledge_base.admission import (
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
+from management.services.knowledge_base.owner_cleanup import (
+    authorize_owner_cleanup_admission,
+    has_owner_cleanup_authority,
+    require_private_owner,
+)
 from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import Comparison, PageRequest, RecordQuery, Revision, Sort
 
@@ -108,10 +113,35 @@ class KnowledgeBaseDeletionJournal:
 
 
 def request_knowledge_base_deletion(records, resources, index_name, actor, *, context):
+    return _request(records, resources, index_name, actor, owner_user_id=None, purpose=None, context=context)
+
+
+def request_knowledge_base_owner_deletion(records, resources, index_name, owner_user_id, purpose, actor, *, context):
+    return _request(records, resources, index_name, actor, owner_user_id=owner_user_id, purpose=purpose, context=context)
+
+
+def _existing_owner_scope(row, owner_user_id, purpose, actor):
+    if not has_owner_cleanup_authority(row, actor.user_id, actor.tenant_id):
+        return None
+    scope = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request']).owner_cleanup
+    if scope.owner_user_id != owner_user_id or scope.purpose != purpose:
+        raise ScopeDenied()
+    return scope
+
+
+def _request(records, resources, index_name, actor, *, owner_user_id, purpose, context):
     require_admission_actor(records, resources, actor)
     authorization = KnowledgeFileAuthorization(resources, user_id=actor.user_id)
     knowledge = authorization._one('cleanse_knowledge', 'index_name', index_name, context)
-    authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, cleanup=True, context=context)
+    previous = records.get(KB, knowledge['knowledge_id'], context=context)
+    if previous is None or previous['index_name'] != index_name:
+        raise ScopeDenied()
+    cleanup = _existing_owner_scope(previous, owner_user_id, purpose, actor)
+    if cleanup is None:
+        if owner_user_id is None:
+            authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, cleanup=True, context=context)
+        else:
+            cleanup = authorize_owner_cleanup_admission(previous, owner_user_id, purpose, actor, context=context)
     with records.transaction(context=context) as transaction:
         row = transaction.get(KB, knowledge['knowledge_id'], context=context)
         if row is None or row['index_name'] != index_name:
@@ -120,10 +150,22 @@ def request_knowledge_base_deletion(records, resources, index_name, actor, *, co
             original = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
             if original.knowledge_id != row['knowledge_id'] or original.index_name != index_name:
                 raise Conflict()
-            return row
-        intent = KnowledgeBaseDeletionIntent(knowledge_id=row['knowledge_id'], index_name=index_name, user_id=actor.user_id)
+            existing = _existing_owner_scope(row, owner_user_id, purpose, actor)
+            if existing is not None or cleanup is None:
+                return row
+            if original.user_id != actor.user_id:
+                raise Conflict()
+            intent = original.model_copy(update={'owner_cleanup': cleanup})
+        else:
+            intent = KnowledgeBaseDeletionIntent(knowledge_id=row['knowledge_id'], index_name=index_name,
+                                                  user_id=actor.user_id, owner_cleanup=cleanup)
+        if cleanup is not None:
+            require_private_owner(row, cleanup.owner_user_id, actor.tenant_id)
         reserved = change_knowledge_admission(transaction, row, {'deletion_request': intent.model_dump(mode='json')},
                                                expected=Revision(str(row['version'])), context=context)
+        if cleanup is not None:
+            require_private_owner(reserved, cleanup.owner_user_id, actor.tenant_id)
+            return reserved
         cursor = None
         while True:
             page = transaction.query(FILES, RecordQuery(

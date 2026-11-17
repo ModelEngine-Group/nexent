@@ -18,6 +18,7 @@ from contracts.knowledge_admission import KnowledgeBaseDeletionIntent
 from management.services.knowledge_base.base_deletion import (
     KnowledgeBaseDeletionJournal,
     request_knowledge_base_deletion,
+    request_knowledge_base_owner_deletion,
 )
 from management.services.knowledge_base.ingestion_coordinator import (
     IngestionCancellation,
@@ -49,9 +50,12 @@ class KnowledgeBaseDeletionCoordinator:
         return await run_blocking('knowledge-base-deletion-' + name, fn, *args,
                                   lane='control-io', owner='management.knowledge_base', **kwargs)
 
-    def _admit(self, index_name, actor, context):
+    def _admit(self, index_name, actor, context, owner_user_id=None, purpose=None):
         context.remaining()
         with self.ports(actor, context=context) as (records, resources):
+            if owner_user_id is not None:
+                return request_knowledge_base_owner_deletion(records, resources, index_name, owner_user_id,
+                                                             purpose, actor, context=context)
             return request_knowledge_base_deletion(records, resources, index_name, actor, context=context)
 
     def _page(self, row, actor, context, cursor):
@@ -71,6 +75,11 @@ class KnowledgeBaseDeletionCoordinator:
         with self.ports(actor, context=context) as (records, resources):
             return getattr(KnowledgeBaseDeletionJournal(records, resources, actor), method)(row, *args, context=context)
 
+    def _current(self, row, actor, context):
+        context.remaining()
+        with self.ports(actor, context=context) as (records, resources):
+            return KnowledgeBaseDeletionJournal(records, resources, actor).load(row['knowledge_id'], context=context)
+
     def _finalize(self, row, actor, context):
         from management.services.knowledge_base.base_metadata import (
             finalize_knowledge_base_deletion,
@@ -81,6 +90,16 @@ class KnowledgeBaseDeletionCoordinator:
             return finalize_knowledge_base_deletion(records, resources, row, actor, context=context)
 
     async def request(self, index_name, actor, *, context=None):
+        return await self._request(index_name, actor, context=context)
+
+    async def request_owner_cleanup(self, index_name, owner_user_id, actor, *, purpose='user_deletion', context=None):
+        return await self._request(index_name, actor, owner_user_id=owner_user_id, purpose=purpose, context=context)
+
+    async def admit_owner_cleanup(self, index_name, owner_user_id, actor, *, purpose='user_deletion', context=None):
+        return await self._request(index_name, actor, owner_user_id=owner_user_id, purpose=purpose,
+                                   prepare_only=True, context=context)
+
+    async def _request(self, index_name, actor, *, owner_user_id=None, purpose=None, prepare_only=False, context=None):
         context = context or OperationContext('kb-base-delete-' + uuid4().hex, monotonic() + 10)
         stopped = Event()
         operation = replace(context, deadline=min(context.deadline, monotonic() + 10),
@@ -88,8 +107,10 @@ class KnowledgeBaseDeletionCoordinator:
         row = None
         try:
             async with asyncio.timeout(operation.remaining()):
-                row = await self._blocking('admit', self._admit, index_name, actor, operation)
+                row = await self._blocking('admit', self._admit, index_name, actor, operation, owner_user_id, purpose)
                 intent = KnowledgeBaseDeletionIntent.model_validate(row['deletion_request'])
+                if prepare_only:
+                    return row
                 # A different editor may acknowledge the intent but cannot execute as its owner.
                 if intent.user_id != actor.user_id:
                     return row
@@ -111,6 +132,10 @@ class KnowledgeBaseDeletionCoordinator:
                             break
                         cursor = page.next_cursor
                     if not complete:
+                        return row
+                    # Child source finalization advances the same KB revision for its document timestamp.
+                    row = await self._blocking('current-parent', self._current, row, actor, operation)
+                    if KnowledgeBaseDeletionIntent.model_validate(row['deletion_request']).phase != 'files':
                         return row
                     row, payload = await self._blocking('reserve', self._journal, row, actor, operation, 'begin_collection')
                     state = await self.client.delete_knowledge_base(payload, user_id=actor.user_id, tenant_id=actor.tenant_id)

@@ -170,6 +170,8 @@ def test_completed_files_are_revalidated_before_collection(parent):
             'status': 'DELETED', 'stage': 'DELETE_DONE', 'deleted_vector_count': 0,
             'deletion_request': intent.model_dump(mode='json'),
         }), expected=None, context=kwargs['context'])
+        # SourceDeletion also updates the KB's last document time and advances its revision.
+        s.records.patch(KB, 1, FieldPatch(set_values={}), expected=None, context=kwargs['context'])
         return s.records.get(FILES, 'a' * 32, context=kwargs['context'])
 
     async def finish(index, path, scope, actor, **kwargs):

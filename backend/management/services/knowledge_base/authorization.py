@@ -7,11 +7,14 @@ from contracts.agentos_knowledge import (
     ObjectReference,
 )
 from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
+from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
+from management.services.knowledge_base.owner_cleanup import has_owner_cleanup_authority
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
+from pydantic import ValidationError
 
 from infrastructure.knowledge_cleanse import knowledge_cleanse_ports
 
@@ -30,8 +33,11 @@ class KnowledgeAuthorization:
             edit=request.action != "inspect",
             history=not execution,
             cleanup=not execution,
+            inspect_cleanup=request.action == 'inspect',
             context=context,
         )
+        if request.action == 'inspect' and has_owner_cleanup_authority(knowledge, self.user_id, self.resources.records.scope.tenant_id):
+            self._require_cleanup_inspection(file, knowledge, request)
         source = None
         if execution:
             try:
@@ -56,6 +62,22 @@ class KnowledgeAuthorization:
             artifact=request.artifact,
             parser_version=request.parser_version,
         )
+
+    def _require_cleanup_inspection(self, file, knowledge, request):
+        try:
+            intent = KnowledgeDeletionIntent.model_validate(file['deletion_request'])
+        except ValidationError:
+            raise ScopeDenied() from None
+        if (intent.scope != 'full' or intent.user_id != self.user_id or file['delete_flag'] != 'N'
+                or file['status'] not in {'DELETE_REQUESTED', 'DELETED'}
+                or intent.index_name != knowledge['index_name'] or intent.file_version != file['source_generation']
+                or intent.filename != file['original_filename'] or intent.object_name != file['object_name']
+                or any(getattr(intent, field) != getattr(request, field) for field in ('knowledge_id', 'file_id', 'file_version'))):
+            raise ScopeDenied()
+        expected = ([intent.source.space, intent.source.key, intent.source.version, intent.source.sha256]
+                    if intent.source is not None else [None] * 4)
+        if [file[field] for field in ('source_space', 'source_key', 'source_revision', 'source_sha256')] != expected:
+            raise ScopeDenied()
 
     def _artifact(self, request, source, context):
         terms = tuple(

@@ -8,6 +8,7 @@ from pydantic import Field
 
 KNOWLEDGE_ADMISSION_DATASET = 'management_knowledge_admission'
 UPLOAD_ADMISSION_DATASET = 'management_knowledge_uploads'
+OWNER_CLEANUP_IDENTITIES = 'knowledge_owner_cleanup_identities'
 
 
 class KnowledgeUploadFile(Contract):
@@ -25,9 +26,16 @@ class KnowledgeUploadFile(Contract):
     created_by: str = Field(min_length=1, max_length=100)
 
 
+class KnowledgeOwnerCleanup(Contract):
+    purpose: Literal['user_deletion', 'tenant_deletion']
+    owner_user_id: str = Field(min_length=1, max_length=100)
+    actor_tenant_id: str = Field(min_length=1, max_length=100)
+
+
 class KnowledgeBaseDeletionIntent(Contract):
     schema_version: Literal[1] = 1
     knowledge_id: int = Field(gt=0, le=2**31 - 1)
     index_name: str = Field(min_length=1, max_length=100)
     user_id: str = Field(min_length=1, max_length=100)
     phase: Literal['files', 'collection_submitting', 'metadata_pending', 'deleted'] = 'files'
+    owner_cleanup: KnowledgeOwnerCleanup | None = None

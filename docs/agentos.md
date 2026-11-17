@@ -191,7 +191,9 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 
 KB 集合删除请求只接受 knowledge_id 与 idempotency_key，查询使用 knowledge_id 与稳定 job_id。Management 核对当前编辑权限、KB 删除意图原用户和全部文件的精确 full 删除终态，Runtime 再检查自己的 writer 已结束且文件墓碑覆盖最后版本、可见指针已清空。物理索引名及模型维度不由请求提供，不需要模型推理。
 
-Runtime 先持久预留一次删除，再通过 Infrastructure 的 StorageInterface 检查整个物理集合为空并删除。普通文件写句柄没有删除集合的权限。重复请求和 inspect 只观察集合是否不存在，未知结果不重发；集合仍存在则保持 cleanup_pending。只有确认不存在才能返回 deleted 与 physical_cleanup_complete=true。每次调用共享十秒总截止，超时关闭 HTTP 并取消后续存储提交。部署前由 Management 应用 SQL 027，Runtime 保持 SQL 启动模式 off。当前公开 KB 整体删除编排、共享产物和最终元数据清理仍待接通，不能以此接口视作完整退役。
+Runtime 先持久预留一次删除，再通过 Infrastructure 的 StorageInterface 检查整个物理集合为空并删除。普通文件写句柄没有删除集合的权限。重复请求和 inspect 只观察集合是否不存在，未知结果不重发；集合仍存在则保持 cleanup_pending。只有确认不存在才能返回 deleted 与 physical_cleanup_complete=true。每次调用共享十秒总截止，超时关闭 HTTP 并取消后续存储提交。部署前由 Management 应用 SQL 027，Runtime 保持 SQL 启动模式 off。普通及 Northbound KB 删除已接入父协调器和最终 SI 元数据事务，未确认完成复用原 KNOWLEDGE_DELETE_BLOCKED；PRIVATE 删号调用方、历史共享产物和完整退役验收仍待完成。
+
+PRIVATE 删号使用服务器保存的专用清理授权。首次接纳通过有限 SI 身份投影验证实际管理员和目标用户，持久记录实际 user_id、其原租户、目标 owner、purpose 及精确 KB。已接纳命令可以在身份停用后继续，只授予该 KB 的 cleanup/edit 清理及精确 full 删除状态查询，普通读取、编辑、上传和检索仍执行原 DAC。File.inspect 还须匹配原执行用户、文件/代次、对象和来源；返回 source=None，不能借查询状态读取源内容。AgentOS 的 user_id 保持实际管理员，tenant_id 明确绑定此次委派的资源租户；原管理员租户留在 Management 的内部快照中，不把目标用户写为执行身份。Runtime 仍调用原 File.delete/inspect 和 KB 授权接口，不接收或创建该授权快照。用户及租户删除的顺序和后台父请求发现尚未接入该专用入口，不能以授权组件通过声称删号清理已经迁完。
 
 `KnowledgeContentRequest` 携带 knowledge_id、file_id、file_version。不传 image_ref 时读取该版本的来源；传入时必须是该文件已完成清洗 manifest 中的精确图片引用。Management 检查当前用户和租户的 KB 读权限、文件版本、来源及 manifest 成员，返回 object_ref 和 filename；授权不包含凭据或任意对象前缀。Runtime 的 `KnowledgeContentReader` 在同一截止内获取授权、经只读 ObjectStore 校验版本/hash 并读取、再复核授权，权限或来源变化时不返回字节。该过程不调用普通文件 HTTP，不增加重试。
 
@@ -247,6 +249,6 @@ Management 源/产物清理、KB 多模态入库、旧检索语义对照及业�
 
 普通与 Northbound 文档删除已统一进入 Management 的持久删除协调器，公开路径和参数保持。full 经标准 File.delete/inspect 确认 Runtime 向量清理，再等待本地清洗排空、源对象与账本终态；source_only 保留 Runtime 向量和文件身份。公开调用共用十秒预算，提交结果未知时返回 pending，后续只查询固定任务，不自动重发。Northbound 响应适配由 northbound service 负责。旧源和旧 ES 数据仍需先完成退役 SPEC 的历史迁移，未经核实的历史文件在接纳前拒绝；当前切换不能作为历史清理完成的证明。
 
-Management 的 KB 上传批次已通过 StorageInterface 原子接纳，上传更新并锁住 KB revision 后复核删除意图，合法并发上传顺序提交。KB 删除意图只保存在 Management；标准授权拒绝新的执行与读取，文件 delete/inspect 和清洗取消仍按当前资源权限完成清理，没有新增 AgentOS operation。KB 整体删除的公开执行链仍待切换，删除意图和上传接纳的并发证明不能替代整个 KB 的物理清理验收。
+Management 的 KB 上传批次已通过 StorageInterface 原子接纳，上传更新并锁住 KB revision 后复核删除意图，合法并发上传顺序提交。KB 删除意图只保存在 Management；标准授权拒绝新的执行与读取，文件 delete/inspect 和清洗取消继续使用资源授权，没有新增 AgentOS operation。普通及 Northbound 的整体删除门面已经切换；PRIVATE 删号和最终部署仍待完成，删除意图及上传接纳的并发证明不能替代整个 KB 的物理清理验收。
 
 规范位于独立文档目录 `nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/`，部署过程见该目录的 `independent-service-deployment.md`。新增接口先修改中立契约、调用双方及回归验证，完成消费者迁移后删除旧实现。

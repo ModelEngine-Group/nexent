@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Live file and KB permission resolution shared by cleansing and AgentOS grants."""
 
+from management.services.knowledge_base.owner_cleanup import has_owner_cleanup_authority
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, PageRequest, RecordQuery
 from permissions.dac import resolve_knowledge_permissions
@@ -52,8 +53,7 @@ class KnowledgeFileAuthorization:
             groups = [group["group_id"] for group in page.items]
         return {**member, "user_roles": account["user_roles"]}, groups
 
-    def resolve_knowledges(self, knowledge_ids, *, edit, context, cleanup=False):
-        member, groups = self.identity(context=context)
+    def resolve_knowledges(self, knowledge_ids, *, edit, context, cleanup=False, inspect_cleanup=False):
         page = self.records.query(
             "cleanse_knowledge", RecordQuery(where=Comparison("knowledge_id", "in", knowledge_ids)),
             PageRequest(limit=len(knowledge_ids)), context=context,
@@ -63,27 +63,39 @@ class KnowledgeFileAuthorization:
             or any(not row["index_name"] for row in rows.values())
             or len({row["index_name"] for row in rows.values()}) != len(rows)):
             raise ScopeDenied()
+        if not cleanup and any(row['deletion_request'] is not None for row in rows.values()):
+            raise ScopeDenied()
+        delegated = set()
+        if cleanup and (edit or inspect_cleanup):
+            for row in rows.values():
+                if has_owner_cleanup_authority(row, self.user_id, self.records.scope.tenant_id):
+                    scope = self.records.scope
+                    if scope.system or scope.service_role != 'management' or scope.actor_id != self.user_id:
+                        raise ScopeDenied()
+                    delegated.add(row['knowledge_id'])
+        ordinary = [row for row in rows.values() if row['knowledge_id'] not in delegated]
+        if not ordinary:
+            return [rows[key] for key in knowledge_ids]
+        member, groups = self.identity(context=context)
         permissions = resolve_knowledge_permissions(
-            list(rows.values()),
+            ordinary,
             self.user_id,
             self.records.scope.tenant_id,
             member,
             groups,
             speed_mode=False,
         )
-        for row in rows.values():
-            if not cleanup and row['deletion_request'] is not None:
-                raise ScopeDenied()
+        for row in ordinary:
             permission = permissions[row["index_name"]]
             if permission is None or edit and permission not in {"EDIT", "CREATOR"}:
                 raise ScopeDenied()
         return [rows[key] for key in knowledge_ids]
 
-    def resolve_knowledge(self, knowledge_id, *, edit, context, cleanup=False):
-        return self.resolve_knowledges([knowledge_id], edit=edit, context=context, cleanup=cleanup)[0]
+    def resolve_knowledge(self, knowledge_id, *, edit, context, cleanup=False, inspect_cleanup=False):
+        return self.resolve_knowledges([knowledge_id], edit=edit, context=context, cleanup=cleanup, inspect_cleanup=inspect_cleanup)[0]
 
-    def resolve(self, reference, *, edit, context, history=False, cleanup=False):
-        knowledge = self.resolve_knowledge(reference.knowledge_id, edit=edit, context=context, cleanup=cleanup)
+    def resolve(self, reference, *, edit, context, history=False, cleanup=False, inspect_cleanup=False):
+        knowledge = self.resolve_knowledge(reference.knowledge_id, edit=edit, context=context, cleanup=cleanup, inspect_cleanup=inspect_cleanup)
         file = self._one(
             "knowledge_file_history" if history else "cleanse_files", "file_id", reference.file_id, context,
         )
