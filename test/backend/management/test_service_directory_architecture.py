@@ -89,6 +89,7 @@ MIGRATED_MODULES = {
     'conversation/creator_checkpoints.py',
     'conversation/creator_execution.py',
     'conversation/creator_histories.py',
+    'conversation/creator_replay.py',
     'conversation/creator_runtime.py',
     'conversation/creator_targets.py',
     'conversation/pins.py',
