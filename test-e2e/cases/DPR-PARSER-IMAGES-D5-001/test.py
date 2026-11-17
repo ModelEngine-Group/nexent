@@ -19,6 +19,8 @@ def test_role_parser_images(record_property):
     evidence = {}
     containers = []
     sources = {
+        "contracts.agentos": "backend/contracts/agentos.py",
+        "contracts.agentos_knowledge": "backend/contracts/agentos_knowledge.py",
         "infrastructure.file_processing.parser": "infrastructure/file_processing/parser.py",
         "management.services.file.cleanse": "backend/management/services/file/cleanse.py",
         "management.services.file.cleanse_lifespan": "backend/management/services/file/cleanse_lifespan.py",
@@ -26,6 +28,10 @@ def test_role_parser_images(record_property):
         "runtime.knowledge_base.chunking": "backend/runtime/knowledge_base/chunking.py",
         "runtime.text_cleanse": "backend/runtime/text_cleanse.py",
         "runtime.knowledge_images": "backend/runtime/knowledge_images.py",
+        "runtime.knowledge_base.image_ingestion": "backend/runtime/knowledge_base/image_ingestion.py",
+        "runtime.knowledge_base.ingestion": "backend/runtime/knowledge_base/ingestion.py",
+        "runtime.model.service": "backend/runtime/model/service.py",
+        "infrastructure.knowledge_objects": "infrastructure/knowledge_objects.py",
         "nexent.core.tools.knowledge_base_search_tool": "sdk/nexent/core/tools/knowledge_base_search_tool.py",
         "runtime.agentos.tools": "backend/runtime/agentos/tools.py",
         "nexent.core.tools.analyze_text_file_tool": "sdk/nexent/core/tools/analyze_text_file_tool.py",

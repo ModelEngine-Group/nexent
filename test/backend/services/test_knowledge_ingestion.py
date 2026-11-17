@@ -199,6 +199,8 @@ async def test_invalid_artifact_never_invokes_model(setup, change):
         else:
             from contracts.agentos_knowledge import CleanseArtifact, CleanseBlock
 
+            s.models.get.return_value = s.models.get.return_value.model_copy(update={"model_type": "multi_embedding"})
+
             value = CleanseArtifact(
                 source=s.value.source,
                 parser_version=s.value.parser_version,
@@ -292,7 +294,9 @@ async def test_hanging_model_obeys_total_deadline_and_is_cancelled(setup, caplog
             finished.append(True)
 
     s.models.invoke.side_effect = hanging
-    s.arguments["context"] = OperationContext("short", monotonic() + 0.05)
+    # Leave preparation time under shared CI load; this asserts cancellation,
+    # not a 50 ms performance target for artifact verification.
+    s.arguments["context"] = OperationContext("short", monotonic() + 1)
     with pytest.raises(DeadlineExceeded):
         await s.service.execute(s.request, **s.arguments)
     assert finished == [True] and s.models.invoke.await_count == 1

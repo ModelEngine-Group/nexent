@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: DPR-KB-MULTIMODAL-20261117
+  change_type: requirement
+  requirement_id: DPR-002
+  title: Complete Runtime image ingestion before switching public KB consumers
+  description: Extend Model.invoke for inline images, bind exact manifest image versions and preserve typed references through vector storage and search projection.
+  affected_features:
+    existing: [DPR-KNOWLEDGE]
+    added: []
+    modified: [DPR-KNOWLEDGE]
+    retired: []
+  affected_cases:
+    existing: [DPR-KB-WORKER-D3-001, DPR-PARSER-IMAGES-D5-001]
+    added: [DPR-KB-MULTIMODAL-D3-001]
+    modified: [DPR-PARSER-IMAGES-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reject non-inline images and reject image input for a text-only embedding model before provider construction.
+    - Pin image keys, versions and hashes to the confirmed manifest and reject unknown sources before inference.
+    - Preserve ordinary text embedding behavior, stable chunk order and no image bytes in vector payload.
+    - Keep the legacy ten-input multimodal provider batch limit without changing stable vector ordering or adding retries.
+    - Project typed image references without changing the existing vector schema or generation lifecycle.
+    reason: Existing UT proves text ingestion and model invocation, while image artifacts are currently rejected. New D3 adds actual ObjectStore, VectorStore and SDK/provider protocol evidence. It owns its labelled MinIO/ES, HTTP listener and managed workers; no shared preparation factories are required. Public workflow switching and actual model quality remain outside this prerequisite.
+    test_selectors:
+    - test/backend/services/test_multimodal_invoke.py
+    - test/backend/services/test_knowledge_multimodal.py
+    - test/backend/services/test_knowledge_ingestion.py
+    - test/backend/services/test_agentos_model.py
+    - test/backend/services/test_knowledge_worker.py
+    - test/backend/services/test_knowledge_search.py
+    - test/backend/app/test_agentos_knowledge_contract.py
+    - test/backend/app/test_agentos_knowledge_api.py
+    - test/backend/infrastructure/test_agentos_knowledge_client.py

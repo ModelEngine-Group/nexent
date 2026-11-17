@@ -94,9 +94,12 @@ class ModelService:
             output = {"content": output.content}
         elif isinstance(payload, EmbeddingInvocation):
             modality = metadata.model_type
+            if payload.input_type == "image" and modality != "multi_embedding":
+                raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
             slot = "multiEmbedding" if modality == "multi_embedding" else "embedding"
             adapter = self.build_adapter(record, modality, slot, actor.tenant_id)
-            output = await adapter.invoke(EmbeddingRequest(payload.input, worker_lane="model-embedding"))
+            inputs = [{"image": value} for value in payload.input] if payload.input_type == "image" else payload.input
+            output = await adapter.invoke(EmbeddingRequest(inputs, worker_lane="model-embedding"))
         else:
             adapter = self.build_adapter(record, "rerank", "rerank", actor.tenant_id)
             options = payload.options

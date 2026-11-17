@@ -93,6 +93,10 @@ vectors = await client.invoke_model(
 )
 ```
 
+`EmbeddingInvocation.input_type` 默认为 `text`。多模态模型可传 `image`，此时 `input` 只接收 `data:image/<mime>;base64,...`，支持 PNG、JPEG、GIF、WebP、BMP、TIFF，不读取任意 URL、S3 或本地文件。纯文本 embedding 模型会拒绝图片输入。现有 AgentOS HTTP 请求体上限仍为 8 MiB，内联图片也受该上限约束。
+
+Runtime 的 KB 入库从已确认的清洗 manifest 读取钉住版本及 SHA256 的图片，经同一 Model.invoke 服务向量化。图片字节不会落入向量 payload；检索结果的可空 `image_ref` 返回 typed ObjectReference 和位置。普通 embedding 模型继续只处理文字。图片引用的前端展示、旧检索结果对照和 Management 公开工作流切换仍需后续完成。
+
 ## 模型管理
 
 `model_command` 接收 `ModelAdministrationOperation` 及 `contracts/model_administration.py` 中对应的类型。Management 对外提供管理 API 和权限校验，Runtime 执行管理写入与连接检查。返回对象经过脱敏，不回传 api_key。

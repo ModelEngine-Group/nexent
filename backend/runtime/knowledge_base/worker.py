@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from dataclasses import replace
+from functools import partial
 from threading import Event
 from time import monotonic
 from uuid import uuid4
@@ -29,6 +30,7 @@ from runtime.knowledge_base.composition import knowledge_jobs, require_knowledge
 from runtime.knowledge_base.ingestion import KnowledgeIngestor
 from runtime.knowledge_base.jobs import job_state
 
+from infrastructure.knowledge_objects import bind_knowledge_image_objects
 from infrastructure.knowledge_runtime import (
     knowledge_execution_ports,
     knowledge_runtime_ports,
@@ -217,6 +219,7 @@ class KnowledgeUploadWorker:
                         self.models,
                         max_artifact_bytes=self.max_artifact_bytes,
                         max_source_bytes=self.max_source_bytes,
+                        image_objects=partial(bind_knowledge_image_objects, actor, grant),
                     )
                     await self._blocking(
                         vectors.ensure_collection, grant.collection, context=context

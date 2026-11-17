@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Neutral AgentOS v1 transport and Management submission request shapes."""
 
+import base64
+import binascii
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -843,6 +845,22 @@ class ChatInvocation(ModelInvokeBase):
 class EmbeddingInvocation(ModelInvokeBase):
     operation: Literal["embedding"] = "embedding"
     input: Annotated[list[str], Field(min_length=1)]
+    input_type: Literal["text", "image"] = "text"
+
+    @model_validator(mode="after")
+    def inline_images(self):
+        if self.input_type == "image":
+            allowed = {f"data:image/{kind};base64" for kind in ("png", "jpeg", "gif", "webp", "bmp", "tiff")}
+            for value in self.input:
+                header, separator, data = value.partition(",")
+                if header not in allowed or not separator:
+                    raise ValueError("Image embedding requires an inline base64 image")
+                try:
+                    if not base64.b64decode(data, validate=True):
+                        raise ValueError("Image embedding requires nonempty bytes")
+                except (binascii.Error, ValueError) as error:
+                    raise ValueError("Invalid inline image encoding") from error
+        return self
 
 
 class RerankInput(BaseModel):

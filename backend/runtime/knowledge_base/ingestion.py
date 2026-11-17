@@ -30,6 +30,7 @@ from nexent.storage.models import (
 from nexent.storage.objects import read_verified_object
 from pydantic import ValidationError
 from runtime.knowledge_base.chunking import chunk_text
+from runtime.knowledge_base.image_ingestion import image_documents
 
 from infrastructure.agent_model_config import normalize_model_revision
 
@@ -85,7 +86,7 @@ class KnowledgeIngestor:
     """Ports are owned by the calling attempt and closed by its composition root."""
 
     def __init__(
-        self, objects, vectors, models, *, max_artifact_bytes, max_source_bytes
+        self, objects, vectors, models, *, max_artifact_bytes, max_source_bytes, image_objects=None
     ):
         if any(
             type(value) is not int or value <= 0
@@ -93,6 +94,7 @@ class KnowledgeIngestor:
         ):
             raise InvalidInput()
         self.objects, self.vectors, self.models = objects, vectors, models
+        self.image_objects = image_objects
         self.max_artifact_bytes, self.max_source_bytes = (
             max_artifact_bytes,
             max_source_bytes,
@@ -178,6 +180,26 @@ class KnowledgeIngestor:
         context.remaining()
         return result
 
+    async def _embeddings(self, batch, expected, actor, dimensions, *, context, input_batch_size):
+        output = [None] * len(batch)
+        for images in (False, True):
+            selected = [(index, item) for index, item in enumerate(batch) if ("_image_input" in item) == images]
+            if not selected:
+                continue
+            for start in range(0, len(selected), input_batch_size):
+                group = selected[start : start + input_batch_size]
+                result = await self._model(
+                    self.models.invoke,
+                    EmbeddingInvocation(model_id=expected.model_id, expected_revision=expected.revision,
+                                        input=[item["_image_input"] if images else item["content"] for _, item in group],
+                                        input_type="image" if images else "text"), actor, context=context,
+                )
+                if normalize_model_revision(result.revision) != normalize_model_revision(expected.revision):
+                    raise Conflict()
+                for (index, _), vector in zip(group, embedding_vectors(result.output, len(group), dimensions)):
+                    output[index] = vector
+        return output
+
     async def execute(
         self,
         request,
@@ -251,6 +273,8 @@ class KnowledgeIngestor:
 
         def chunks(*, context):
             context.remaining()
+            if not any(block.kind != "image" for block in artifact.blocks):
+                return []
             return chunk_text(
                 artifact,
                 filename=filename,
@@ -261,26 +285,18 @@ class KnowledgeIngestor:
             )
 
         documents = await self._blocking(chunks, context=context)
+        if metadata.model_type == "multi_embedding":
+            documents.extend(await self._blocking(image_documents, artifact, self.image_objects,
+                                                   actor=actor, limit=self.max_source_bytes, context=context))
         keys = []
         for start in range(0, len(documents), batch_size):
             if checkpoint is not None:
                 await checkpoint()
             batch = documents[start : start + batch_size]
-            result = await self._model(
-                self.models.invoke,
-                EmbeddingInvocation(
-                    model_id=expected.model_id,
-                    expected_revision=expected.revision,
-                    input=[item["content"] for item in batch],
-                ),
-                actor,
-                context=context,
+            embeddings = await self._embeddings(
+                batch, expected, actor, info.dimensions, context=context,
+                input_batch_size=10 if metadata.model_type == "multi_embedding" else batch_size,
             )
-            if normalize_model_revision(result.revision) != normalize_model_revision(
-                expected.revision
-            ):
-                raise Conflict()
-            embeddings = embedding_vectors(result.output, len(batch), info.dimensions)
             if checkpoint is not None:
                 await checkpoint()
             rows = tuple(
@@ -301,7 +317,8 @@ class KnowledgeIngestor:
                         "content": item["content"],
                         "filename": filename,
                         "location": {
-                            **item.get("metadata", {}),
+                            **{key: value for key, value in item.get("metadata", {}).items() if key not in {"kind", "image_ref"}},
+                            **({"kind": "image", "image_ref": item["_image_ref"]} if "_image_ref" in item else {}),
                             **(
                                 {"language": item["language"]}
                                 if "language" in item
@@ -332,6 +349,4 @@ class KnowledgeIngestor:
             or artifact.parser_version != request.parser_version
         ):
             raise InvalidInput()
-        if any(block.kind == "image" for block in artifact.blocks):
-            raise CapabilityUnsupported()
         return artifact

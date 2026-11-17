@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-KNOWLEDGE
+case:
+  case_id: DPR-KB-MULTIMODAL-D3-001
+  feature_id: DPR-KNOWLEDGE
+  requirement_ids: [DPR-002, DPR-003, DPR-006]
+  business_rule_ids: [DPR-KNOWLEDGE-RULE-04]
+  title: Runtime embeds verified text and images through actual provider and storage protocols
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove mixed ingestion through the real Runtime Model.invoke service, SDK adapter, ObjectStore and VectorStore without data-process.
+  preconditions:
+  - Docker, cached MinIO/Elasticsearch and configured Python dependencies are available.
+  test_data:
+    resources: Owned MinIO and ES, loopback embedding protocol mock and managed lanes.
+    fixtures: Synthetic actor, source, manifest text/image blocks and a valid PNG; controlled model metadata and mock vectors.
+  steps:
+  - order: 1
+    action: Publish owned source and a mixed cleansing artifact, then run production ingestion through Model.invoke and the real SDK adapter against the HTTP mock.
+    expected: Text and inline-image requests reach the same authorized model; vectors use stable consecutive chunk keys and one generation.
+  - order: 2
+    action: Query actual stored vectors and project the results, then attempt an image reference outside the manifest source scope.
+    expected: The image hit returns its typed reference and location without raw image bytes; unauthorized image input causes no new model call or vector write.
+  - order: 3
+    action: Close listeners, clients, managed workers and remove only uniquely labelled test storage resources.
+    expected: All owned resources are reclaimed without changing application data or using data-process.
+  expected_results:
+  - Actual Model.invoke, SDK provider protocol and scoped storage produce text and image vectors with stable identities.
+  - Image references survive retrieval and denied inputs have no inference/write side effects.
+  - Owned resources close without retries or old service traffic.
+  forbidden_side_effects:
+  - No actual provider, application data, raw image bytes in vector payload, arbitrary object read or data-process request.
+  integration_boundary:
+  - Production ingestion, ModelService, SDK adapter, Infrastructure MinIO/ES ports and controlled HTTP embedding service.
+  - Cleansing inputs and model metadata are synthetic; no real model quality, PG job visibility or public Management workflow is claimed.
+  observations:
+  - HTTP embedding input types, physical vector keys/generation, typed image reference and owned cleanup.
+  cleanup:
+  - Drain owned workers, close HTTP listeners and exact clients, remove only unique-label storage containers and volumes.
+  acceptance:
+  - id: AC-01
+    description: Mixed input traverses actual provider/storage protocols with stable vector identities.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Retrieved images retain typed references and denied inputs have no side effects.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Owned resources close without application mutation.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

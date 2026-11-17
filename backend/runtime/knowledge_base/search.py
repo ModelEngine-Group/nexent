@@ -97,6 +97,8 @@ class KnowledgeSearchService:
             filename=hit.payload.get("filename", ""), location=hit.payload.get("location", {}),
             chunk_id=hit.key.key, score=hit.score, score_kind=hit.score_kind,
             score_details=details,
+            image_ref=hit.payload.get("location", {}).get("image_ref")
+            if hit.payload.get("location", {}).get("kind") == "image" else None,
         )
 
     def _visible(self, records, grant, request, hits, *, context):

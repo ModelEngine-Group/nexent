@@ -191,6 +191,7 @@ class KnowledgeSearchHit(KnowledgeFileReference):
     score_kind: str = Field(min_length=1, max_length=64)
     location: dict[str, JsonValue] = Field(default_factory=dict)
     score_details: dict[str, JsonValue] = Field(default_factory=dict)
+    image_ref: ObjectReference | None = None
 
 
 class KnowledgeSearchResult(Contract):

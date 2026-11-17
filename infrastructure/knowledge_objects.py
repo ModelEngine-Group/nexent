@@ -1,7 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Runtime reads only the pinned legacy source and tenant-partitioned cleanse artifact."""
+"""Runtime reads pinned sources, manifests and their declared image revisions."""
 
-from contracts.agentos_knowledge import KnowledgeFileGrant
+import re
+from contextlib import contextmanager
+
+from contracts.agentos_knowledge import CleanseArtifact, KnowledgeFileGrant
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import ObjectRef, Revision, StorageScope
 
@@ -43,6 +46,62 @@ class KnowledgeObjects:
         if not self._closed:
             self._closed = True
             close_owned(self._context, [self._source.close, self._artifact.close])
+
+
+class PinnedImages:
+    """Only manifest-declared image revisions may cross this read-only boundary."""
+
+    def __init__(self, objects, references):
+        self.scope = objects.scope
+        self._objects, self._references, self._closed = objects, frozenset(references), False
+
+    def _check(self, ref):
+        if self._closed or ref not in self._references:
+            raise ScopeDenied()
+
+    def stat(self, ref, *, context):
+        self._check(ref)
+        return self._objects.stat(ref, context=context)
+
+    def open_read(self, ref, *, context):
+        self._check(ref)
+        return self._objects.open_read(ref, context=context)
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            self._objects.close()
+
+
+@contextmanager
+def bind_knowledge_image_objects(actor, grant, artifact, *, context):
+    if (not isinstance(grant, KnowledgeFileGrant) or grant.action != "execute"
+            or grant.source is None or grant.source.space != "files"
+            or not isinstance(artifact, CleanseArtifact) or grant.source != artifact.source
+            or grant.parser_version != artifact.parser_version):
+        raise ScopeDenied()
+    references = []
+    for block in artifact.blocks:
+        if block.kind != "image":
+            continue
+        ref = block.object_ref
+        if (ref.space != "files" or not re.fullmatch(
+                "images/" + re.escape(artifact.source.sha256) + "/" + re.escape(ref.sha256)
+                + r"\.(?:png|jpg|jpeg|gif|webp|bmp|tiff)", ref.key)):
+            raise ScopeDenied()
+        references.append(ObjectRef(ref.space, ref.key, Revision(ref.version)))
+    settings = _configured_environment()
+    objects = S3ObjectStore(
+        StorageScope("runtime", actor.tenant_id, actor.user_id, {"files"}),
+        ObjectBinding("files", settings.MINIO_DEFAULT_BUCKET, actor.tenant_id + "/", {"runtime"},
+                      exact_keys={ref.key for ref in references}), _configured_client,
+    )
+    pinned = PinnedImages(objects, references)
+    try:
+        context.remaining()
+        yield pinned
+    finally:
+        pinned.close()
 
 
 def bind_knowledge_objects(actor, grant, *, context):
