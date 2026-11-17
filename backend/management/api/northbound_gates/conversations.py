@@ -4,9 +4,15 @@
 
 Two gates share the one service the internal route uses; both are audit
 capabilities, so every attempt — including denied ones — leaves a trail.
+
+Failures are translated by the shared domain-error registry
+(``management.utils.domain_errors``): a registered domain exception maps to
+its contract status and code, anything else surfaces as a generic 500
+without leaking internals. The registry is also wired into the app-level
+generic exception handler, so gates that let an exception propagate get the
+same three-field body.
 """
 
-from http import HTTPStatus
 from typing import Callable
 
 from fastapi import APIRouter, Depends, Request
@@ -19,44 +25,29 @@ from management.services.permission.identity.gate_policies import (
     audit_hook,
     audit_outcome,
     northbound_envelope_factory,
-    get_request_id,
 )
 from management.services.conversation.service import (
     delete_conversation_service,
     delete_conversations_batch_service,
 )
+from management.utils.domain_errors import domain_error_body
+from management.utils.request_context import get_request_id
 
 nb_conversation_router = APIRouter(prefix="/nb/v1/conversations", tags=["northbound-gates"])
 
-# Domain exceptions the three-field error body is defined for (aligned with the
-# develop-side gate translation table). Unlisted failures fall back to a
-# generic 500 without leaking internals.
-_DOMAIN_ERROR_STATUS = {
-    "ForbiddenError": (403, "FORBIDDEN"),
-    "UnauthorizedError": (401, "UNAUTHORIZED"),
-    "NotFoundException": (404, "NOT_FOUND"),
-    "AutomationNotFoundError": (404, "AUTOMATION_TASK_NOT_FOUND"),
-    "ValidationError": (400, "VALIDATION_ERROR"),
-    "TokenExpiredError": (401, "TOKEN_EXPIRED"),
-}
-
 
 def _error_response(exc: Exception, request) -> JSONResponse:
-    """Translate a domain exception into the three-field northbound error body."""
-    for name, (status, code) in _DOMAIN_ERROR_STATUS.items():
-        if any(base.__name__ == name for base in type(exc).__mro__):
-            message = str(exc).strip() or code.replace("_", " ").lower()
-            return JSONResponse(
-                status_code=status,
-                content={
-                    "code": code,
-                    "message": message[:200],
-                    "status": status,
-                    "requestId": get_request_id(request),
-                },
-            )
+    """Translate a domain exception into the three-field northbound error body.
+
+    Kept as a small local helper (automations.py imports it) so gates can
+    translate inline; the status/code mapping itself lives in the shared
+    registry, single source of truth for both entry points.
+    """
+    body = domain_error_body(exc, get_request_id(request))
+    if body is not None:
+        return JSONResponse(status_code=body["status"], content=body)
     return JSONResponse(
-        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        status_code=500,
         content={
             "code": "INTERNAL_ERROR",
             "message": "Internal server error",

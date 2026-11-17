@@ -13,6 +13,8 @@ from contracts.errors.exceptions import (
     QuotaExceededError,
     TokenExpiredError,
 )
+from management.utils.domain_errors import domain_error_body
+from management.utils.request_context import get_request_id
 
 try:
     from ext_components.aidp.consts.aidp_exceptions import (
@@ -165,6 +167,16 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status_code=400,
                 content={"message": str(exc)},
             )
+
+        # Domain exceptions registered in the shared registry (northbound and
+        # internal entry points read the same table) translate to their
+        # contract status/code instead of collapsing into a 500. Unregistered
+        # failures keep falling through to the generic 500 without leaking
+        # internals.
+        domain_body = domain_error_body(exc, get_request_id(request))
+        if domain_body is not None:
+            logger.warning("Domain exception: %s: %s", type(exc).__name__, exc)
+            return JSONResponse(status_code=domain_body["status"], content=domain_body)
 
         logger.error(f"Generic Exception: {exc}")
         return JSONResponse(

@@ -277,6 +277,84 @@ class TestMinioClient:
 
     @patch('management.db.client.create_storage_client_from_config')
     @patch('management.db.client.MinIOStorageConfig')
+    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
+    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', 'files.example.com:9010')
+    def test_minio_client_get_file_url_external_endpoint(self, mock_config_class, mock_create_client):
+        """Test get_file_url presigns against the external endpoint when configured."""
+        MinioClient._instance = None
+        MinioClient._initialized = False
+
+        mock_storage_client = MagicMock()
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        client._external_url_client = None
+        success, result = client.get_file_url('file.txt', 'bucket', 7200)
+
+        assert success is True
+        # boto3 is mocked at module level; generate_presigned_url returns a MagicMock
+        assert result is not None
+        # Internal signing must not be touched
+        mock_storage_client.get_file_url.assert_not_called()
+
+    @patch('management.db.client.create_storage_client_from_config')
+    @patch('management.db.client.MinIOStorageConfig')
+    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
+    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', 'files.example.com:9010')
+    def test_minio_client_get_file_url_external_fallback_on_error(self, mock_config_class, mock_create_client):
+        """Test get_file_url falls back to internal signing when external presign fails."""
+        MinioClient._instance = None
+        MinioClient._initialized = False
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.get_file_url.return_value = (
+            True, 'http://internal.example.com/file.txt')
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        client._external_url_client = None
+        # Force the boto3 (mocked) presign call to raise: build the external
+        # client first, then break its generate_presigned_url.
+        external_client = client._get_external_url_client()
+        external_client.generate_presigned_url.side_effect = RuntimeError("presign boom")
+        try:
+            success, result = client.get_file_url('file.txt', 'bucket', 7200)
+        finally:
+            external_client.generate_presigned_url.side_effect = None
+
+        assert success is True
+        assert result == 'http://internal.example.com/file.txt'
+        mock_storage_client.get_file_url.assert_called_once_with(
+            'file.txt', 'bucket', 7200)
+
+    @patch('management.db.client.create_storage_client_from_config')
+    @patch('management.db.client.MinIOStorageConfig')
+    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
+    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', MagicMock())
+    def test_minio_client_get_file_url_external_endpoint_non_string_ignored(self, mock_config_class, mock_create_client):
+        """Test a non-string MINIO_EXTERNAL_ENDPOINT is treated as unconfigured."""
+        MinioClient._instance = None
+        MinioClient._initialized = False
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.get_file_url.return_value = (
+            True, 'http://example.com/file.txt')
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        client._external_url_client = None
+        success, result = client.get_file_url('file.txt', 'bucket', 7200)
+
+        assert success is True
+        assert result == 'http://example.com/file.txt'
+        mock_storage_client.get_file_url.assert_called_once_with(
+            'file.txt', 'bucket', 7200)
+
+    @patch('management.db.client.create_storage_client_from_config')
+    @patch('management.db.client.MinIOStorageConfig')
     def test_minio_client_get_file_size(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_size delegates to storage client"""
         MinioClient._instance = None

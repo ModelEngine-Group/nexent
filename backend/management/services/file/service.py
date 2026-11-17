@@ -611,7 +611,11 @@ async def upload_to_minio(
 async def get_file_url_impl(object_name: str, expires: int):
     result = get_file_url(object_name=object_name, expires=expires)
     if not result["success"]:
-        raise Exception(
+        # Typed domain exception: the shared northbound registry maps it to
+        # 404 (presigned signing never validates existence, so absence is
+        # indistinguishable from an operational failure here — report the
+        # contract's not-found wording either way).
+        raise NotFoundException(
             f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}")
     return result
 

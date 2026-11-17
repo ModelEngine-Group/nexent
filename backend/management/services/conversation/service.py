@@ -745,24 +745,24 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         bool: Whether the deletion was successful
     """
     try:
-        try:
-            from management.services.automation.service import agent_automation_facade
-            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
-        except Exception as automation_error:
-            logging.warning(
-                "Failed to cleanup automation task for conversation %s: %s",
-                conversation_id,
-                automation_error,
-            )
+        from management.services.automation.service import agent_automation_facade
+        agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+    except Exception as automation_error:
+        logging.warning(
+            "Failed to cleanup automation task for conversation %s: %s",
+            conversation_id,
+            automation_error,
+        )
 
-        success = delete_conversation(conversation_id, user_id)
-        if not success:
-            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+    success = delete_conversation(conversation_id, user_id)
+    if not success:
+        # The repository applies a created_by ownership filter: no row
+        # means not owned or already deleted. Raise the typed domain
+        # exception so the shared northbound registry maps it to 404
+        # instead of collapsing into a generic 500.
+        raise ConversationNotFoundError(f"Conversation {conversation_id} does not exist or has been deleted")
 
-        return True
-    except Exception as e:
-        logging.error(f"Failed to delete conversation: {str(e)}")
-        raise Exception(str(e))
+    return True
 
 
 def delete_conversations_batch_service(conversation_ids: List[int], user_id: str) -> Dict[str, Any]:

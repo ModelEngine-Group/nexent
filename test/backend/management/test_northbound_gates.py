@@ -50,6 +50,13 @@ def gate_client(monkeypatch):
     monkeypatch.setattr(file_access, "check_file_access", lambda name, uid, tid: True)
     monkeypatch.setattr(file_service, "get_file_url_impl", fake_url_impl)
     monkeypatch.setattr(file_service, "get_file_stream_impl", fake_stream_impl)
+    # The ignore branch checks object existence before presigning; keep that
+    # storage probe out of these behavioural tests.
+    from management.db.file import attachment as file_attachment
+
+    monkeypatch.setattr(
+        file_attachment, "get_file_size_from_minio_strict", lambda name, bucket=None: 1024
+    )
 
     audit_calls = []
     from management.services.monitor import audit as audit_mod

@@ -507,18 +507,41 @@ def test_delete_conversation_success(monkeypatch, mock_session_ctx):
 
 
 def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
-    """delete_conversation returns False when no conversation row affected."""
+    """delete_conversation returns False when no owned conversation row is affected."""
     session, ctx = mock_session_ctx
     conversation_result = MagicMock()
     conversation_result.rowcount = 0
-    session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    session.execute.side_effect = [conversation_result]
 
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_conversation(999)
 
     assert ok is False
+    # Ownership filter rejected the row: child cascades must not run.
+    assert session.execute.call_count == 1
+
+
+def test_delete_conversation_ownership_filter(monkeypatch, mock_session_ctx):
+    """delete_conversation only matches rows whose created_by equals user_id."""
+    session, ctx = mock_session_ctx
+    conversation_result = MagicMock()
+    conversation_result.rowcount = 1
+    session.execute.side_effect = [conversation_result] + [MagicMock() for _ in range(4)]
+
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+
+    ok = delete_conversation(123, user_id="owner-1")
+
+    assert ok is True
     assert session.execute.call_count == 5
+    # The first statement (conversation soft delete) is built from a real
+    # SQLAlchemy update() expression; its whereclause carries the created_by
+    # ownership filter (three conditions: id, delete_flag, created_by).
+    first_stmt = session.execute.call_args_list[0].args[0]
+    whereclause = getattr(first_stmt, "whereclause", None)
+    if whereclause is not None and not isinstance(whereclause, MagicMock):
+        assert len(whereclause.clauses) == 3
 
 
 # =============================================================================
