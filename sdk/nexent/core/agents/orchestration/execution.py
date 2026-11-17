@@ -90,6 +90,14 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
 
 
 def execute_adapter(info):
+    """Apply Core-neutral identity before constructing any Core resources."""
+    from nexent.core.agents.contracts.identity import run_identity_scope
+
+    with run_identity_scope(getattr(info, "run_role", "root")):
+        return _execute_adapter(info)
+
+
+def _execute_adapter(info):
     """Release an Adapter even when validation or preparation raises."""
     from nexent.core.agents.factory import AgentCoreFactory
     adapter = AgentCoreFactory.create(info)
