@@ -52,6 +52,10 @@ from contracts.errors.exceptions import (
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
 )
+from contracts.knowledge_base_deletion import (
+    KnowledgeBaseDeleteGrant,
+    KnowledgeBaseDeleteState,
+)
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -119,6 +123,15 @@ class AgentOSClient:
 
     async def authorize_knowledge_content(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, payload, user_id, tenant_id, KnowledgeContentGrant)
+
+    async def authorize_knowledge_base_deletion(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_BASE_DELETION_AUTHORIZE, payload, user_id, tenant_id, KnowledgeBaseDeleteGrant)
+
+    async def delete_knowledge_base(self, payload, user_id, tenant_id):
+        return await self._record_json(KnowledgeOperation.DELETE_BASE, payload, user_id, tenant_id, KnowledgeBaseDeleteState)
+
+    async def inspect_knowledge_base_deletion(self, payload, user_id, tenant_id):
+        return await self._record_json(KnowledgeOperation.INSPECT_BASE_DELETION, payload, user_id, tenant_id, KnowledgeBaseDeleteState)
 
     async def search_knowledge(self, payload, user_id, tenant_id):
         try:

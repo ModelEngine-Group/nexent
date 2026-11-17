@@ -19,7 +19,7 @@ from infrastructure.storage.catalog import (
 files = KnowledgeFileLifecycle.__table__
 
 
-def bind_admission_records(scope, engine):
+def bind_admission_records(scope, engine, *, readonly=False):
     tables = {KB: knowledge, FILES: files}
     if scope.system or scope.service_role != 'management' or not scope.namespaces <= tables.keys():
         raise ScopeDenied()
@@ -34,7 +34,8 @@ def bind_admission_records(scope, engine):
                                   else 'object' if isinstance(tables[name].c[field].type, sa.JSON)
                                   else 'string', nullable=tables[name].c[field].nullable)
                   for field in names[name]),
-            frozenset({'management'}), frozenset({'management'}), tenant_field='tenant_id', active_field='delete_flag',
+            frozenset({'management'}), frozenset() if readonly else frozenset({'management'}),
+            tenant_field='tenant_id', active_field='delete_flag',
         ))
     return SQLRecordStore(scope, DatasetCatalog(tuple(definitions)),
                           {name: tables[name] for name in scope.namespaces}, engine,

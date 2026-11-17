@@ -16,6 +16,7 @@ from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput
 from nexent.storage.models import OperationContext
+from runtime.knowledge_base.base_deletion_service import KnowledgeBaseDeletionService
 from runtime.knowledge_base.composition import knowledge_jobs, require_knowledge_grant
 from runtime.knowledge_base.search import KnowledgeSearchService
 
@@ -51,6 +52,12 @@ class KnowledgeService:
 
     async def search(self, payload, actor, *, context=None):
         return await KnowledgeSearchService(self.client, self.models).search(payload, actor, context=context)
+
+    async def delete_base(self, payload, actor, *, context=None):
+        return await KnowledgeBaseDeletionService(self.client).delete(payload, actor, context=context)
+
+    async def inspect_base_deletion(self, payload, actor, *, context=None):
+        return await KnowledgeBaseDeletionService(self.client).inspect(payload, actor, context=context)
 
     async def _dispatch(self, payload, actor, action, context):
         schema = {

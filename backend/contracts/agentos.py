@@ -793,6 +793,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
+    KNOWLEDGE_BASE_DELETION_AUTHORIZE = NAMESPACE + 'v1/knowledge/authorize-base-deletion'
     KNOWLEDGE_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize"
     KNOWLEDGE_SEARCH_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize-search"
     KNOWLEDGE_CONTENT_AUTHORIZE = NAMESPACE + "v1/knowledge/authorize-content"

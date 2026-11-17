@@ -9,6 +9,10 @@ from contracts.agentos_knowledge import (
     KnowledgeOperation,
     KnowledgeSearch,
 )
+from contracts.knowledge_base_deletion import (
+    KnowledgeBaseDelete,
+    KnowledgeBaseDeleteLookup,
+)
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
@@ -55,5 +59,13 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.SEARCH.value, include_in_schema=False)
     async def search(request: Request):
         return await dispatch(request, KnowledgeSearch, service.search, 200)
+
+    @router.post(KnowledgeOperation.DELETE_BASE.value, include_in_schema=False)
+    async def delete_base(request: Request):
+        return await dispatch(request, KnowledgeBaseDelete, service.delete_base, 202)
+
+    @router.post(KnowledgeOperation.INSPECT_BASE_DELETION.value, include_in_schema=False)
+    async def inspect_base_deletion(request: Request):
+        return await dispatch(request, KnowledgeBaseDeleteLookup, service.inspect_base_deletion, 200)
 
     return router

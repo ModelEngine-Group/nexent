@@ -13,10 +13,11 @@ from infrastructure.rdb.knowledge_admission import bind_admission_records
 
 
 @contextmanager
-def knowledge_admission_ports(actor, *, context):
+def knowledge_admission_ports(actor, *, context, readonly=False):
     engine, owned = record_engine(context), []
     try:
-        records = bind_admission_records(StorageScope('management', actor.tenant_id, actor.user_id, {KB, FILES}), engine)
+        records = bind_admission_records(StorageScope('management', actor.tenant_id, actor.user_id, {KB, FILES}), engine,
+                                         readonly=readonly)
         owned.append(records)
         resources = bind_cleanse_resources(StorageScope('management', actor.tenant_id, actor.user_id, set(TABLES)), engine)
         owned.append(resources)

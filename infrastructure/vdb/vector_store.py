@@ -49,6 +49,7 @@ class ElasticsearchVectorStore:
             {
                 "vector.collection.ensure",
                 "vector.collection.describe",
+                "vector.collection.exists",
                 "vector.upsert",
                 "vector.get",
                 "vector.search.dense",
@@ -79,7 +80,9 @@ class ElasticsearchVectorStore:
             raise ScopeDenied()
         self._factory = client_factory
         if any(binding.dimensions is None for binding in bindings):
-            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete"}))
+            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists"}))
+        if any(binding.owns_collection and binding.writable for binding in bindings):
+            self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         self._closed = False
 
     @property
@@ -170,6 +173,38 @@ class ElasticsearchVectorStore:
         if not matches_mapping(binding.mapping(), mapping):
             raise Conflict(operation_id=context.operation_id)
         return VectorCollectionInfo(collection, binding.dimensions, binding.metric)
+
+    def collection_exists(self, collection, *, context):
+        binding = self._binding(collection, maintenance=True)
+        with self._client(context) as client:
+            result = self._call(client, 'indices.exists', context, index=binding.index)
+        result = result.body if hasattr(result, 'body') else result
+        if type(result) is not bool:
+            raise Unavailable(operation_id=context.operation_id)
+        return result
+
+    def delete_empty_collection(self, collection, *, context):
+        binding = self._binding(collection, write=True, maintenance=True)
+        if not binding.owns_collection:
+            raise ScopeDenied()
+        with self._client(context) as client:
+            try:
+                # Scoped document counts cannot establish physical collection emptiness.
+                count = self._call(client, 'count', context, index=binding.index, query={'match_all': {}}).get('count')
+                if type(count) is not int or count < 0:
+                    raise Unavailable(operation_id=context.operation_id)
+                if count:
+                    raise Conflict(operation_id=context.operation_id)
+                result = self._call(client, 'indices.delete', context, write=True, index=binding.index)
+            except NotFound:
+                return DeleteReceipt(context.operation_id, False)
+            if result.get('acknowledged') is not True:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+            exists = self._call(client, 'indices.exists', context, index=binding.index)
+            exists = exists.body if hasattr(exists, 'body') else exists
+            if exists is not False:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+        return DeleteReceipt(context.operation_id, True)
 
     def ensure_collection(self, collection, *, context):
         binding = self._binding(collection, write=True)

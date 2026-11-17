@@ -12,9 +12,13 @@ from contracts.agentos_knowledge import (
     KnowledgeContentRequest,
     KnowledgeSearchAuthorization,
 )
+from contracts.knowledge_base_deletion import KnowledgeBaseDeleteAuthorization
 from fastapi import APIRouter, HTTPException, Request
 from management.api.agentos_request import read_agentos_callback
 from management.services.knowledge_base.authorization import authorize_knowledge
+from management.services.knowledge_base.base_deletion_authorization import (
+    authorize_knowledge_base_deletion,
+)
 from management.services.knowledge_base.content_authorization import (
     authorize_knowledge_content,
 )
@@ -31,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 def create_knowledge_authorization_router(service=authorize_knowledge, search_service=authorize_knowledge_search,
-                                         content_service=authorize_knowledge_content):
+                                         content_service=authorize_knowledge_content,
+                                         base_deletion_service=authorize_knowledge_base_deletion):
     router = APIRouter()
 
     async def dispatch(request, operation, schema, action):
@@ -75,5 +80,10 @@ def create_knowledge_authorization_router(service=authorize_knowledge, search_se
     @router.post(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE.value, include_in_schema=False)
     async def authorize_content(request: Request):
         return await dispatch(request, ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, KnowledgeContentRequest, content_service)
+
+    @router.post(ManagementOperation.KNOWLEDGE_BASE_DELETION_AUTHORIZE.value, include_in_schema=False)
+    async def authorize_base_deletion(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_BASE_DELETION_AUTHORIZE,
+                              KnowledgeBaseDeleteAuthorization, base_deletion_service)
 
     return router

@@ -179,6 +179,13 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 | 文本检索与重排 | `/internal/agentos/v1/knowledge/search` | `search_knowledge(KnowledgeSearch, user_id, tenant_id)`，返回 `KnowledgeSearchResult`，HTTP 200 |
 | Runtime 查询 Management 的 KB 读权限 | `/internal/agentos/v1/knowledge/authorize-search` | `authorize_knowledge_search(KnowledgeSearchAuthorization, user_id, tenant_id)`，返回 `KnowledgeSearchGrant` |
 | Runtime 查询来源/图片只读授权 | `/internal/agentos/v1/knowledge/authorize-content` | `authorize_knowledge_content(KnowledgeContentRequest, user_id, tenant_id)`，返回 `KnowledgeContentGrant` |
+| 删除已排空的 KB 物理集合 | `/internal/agentos/v1/knowledge/bases/delete` | `delete_knowledge_base(KnowledgeBaseDelete, user_id, tenant_id)`，返回 `KnowledgeBaseDeleteState`，HTTP 202 |
+| 核对 KB 集合删除结果 | `/internal/agentos/v1/knowledge/bases/inspect` | `inspect_knowledge_base_deletion(KnowledgeBaseDeleteLookup, user_id, tenant_id)`，HTTP 200 |
+| Runtime 查询整体删除授权 | `/internal/agentos/v1/knowledge/authorize-base-deletion` | `authorize_knowledge_base_deletion(KnowledgeBaseDeleteAuthorization, user_id, tenant_id)`，返回 `KnowledgeBaseDeleteGrant` |
+
+KB 集合删除请求只接受 knowledge_id 与 idempotency_key，查询使用 knowledge_id 与稳定 job_id。Management 核对当前编辑权限、KB 删除意图原用户和全部文件的精确 full 删除终态，Runtime 再检查自己的 writer 已结束且文件墓碑覆盖最后版本、可见指针已清空。物理索引名及模型维度不由请求提供，不需要模型推理。
+
+Runtime 先持久预留一次删除，再通过 Infrastructure 的 StorageInterface 检查整个物理集合为空并删除。普通文件写句柄没有删除集合的权限。重复请求和 inspect 只观察集合是否不存在，未知结果不重发；集合仍存在则保持 cleanup_pending。只有确认不存在才能返回 deleted 与 physical_cleanup_complete=true。每次调用共享十秒总截止，超时关闭 HTTP 并取消后续存储提交。部署前由 Management 应用 SQL 027，Runtime 保持 SQL 启动模式 off。当前公开 KB 整体删除编排、共享产物和最终元数据清理仍待接通，不能以此接口视作完整退役。
 
 `KnowledgeContentRequest` 携带 knowledge_id、file_id、file_version。不传 image_ref 时读取该版本的来源；传入时必须是该文件已完成清洗 manifest 中的精确图片引用。Management 检查当前用户和租户的 KB 读权限、文件版本、来源及 manifest 成员，返回 object_ref 和 filename；授权不包含凭据或任意对象前缀。Runtime 的 `KnowledgeContentReader` 在同一截止内获取授权、经只读 ObjectStore 校验版本/hash 并读取、再复核授权，权限或来源变化时不返回字节。该过程不调用普通文件 HTTP，不增加重试。
 

@@ -22,6 +22,7 @@ class VectorBinding:
     metric: str = "cosine"
     writable: bool = False
     additional_text_fields: tuple[str, ...] = ()
+    owns_collection: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "fields", tuple(self.fields))
@@ -31,6 +32,7 @@ class VectorBinding:
         names = [field.name for field in self.fields]
         if (
             type(self.writable) is not bool
+            or type(self.owns_collection) is not bool
             or not self.collection
             or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", self.index)
             or self.dimensions is not None and (

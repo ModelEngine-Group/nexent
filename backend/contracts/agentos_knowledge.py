@@ -314,6 +314,8 @@ class FileCleanseReleased(FileCleanseLookup):
 
 
 class KnowledgeOperation(str, Enum):
+    DELETE_BASE = '/internal/agentos/v1/knowledge/bases/delete'
+    INSPECT_BASE_DELETION = '/internal/agentos/v1/knowledge/bases/inspect'
     UPLOAD = "/internal/agentos/v1/knowledge/files/upload"
     INSPECT = "/internal/agentos/v1/knowledge/files/inspect"
     DELETE = "/internal/agentos/v1/knowledge/files/delete"
