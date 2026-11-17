@@ -164,6 +164,16 @@ export default function ResourceReviewCenter({
   );
   const actions = (row: ResourceReview, inline = false) => (
     <Space size={inline ? 12 : 16}>
+      {inline && row.status !== "pending_review" && (
+        <Button
+          autoInsertSpace={false}
+          type="link"
+          className="!h-auto !p-0"
+          onClick={() => open(row)}
+        >
+          {t("resourceCenter.opinion")}
+        </Button>
+      )}
       {row.allowed_actions.map((value) => (
         <Button
           key={value}
@@ -223,6 +233,7 @@ export default function ResourceReviewCenter({
           <Table<ResourceReview>
             className="resource-review-table resource-scroll-table"
             size="middle"
+            tableLayout="fixed"
             scroll={{ x: 1500, y: "100%" }}
             rowKey={(row) => row.review_id}
             loading={list.isFetching}
@@ -234,7 +245,7 @@ export default function ResourceReviewCenter({
               {
                 title: t("resourceCenter.name"),
                 dataIndex: "name",
-                width: 300,
+                width: "17%",
                 render: (_, row) => (
                   <div className="flex min-w-0 items-center gap-2">
                     <button
@@ -259,13 +270,13 @@ export default function ResourceReviewCenter({
               {
                 title: t("resourceCenter.type"),
                 dataIndex: "resource_type",
-                width: 180,
+                width: "10%",
                 render: (value) => t(`resourceCenter.tab.${value}`),
               },
               {
                 title: t("resourceCenter.statusLabel"),
                 dataIndex: "status",
-                width: 180,
+                width: "10%",
                 render: (value) => (
                   <span
                     className={`inline-flex rounded px-2 font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal ${
@@ -282,7 +293,7 @@ export default function ResourceReviewCenter({
               },
               {
                 title: t("resourceCenter.submitter"),
-                width: 180,
+                width: "10%",
                 ellipsis: true,
                 render: (_, row) =>
                   displayName(
@@ -293,18 +304,19 @@ export default function ResourceReviewCenter({
               {
                 title: t("resourceCenter.submittedAt"),
                 dataIndex: "submitted_at",
-                width: 180,
+                width: "10%",
                 render: dateText,
               },
               {
                 title: t("resourceCenter.submission"),
                 dataIndex: "submit_description",
+                width: "30%",
                 ellipsis: true,
                 render: (value) => value || "—",
               },
               {
                 title: t("resourceCenter.actions"),
-                width: 240,
+                width: "13%",
                 fixed: "right",
                 render: (_, row) => actions(row, true),
               },

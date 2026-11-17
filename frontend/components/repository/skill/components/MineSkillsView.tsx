@@ -737,6 +737,12 @@ export function MineSkillCard({
             <span className="truncate" title={skill.name || undefined}>
               {skill.name || t("skillRepository.common.untitled")}
             </span>
+            {skill.latest_review &&
+            skill.latest_review.status !== "approved" ? (
+              <span className="inline-flex shrink-0 items-center font-normal">
+                <ResourceReviewLink review={skill.latest_review} />
+              </span>
+            ) : null}
             {hasRepositoryInfo && (
               <span
                 className={`shrink-0 rounded px-2 text-xs leading-5 font-normal ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
@@ -826,7 +832,8 @@ export function MineSkillCard({
               ) : null}
             </div>
             <div className="flex min-w-0 items-center justify-end">
-              {skill.latest_review?.status !== "approved" ? (
+              {(!presentation || presentation.layout === "list") &&
+              skill.latest_review?.status !== "approved" ? (
                 <ResourceReviewLink review={skill.latest_review} />
               ) : null}
               {!presentation && hasRepositoryInfo ? (

@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Steps, Select } from "antd";
-import { Maximize2, Minimize2, PanelRightClose, Plus, X } from "lucide-react";
+import { Maximize2, Minimize2, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -485,15 +485,6 @@ export default function SkillChatEditor({
             aria-label={t("skillChat.expand")}
             icon={maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             onClick={() => setMaximized(!maximized)}
-          />
-          <Button
-            type="text"
-            aria-label={t("skillChat.collapse")}
-            icon={<PanelRightClose size={16} />}
-            onClick={() => {
-              setMaximized(false);
-              onClose();
-            }}
           />
         </div>
       </div>

@@ -15,11 +15,47 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/components/repository/ResourceReviewLink", () => ({
-  default: () => null,
+  default: ({ review }: { review?: { status: string } | null }) =>
+    review ? <a href="#review">{review.status}</a> : null,
 }));
 vi.mock(
   "@/components/repository/skill/components/MineApplyListingModal",
   () => ({ MineApplyListingModal: () => null })
+);
+
+test.each(["cards"] as const)(
+  "aligns pending and rejected badges beside the skill name in %s",
+  (layout) => {
+    for (const status of ["pending_review", "rejected"] as const) {
+      const { unmount } = render(
+        <App>
+          <RepositoryPresentationContext.Provider
+            value={{ layout, resourceType: "skill" }}
+          >
+            <MineSkillCard
+              skill={{
+                skill_id: 8,
+                name: "Review skill",
+                permission: "EDIT",
+                latest_review: { review_id: "review-8", status },
+                repository_info: [],
+              }}
+              onEdit={vi.fn()}
+              onView={vi.fn()}
+              onDelete={vi.fn()}
+              onApplyListing={vi.fn()}
+              onViewReview={vi.fn()}
+            />
+          </RepositoryPresentationContext.Provider>
+        </App>
+      );
+      expect(screen.getAllByText(status)).toHaveLength(1);
+      expect(
+        screen.getByRole("heading", { name: /Review skill/ })
+      ).toContainElement(screen.getByText(status));
+      unmount();
+    }
+  }
 );
 vi.mock(
   "@/components/repository/skill/components/SkillReviewStatusModal",
