@@ -53,7 +53,7 @@ case:
     action: 以管理员冷读OTLP中已归档reasoning、模型输入输出及工具结果，覆盖内嵌值和Unicode/尾随换行；核对节点DTO的parent_id/source、物理attempt和片段归并，另测试未返回思考、未采集、过期、损坏及未挂载。
       覆盖1MiB及4MiB字段、转义引号/反斜杠/换行、Unicode多字节跨块，监测解析缓冲。
     expected: OTLP→节点DTO思考/工具内容和业务父子正确，物理attempt各自独立；fragment与最终Span按源ID/区间去重。普通正文完整，超大字段按至多1MiB分块读全；未知思考不补造，410/503/trajectory_corrupt明确。节点id复用record_id、parent_id关联业务父，source保留实际traceId/spanId及export_seq，排序位置独立；duration_ms=20表示20ms，OTLP业务trace属性与原生ID分别保留。
-      大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
+      大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；旧文件仅为成功Python包装下唯一且无子调用的代码阶段补用包装输出，保留原阶段source和耗时，预览与分块读取一致，已有输出和明确采集失败状态不覆盖；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
   - order: 4
     action: 使用快照中的output正文引用，经统一contents反复冷读工具结果并分块取大结果；以合法管理员篡改为内部文件来源及跨会话引用；完成新运行后再次查询，检查缺usage/时间记录及新增路由集合。
     expected: 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。轨迹读取GET保持4条，另增设置GET/PUT，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
@@ -87,7 +87,7 @@ case:
     物理目录按tenant/user/首次根Agent/conversation组织，meta各层一致；最近Agent筛选不要求其等于agent_id，切换和删除Agent后仍可读取全部保留执行。
   - 摘要默认50最多200且≤2MiB，节点DTO单段≤500条/8MiB，源UUID/seq保持字符串；原快照内旧成员无重复/跳过，新归档仅显式查询后出现；清理换代返回snapshot_reset，参数/游标篡改拒绝。最近Agent只筛会话，不裁剪会话内其他Agent执行，trace_id与conversation_id同值。
   - OTLP→节点DTO思考/工具内容和业务父子正确，物理attempt各自独立；fragment与最终Span按源ID/区间去重。普通正文完整，超大字段按至多1MiB分块读全；未知思考不补造，410/503/trajectory_corrupt明确。节点id复用record_id、parent_id关联业务父，source保留实际traceId/spanId及export_seq，排序位置独立；duration_ms=20表示20ms，OTLP业务trace属性与原生ID分别保留。
-    大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
+    大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；旧文件仅为成功Python包装下唯一且无子调用的代码阶段补用包装输出，保留原阶段source和耗时，预览与分块读取一致，已有输出和明确采集失败状态不覆盖；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
   - 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。轨迹读取GET保持4条，另增设置GET/PUT，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
   - 仅新增1个清理POST，轨迹读取GET保持4条，另增设置GET/PUT、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端传天数/游标及可选tenant_id；SU必须显式选择授权租户，OPS省略时使用本租户且不能越权，游标不可跨租户复用，无法指定路径。
   - 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准OPS/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
@@ -117,7 +117,7 @@ case:
     - 2
   - id: AC-03
     description: OTLP→节点DTO思考/工具内容和业务父子正确，物理attempt各自独立；fragment与最终Span按源ID/区间去重。普通正文完整，超大字段按至多1MiB分块读全；未知思考不补造，410/503/trajectory_corrupt明确。节点id复用record_id、parent_id关联业务父，source保留实际traceId/spanId及export_seq，排序位置独立；duration_ms=20表示20ms，OTLP业务trace属性与原生ID分别保留。
-      大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
+      大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。 成功Python/code.execute重复包装层合并，具体工具直接显示原名，生成代码显示Python调用，有沙箱时保留代码执行分组；节点原ID/source/正文/耗时及汇总指标保持，分页祖先及父导航指向保留节点，异常包装仍可读；旧文件仅为成功Python包装下唯一且无子调用的代码阶段补用包装输出，保留原阶段source和耗时，预览与分块读取一致，已有输出和明确采集失败状态不覆盖；管理员HTTP冷读保留记忆准备及沙箱phase节点的原时间、父子关系、输入输出和错误；phase的Token/TTFT/吞吐及版本为null，根模型/工具次数不增加。
     steps:
     - 3
     expected_results:

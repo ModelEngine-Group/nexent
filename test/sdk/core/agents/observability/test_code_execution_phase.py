@@ -107,7 +107,12 @@ def test_deferred_code_duration_excludes_initialization_and_migration(
             assert json.loads(node.attributes["input.value"]) == {
                 "code": "print(1 + 2)"
             }
-            assert "output.value" not in node.attributes
+            if error:
+                assert "output.value" not in node.attributes
+            else:
+                assert json.loads(node.attributes["output.value"]) == {
+                    "output": "answer", "logs": "logs"
+                }
             assert "private failure" not in str(node.attributes)
             if error:
                 assert node.attributes["error.type"] == error.__name__
@@ -154,6 +159,7 @@ def test_official_local_path_is_timed_without_initializing_sandbox(
     node = next(s for s in exporter.get_finished_spans() if s.name == "code.execute")
     assert node.attributes["nexent.duration_ms"] == pytest.approx(250)
     assert node.attributes["execution.backend"] == "local"
+    assert json.loads(node.attributes["output.value"]) == {"output": "local", "logs": ""}
     acquire.assert_not_called()
     wrapper.cleanup()
     release.assert_not_called()
@@ -179,3 +185,37 @@ def test_direct_executor_default_and_remote_capture_keep_result(
         )
     executor.assert_called_once_with("print(3)")
     assert not any(s.name == "code.execute" for s in exporter.get_finished_spans())
+
+
+@pytest.mark.parametrize("value", [None, False, 0, "", {"items": ["结果"]}])
+def test_direct_code_phase_records_final_result_and_print_logs(local_spans, value):
+    manager, exporter = local_spans
+    result = SimpleNamespace(output=value, logs="printed\n第二行\n")
+    executor = Mock(return_value=result, _nexent_tool_bridge=None, _nexent_backend="docker")
+    with manager.start_agent_run():
+        assert sandbox._execute_with_tool_context(executor, "print('printed')", trace_execution=True) is result
+    executor.assert_called_once_with("print('printed')")
+    node = next(s for s in exporter.get_finished_spans() if s.name == "code.execute")
+    assert json.loads(node.attributes["output.value"]) == {"output": value, "logs": result.logs}
+
+
+def test_code_phase_serialization_failure_does_not_retry_execution(local_spans, monkeypatch):
+    manager, exporter = local_spans
+    result = SimpleNamespace(output="answer", logs="logs")
+    executor = Mock(return_value=result, _nexent_tool_bridge=None, _nexent_backend="local")
+    original = phase_capture.safe_local_content
+
+    def serialize(value):
+        if isinstance(value, dict) and "output" in value:
+            raise ValueError("private")
+        return original(value)
+
+    monkeypatch.setattr(phase_capture, "safe_local_content", serialize)
+    with manager.start_agent_run():
+        assert sandbox._execute_with_tool_context(executor, "1 + 2", trace_execution=True) is result
+    executor.assert_called_once_with("1 + 2")
+    node = next(s for s in exporter.get_finished_spans() if s.name == "code.execute")
+    assert "output.value" not in node.attributes
+    assert node.attributes["nexent.availability.output"] == "serialization_failed"
+    assert node.attributes["nexent.trajectory.gap"] is True
+    assert "private" not in str(node.attributes)

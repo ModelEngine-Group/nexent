@@ -210,3 +210,58 @@ def test_legacy_python_without_phase_or_children_keeps_its_source():
     assert set(nodes) == {"root", "python"}
     assert nodes["python"]["parent_id"] == "root"
     assert nodes["python"]["_bodies"]["input"] == "python input"
+
+
+def without_output(node):
+    node["attributes"] = [a for a in node["attributes"] if a["key"] != "output.value"]
+    return node
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_legacy_generated_code_inherits_only_unambiguous_wrapper_output(sandbox):
+    values = [
+        span("root"), python_node(),
+        without_output(code_node("code", "python", **{"nexent.duration_ms": "125"})),
+    ]
+    if sandbox:
+        values.append(code_node("init", "python", name="agent.sandbox.initialize"))
+    nodes = indexed(*values)
+    code = nodes["code"]
+    assert code["_bodies"] == {"input": "code input", "output": "python output"}
+    assert code["source"]["span_id"] == "code".ljust(16, "0")
+    assert code["duration_ms"] == 125
+    assert code["parent_id"] == ("python" if sandbox else "root")
+
+
+def test_code_own_output_wins_over_wrapper_output():
+    nodes = indexed(span("root"), python_node(), code_node("code", "python", **{"output.value": ""}))
+    assert nodes["code"]["_bodies"]["output"] == ""
+
+
+@pytest.mark.parametrize("boundary", [
+    "ambiguous", "named_tool", "tool_sibling", "unavailable", "failed",
+    "other_executor", "missing_parent_output",
+])
+def test_code_missing_output_does_not_borrow_unrelated_or_unavailable_results(boundary):
+    parent = python_node()
+    code = without_output(code_node("code", "python"))
+    extra = []
+    if boundary == "ambiguous":
+        extra = [code_node("other-code", "python")]
+    elif boundary == "named_tool":
+        extra = [code_node("read", "code", kind="tool", name="read_skill_md")]
+        code["attributes"].append({"key": "nexent.business_status", "value": {"stringValue": "failed"}})
+    elif boundary == "tool_sibling":
+        extra = [code_node("read", "python", kind="tool", name="read_skill_md")]
+    elif boundary == "unavailable":
+        code["attributes"].append({"key": "nexent.availability.output", "value": {"stringValue": "serialization_failed"}})
+    elif boundary == "failed":
+        parent["attributes"].append({"key": "nexent.business_status", "value": {"stringValue": "failed"}})
+    elif boundary == "other_executor":
+        parent = code_node("python", "root", kind="tool", name="custom_executor")
+    else:
+        parent = without_output(parent)
+    nodes = indexed(span("root"), parent, code, *extra)
+    assert "output" not in nodes["code"]["_bodies"]
+    if boundary == "named_tool":
+        assert nodes["read"]["_bodies"]["output"] == "read output"

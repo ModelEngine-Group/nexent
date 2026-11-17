@@ -33,6 +33,45 @@ def snapshot(runtime, client):
                            params={'trajectory_id': run['trajectory_id']}, headers={'Authorization': 'admin'}))
 
 
+def test_capture_generated_code_result_and_logs_survive_cold_read(runtime):
+    code = "print('执行日志😀')\n{'result': 42}"
+
+    def reply(request, number, emit):
+        emit(f'<code>\n{code}\n</code>' if number == 1 else '<final_answer>done</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base)
+        assert info.attempt_outcome == 'completed'
+        assert len(requests) == 2
+    saved = runtime.spans()
+    execution = next(s for s in saved if s['name'] == 'code.execute')
+    python = next(s for s in saved if attrs(s).get('tool.name') == 'python_interpreter')
+    result = json.loads(attrs(execution)['output.value'])
+    assert result == json.loads(attrs(python)['output.value'])
+    assert result == {'output': {'result': 42}, 'logs': '执行日志😀\n'}
+    assert json.loads(attrs(execution)['input.value']) == {'code': code}
+    with runtime.client() as client:
+        view = snapshot(runtime, client)
+        node = next(n for n in view['nodes'] if n['name'] == 'code.execute')
+        assert node['source']['span_id'] == execution['spanId']
+        assert node['duration_ms'] == pytest.approx(float(attrs(execution)['nexent.duration_ms']))
+        assert not any(n['name'] == 'python_interpreter' for n in view['nodes'])
+        assert json.loads(node['output']['text']) == result
+        pieces, offset = [], 0
+        while True:
+            chunk = data(client.get(
+                '/trajectory/conversations/123/contents/' + node['output']['content_id'],
+                params={'offset': offset, 'limit': 16}, headers={'Authorization': 'admin'},
+            ))
+            pieces.append(chunk['text'])
+            assert chunk['next_offset'] > offset
+            offset = chunk['next_offset']
+            if chunk['complete']:
+                break
+        assert json.loads(''.join(pieces)) == result
+
+
 @pytest.mark.parametrize('creator', [False, True], ids=['clarification', 'creator-card'])
 def test_capture_interactive_card_preserves_stop_status(runtime, creator):
     from ops.services.trajectory.projection import execution_values

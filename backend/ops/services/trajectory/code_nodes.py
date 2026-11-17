@@ -17,6 +17,34 @@ def simplify_code_nodes(nodes, *, check=lambda: None):
                 protected.add(current)
                 current = nodes[current]["parent_id"]
 
+    for identity, node in nodes.items():
+        check()
+        if (
+            node["kind"] != "tool"
+            or node["name"] != "python_interpreter"
+            or identity in protected
+            or node["_bodies"].get("output") is None
+        ):
+            continue
+        codes = []
+        for child in children[identity]:
+            check()
+            candidate = nodes[child]
+            if candidate["kind"] == "phase" and candidate["name"] == "code.execute":
+                codes.append(child)
+            elif candidate["kind"] != "phase" or candidate["name"] != "agent.sandbox.initialize":
+                break
+        else:
+            if len(codes) == 1:
+                code = nodes[codes[0]]
+                if (
+                    not children[codes[0]]
+                    and "output" not in code["_bodies"]
+                    and "output" not in code["_availability"]
+                ):
+                    # Keep the original Text coordinates for chunked historical reads.
+                    code["_bodies"]["output"] = node["_bodies"]["output"]
+
     removed = {
         identity
         for identity, node in nodes.items()

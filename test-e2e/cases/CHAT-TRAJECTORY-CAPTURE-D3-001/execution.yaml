@@ -35,6 +35,7 @@ acceptance_bindings:
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
   - test_capture_actual_worker_cancel_preserves_partial_output
   AC-09:
+  - test_capture_generated_code_result_and_logs_survive_cold_read
   - test_capture_preparation_phases_survive_authorized_worker_and_cold_read
   - test_capture_parallel_tools_nested_output_and_full_local_body
 preparation:

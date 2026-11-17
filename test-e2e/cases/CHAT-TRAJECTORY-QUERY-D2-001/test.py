@@ -1363,8 +1363,9 @@ def test_trj_query_tenant_facets_exclude_empty_members(
 @pytest.mark.parametrize("sandbox", [False, True])
 @pytest.mark.parametrize("generated", [False, True])
 @pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("legacy_output", [False, True])
 def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
-    harness, sandbox, generated, failed
+    harness, sandbox, generated, failed, legacy_output
 ):
     from uuid import uuid4
 
@@ -1387,6 +1388,8 @@ def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
     start = harness.now[0] - timedelta(seconds=2)
     nanos = int(start.timestamp() * 1e9)
     spans = []
+    legacy = legacy_output and generated and not failed
+    wrapper_output = json.dumps({"output": {"result": 42}, "logs": '中文😀\\"\n' * 3000}, ensure_ascii=False)
     for index, (key, parent, kind, name) in enumerate(entries, start=1):
         attrs = {
             "tenant.id": identity.tenant_id,
@@ -1418,6 +1421,10 @@ def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
             attrs["nexent.duration_ms"] = 125
             if failed:
                 attrs["nexent.business_status"] = "failed"
+            if legacy:
+                attrs.pop("output.value")
+        if key == "python" and legacy:
+            attrs["output.value"] = wrapper_output
         spans.append(
             {
                 "traceId": "b" * 32,
@@ -1480,18 +1487,24 @@ def test_trj_query_code_tree_keeps_sources_bodies_and_paged_ancestry(
     if failed and not generated:
         assert indexed_nodes[ids["read"]]["parent_id"] == ids["code"]
     for slot in ("input", "output"):
-        text = data(
-            get(
-                harness,
-                "/trajectory/conversations/123/contents/"
-                + selected[slot]["content_id"],
-            )
-        )["text"]
-        assert (
-            text
-            == selected[slot]["text"]
-            == ("code" if generated or failed else "read") + " " + slot
+        expected = wrapper_output if legacy and slot == "output" else (
+            ("code" if generated or failed else "read") + " " + slot
         )
+        pieces, offset = [], 0
+        while True:
+            chunk = data(get(
+                harness, "/trajectory/conversations/123/contents/" + selected[slot]["content_id"],
+                offset=offset, limit=8192,
+            ))
+            pieces.append(chunk["text"])
+            assert chunk["next_offset"] > offset
+            offset = chunk["next_offset"]
+            if chunk["complete"]:
+                break
+        assert "".join(pieces) == expected
+        assert selected[slot]["text"] == expected[:len(selected[slot]["text"])]
+        if legacy and slot == "output":
+            assert not selected[slot]["complete"] and len(pieces) > 1
     expected_span = next(
         s
         for s in spans

@@ -1330,9 +1330,13 @@ def _execute_with_tool_context(executor: Any, code: str, *, trace_execution: boo
         with trace_phase(
             "code.execute", input_value={"code": code},
             attributes={"execution.backend": getattr(executor, "_nexent_backend", "local")},
-        ):
-            # The Python tool already records the complete result and logs.
-            return _execute_with_tool_context(executor, code)
+        ) as phase:
+            result = _execute_with_tool_context(executor, code)
+            phase.set_output({
+                "output": getattr(result, "output", None),
+                "logs": getattr(result, "logs", ""),
+            })
+            return result
     bridge = getattr(executor, "_nexent_tool_bridge", None)
     if not isinstance(bridge, _ToolBridge):
         return executor(code)
