@@ -13,9 +13,11 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/gateway/**'
-      - 'backend/gateway_service.py'
-      - 'backend/infrastructure/__init__.py'
-      - 'backend/infrastructure/database/**'
+      - 'backend/__init__.py'
+      - 'backend/http/gateway_service.py'
+      - 'infrastructure/__init__.py'
+      - 'infrastructure/rdb/__init__.py'
+      - 'infrastructure/rdb/identity.py'
       - 'deploy/images/dockerfiles/gateway/**'
       - '.dockerignore'
       - '.github/workflows/auto-build-gateway-dev.yml'
@@ -23,9 +25,11 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/gateway/**'
-      - 'backend/gateway_service.py'
-      - 'backend/infrastructure/__init__.py'
-      - 'backend/infrastructure/database/**'
+      - 'backend/__init__.py'
+      - 'backend/http/gateway_service.py'
+      - 'infrastructure/__init__.py'
+      - 'infrastructure/rdb/__init__.py'
+      - 'infrastructure/rdb/identity.py'
       - 'deploy/images/dockerfiles/gateway/**'
       - '.dockerignore'
       - '.github/workflows/auto-build-gateway-dev.yml'
@@ -53,4 +57,4 @@ jobs:
       - name: Verify launcher and identity repository imports
         run: |
           docker run --rm --network none --entrypoint python "$GATEWAY_IMAGE" \
-            -c 'import gateway_service; from infrastructure.database.identity import IdentityRepository'
+            -c 'import backend.http.gateway_service; from infrastructure.rdb.identity import IdentityRepository'
