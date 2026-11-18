@@ -13,7 +13,7 @@ import pytest
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
-from services.nl2agent_service import _Nl2AgentBoundaryObserver
+from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
 CARD = '<nl2a>\n{"subtype":"requirement_clarification","agent_id":42,"questions":[]}\n</nl2a>'

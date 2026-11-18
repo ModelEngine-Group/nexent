@@ -11,7 +11,7 @@ import tempfile
 import types
 import importlib.machinery
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, call
 from unittest.mock import patch as _patch
 
 import pytest
@@ -195,6 +195,7 @@ class _PatchProxy:
 
 class _MiniMocker:
     Mock = Mock
+    call = call
 
     def __init__(self):
         self._patchers = []

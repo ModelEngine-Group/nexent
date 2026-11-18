@@ -190,8 +190,11 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         model_id=12, model_type="embedding",
     ))
 
+    tool_overrides = {"document_paths": ["report.txt"]}
+    if mode == "override":
+        tool_overrides["top_k"] = 5
     tool_params = ToolParamsRequest.model_validate({
-        "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
+        "agents": {"root": {"tools": {"knowledge_base_search": tool_overrides}}},
     })
     compiler_options = {}
     if mode == "native":
@@ -218,7 +221,6 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
             knowledge_scope={
                 "local": {"mode": mode, "knowledge_ids": ["7", "8"] if mode == "override" else []},
                 "aidp": {"mode": "disabled"},
-                "retrieval_config": {"top_k": 5},
             },
         )
         root = SimpleNamespace(agent_id=7, version_no=2)

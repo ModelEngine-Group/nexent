@@ -185,7 +185,9 @@ async def test_default_route_persists_creator_and_model_preferences(mocker, skil
             "query": "Create", "model_id": 21, "model_parameter_preferences": {"21": {"temperature": 0.3}},
         })
     assert response.status_code == 200 and response.headers["conversation_id"] == "42"
-    assert '"type":"done"' in response.text
+    events = [json.loads(line.removeprefix("data: ")) for line in response.text.splitlines()
+              if line.startswith("data: ")]
+    assert any(event["type"] == "done" for event in events)
     assert save.call_args.kwargs["agent_id"] == 78
     assert save.call_args.kwargs["selected_model_id"] == 21
     assert save.call_args.kwargs["model_parameter_preferences"] == {"21": {"temperature": 0.3}}

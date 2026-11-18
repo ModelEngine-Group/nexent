@@ -94,7 +94,6 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
     }
     config = WorkbenchSessionConfig(mode="generic_chat", knowledge_scope={
         "aidp": {"mode": "override", "kds_ids": ["kb1", "kb2", "private"]},
-        "retrieval_config": {"top_k": 7, "search_method": "full_text_search"},
     })
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=8, version_no=3)), root_skills=())
     mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
@@ -105,7 +104,12 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
     mocker.patch.object(scope, "_resolve_aidp_access_snapshot", return_value=SimpleNamespace(
         accessible_id_set={"kb1", "kb2"}, name_to_id={"One": "kb1", "Two": "kb2"},
     ))
-    request = AgentRequest(query="query", entrypoint="workbench", workbench=config)
+    request = AgentRequest(
+        query="query", entrypoint="workbench", workbench=config,
+        tool_params={"agents": {"root": {"tools": {"aidp_search": {
+            "top_k": 7, "search_method": "full_text_search",
+        }}}}},
+    )
     prepared = workbench.prepare_portable_workbench(request, None, "user-a", "tenant-a")
     assert prepared.knowledge.aidp_kds_ids == ["kb1", "kb2"]
     assert prepared.knowledge.warnings == [{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "aidp", "count": 1}]
