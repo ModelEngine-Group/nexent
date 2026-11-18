@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-PANEL-RESIZE-20261111
+  change_type: requirement
+  requirement_id: AGENT-PANEL-RESIZE-20261111
+  title: Resize NL2Agent and debug panels in the Agent editor
+  description: Drag native split boundaries without changing Agent data or resetting conversations.
+  affected_features:
+    existing: [AGENT-EDITOR-WORKFLOWS]
+    added: []
+    modified: [AGENT-EDITOR-WORKFLOWS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AGENT-PANEL-RESIZE-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Save valid dragged proportions and constrain panel sizes.
+    - Ignore zero, non-finite or hidden/expanded resize callbacks.
+    - Restore normal widths and retain mounted children after visibility and expanded transitions.
+    - Reserve configuration header space while adapting the maximum NL2Agent width to the viewport, with observer cleanup on unmount.
+    test_selectors:
+    - frontend/tests/workbench/AgentEditorSplit.test.tsx
+    - frontend/tests/workbench/AgentDebugHeader.test.tsx
+    reason: Frontend local presentation state needs UT; no Python/API/runtime changes. Browser layout needs independent pointer-drag evidence, not another D1.
+  notes: |
+    SPEC: docs/Developing/ux-agent-workbench-layout/changes/ux-editor-panel-resizing/ in the document repository.
+    Responsibility inherits agent_config. The browser context owns controlled APIs and fixtures and releases them on teardown; no server data or shared preparation factories.

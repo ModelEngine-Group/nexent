@@ -10,7 +10,7 @@ from management.db.agent.system import (
     create_workbench_draft, has_legacy_workbench_agents,
     load_system_agent, lock_system_agent_release, replace_workbench_draft_bindings,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.services.agent.system import SystemAgentProvider
 
 

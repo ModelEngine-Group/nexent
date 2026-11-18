@@ -24,22 +24,22 @@ if "nexent.core" not in sys.modules:
     sys.modules["nexent.core"] = mock.MagicMock()
 if "nexent.core.agents" not in sys.modules:
     sys.modules["nexent.core.agents"] = mock.MagicMock()
-if "nexent.core.agents.agent_model" not in sys.modules:
-    agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+if "nexent.core.agents.contracts.config" not in sys.modules:
+    agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 
     class ToolConfig:  # minimal stub
         pass
 
     agent_model_mod.ToolConfig = ToolConfig
-    sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+    sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
-# Stub boto3 used by management.db.client
+# Stub boto3 used by infrastructure.rdb.client
 if "boto3" not in sys.modules:
     sys.modules["boto3"] = mock.MagicMock()
 
-# Provide stub modules for management.db.client and management.db.client so that
+# Provide stub modules for infrastructure.rdb.client and infrastructure.rdb.client so that
 # patching MinioClient does not import the real client module (which pulls SQLAlchemy).
-backend_db_client_mod = types.ModuleType("management.db.client")
+backend_db_client_mod = types.ModuleType("infrastructure.rdb.client")
 
 
 class _MinioClient:  # minimal stub
@@ -47,9 +47,10 @@ class _MinioClient:  # minimal stub
 
 
 backend_db_client_mod.MinioClient = _MinioClient
-sys.modules["management.db.client"] = backend_db_client_mod
+sys.modules["infrastructure.rdb.client"] = backend_db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Ensure parent package exposes the submodule attribute for import machinery
 try:
@@ -61,14 +62,15 @@ except Exception:
         setattr(sys.modules["management.db"],
                 "client", backend_db_client_mod)
 
-# Also stub management.db.client.MinioClient in case modules import without the 'backend.' prefix
-database_client_mod = types.ModuleType("management.db.client")
+# Also stub infrastructure.object_storage.client.MinioClient in case modules import without the 'backend.' prefix
+database_client_mod = types.ModuleType("infrastructure.rdb.client")
 database_client_mod.MinioClient = _MinioClient
-sys.modules["management.db.client"] = database_client_mod
+sys.modules["infrastructure.rdb.client"] = database_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
@@ -379,6 +381,15 @@ db_mm_mod.get_model_by_display_name = _noop
 db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
 db_mm_mod.get_models_by_display_name = _get_models_by_display_name
 db_mm_mod.get_model_records = _get_model_records
+db_mm_mod.get_capacity_model_records = lambda model_types, tenant_id: []
+
+
+def _get_model_records_page(filters, tenant_id, page, page_size):
+    records = sys.modules["management.services.model.management"].get_model_records(filters, tenant_id)
+    return records[(page - 1) * page_size:page * page_size], len(records)
+
+
+db_mm_mod.get_model_records_page = _get_model_records_page
 db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
 
 
@@ -445,6 +456,7 @@ def _update_config_by_tenant_config_id(*args, **kwargs):
 
 db_tenant_cfg_mod.delete_config_by_tenant_config_id = _delete_config_by_tenant_config_id
 db_tenant_cfg_mod.get_all_configs_by_tenant_id = _get_all_configs_by_tenant_id
+db_tenant_cfg_mod.get_configs_by_tenant_id_and_keys = lambda tenant_id, keys: {}
 db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
 db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
@@ -523,7 +535,7 @@ def import_svc(module="management", *, isolate_storage=True):
     sampling_module = importlib.util.module_from_spec(sampling_spec)
     sampling_spec.loader.exec_module(sampling_module)
     sys.modules["nexent.core.models.sampling"] = sampling_module
-    with mock.patch("management.db.client.MinioClient", return_value=minio_client_mock):
+    with mock.patch("infrastructure.object_storage.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
     if not isolate_storage:
         return svc
@@ -2315,7 +2327,7 @@ def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
         },
     ]
 
-    with mock.patch.object(svc, "get_model_records", return_value=records), \
+    with mock.patch.object(svc, "get_capacity_model_records", return_value=records), \
             mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
         result = svc.get_capacity_coverage("tenant-a")
 
@@ -2331,7 +2343,7 @@ def test_get_capacity_coverage_visibility_flag_off():
     svc = import_svc("capacity")
 
     with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
-            mock.patch.object(svc, "get_model_records") as mock_get_records:
+            mock.patch.object(svc, "get_capacity_model_records") as mock_get_records:
         result = svc.get_capacity_coverage("tenant-a")
 
     assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
@@ -2450,7 +2462,7 @@ def test_get_capacity_coverage_cross_tenant_isolation():
             return list(tenant_b_rows)
         return []
 
-    with mock.patch.object(svc, "get_model_records", side_effect=get_records_by_tenant), \
+    with mock.patch.object(svc, "get_capacity_model_records", side_effect=get_records_by_tenant), \
             mock.patch.object(svc, "_capacity_suggestion_available", return_value=False):
         result_a = svc.get_capacity_coverage("tenant-a")
         result_b = svc.get_capacity_coverage("tenant-b")

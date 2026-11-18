@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from contracts.errors.exceptions import McpNotFoundError
+from management.db.tag.repository import TagManagementDB
 from management.services.agent import management as agent_service
 from management.services.skill.service import SkillService
 from management.services.mcp import service as remote_mcp_service
@@ -128,8 +129,8 @@ async def test_mcp_delete_cleans_up_after_the_local_tenant_record_is_deleted(mon
         remote_mcp_service, "delete_mcp_record_by_id", lambda **kwargs: calls.append("delete")
     )
     monkeypatch.setattr(
-        TagManagementService,
-        "cleanup_resource_assignments",
+        TagManagementDB,
+        "soft_delete_resource_assignments",
         lambda *args: calls.append(args),
     )
 
@@ -145,8 +146,8 @@ async def test_mcp_delete_does_not_clean_up_when_the_tenant_record_is_absent(mon
     )
     cleanup_calls = []
     monkeypatch.setattr(
-        TagManagementService,
-        "cleanup_resource_assignments",
+        TagManagementDB,
+        "soft_delete_resource_assignments",
         lambda *args: cleanup_calls.append(args),
     )
 
@@ -171,8 +172,8 @@ async def test_container_mcp_delete_cleans_up_the_resolved_local_record(monkeypa
         remote_mcp_service, "delete_mcp_record_by_container_id", lambda **_kwargs: calls.append("delete")
     )
     monkeypatch.setattr(
-        TagManagementService,
-        "cleanup_resource_assignments",
+        TagManagementDB,
+        "soft_delete_resource_assignments",
         lambda *args: calls.append(args),
     )
 

@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-LEGACY-PROMPT-OPTIMIZATION-20261109
+  change_type: refactor
+  title: Remove unused standalone prompt optimization routes
+  description: >-
+    Remove the three standalone prompt optimization endpoints and their frontend
+    clients. Keep NL2Agent, guardrail generation and Agent evaluation. Retire the
+    old route-specific D3 Cases and remove their executable bindings.
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: [F-047, F-048]
+  affected_cases:
+    existing: [NL2AGENT-PROTOCOL-D4-001]
+    added: []
+    modified: []
+    retired: [AGT-009, AGT-010, AGT-011, AGT-012]
+  traditional_ut:
+    decision: strengthen
+    reason: Cover removal at the Gateway and Management route boundaries, and retain guardrail and evaluation coverage.
+    behaviors:
+    - Gateway returns 404 for retired POST endpoints before authenticating or forwarding.
+    - Management excludes the old optimization router.
+    - Guardrail rules and evaluation execution retain their existing behavior.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py
+    - test/backend/app/test_config_app.py
+    - test/backend/services/test_prompt_service.py
+    - test/backend/app/test_agent_evaluation_runtime_app.py

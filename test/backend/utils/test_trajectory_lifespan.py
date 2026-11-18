@@ -1,0 +1,85 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Verify Runtime resource release when trajectory lifecycle collaborators fail."""
+
+import importlib.util
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from nexent.core.concurrency import ManagerState
+
+
+@pytest.fixture
+def runtime_module(monkeypatch):
+    manager = Mock(state=ManagerState.CREATED, run=AsyncMock(), shutdown=AsyncMock())
+    processor = Mock()
+    app = Mock()
+    app.get.return_value = lambda function: function
+    stubs = {
+        "backend.http.server.app_factory": {"create_app": Mock(return_value=app)},
+        "runtime.api.agent.execution": {"agent_runtime_router": Mock()},
+        "management.api.automation.agent_automation": {"conversation_automation_router": Mock(), "router": Mock()},
+        "runtime.api.evaluation.execution": {"router": Mock()},
+        "runtime.api.voice.streaming": {"voice_runtime_router": Mock()},
+        "management.api.conversation.conversation_management": {"router": Mock()},
+        "management.api.conversation.workbench_pins": {"router": Mock()},
+        "management.api.conversation.conversation_share": {"router": Mock()},
+        "runtime.api.file.upload": {"file_management_runtime_router": Mock()},
+        "runtime.api.skill.creation": {"skill_creator_router": Mock()},
+        "management.configuration.runtime": {
+            "start_system_configuration": AsyncMock(),
+            "stop_system_configuration": AsyncMock(),
+        },
+        "runtime.api.exception_handler": {"ExceptionHandlerMiddleware": Mock()},
+        "runtime.api.identity_routes": {"is_runtime_service_request": Mock()},
+        "runtime.thread_management": {"runtime_thread_manager": manager},
+        "infrastructure.redis.run_state": {"runtime_state_service": Mock()},
+        "infrastructure.trace.bootstrap": {"local_trajectory_processor": processor},
+        "management.services.agent.execution": {"shutdown_agent_stream_tasks": AsyncMock(return_value=[])},
+        "management.services.conversation.creator_runtime": {"shutdown_creator_streams": AsyncMock(return_value=0)},
+        "nexent.core.agents.sandbox.execution": {"SandboxPoolManager": SimpleNamespace(_instance=None)},
+    }
+    for name, attributes in stubs.items():
+        monkeypatch.setitem(sys.modules, name, SimpleNamespace(**attributes))
+    path = Path(__file__).resolve().parents[3] / "backend/runtime/api/application.py"
+    spec = importlib.util.spec_from_file_location("trajectory_lifespan_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.start_agent_automation_scheduler = AsyncMock()
+    module.stop_agent_automation_scheduler = AsyncMock()
+    module.set_default_thread_manager = Mock()
+    module.clear_default_thread_manager = Mock()
+    return module, manager, processor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "start", "scheduler_stop", "creator_stop", "writer_stop"])
+async def test_trajectory_lifespan_always_releases_runtime_manager(runtime_module, failure):
+    module, manager, processor = runtime_module
+    if failure == "start":
+        processor.start.side_effect = RuntimeError("controlled-start-failure")
+    elif failure == "scheduler_stop":
+        module.stop_agent_automation_scheduler.side_effect = RuntimeError("controlled-stop-failure")
+    elif failure == "writer_stop":
+        manager.run.side_effect = RuntimeError("controlled-writer-stop-failure")
+    elif failure == "creator_stop":
+        sys.modules["management.services.conversation.creator_runtime"].shutdown_creator_streams.side_effect = RuntimeError("controlled-creator-stop-failure")
+
+    if failure:
+        with pytest.raises(RuntimeError, match="controlled"):
+            async with module.runtime_lifespan(None):
+                pass
+    else:
+        async with module.runtime_lifespan(None):
+            processor.start.assert_called_once()
+
+    manager.start.assert_called_once()
+    processor.request_stop.assert_called_once()
+    manager.shutdown.assert_awaited_once()
+    module.stop_system_configuration.assert_awaited_once()
+    module.clear_default_thread_manager.assert_called_once_with(manager)
+    assert manager.run.await_args.args[2] == processor.shutdown
+    if failure != "scheduler_stop":
+        sys.modules["management.services.conversation.creator_runtime"].shutdown_creator_streams.assert_awaited_once()

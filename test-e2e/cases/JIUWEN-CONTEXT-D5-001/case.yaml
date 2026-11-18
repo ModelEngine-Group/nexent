@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-CONTEXT-D5-001
+  feature_id: JIUWEN-CONTEXT
+  requirement_ids:
+  - JIUWEN-M4-20261016
+  business_rule_ids:
+  - JIUWEN-CONTEXT-RULE-003
+  title: Persisted Core change and saved CM D5
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Protect accepted checkpoints and recover from invalid or cancelled Jiuwen
+    summaries after a configured Core change.
+  preconditions:
+  - Controlled model HTTP endpoint and installed Jiuwen/smolagents; isolated PostgreSQL
+    for runtime database proof.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Persist completed smolagents history and a valid checkpoint, change effective
+      configuration to Jiuwen with CM enabled, and inject invalid summary output or
+      a blocked summary read.
+    expected: Neither fault overwrites or appends an invalid checkpoint; historical
+      messages and tool effects remain unchanged. Cancelled reads close, stop within
+      ten seconds and send no main follow-up model request.
+  - order: 2
+    action: Restore the controlled model endpoint, reopen the same conversation and
+      follow up; also query with a different owner, tenant or invalid current-message
+      boundary.
+    expected: An authorized new run completes from preserved history; old checkpoint
+      content remains unchanged and unauthorized history queries return no data. Managed
+      workers drain without STUCK tasks.
+  expected_results:
+  - Neither fault overwrites or appends an invalid checkpoint; historical messages
+    and tool effects remain unchanged. Cancelled reads close, stop within ten seconds
+    and send no main follow-up model request.
+  - An authorized new run completes from preserved history; old checkpoint content
+    remains unchanged and unauthorized history queries return no data. Managed workers
+    drain without STUCK tasks.
+  forbidden_side_effects:
+  - No historical tool replay, second authoritative memory, checkpoint corruption,
+    cross-owner history or duplicate current input.
+  acceptance:
+  - id: AC-01
+    description: Configuration-side Core changes preserve old conversations and saved
+      CM semantics.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  risk_type: RELIABILITY
+  risk: Summary failure, cancellation or unavailable history boundary corrupts facts
+    or replays tools.
+  condition:
+  - Summary response is invalid or blocked; history owner or current-message boundary
+    is invalid.
+  metrics:
+  - Terminal outcome, subsequent calls, active futures/workers and elapsed close time.
+  thresholds:
+  - No invalid checkpoint write; zero historical effects; cancelled workers drain
+    within ten seconds.
+  recovery_expectations:
+  - Fresh authorized follow-up reads the previous valid checkpoint and succeeds.

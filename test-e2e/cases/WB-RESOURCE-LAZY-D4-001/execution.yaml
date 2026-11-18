@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: WB-RESOURCE-LAZY-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: WB-RESOURCE-LAZY-D4-001
+timeout_seconds: 240
+acceptance_bindings:
+  AC-01: [WB-RESOURCE-LAZY-D4-001]
+  AC-02: [WB-RESOURCE-LAZY-D4-001]
+  AC-03: [WB-RESOURCE-LAZY-D4-001]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

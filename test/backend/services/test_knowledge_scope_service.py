@@ -27,7 +27,7 @@ from management.services.knowledge_base.scope import (
 
 def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker):
     """UT-BE-WB-016/UT-BE-WB-023: same-name system nodes retain separate scopes."""
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 
     def node(ref, index):
         return AgentConfig(
@@ -66,7 +66,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
 @pytest.mark.parametrize("child_ref", [None, "system:root"])
 def test_executable_knowledge_rejects_ambiguous_runtime_identity(child_ref, mocker):
     """UT-BE-WB-023: invalid executable identity fails before resource access."""
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     root = AgentConfig(runtime_ref="system:root", name="root", description="test", model_name="model", tools=[])
     root.worker_agents = [root.model_copy(update={"runtime_ref": child_ref})]

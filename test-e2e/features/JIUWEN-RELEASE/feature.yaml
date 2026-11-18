@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-RELEASE
+  name: Deployed Jiuwen real-model qualification
+  status: active
+  description: Distinguish deployed HTTP/history proof and real-model resource execution
+    from controlled provider tests.
+  business_rules:
+  - rule_id: JIUWEN-RELEASE-RULE-001
+    description: Build current source, preserve storage and rollback identities; real
+      provider runs cover each resource and multiple turns including published Core
+      changes with saved database history.
+  required_test_stages:
+  - D3
+  source:
+    requirement_ids:
+    - JIUWEN-M6-20261016
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

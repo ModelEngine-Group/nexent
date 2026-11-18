@@ -2,7 +2,12 @@
 
 "use client";
 
+import { formatNl2AgentActionSummary } from "../ui/nl2agent-action-summary";
+import { outputStatus } from "@/lib/nexentOutputStatus";
+import type { NexentOutputStatus } from "@/types/nexentOutput";
+
 import { getCreatorMode } from "@/lib/creatorConversation";
+import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -46,8 +51,10 @@ import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
+import { fromMessageAnnotationWireItems } from "../utils/message-annotations";
 import {
   attachExecutionLogsToTool,
+  markSubAgentRunFinished,
   collapseSubAgentParts,
   attachSearchContentToTool,
   buildExecutionCodePart,
@@ -409,7 +416,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
-      const messageParts = Array.isArray(msg.message)
+      const sourceParts = Array.isArray(msg.message)
         ? msg.message.map((part) => ({
             ...part,
             content:
@@ -420,6 +427,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const messageParts = sourceParts;
       const runHasFinalAnswer = messageParts.some(
         (part) => part.type === "final_answer"
       );
@@ -499,6 +507,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       }
 
       const content: any[] = [];
+      let restoredRuntimeStatus: NexentOutputStatus | undefined;
       let historicalCardAction: Nl2AgentCardAction | null = null;
       let historicalNl2a:
         import("./remote-chat-model-adapter").Nl2aMessage | null = null;
@@ -516,13 +525,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             action.agent_id > 0
           ) {
             historicalCardAction = action;
-            text =
-              {
-                requirement_clarification: "Requirements submitted",
-                suggested_resource_installation:
-                  "Resource installation completed",
-                installed_resource_binding: "Resource selection completed",
-              }[action.subtype] || "Agent creation continued";
+            text = formatNl2AgentActionSummary(action.subtype);
           }
         } catch {
           // Ordinary user text is not a structured card action.
@@ -703,6 +706,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           return appendedImages;
         };
 
+        restoredRuntimeStatus = outputStatus(msg.status);
         for (const [partIndex, part] of messageParts.entries()) {
           if (
             part.type === "model_attempt_control" &&
@@ -769,7 +773,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const state = parseNl2AgentState(part.content);
             if (
               getCreatorMode(detail) === "agent_create" &&
-              state?.event === "agent_generation_completed"
+              state?.event === "agent_generation_completed" &&
+              state.agent_id === detail.target?.id &&
+              !content.some(
+                (item) =>
+                  item.type === "data" && item.name === "nl2agent-created"
+              )
             ) {
               content.push({
                 type: "data",
@@ -1002,6 +1011,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             })();
             flushReasoning(endInvocationId ?? part.invocation_id);
             let payload: {
+              status?: "completed" | "failed" | "stopped";
               invocation_id?: string;
             } = {};
             try {
@@ -1031,6 +1041,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 });
                 closing.reasoningText = "";
               }
+              markSubAgentRunFinished(content, closing.runId, payload.status);
               activeSubAgents.delete(invocationId);
             } else if (activeSubAgents.size > 0) {
               // No id supplied (very old payload): fall back to closing the
@@ -1211,7 +1222,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 {
                   ...part,
                   content: unwrapFinalAnswer(part.content),
-                  answer_phase: "delta",
+                  answer_phase: part.answer_phase ?? "delta",
                 },
                 meta
               );
@@ -1220,28 +1231,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
 
         flushReasoning();
-
-        // Older creation turns may have returned a final answer without the
-        // trusted completion event. Show the saved draft, not a false success.
-        if (
-          getCreatorMode(detail) === "agent_create" &&
-          detail.target?.type === "agent" &&
-          Number.isInteger(detail.target.id) &&
-          detail.target.id > 0 &&
-          messageParts.some(
-            (part) =>
-              part.type === "final_answer" && Boolean(part.content?.trim())
-          ) &&
-          !content.some(
-            (part) => part.type === "data" && part.name === "nl2agent-created"
-          )
-        ) {
-          content.push({
-            type: "data",
-            name: "nl2agent-created",
-            data: { agentId: detail.target.id, completed: false },
-          });
-        }
 
         for (const [path, fileContent] of historicalSkillFiles) {
           const extension = path.split(".").pop()?.toLowerCase();
@@ -1378,7 +1367,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       // An NL2Agent turn may consist only of an interactive card boundary.
       // Keep the message so its restored metadata can render the card.
-      if (historicalNl2a && content.length === 0) {
+      if (
+        (historicalNl2a ||
+          (msg.role === "assistant" && msg.status === "streaming")) &&
+        content.length === 0
+      ) {
         content.push({ type: "text", text: "" });
       }
 
@@ -1415,7 +1408,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             ? { nl2agentCardAction: historicalCardAction }
             : {}),
           ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
-          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          // Empty saved usage must not fall back to another turn's live counters.
+          stepTokenCounts,
+          ...(msg.role === "user" && msg.annotations?.length
+            ? { annotations: fromMessageAnnotationWireItems(msg.annotations) }
+            : {}),
           ...(msg.role === "user" && typeof msg.message_index === "number"
             ? { historicalMessageIndex: msg.message_index }
             : {}),
@@ -1426,7 +1423,23 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       messages.push({
         id: messageId,
         role: msg.role,
+        // A persisted active status is not a live runtime connection. Hydrate it
+        // as idle so useConversationResume can establish the actual stream.
+        ...(msg.role === "assistant" ? { status: messageExecutionStatus(
+          msg.status === "streaming" || msg.status === "pending" ? "completed"
+            : msg.status ?? (content.some(part => "isError" in part && part.isError) ? "failed" : "completed")
+        ) } : {}),
         content,
+        // A persisted running flag does not represent an attached local stream.
+        // The shared resume hook reconnects it under the original user boundary.
+        ...(restoredRuntimeStatus
+          ? {
+              status:
+                restoredRuntimeStatus.type === "running"
+                  ? { type: "complete" as const, reason: "unknown" as const }
+                  : restoredRuntimeStatus,
+            }
+          : {}),
         ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
@@ -1448,6 +1461,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         planRegistry.set(restoredPlan);
       }
     }
+    return {
+      ...repository,
+    };
     // The shared hook reconnects after loading; automatic resume appends
     // another assistant below the head and breaks the retry branch.
     return repository;

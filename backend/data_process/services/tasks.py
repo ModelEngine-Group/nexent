@@ -31,7 +31,7 @@ from data_process.utils import (
 from data_process.utils import get_task_details as get_task_details_info
 from management.db.file.attachment import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from management.services.file.upload import convert_office_to_pdf
-from infrastructure.ingestion.errors import classify_ingestion_exception
+from contracts.errors.ingestion import classify_ingestion_exception
 
 
 # Optional heavy dependencies are loaded only when their feature is used.  The

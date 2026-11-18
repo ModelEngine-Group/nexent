@@ -255,7 +255,30 @@ it("ME-01 reviewed outlets have an ordinary pencil with no warning", () => {
 
 it("ME-01 review warnings do not bypass edit permission", () => {
   permission.edit = false;
-  renderList([{ ...makeModels(1)[0], migrationStatus: "migrated", migrationReviewRequired: true }]);
-  expect(screen.queryByRole("button", { name: /common.edit/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "modelMigration.review" })).not.toBeInTheDocument();
+  renderList([
+    {
+      ...makeModels(1)[0],
+      migrationStatus: "migrated",
+      migrationReviewRequired: true,
+    },
+  ]);
+  expect(
+    screen.queryByRole("button", { name: /common.edit/ })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "modelMigration.review" })
+  ).not.toBeInTheDocument();
+});
+
+it("keeps the pending-review edit indicator without a duplicate migration text badge", () => {
+  const model = {
+    ...makeModels(1)[0],
+    migrationStatus: "migrated" as const,
+    migrationReviewRequired: true,
+  };
+  renderList([model]);
+  expect(screen.queryByText("modelMigration.pending")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "common.edit · modelMigration.pending" })
+  ).toBeVisible();
 });

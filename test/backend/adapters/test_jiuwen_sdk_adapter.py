@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for ``backend.adapters.jiuwen_sdk_adapter``.
+"""Unit tests for ``adapters.jiuwen_sdk_adapter``.
 
 The adapter module has heavy module-level side effects (installing a
 ``sys.meta_path`` finder, stubbing missing optional dependencies, then doing
@@ -115,7 +115,7 @@ _ensure_openjiuwen_stub()
 # multiple times inside the same pytest session without leaking state.
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def adapter_module(monkeypatch):
+def adapter_module(monkeypatch, request):
     """Import ``adapters.jiuwen_sdk_adapter`` fresh for each test.
 
     The module installs a meta-path finder and writes module-level stubs on
@@ -128,6 +128,7 @@ def adapter_module(monkeypatch):
     # Snapshot of the stub-tree entries we manage.  We re-register them
     # before every test, even if the test deleted them.
     _ensure_openjiuwen_stub()
+    monkeypatch.setattr("importlib.metadata.version", lambda name: getattr(request, "param", "0.1.13"))
 
     sys.modules.pop("adapters.jiuwen_sdk_adapter", None)
     import adapters.jiuwen_sdk_adapter as mod  # noqa: E402,WPS433
@@ -152,6 +153,12 @@ class TestModuleImport:
     def test_bypasser_installed_flag_is_true(self, adapter_module):
         # The module marks the bypasser as installed at import time.
         assert adapter_module._bypasser_installed is True
+
+    @pytest.mark.parametrize("adapter_module", ["0.1.18"], indirect=True)
+    def test_native_version_does_not_install_legacy_import_shims(self, adapter_module):
+        assert adapter_module._needs_legacy_bypass is False
+        assert adapter_module._bypasser_installed is False
+        assert not any(isinstance(finder, adapter_module._JiuwenInitBypasser) for finder in sys.meta_path)
 
     def test_install_jiuwen_bypasser_is_now_a_noop(self, adapter_module):
         # After the import-time install, calling the helper is a no-op that
@@ -446,7 +453,7 @@ class TestBuildJiuwenModelConfigs:
         return ModelRequestConfig, ModelClientConfig
 
     def test_missing_model_raises_jiuwen_error(self, adapter_module, fake_jiuwen_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         # Give the ``database`` stub a ``__path__`` so that subsequent
         # ``from X import Y`` inside the stub's ``__init__`` resolves through
@@ -561,7 +568,7 @@ class TestBuildJiuwenModelConfigs:
 
 class TestJiuwenSDKAdapterEnsure:
     def test_ensure_available_imports_openjiuwen(self, adapter_module, monkeypatch):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         # The simplest way to simulate ``openjiuwen`` being uninstalled is
         # to delete the cached module so the ``import openjiuwen`` statement
@@ -590,7 +597,7 @@ class TestJiuwenSDKAdapterGenerate:
     def test_generate_raises_not_implemented(self, adapter_module):
         # ``generate`` is a stub: it should always raise ``JiuwenSDKError``
         # with a "not implemented" message.
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         adapter = adapter_module.JiuwenSDKAdapter(model_id=1, tenant_id="t1")
         with pytest.raises(JiuwenSDKError, match="尚未实现"):
@@ -796,7 +803,7 @@ class TestEvaluateSemanticConsistency:
         assert reason == "失败"
 
     def test_non_dict_payload_raises(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         _patch_build_configs(adapter_module)
         _build_metric_mock(
@@ -857,7 +864,7 @@ class TestOptimize:
         assert result == "new prompt"
 
     def test_none_result_raises(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         _patch_ensure_available(adapter_module)
         _patch_lazy_builders(adapter_module, MagicMock(), MagicMock())
@@ -869,7 +876,7 @@ class TestOptimize:
             adapter.optimize(prompt="p", feedback="f")
 
     def test_exception_is_wrapped_as_jiuwen_sdk_error(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         _patch_ensure_available(adapter_module)
         _patch_lazy_builders(adapter_module, MagicMock(), MagicMock())
@@ -904,7 +911,7 @@ class TestOptimizeBadcase:
         assert kwargs["language"] == "zh-CN"
 
     def test_none_result_raises(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         _patch_ensure_available(adapter_module)
         _patch_lazy_builders(adapter_module, MagicMock(), MagicMock())
@@ -917,7 +924,7 @@ class TestOptimizeBadcase:
             adapter.optimize_badcase(prompt="p", bad_cases=[MagicMock()])
 
     def test_exception_is_wrapped_as_jiuwen_sdk_error(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         _patch_ensure_available(adapter_module)
         _patch_lazy_builders(adapter_module, MagicMock(), MagicMock())
@@ -937,7 +944,7 @@ class TestOptimizeBadcase:
 
 class TestLazyImportJiuwen:
     def test_missing_openjiuwen_raises_jiuwen_error(self, adapter_module, monkeypatch):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         # Force the import statement inside ``_lazy_import_jiuwen`` to raise
         # by overriding ``__import__`` for the duration of the call.  We
@@ -1081,7 +1088,7 @@ class TestRunAsyncLoopRunning:
 
 class TestEvaluateSemanticConsistencyLLMPath:
     def test_invoke_exception_raises_jiuwen_error(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         llm_as_judge_mod = types.ModuleType(
             "openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge"
@@ -1127,7 +1134,7 @@ class TestEvaluateSemanticConsistencyLLMPath:
             )
 
     def test_parse_exception_raises_jiuwen_error(self, adapter_module):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         llm_as_judge_mod = types.ModuleType(
             "openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge"
@@ -1434,7 +1441,7 @@ class TestJiuwenInitBypasserFindSpec:
         # Provide a fake real openjiuwen package with __path__ so the finder
         # gets past the ``import openjiuwen`` line.
         real_pkg = types.ModuleType("openjiuwen")
-        real_pkg.__path__ = [str(adapter_module.__file__).rsplit("adapters", 1)[0]]
+        real_pkg.__path__ = [str(Path(adapter_module.__file__).parent)]
         monkeypatch.setitem(sys.modules, "openjiuwen", real_pkg)
 
         finder = _JiuwenInitBypasser()
@@ -1692,7 +1699,7 @@ class TestLazyImportJiuwenBuilders:
     def test_raises_jiuwen_sdk_error_when_openjiuwen_missing(
         self, adapter_module, monkeypatch,
     ):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         monkeypatch.setattr(
             adapter_module, "_install_jiuwen_bypasser", lambda: True,
@@ -1718,7 +1725,7 @@ class TestEvaluateSemanticConsistencyImportFailure:
     raises — caught and re-raised as ``JiuwenSDKError`` (line 599-604)."""
 
     def test_import_failure_raises_jiuwen_sdk_error(self, adapter_module, monkeypatch):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         # Make the import of LLMAsJudgeMetric fail by injecting a broken module.
         bad_module = types.ModuleType(

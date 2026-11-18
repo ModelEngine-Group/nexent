@@ -13,17 +13,20 @@ import { RemoteConversationHistoryAdapter } from "@/app/newchat/adapter/conversa
 import { useConversationResume } from "@/hooks/chat/useConversationResume";
 import type { ApiConversationDetail } from "@/types/conversation";
 import type { Agent } from "@/types/agentConfig";
-import {
-  collectStream,
-  restoreHistory,
-  summaryEvent,
-  summaryParts,
-} from "../../infra/automation/d1/frontend/newchat-fixture";
 
 vi.mock("@/services/conversationService", () => ({
   CONVERSATION_PAGE_SIZE: 20,
   conversationService: { getById: vi.fn(), runAgent: vi.fn(), stop: vi.fn() },
 }));
+
+async function restoreHistory(messages: unknown[]) {
+  return new RemoteConversationHistoryAdapter(
+    () => "901",
+    async () => ({ remoteId: "901" }),
+    async () => ({ conversation_id: "901", message: messages }) as never,
+  ).load();
+}
+
 
 describe("UT-FE-040 newchat history turn ownership", () => {
   it("UT-FE-040 groups normal chat output by the originating user turn", async () => {
@@ -197,6 +200,7 @@ it.each([
     const restored = await loadRetry(snapshot);
     expect(restored).not.toHaveProperty("unstable_resume");
     runtime.thread.import(restored);
+    expect(runtime.thread.getState().isRunning).toBe(false);
     expect(runtime.thread.getMessageById("6").getState()).toMatchObject({
       branchNumber: 3,
       branchCount: 3,
@@ -239,7 +243,9 @@ it.each([
       );
     };
     try {
-      await waitFor(() => expect(controllers).toHaveLength(1));
+      await waitFor(() => {
+        expect(controllers).toHaveLength(1);
+      });
       assertBranches();
       if (partial)
         expect(
@@ -291,10 +297,12 @@ it.each([
       const current = runtime.thread.getMessageById("6");
       current.switchToBranch({ position: "previous" });
       expect(runtime.thread.getState().messages.at(-1)?.id).toBe("4");
+      expect(JSON.stringify(runtime.thread.getState().messages.at(-1)?.content)).toContain("answer-4");
       runtime.thread
         .getMessageById("4")
         .switchToBranch({ position: "previous" });
       expect(runtime.thread.getState().messages.at(-1)?.id).toBe("2");
+      expect(JSON.stringify(runtime.thread.getState().messages.at(-1)?.content)).toContain("answer-2");
       complete.unmount();
     } finally {
       mounted.unmount();

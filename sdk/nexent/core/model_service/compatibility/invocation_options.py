@@ -28,6 +28,9 @@ class LegacyInvocationOptions:
     custom_overrides: Mapping[str, object] | None = None
 
     def resolve(self, profile: ResolvedModelProfile) -> ResolvedModelProfile:
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+
+        profile = ensure_outlet_parameter_rules(profile)
         submitted = dict(self.parameters)
         for key, value in (("stop", self.stop_sequences), ("response_format", self.response_format)):
             if value is None:

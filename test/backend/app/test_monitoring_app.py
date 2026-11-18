@@ -32,7 +32,7 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("management.db.client.MinioClient",
+patch("infrastructure.object_storage.client.MinioClient",
       return_value=minio_client_mock).start()
 
 
@@ -96,7 +96,7 @@ class TestListModelsEndpoint:
     @pytest.fixture
     def client(self, mocker):
         mocker.patch("boto3.client")
-        mocker.patch("management.db.client.MinioClient")
+        mocker.patch("infrastructure.object_storage.client.MinioClient")
 
         import types
 

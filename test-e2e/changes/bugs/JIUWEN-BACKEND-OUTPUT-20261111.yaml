@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-BACKEND-OUTPUT-20261111
+  change_type: bugfix
+  bug_id: JIUWEN-BACKEND-OUTPUT-20261111
+  title: Normalize Core output before the public SSE boundary
+  description: Move the output projection from the frontend to the shared backend
+    stream and history boundaries.
+  observed_behavior: Northbound clients receive model_output and other new runtime
+    event types while only the web UI converts them.
+  expected_behavior: Northbound and page clients receive established Nexent types
+    with exact tool pairing and explicit terminal semantics.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing raw persistence and frontend projection tests did not assert
+      the established backend wire types.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-OUTPUT-D4-001
+    - JIUWEN-OUTPUT-D5-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Normal text, reasoning, exact resources and metrics use established Nexent types
+      before channel publishing.
+    - Missing, duplicate and invalid terminals cannot confirm success; waiting input
+      has no final answer; mixed Core invocations remain isolated.
+    - Saved envelopes are projected on the backend without rewriting audit records;
+      ordinary JSON and legacy events stay literal.
+    - The frontend uses its existing stream and history parsers without engine envelope
+      conversion.
+    reason: Move existing projection assertions to the server owner and retain frontend
+      parser regressions.
+    test_selectors:
+    - test/backend/utils/test_nexent_output.py
+    - test/backend/utils/test_runtime_output.py
+    - test/backend/services/test_agent_stream_memory.py
+    - test/backend/services/test_specialized_agent_stream_contract.py
+    - test/backend/services/test_creator_execution.py
+    - test/backend/services/test_workbench_creation_history_service.py
+    - test/backend/services/test_workbench_creation_history_coverage.py
+  notes: SPEC runtime-agent-core-factory BO-01..04. No SQL or models changes. Strengthen
+    existing D3 PostgreSQL/wire proof, D5 faults and D4 client journey; no redundant
+    D1. D3/D5 create and finally release owned loopback providers, threads and PostgreSQL;
+    D4 owns browser fixtures. Self-contained preparation families are empty. Latest
+    deployment and authenticated real model checks are separate delivery evidence.

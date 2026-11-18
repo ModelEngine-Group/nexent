@@ -5,7 +5,7 @@
 import json
 
 import pytest
-from nexent.core.agent_runtime_support.contracts import RuntimeResourceView
+from nexent.core.agents.contracts.resources import RuntimeResourceView
 from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
 from nexent.core.model_service.resource_conversion import (
     ResourceConverterRegistry,

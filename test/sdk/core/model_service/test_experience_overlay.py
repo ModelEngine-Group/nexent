@@ -97,7 +97,7 @@ def test_defaults_are_layered_before_permitted_user_values(layer, expected):
     assert before.parameter_rules.declarations[0]["source"]["ref"] == "fixture"
 
 
-def test_model_experience_is_applied_after_exact_upstream_facts():
+def test_exact_upstream_fact_overrides_model_experience():
     rule = {
         "capability_overrides": [
             {
@@ -109,8 +109,8 @@ def test_model_experience_is_applied_after_exact_upstream_facts():
         ]
     }
     policy = resolve(definitions(model=rule))
-    assert policy.capabilities["context"]["output_limit"] == 8000
-    assert policy.overrides[0]["original_value"] == 12000
+    assert policy.capabilities["context"]["output_limit"] == 12000
+    assert policy.overrides[0]["original_value"] == 16000
     assert policy.overrides[0]["source"] == "rules/model.toml"
     assert policy.capabilities["context"]["combined_window"] == 200000
 

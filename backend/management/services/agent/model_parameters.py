@@ -3,20 +3,20 @@
 """Apply explicit per-Agent values to an immutable saved model outlet."""
 
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
-from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
 
 def merge_agent_model_parameters(profile, entry):
     """Read a current/historical entry at the boundary, then apply canonical values."""
     from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry))
+    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry, profile=profile))
 
 
 def _apply_agent_parameters(profile, entry):
     from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
     from nexent.core.model_service.profiles.request_parameters import overlay_extra_api_parameters
 
-    resolved = overlay_profile_parameters(ensure_outlet_sampling_rules(profile), entry["parameter_values"], scope="outlet")
+    resolved = overlay_profile_parameters(ensure_outlet_parameter_rules(profile), entry["parameter_values"], scope="outlet")
     if entry.get("custom_overrides") is not None:
         data = resolved.model_dump(mode="json")
         data["extra_api_parameters"] = overlay_extra_api_parameters(resolved, entry["custom_overrides"])
@@ -32,7 +32,7 @@ def merge_runtime_model_parameters(profile, entry, preferences):
     if not isinstance(preferences, dict):
         from contracts.errors.exceptions import ModelOutletValidationError
         raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-    canonical = read_agent_parameter_entry(entry)
+    canonical = read_agent_parameter_entry(entry, profile=profile)
     from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
     preferences = without_outlet_token_limits(preferences)
     agent_view = _apply_agent_parameters(profile, canonical)

@@ -7,6 +7,7 @@ import json
 from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
+from management.services.agent.replay import subscribe_shared_checkpoint
 from copy import (
     deepcopy,
 )
@@ -49,6 +50,9 @@ from management.services.agent.execution import (
     _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
+from management.services.agent.preparation.run import (
+    preflight_mcp_header_passthrough,
+)
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -86,17 +90,16 @@ from management.services.knowledge_base.scope import (
     prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
-from management.services.agent.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
+    strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
 
@@ -217,6 +220,8 @@ async def run_agent_stream(
         # need a transient identifier for lifecycle operations such as stop.
         agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
 
+    # Preserve the submitted query before adding model-only runtime context.
+    user_query = agent_request.query
     # Inject current time in the user's timezone so the LLM can answer
     # time-related questions correctly. The SDK strips this prefix before
     # sending AGENT_NEW_RUN to the frontend, so the user message display
@@ -350,6 +355,16 @@ async def run_agent_stream(
                 error_code,
                 details={"reason": exc.code.value},
             ) from exc
+    # Validation passed — now compute a clean copy without transport-only
+    # reserved fields (``_mcp_headers``, ``_mcp_headers_by_server``, and any
+    # future ``_``-prefixed key) for every persistence path below.  We never
+    # mutate ``agent_request.metadata`` in place because ``apply_mcp_header_
+    # passthrough`` later still needs to read the reserved fields from it.
+    clean_metadata = (
+        strip_reserved_runtime_metadata_fields(agent_request.metadata)
+        if metadata_update_requested
+        else {}
+    )
     metadata_entrypoint = getattr(
         agent_request, "_runtime_metadata_entrypoint", "native"
     )
@@ -458,7 +473,7 @@ async def run_agent_stream(
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
-            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
+            conversation_kwargs["runtime_metadata"] = clean_metadata
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -483,7 +498,7 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=agent_request.metadata or {},
+                    metadata=clean_metadata,
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
             except RuntimeMetadataVersionConflict as exc:
@@ -515,15 +530,13 @@ async def run_agent_stream(
             )
 
         if agent_request.is_debug:
-            metadata_snapshot = (
-                dict(agent_request.metadata or {}) if metadata_update_requested else {}
-            )
+            metadata_snapshot = clean_metadata
             metadata_version = None
         elif is_new_conversation:
             metadata_snapshot = dict(
                 conversation_data.get(
                     "runtime_metadata",
-                    agent_request.metadata if metadata_update_requested else {},
+                    clean_metadata if metadata_update_requested else {},
                 )
                 or {}
             )
@@ -547,7 +560,7 @@ async def run_agent_stream(
                 resolved_metadata = resolve_conversation_runtime_metadata(
                     conversation_id=agent_request.conversation_id,
                     user_id=resolved_user_id,
-                    request_metadata=agent_request.metadata,
+                    request_metadata=clean_metadata if metadata_update_requested else None,
                     update_requested=metadata_update_requested,
                     expected_version=agent_request.expected_metadata_version,
                 )
@@ -677,6 +690,17 @@ async def run_agent_stream(
             if runtime_state_service.enabled and is_remote_running:
 
                 async def redis_channel_stream():
+                    checkpoint = await runtime_state_service.read_replay_checkpoint_async(
+                        resolved_user_id, agent_request.conversation_id,
+                    )
+                    if checkpoint:
+                        yield STREAM_STATUS_EVENT
+                        yield _resume_status_chunk(len(checkpoint["entries"]))
+                        async for chunk in subscribe_shared_checkpoint(
+                            runtime_state_service, resolved_user_id, agent_request.conversation_id, checkpoint,
+                        ):
+                            yield chunk
+                        return
                     replay_events = (
                         await runtime_state_service.read_stream_events_async(
                             user_id=resolved_user_id,
@@ -766,15 +790,14 @@ async def run_agent_stream(
             yield STREAM_STATUS_EVENT
             yield _resume_status_chunk(replay_chunk_count)
 
-            # Use subscribe_with_history(0) to replay ALL chunks from the buffer
-            # This ensures no chunks are lost even if frontend disconnected during streaming
-            # The frontend skips all chunks until replay_chunk_count is reached
-            async for chunk in channel.subscribe_with_history(0):
+            # Replay rendering checkpoints independently of the bounded raw tail.
+            # Reconnection rebuilds the answer before consuming newer suffixes.
+            async for chunk in channel.subscribe_with_history(0, include_replay_checkpoint=True):
                 yield chunk
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield _resume_completed_chunk()
+            yield _resume_completed_chunk(channel.completion_status or "failed")
 
         return StreamingResponse(
             channel_stream(),
@@ -886,9 +909,11 @@ async def run_agent_stream(
         )
 
     try:
+        stream_generation = uuid.uuid4().hex
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
+            generation=stream_generation,
         )
 
         if not agent_request.is_debug and not skip_user_save:
@@ -904,6 +929,7 @@ async def run_agent_stream(
             resolved_user_id,
             resolved_tenant_id,
             language,
+            user_query=user_query,
             extra_metadata={
                 "skip_user_save": skip_user_save,
                 "has_override_user_id": user_id is not None,
@@ -919,6 +945,7 @@ async def run_agent_stream(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
             )
+            channel.generation = stream_generation
     except Exception:
         deferred_run.cancel()
         runtime_thread_manager.cancel(
@@ -947,6 +974,41 @@ async def run_agent_stream(
         stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
+
+    # -------------------------------------------------------------------
+    # Phase-1 MCP header passthrough preflight — MUST run BEFORE the
+    # StreamingResponse is committed so AppException 010111 surfaces
+    # as HTTP 400 instead of getting swallowed into an SSE error event later.
+    # -------------------------------------------------------------------
+    if agent_request.metadata is not None and agent_request.agent_id is not None:
+        try:
+            _pf = preflight_mcp_header_passthrough(
+                agent_id=int(agent_request.agent_id),
+                tenant_id=resolved_tenant_id,
+                user_id=str(user_id or ""),
+                version_no=int(agent_request.version_no or 0),
+                metadata=agent_request.metadata,
+            )
+            if _pf is not None:
+                # Real function returns a coroutine; AsyncMock returns an
+                # awaitable; a plain MagicMock returns a MagicMock that is
+                # NOT awaitable — guard against that so existing tests that
+                # only patch generate_stream don't crash on this new step.
+                import inspect as _inspect
+
+                if _inspect.isawaitable(_pf):
+                    await _pf
+        except Exception as exc:
+            # AppException propagates as HTTP 400 — this is the desired
+            # northbound contract.  Anything else here is a code bug; reraise
+            # so FastAPI surfaces 500.
+            if isinstance(exc, AppException):
+                raise
+            logger.error(
+                "preflight_mcp_header_passthrough raised unexpected exception",
+                exc_info=True,
+            )
+            raise
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
@@ -1044,6 +1106,11 @@ async def run_agent_stream(
         headers["run_id"] = debug_run_id
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
+    for field, header in [("_runtime_user_message_id", "X-User-Message-Id"),
+                          ("_runtime_user_message_index", "X-User-Message-Index")]:
+        value = getattr(agent_request, field, None)
+        if type(value) is int and value >= 0:
+            headers[header] = str(value)
     runtime_metadata_version = getattr(agent_request, "_runtime_metadata_version", None)
     if runtime_metadata_version is not None:
         headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)

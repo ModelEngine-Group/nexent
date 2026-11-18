@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.context_runtime.contracts import FinalContext
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.contracts.context import FinalContext
 from nexent.core.models import openai_llm
 from nexent.core.models.context_overflow import (
     ProviderContextOverflowRetryExhausted,

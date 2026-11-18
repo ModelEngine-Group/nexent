@@ -1,25 +1,21 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
-from contracts.errors.exceptions import DuplicateError
-from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
-from management.utils.orm import as_dict
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.constants.environment import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
-from contracts.errors.exceptions import DuplicateError
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
-from management.db.models import KnowledgeRecord
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, DuplicateError
+from contracts.roles import has_any_role, normalize_roles
+from infrastructure.rdb.client import get_db_session
+from management.db.models import KnowledgeRecord, UserTenant
+from infrastructure.rdb.orm import as_dict
 from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")
@@ -43,10 +39,9 @@ def _get_user_role_in_session(session, user_id: Optional[str], tenant_id: Option
     if not user_id or not tenant_id:
         return "USER"
     try:
-        from management.db.models import UserTenant
 
         role = (
-            session.query(UserTenant.user_role)
+            session.query(UserTenant.roles)
             .filter(
                 UserTenant.user_id == user_id,
                 UserTenant.tenant_id == tenant_id,
@@ -57,7 +52,7 @@ def _get_user_role_in_session(session, user_id: Optional[str], tenant_id: Option
     except Exception:
         logger.exception("Failed to resolve knowledge-base creator role")
         return "USER"
-    return role.upper() if isinstance(role, str) and role else "USER"
+    return normalize_roles(role or "USER")
 
 
 def _raise_knowledge_limit_error(scope: str, limit: int, current_count: int, role: str = None) -> None:
@@ -83,6 +78,8 @@ def _enforce_knowledge_limits(session, tenant_id: Optional[str], user_id: Option
     if not tenant_id:
         return
 
+    snapshot = get_config_snapshot()
+
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
         {"lock_key": f"knowledge-tenant-limit:{tenant_id}"},
@@ -95,16 +92,16 @@ def _enforce_knowledge_limits(session, tenant_id: Optional[str], user_id: Option
         )
         .count()
     )
-    if tenant_count >= MAX_KNOWLEDGE_BASES_PER_TENANT:
-        _raise_knowledge_limit_error("tenant", MAX_KNOWLEDGE_BASES_PER_TENANT, tenant_count)
+    if tenant_count >= snapshot.get("MAX_KNOWLEDGE_BASES_PER_TENANT"):
+        _raise_knowledge_limit_error("tenant", snapshot.get("MAX_KNOWLEDGE_BASES_PER_TENANT"), tenant_count)
 
     if not user_id:
         return
     role = _get_user_role_in_session(session, user_id, tenant_id)
     user_limit = (
-        MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
-        if role in _PRIVILEGED_KNOWLEDGE_ROLES
-        else MAX_KNOWLEDGE_BASES_PER_USER
+        snapshot.get("MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER")
+        if has_any_role(role, _PRIVILEGED_KNOWLEDGE_ROLES)
+        else snapshot.get("MAX_KNOWLEDGE_BASES_PER_USER")
     )
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
@@ -771,7 +768,6 @@ def update_summary_frequency(index_name: str, summary_frequency: Optional[str], 
 
 def update_last_summary_time(index_name: str):
     """Update last_summary_time to now after a successful summary generation."""
-    from datetime import datetime
 
     try:
         with get_db_session() as session:
@@ -790,7 +786,6 @@ def update_last_summary_time(index_name: str):
 
 def update_last_doc_update_time(index_name: str):
     """Update last_doc_update_time to now after document add/delete operation."""
-    from datetime import datetime
 
     try:
         with get_db_session() as session:

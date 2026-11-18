@@ -2,7 +2,7 @@
 
 """Actual router/DTO/RBAC contracts with an isolated service boundary."""
 
-import gateway.authentication.auth as depends_dependencies
+import management.services.permission.identity.session as depends_dependencies
 import json
 from dataclasses import dataclass, field
 
@@ -15,7 +15,7 @@ from runtime.api.skill import creation as skill_app_creation
 from management.services.model import run_bindings
 from contracts.errors.exceptions import ForbiddenError
 from management.services.model import run_controls
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 import permissions.depends as depends
 from permissions import rbac
 from permissions.models import CurrentUser

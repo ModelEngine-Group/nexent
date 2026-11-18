@@ -6,6 +6,7 @@ export type ClarificationQuestionType =
 export interface ClarificationOption {
   id: string;
   label: string;
+  disabled?: boolean;
 }
 
 export interface ClarificationQuestion {
@@ -33,6 +34,7 @@ export interface RuntimeClarificationQuestion {
   options: ClarificationOption[];
   allow_other: boolean;
   placeholder: string;
+  creation_request?: string;
 }
 
 export interface ClarificationForm {

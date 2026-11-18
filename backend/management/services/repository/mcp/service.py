@@ -3,30 +3,64 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
-from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
-from contracts.constants.constants import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_MARKET_STATUSES
-from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_MCP_REPOSITORY
-from management.db.mcp.market import check_mcp_market_name_exists, create_mcp_market_record, delete_mcp_market_record_by_id, get_mcp_market_record_by_id, get_mcp_market_records, get_mcp_market_tag_stats_by_tenant, increment_mcp_market_download_count, list_mcp_market_records_by_status, list_mcp_market_records_by_tenant_and_user, update_mcp_market_record, update_mcp_market_status
-from management.db.mcp.remote import clear_mcp_record_market_id, update_mcp_record_market_id_by_id, update_mcp_record_manage_fields_by_id
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
+
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_MCP_REPOSITORY,
+    STATUS_NOT_SHARED,
+    STATUS_PENDING_REVIEW,
+    STATUS_REJECTED,
+    STATUS_SHARED,
+    VALID_MARKET_STATUSES,
+)
+from contracts.errors.exceptions import (
+    MCPConnectionError,
+    McpNameConflictError,
+    McpNotFoundError,
+    McpValidationError,
+    UnauthorizedError,
+)
+from contracts.roles import has_any_role, roles_from_record
 from management.db.identity.group import query_group_ids_by_user
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.mcp import remote as remote_mcp_db
+from management.db.mcp.market import (
+    check_mcp_market_name_exists,
+    create_mcp_market_record,
+    delete_mcp_market_record_by_id,
+    get_mcp_market_record_by_id,
+    get_mcp_market_records,
+    get_mcp_market_tag_stats_by_tenant,
+    increment_mcp_market_download_count,
+    list_mcp_market_records_by_status,
+    list_mcp_market_records_by_tenant_and_user,
+    update_mcp_market_record,
+    update_mcp_market_status,
+)
+from management.db.mcp.remote import (
+    clear_mcp_record_market_id,
+    update_mcp_record_manage_fields_by_id,
+    update_mcp_record_market_id_by_id,
+)
 from management.services.notification.service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
     deactivate_notifications,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.utils.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.serialization import (
+    convert_list_to_string,
+    convert_string_to_list,
+)
 
 logger = logging.getLogger("mcp_management_service")
 
 
 def get_mcp_record_by_id_and_tenant(*args, **kwargs):
     """Load a source MCP record through the database module boundary."""
-    from management.db.mcp.remote import get_mcp_record_by_id_and_tenant as load_record
 
-    return load_record(*args, **kwargs)
+    return remote_mcp_db.get_mcp_record_by_id_and_tenant(*args, **kwargs)
 
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SU"}
 SUPER_ADMIN_ROLES = {"SUPER_ADMIN", "SU"}
@@ -67,10 +101,10 @@ _SUBMIT_TRANSITIONS: FrozenSet[Tuple[str, str]] = frozenset({
 def _get_mcp_review_admin_scope(user_id: str, tenant_id: str) -> str | None:
     """Return tenant scope for review queries. None means no scope (SU sees all)."""
     user_tenant = get_user_tenant_by_user_id(user_id)
-    user_role = (user_tenant or {}).get("user_role", "").upper()
-    if user_role not in ADMIN_ROLES:
+    user_role = roles_from_record(user_tenant or {})
+    if not has_any_role(user_role, ADMIN_ROLES):
         raise UnauthorizedError("Only administrators can review MCP submissions")
-    if user_role in SUPER_ADMIN_ROLES:
+    if has_any_role(user_role, SUPER_ADMIN_ROLES):
         return None
     return tenant_id
 
@@ -147,7 +181,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_user_role(user_id: str) -> str:
     user_tenant = get_user_tenant_by_user_id(user_id) or {}
-    return str(user_tenant.get("user_role", "")).upper()
+    return roles_from_record(user_tenant)
 
 
 def _validate_market_status_transition(
@@ -166,21 +200,21 @@ def _validate_market_status_transition(
     """
     transition = (current_status, new_status)
 
-    if user_role == "SU":
+    if has_any_role(user_role, {'SU'}):
         if transition not in _SU_TRANSITIONS:
             raise ValueError(
                 f"Invalid status transition from '{current_status}' to '{new_status}'"
             )
         return None
 
-    if user_role in ("ADMIN", "DEV"):
+    if has_any_role(user_role, {'ADMIN','DEV'}):
         if record.get("tenant_id") != tenant_id:
             raise UnauthorizedError("Not authorized to update this marketplace listing")
-        if user_role == "DEV" and record.get("user_id") != user_id:
+        if has_any_role(user_role, {'DEV'}) and not has_any_role(user_role, {'ADMIN'}) and record.get("user_id") != user_id:
             raise UnauthorizedError("Not authorized to update this marketplace listing")
 
         # ADMIN can also act as reviewer
-        if user_role == "ADMIN" and transition in _ADMIN_REVIEW_TRANSITIONS:
+        if has_any_role(user_role, {'ADMIN'}) and transition in _ADMIN_REVIEW_TRANSITIONS:
             return None
 
         if transition not in _PUBLISHER_TRANSITIONS:
@@ -215,7 +249,7 @@ async def list_community_mcp_services(
     """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
     user_role = _get_user_role(user_id)
     user_group_ids = None
-    if user_role not in CAN_EDIT_ALL_USER_ROLES:
+    if not has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES):
         try:
             user_group_ids = list(query_group_ids_by_user(user_id) or [])
         except Exception as e:
@@ -228,7 +262,7 @@ async def list_community_mcp_services(
         transport_type=transport_type,
         cursor=cursor,
         limit=limit,
-        user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
+        user_id=user_id if not has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES) else None,
         user_group_ids=user_group_ids,
     )
     if page is not None:
@@ -690,7 +724,7 @@ async def approve_community_mcp_service(
 ) -> None:
     """Approve: pending_review -> shared."""
     user_role = _get_user_role(user_id)
-    if user_role not in ADMIN_ROLES:
+    if not has_any_role(user_role, ADMIN_ROLES):
         raise UnauthorizedError("Only administrators can approve MCP submissions")
     await change_mcp_market_status(
         tenant_id=tenant_id,
@@ -710,7 +744,7 @@ async def reject_community_mcp_service(
 ) -> None:
     """Reject: pending_review -> rejected."""
     user_role = _get_user_role(user_id)
-    if user_role not in ADMIN_ROLES:
+    if not has_any_role(user_role, ADMIN_ROLES):
         raise UnauthorizedError("Only administrators can reject MCP submissions")
     await change_mcp_market_status(
         tenant_id=tenant_id,

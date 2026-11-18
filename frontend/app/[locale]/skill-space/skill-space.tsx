@@ -1,12 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useEffect, useMemo, useState } from "react";
 import { App, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
@@ -37,7 +37,7 @@ export function SkillSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = hasRole(user, "ADMIN");
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
   const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<

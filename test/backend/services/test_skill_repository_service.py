@@ -846,7 +846,7 @@ def test_update_status_validates_input_and_missing_records():
         )
 
 
-@pytest.mark.parametrize("user_role", ["USER", "user", ""])
+@pytest.mark.parametrize("user_role", ["USER", "user", "OPS", ""])
 def test_skill_repository_access_rejects_ordinary_users(user_role):
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
         "user_role": user_role,
@@ -1246,3 +1246,13 @@ def test_repository_detail_not_found():
 
     with pytest.raises(ValueError, match="Repository listing not found"):
         srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+
+
+@pytest.mark.parametrize("roles,allowed", [(["USER", "DEV", "OPS"], True), (["USER", "OPS"], False)])
+def test_skill_repository_access_uses_the_authoritative_role_union(roles, allowed):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"roles": roles, "user_role": "USER"}
+    if allowed:
+        srs.ensure_skill_repository_access("user-1")
+    else:
+        with pytest.raises(ForbiddenError):
+            srs.ensure_skill_repository_access("user-1")

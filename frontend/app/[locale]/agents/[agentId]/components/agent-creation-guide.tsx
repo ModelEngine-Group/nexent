@@ -9,11 +9,10 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { Button } from "antd";
+import { Button, Tour } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { useGuidePreference } from "@/hooks/useGuidePreference";
-import { StandardTour } from "@/components/common/StandardTour";
 import { hasCompletedAgentCreationGuide } from "@/lib/agentCreationGuide";
 
 const TARGETS = ["assistant", "core", "resources", "workflow"] as const;
@@ -95,12 +94,15 @@ export function AgentCreationGuide({
   return (
     <>
       <span ref={initializeGuide} hidden />
-      <StandardTour
+      <Tour
         open={open}
         current={current}
         onChange={setCurrent}
         onClose={dismiss}
-        rootClassName={`agent-creation-guide guide-step-${current + 1}`}
+        rootClassName="agent-creation-guide"
+        closable={false}
+        disabledInteraction
+        indicatorsRender={() => null}
         actionsRender={(actions) =>
           current === 0 ? (
             <>
@@ -113,25 +115,13 @@ export function AgentCreationGuide({
             actions
           )
         }
-        gap={{
-          offset:
-            current === 0
-              ? [1, -9]
-              : current === 3
-                ? 0
-                : current === 2
-                  ? [17, 6.5]
-                  : [17, 8],
-          radius: 8,
-        }}
+        gap={{ radius: 8 }}
         scrollIntoViewOptions={{ block: "nearest", inline: "nearest" }}
         steps={TARGETS.map((name, index) => ({
           title: t(`agent.creationGuide.${name}.title`),
           description: t(`agent.creationGuide.${name}.description`),
           target: () => findTarget(name) ?? workspaceRef.current!,
           placement: PLACEMENTS[index],
-          className: index === 2 ? "guide-resources" : undefined,
-          style: { width: index === 0 ? 292 : 300 },
           prevButtonProps: { children: t("agent.creationGuide.previous") },
           nextButtonProps: {
             children: t(

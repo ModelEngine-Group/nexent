@@ -68,6 +68,7 @@ interface AgentStoreState {
   agentId: number | null;
   currentAgentId: number | null;
   isReadOnly: boolean;
+  promptsHidden: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
   lastSavedAt: number | null;
@@ -309,9 +310,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt !== undefined
-    ? { prompt: patch.prompt }
-    : {}),
+  ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
@@ -575,6 +574,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     agentId: null,
     currentAgentId: null,
     isReadOnly: true,
+    promptsHidden: false,
     editedAgent: null,
     savedAgent: null,
     lastSavedAt: null,
@@ -594,6 +594,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         agentId,
         currentAgentId: agentId,
         isReadOnly: agent.permission === "READ_ONLY",
+        promptsHidden: agent.prompts_hidden === true,
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
         lastSavedAt: null,
@@ -696,6 +697,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         replaced = true;
         return {
           isReadOnly: agent.permission === "READ_ONLY",
+          promptsHidden: agent.prompts_hidden === true,
           editedAgent: cloneDraft(draft),
           savedAgent: cloneDraft(draft),
           serverSnapshotRevision: state.serverSnapshotRevision + 1,
@@ -725,6 +727,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         agentId: null,
         currentAgentId: null,
         isReadOnly: true,
+        promptsHidden: false,
         editedAgent: null,
         savedAgent: null,
         lastSavedAt: null,

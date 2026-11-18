@@ -17,7 +17,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
 from services.nl2agent_service import (
@@ -52,7 +52,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
 )
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +70,10 @@ def shared_creator_definition(mocker):
         'agent_id': 77, 'version_no': 0, 'agent_origin': 'SYSTEM', 'max_steps': 8,
         'prompt': json.dumps({lang: build_nl2agent_system_prompt(lang) for lang in ('zh', 'en')}),
     })
+    mocker.patch(
+        'services.nl2agent_service.get_config_snapshot',
+        return_value={'MCP_REQUEST_TIMEOUT_SECONDS': 10},
+    )
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -136,7 +140,8 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     )
 
     messages = [json.loads(item) for item in observer.get_cached_message()]
-    assert stop_event.is_set()
+    assert not stop_event.is_set()
+    assert observer.turn_complete is True
     assert observer.boundary_reached is True
     assert [item["type"] for item in messages] == [
         ProcessType.NL2A.value,
@@ -1716,7 +1721,7 @@ async def test_build_run_info_is_ephemeral(mocker, query, clarification_required
     assert history_item.type.value == 'conversation_turn'
     assert history_item.content == {'user_message': 'Build an agent that summarizes weather risks.', 'assistant_final_answer': 'I found matching weather tools.', 'attachments': [], 'user_message_id': -1, 'assistant_message_id': -2}
     assert history_item.metadata == {'layout_order': 0}
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': NEXENT_MCP_INTERNAL_TOKEN}}]
     assert run_info.sandbox_config is None
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
@@ -1787,7 +1792,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     assert prompt_context.type == ContextItemType.SYSTEM
     assert '### Role' in prompt_context.content['text']
     assert run_info.context_input.items[1] == verified_context
-    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': NEXENT_MCP_INTERNAL_TOKEN}}]
 
 
 @pytest.mark.asyncio

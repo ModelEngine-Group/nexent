@@ -374,7 +374,10 @@ it("switches examples on description changes while retaining the visibility opt-
   );
   expect(
     within(screen.getByTestId("creator-welcome")).getAllByRole("button")
-  ).toHaveLength(4);
+  ).toHaveLength(3);
+  expect(
+    screen.queryByText("nl2agent.suggestions.recommendKnowledgeBases.title")
+  ).not.toBeInTheDocument();
   expect(
     screen.getByText("nl2agent.suggestions.generatePrompts.title")
   ).toBeInTheDocument();

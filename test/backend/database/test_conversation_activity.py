@@ -31,12 +31,30 @@ def session(monkeypatch):
         yield value
 
     monkeypatch.setattr(db, "get_db_session", sessions)
-    monkeypatch.setattr(db, "MAX_CONVERSATION_TURNS", 100)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        db,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(MAX_CONVERSATION_TURNS=100),
+    )
     return value
 
 
 def message(**changes):
     return {"conversation_id": 1, "message_idx": 200, "role": "user", "content": "hello", **changes}
+
+
+def test_ordered_pair_keeps_automation_provenance_and_shared_transaction(session):
+    session.scalar.side_effect = [1, 4]
+    message_id, index = db.append_conversation_user_message(
+        1, "scheduled task", [], "owner", message_source=MessageSource.AUTOMATION
+    )
+    assert (message_id, index) == (123, 6)
+    assert session.scalar.call_count == 2
+    inserts = [call.args[0] for call in session.execute.call_args_list if isinstance(call.args[0], Insert)]
+    assert len(inserts) == 1
+    assert inserts[0].compile().params["message_source"] == "AUTOMATION"
 
 
 def test_ordinary_quota_excludes_automation_and_rejects_before_inserting(session):

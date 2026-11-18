@@ -172,7 +172,7 @@ export const PROVIDER_LINKS: Record<string, string> = {
 
 // User role constants
 export const USER_ROLES = {
-  SPEED: "SPEED",
+  OPS: "OPS",
   SU: "SU",
   ADMIN: "ADMIN",
   DEV: "DEV",

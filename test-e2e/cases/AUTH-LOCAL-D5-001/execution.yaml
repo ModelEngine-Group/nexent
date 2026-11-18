@@ -6,6 +6,7 @@ implementations:
   selector: AUTH-LOCAL-D5-001
 acceptance_bindings:
   AC-01:
+  - test_account_data_coverage_and_safe_recovery
   - test_speed_seed_is_system_identity_and_replay_preserves_operator_changes
   - test_deployment_automatic_upgrade_retries_after_sql_success
   - test_legacy_api_only_keys_survive_upgrade_and_replay
@@ -27,4 +28,7 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
-notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and no deployed Supabase.
+notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and an authorized Docker
+  daemon for labelled disposable deployment resources. Requires the Docker CLI, Bash
+  and cached nexent/nexent:latest and postgres:15-alpine images. No deployed Supabase
+  is accessed; automatic_upgrade and cleanup helpers own and release their test resources.

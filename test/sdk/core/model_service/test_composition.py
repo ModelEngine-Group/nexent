@@ -100,7 +100,7 @@ def test_top_p_override_has_explicit_support_and_versioned_revision(
         current.models["family/model"].capabilities["sampling"]["top_p"]["status"]
         == "unknown"
     )
-    assert composition.COMPOSER_REF == "profile_policy_composer_v6"
+    assert composition.COMPOSER_REF == "profile_policy_composer_v8"
     monkeypatch.setattr(composition, "COMPOSER_REF", "profile_policy_composer_v1")
     previous = catalog(sources, combo={"capability_overrides": [override]})
     assert current.revision != previous.revision
@@ -150,7 +150,7 @@ def test_exact_combination_override_takes_priority_over_provider(sources):
         value.capabilities["tools"]["status"] = "unknown"
 
 
-def test_provider_experience_takes_priority_over_hosted_source_fact(sources):
+def test_hosted_source_takes_priority_over_less_specific_provider_experience(sources):
     hosted = replace(
         sources.provider_models["provider/exact"],
         capabilities={"tools": {"status": "supported"}},
@@ -159,7 +159,7 @@ def test_provider_experience_takes_priority_over_hosted_source_fact(sources):
     value = compose(
         catalog(changed, provider={"capability_overrides": [override("unsupported")]})
     )
-    assert value.capabilities["tools"]["status"] == "unsupported"
+    assert value.capabilities["tools"]["status"] == "supported"
     assert value.overrides[-1]["original_value"] == "supported"
 
 
@@ -465,3 +465,23 @@ def test_kimi_sampling_preference_is_composed_without_fixing_user_values(provide
         protocol_parameter_rules=openai_chat_parameter_rules(),
     )
     assert policy.parameter_values["top_p"] == expected
+
+
+def test_hosted_source_overrides_model_preference_and_hosted_preference_wins(sources):
+    hosted = replace(sources.provider_models["provider/exact"], capabilities={"tools": {"status": "unsupported"}})
+    changed = replace(sources, provider_models={"provider/exact": hosted})
+    assert compose(catalog(changed, model={"capability_overrides": [override("supported")]})).capabilities["tools"]["status"] == "unsupported"
+    assert compose(catalog(changed, model={"capability_overrides": [override("supported")]},
+        combo={"capability_overrides": [override("supported")]})).capabilities["tools"]["status"] == "supported"
+
+
+@pytest.mark.parametrize("controls", [[], None])
+def test_hosted_control_restriction_removes_inherited_model_parameters(sources, controls):
+    parameter = {"key": "enable_thinking", "schema": {"type": "boolean"}, "visible": True,
+        "editable": True, "required": False, "allowed_scopes": ["outlet", "conversation"],
+        "ui_group": "reasoning", "owner": "model", "source": {"ref": "fixture"},
+        "api_binding": {"path": "/enable_thinking", "transform_ref": "test_v1", "transform_version": 1}}
+    hosted = replace(sources.provider_models["provider/exact"], capabilities={"reasoning": {"controls": controls}})
+    changed = replace(sources, provider_models={"provider/exact": hosted})
+    policy = compose(catalog(changed, model={"parameters": [parameter]}))
+    assert "enable_thinking" not in policy.parameter_bindings

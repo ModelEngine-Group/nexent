@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for sdk.nexent.core.tools.plan_tools.
 
 Exercises the two plan management tools (CreatePlanTool, UpdatePlanStepTool)
@@ -187,11 +188,10 @@ class _AgentPlan:
         }
 
 
-agent_model_mod = types.ModuleType("sdk.nexent.core.agents.agent_model")
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 agent_model_mod.PlanStep = _PlanStep
 agent_model_mod.AgentPlan = _AgentPlan
-sys.modules["sdk.nexent.core.agents.agent_model"] = agent_model_mod
-agents_pkg.agent_model = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
 
 # ---------------------------------------------------------------------------
