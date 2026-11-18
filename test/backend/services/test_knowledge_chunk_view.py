@@ -251,9 +251,9 @@ def test_standalone_orphans_missing_rows_and_wrong_generation_are_refused(view, 
 
 def test_epoch_changes_snapshot_even_without_any_manifest_change(view):
     s = view
-    before, _ = _snapshot(s.s.record, 1, 0, context=context())
+    before = _snapshot(s.s.record, 1, context=context())
     s.mutate("update", "base1", 1, 0)
-    after, _ = _snapshot(s.s.record, 1, 0, context=context())
+    after = _snapshot(s.s.record, 1, context=context())
     assert before != after
 
 
@@ -269,7 +269,7 @@ def test_active_mutation_prevents_a_stable_snapshot(view):
     )
     s.s.mutation.reserve(value, context=context())
     with pytest.raises(Conflict):
-        _snapshot(s.s.record, 1, 0, context=context())
+        _snapshot(s.s.record, 1, context=context())
 
 
 def test_read_binding_projects_only_selected_kb_and_refuses_writes(view):

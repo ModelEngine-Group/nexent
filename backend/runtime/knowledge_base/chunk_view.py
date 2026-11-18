@@ -196,7 +196,7 @@ class ChunkReadView:
         return state is None or state.alive and state.latest["chunk_index"] == data.get("chunk_index")
 
     @staticmethod
-    def _scan(vectors, resource, where, *, context):
+    def _scan(vectors, resource, where, *, context, include_vectors=False):
         cursor, seen = None, set()
         while True:
             context.remaining()
@@ -205,7 +205,8 @@ class ChunkReadView:
                 where,
                 PageRequest(limit=500, cursor=cursor),
                 context=context,
-                include_vector=False,
+                include_vector=include_vectors,
+                **({"allow_missing_vector": True} if include_vectors else {}),
             )
             yield from page.items
             if page.next_cursor is None:
@@ -243,6 +244,10 @@ class ChunkReadView:
         )
 
     def file_window(self, vectors, resource, manifest, job, start, end, *, context):
+        return [self._dto(row, resource) for row in self.file_records(
+            vectors, resource, manifest, job, start, end, context=context)]
+
+    def file_records(self, vectors, resource, manifest, job, start, end, *, context, include_vectors=False):
         count = self.file_count(manifest, job, context=context)
         if not 0 <= start <= end <= count:
             raise InvalidInput()
@@ -269,7 +274,7 @@ class ChunkReadView:
                 if state.original
             },
         )
-        for record in self._scan(vectors, resource, where, context=context):
+        for record in self._scan(vectors, resource, where, context=context, include_vectors=include_vectors):
             data = record.payload
             if record.key.collection != resource.collection or any(
                 data.get(name) != value for name, value in reference.items()
@@ -291,7 +296,7 @@ class ChunkReadView:
                 raise Conflict()
             if not history.structural:
                 if not start <= index < end or any(
-                    row.chunk_index == index for row in selected
+                    row.payload["chunk_index"] == index for row in selected
                 ):
                     raise Conflict()
             elif state is None:
@@ -304,7 +309,8 @@ class ChunkReadView:
                 original[index] = key
             if state is None or state.creation is None:
                 self._model(record, model)
-            selected.append(self._dto(record, resource))
+            self._dto(record, resource)
+            selected.append(record)
         if history.structural:
             if (
                 len(selected) != count
@@ -322,11 +328,14 @@ class ChunkReadView:
             for key, state in history.states.items()
         ):
             raise Conflict()
-        selected.sort(key=lambda row: (row.chunk_index, row.chunk_id))
+        selected.sort(key=lambda row: (row.payload["chunk_index"], row.key.key))
         self.stable(context=context)
         return selected[start:end] if history.structural else selected
 
     def standalone_window(self, vectors, resource, start, end, *, context):
+        return [self._dto(row, resource) for row in self.standalone_records(vectors, resource, start, end, context=context)]
+
+    def standalone_records(self, vectors, resource, start, end, *, context, include_vectors=False):
         count = self.standalone_count(context=context)
         if not 0 <= start <= end <= count:
             raise InvalidInput()
@@ -339,7 +348,7 @@ class ChunkReadView:
                 Comparison("file_id", "is_null", True),
             ),
         )
-        for record in self._scan(vectors, resource, where, context=context):
+        for record in self._scan(vectors, resource, where, context=context, include_vectors=include_vectors):
             data, key = record.payload, record.key.key
             if any(
                 data.get(name) is not None
@@ -356,9 +365,10 @@ class ChunkReadView:
             ):
                 raise Conflict()
             keys.add(key)
-            selected.append(self._dto(record, resource))
+            self._dto(record, resource)
+            selected.append(record)
         if len(selected) != count:
             raise Conflict()
-        selected.sort(key=lambda row: row.chunk_id)
+        selected.sort(key=lambda row: row.key.key)
         self.stable(context=context)
         return selected[start:end]

@@ -38,7 +38,7 @@ def sample_documents_for_clustering(sample: KnowledgeSampleResult):
         if not document.chunks:
             continue
         doc_id = f'doc_{len(documents):04d}'
-        documents[doc_id] = {'doc_id': doc_id, 'path_or_url': document.file_ref.file_id,
+        documents[doc_id] = {'doc_id': doc_id, 'path_or_url': document.file_ref.file_id if document.file_ref else document.path_or_url or '',
             'filename': document.filename or 'unknown', 'chunk_count': len(document.chunks), 'file_size': 0,
             'chunks': [chunk.model_dump() for chunk in document.chunks]}
     return documents, document_embeddings(documents)

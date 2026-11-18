@@ -20,12 +20,7 @@ from contracts.agentos_knowledge import (
 )
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
-from nexent.storage.models import (
-    Comparison,
-    Junction,
-    OperationContext,
-    PageRequest,
-)
+from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.publication import published_files, published_job
 
@@ -35,59 +30,73 @@ from infrastructure.knowledge_runtime import knowledge_search_ports
 logger = logging.getLogger(__name__)
 
 
-def _snapshot(records, knowledge_id, limit, *, context):
-    """Hash every visible manifest and reservoir-sample files with bounded memory."""
+def _snapshot(records, knowledge_id, *, context):
+    """Hash every visible manifest and the stable confirmed-change epoch."""
     view = ChunkReadView(records, knowledge_id, context=context)
     digest = hashlib.sha256(json.dumps([knowledge_id, view.version], separators=(",", ":")).encode())
-    selected = []
-    for count, row in enumerate(published_files(records, knowledge_id, context=context), start=1):
+    for row in published_files(records, knowledge_id, context=context):
         digest.update(json.dumps([row['file_id'], row['visible_version'], row['visible_generation'],
                                   row['visible_job_id']], separators=(',', ':')).encode())
-        if len(selected) < limit:
-            selected.append(row)
-        elif limit:
-            index = random.randrange(count)
-            if index < limit: selected[index] = row
     view.stable(context=context)
-    return digest.hexdigest(), selected
+    return digest.hexdigest()
 
 
 
-def _document(records, vectors, resource, manifest, model, *, context):
-    job = published_job(records, resource, manifest, context=context)
-    reference = KnowledgeFileReference(knowledge_id=resource.knowledge_id, file_id=manifest['file_id'],
-                                       file_version=manifest['visible_version'])
-    where = Junction('and', tuple(Comparison(name, 'eq', value) for name, value in reference.model_dump().items()))
-    chunks, cursor, filename = {}, None, None
-    while True:
-        page = vectors.scan(resource.collection, where, PageRequest(limit=500, cursor=cursor), context=context)
-        for record in page.items:
-            data = record.payload
-            if record.key.collection != resource.collection or any(data.get(k) != v for k, v in reference.model_dump().items()):
-                raise ScopeDenied()
-            if record.generation is None or record.generation.value != manifest['visible_generation']:
-                continue
-            if (data.get('embedding_model_id') != model.model_id
-                or normalize_model_revision(data.get('embedding_revision')) != normalize_model_revision(model.revision)):
-                raise Conflict()
-            chunk = KnowledgeSampleChunk(chunk_index=data['chunk_index'], content=data['content'],
-                                        embedding=list(record.vector), location=data.get('location', {}))
-            if chunk.chunk_index in chunks or chunk.chunk_index >= job['chunk_count']:
-                raise Conflict()
-            chunks[chunk.chunk_index] = chunk
-            actual_name = data.get('filename', '')
-            if filename is not None and actual_name != filename:
-                raise Conflict()
-            filename = actual_name
-        if page.next_cursor is None:
-            break
-        if page.next_cursor == cursor:
+def _sample_chunk(record, model):
+    data = record.payload
+    if record.vector:
+        if (data.get('embedding_model_id') != model.model_id
+            or normalize_model_revision(data.get('embedding_revision')) != normalize_model_revision(model.revision)):
             raise Conflict()
-        cursor = page.next_cursor
-    if len(chunks) != job['chunk_count']:
+    elif data.get('embedding_model_id') is not None:
         raise Conflict()
-    return KnowledgeSampleDocument(file_ref=reference, filename=filename or '',
-                                   chunks=[chunks[i] for i in range(len(chunks))])
+    return KnowledgeSampleChunk(chunk_id=record.key.key, chunk_index=data.get('chunk_index'), content=data['content'],
+        embedding=list(record.vector) if record.vector else None, location=data.get('location', {}))
+
+
+def _sample_documents(records, vectors, resource, model, limit, *, context):
+    view = ChunkReadView(records, resource.knowledge_id, context=context)
+    selected, count = [], 0
+
+    def select(item):
+        nonlocal count
+        count += 1
+        if len(selected) < limit:
+            selected.append(item)
+        else:
+            index = random.randrange(count)
+            if index < limit:
+                selected[index] = item
+
+    for manifest in published_files(records, resource.knowledge_id, context=context):
+        job = published_job(records, resource, manifest, context=context)
+        if view.file_count(manifest, job, context=context):
+            select((manifest, job, None, None))
+    standalone_count = view.standalone_count(context=context)
+    groups = {}
+    if standalone_count:
+        rows = view.standalone_records(vectors, resource, 0, standalone_count, context=context, include_vectors=True)
+        for record in rows:
+            path = record.payload.get('location', {}).get('path_or_url')
+            path = path if isinstance(path, str) and path else None
+            identity = ['path', path] if path is not None else ['chunk', record.key.key]
+            key = hashlib.sha256(json.dumps([resource.knowledge_id, *identity], separators=(',', ':')).encode()).hexdigest()
+            groups.setdefault((key, path), []).append(record)
+        for (key, path), rows in groups.items():
+            select((None, None, (key, path), rows))
+    documents = []
+    for manifest, job, independent, rows in selected:
+        reference = None
+        if manifest is not None:
+            file_count = view.file_count(manifest, job, context=context)
+            rows = view.file_records(vectors, resource, manifest, job, 0, file_count, context=context, include_vectors=True)
+            reference = KnowledgeFileReference(knowledge_id=resource.knowledge_id, file_id=manifest['file_id'],
+                                                file_version=manifest['visible_version'])
+        documents.append(KnowledgeSampleDocument(file_ref=reference,
+            standalone_key=independent[0] if independent else None, path_or_url=independent[1] if independent else None,
+            filename=rows[0].payload.get('filename', ''), chunks=[_sample_chunk(row, model) for row in rows]))
+    view.stable(context=context)
+    return documents
 
 
 class PublishedKnowledgeReader:
@@ -133,14 +142,13 @@ class KnowledgeSampleService(PublishedKnowledgeReader):
                 model = ModelVersion(model_id=metadata.model_id, revision=metadata.revision)
                 dimensions = await self.models.embedding_dimensions(model, actor)
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
-                    revision, manifests = await self._blocking(_snapshot, records, request.knowledge_id,
-                                                               request.document_limit, context=context)
-                    documents = [await self._blocking(_document, records, vectors[resource.collection], resource,
-                                 row, model, context=context) for row in manifests]
+                    revision = await self._blocking(_snapshot, records, request.knowledge_id, context=context)
+                    documents = await self._blocking(_sample_documents, records, vectors[resource.collection], resource,
+                                                    model, request.document_limit, context=context)
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
                     await self.models.embedding_dimensions(model, actor)
-                    final, _ = await self._blocking(_snapshot, records, request.knowledge_id, 0, context=context)
+                    final = await self._blocking(_snapshot, records, request.knowledge_id, context=context)
                     if final != revision:
                         raise Conflict()
                     return KnowledgeSampleResult(knowledge_id=request.knowledge_id, knowledge_revision=resource.revision,

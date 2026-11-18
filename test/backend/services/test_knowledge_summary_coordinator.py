@@ -95,7 +95,7 @@ def coordinator(setup, monkeypatch, manager):
     sample = KnowledgeSampleResult(knowledge_id=1, knowledge_revision=knowledge_search_revision(row), data_revision='a'*64,
         embedding_model={'model_id': 2, 'revision': 'v1'}, documents=[{'file_ref': {
             'knowledge_id': 1, 'file_id': 'b'*32, 'file_version': 0}, 'filename': 'one.txt',
-            'chunks': [{'chunk_index': 0, 'content': 'one', 'embedding': [1., 0.]}]}])
+            'chunks': [{'chunk_id': 'one', 'chunk_index': 0, 'content': 'one', 'embedding': [1., 0.]}]}])
     service = SimpleNamespace(sample=AsyncMock(return_value=sample), summarize_sample=AsyncMock(return_value='<p>summary</p>'))
     return SimpleNamespace(coordinator=SummaryCoordinator(summary=service, ports=ports), journal=journal,
         update=update, engine=engine, config=config, closed=closed, identities=identities, ports=ports,

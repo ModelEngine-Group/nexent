@@ -191,9 +191,9 @@ class VectorStore(StoragePort, Protocol):
 
     def scan(
         self, collection: str, where: Comparison | Junction | None, page: PageRequest,
-        *, context: OperationContext, include_vector: bool = True,
+        *, context: OperationContext, include_vector: bool = True, allow_missing_vector: bool = False,
     ) -> Page[VectorRecord]:
-        """Read scoped keys; payload-only mode omits vectors and needs no dimensions."""
+        """Read scoped keys; explicitly optional vectors distinguish absence from invalid data."""
         ...
 
     def delete(

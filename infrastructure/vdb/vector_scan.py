@@ -28,7 +28,7 @@ def _after(cursor, fingerprint):
     return data['after']
 
 
-def scan_vectors(store, binding, where, page, *, context, include_vector=True):
+def scan_vectors(store, binding, where, page, *, context, include_vector=True, allow_missing_vector=False):
     if not isinstance(page, PageRequest):
         raise InvalidInput()
     query = store._filter(binding, where)
@@ -36,8 +36,11 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True):
     # Payload edit policy does not alter the established read cursor contract.
     read_schema.pop('mutable_fields')
     read_schema.pop('allow_unembedded')
+    identity = [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, read_schema, query, include_vector]
+    if allow_missing_vector:
+        identity.append("optional-vector")
     fingerprint = hashlib.sha256(json.dumps(
-        [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, read_schema, query, include_vector],
+        identity,
         sort_keys=True, separators=(',', ':'), allow_nan=False,
     ).encode()).hexdigest()
     after = _after(page.cursor, fingerprint)
@@ -68,7 +71,8 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True):
         source = hit.get('_source')
         try:
             key, data, generation = store._decode(binding, source)
-            record = VectorRecord(key, vector(binding, source.get('embedding')) if include_vector else (), data, generation)
+            values = vector(binding, source.get('embedding')) if include_vector and not (allow_missing_vector and 'embedding' not in source) else ()
+            record = VectorRecord(key, values, data, generation)
         except InvalidInput:
             raise Unavailable(operation_id=context.operation_id) from None
         if previous is not None and key.key <= previous:

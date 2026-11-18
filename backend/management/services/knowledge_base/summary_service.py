@@ -77,16 +77,25 @@ class KnowledgeSummaryService:
             or result.knowledge_revision != resource.revision
             or result.embedding_model.model_id != resource.embedding_model_id or len(result.documents) > limit):
             raise Conflict()
-        files, dimensions = set(), None
+        sources, chunks, dimensions = set(), set(), None
         for document in result.documents:
-            if document.file_ref.knowledge_id != resource.knowledge_id:
+            if document.file_ref is not None and document.file_ref.knowledge_id != resource.knowledge_id:
                 raise ScopeDenied()
-            if document.file_ref.file_id in files:
+            source = ('file', document.file_ref.file_id) if document.file_ref else ('independent', document.standalone_key)
+            if source in sources:
                 raise Conflict()
-            files.add(document.file_ref.file_id)
-            for index, chunk in enumerate(document.chunks):
-                if chunk.chunk_index != index:
+            sources.add(source)
+            previous = None
+            for chunk in document.chunks:
+                if chunk.chunk_id in chunks or (chunk.chunk_index is None) != (document.file_ref is None):
                     raise Conflict()
+                chunks.add(chunk.chunk_id)
+                order = (chunk.chunk_index, chunk.chunk_id) if document.file_ref else (chunk.chunk_id,)
+                if previous is not None and order <= previous:
+                    raise Conflict()
+                previous = order
+                if chunk.embedding is None:
+                    continue
                 if dimensions is None:
                     dimensions = len(chunk.embedding)
                 if len(chunk.embedding) != dimensions:

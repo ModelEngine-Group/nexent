@@ -323,9 +323,10 @@ class KnowledgeBaseState(Contract):
 
 
 class KnowledgeSampleChunk(Contract):
-    chunk_index: int = Field(ge=0)
+    chunk_id: str = Field(min_length=1, max_length=1024)
+    chunk_index: int | None = Field(default=None, ge=0)
     content: str
-    embedding: list[float] = Field(min_length=1)
+    embedding: list[float] | None = Field(default=None, min_length=1)
     location: dict[str, JsonValue] = Field(default_factory=dict)
 
     @field_validator('embedding')
@@ -333,15 +334,23 @@ class KnowledgeSampleChunk(Contract):
     def finite_embedding(cls, values):
         import math
 
-        if any(not math.isfinite(value) for value in values):
+        if values is not None and any(not math.isfinite(value) for value in values):
             raise ValueError('Expected finite stored embeddings')
         return values
 
 
 class KnowledgeSampleDocument(Contract):
-    file_ref: KnowledgeFileReference
-    filename: str = Field(max_length=1024)
+    file_ref: KnowledgeFileReference | None = None
+    standalone_key: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    path_or_url: str | None = None
+    filename: str | None
     chunks: list[KnowledgeSampleChunk]
+
+    @model_validator(mode="after")
+    def one_source(self):
+        if (self.file_ref is None) == (self.standalone_key is None):
+            raise ValueError("A sample document needs exactly one file or independent source")
+        return self
 
 
 class KnowledgeSampleResult(Contract):

@@ -546,13 +546,17 @@ class ElasticsearchVectorStore:
             hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
 
-    def scan(self, collection, where, page, *, context, include_vector=True):
+    def scan(self, collection, where, page, *, context, include_vector=True, allow_missing_vector=False):
         from infrastructure.vdb.vector_scan import scan_vectors
 
-        if type(include_vector) is not bool:
+        if (type(include_vector) is not bool or type(allow_missing_vector) is not bool
+            or allow_missing_vector and not include_vector):
             raise InvalidInput()
-        return scan_vectors(self, self._binding(collection, maintenance=not include_vector), where, page,
-                            context=context, include_vector=include_vector)
+        binding = self._binding(collection, maintenance=not include_vector or allow_missing_vector)
+        if allow_missing_vector and not binding.allow_unembedded:
+            raise CapabilityUnsupported()
+        return scan_vectors(self, binding, where, page, context=context,
+                            include_vector=include_vector, allow_missing_vector=allow_missing_vector)
 
     def count(self, collection, where, *, context):
         binding = self._binding(collection, maintenance=True)

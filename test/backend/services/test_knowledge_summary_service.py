@@ -52,8 +52,8 @@ def setup(resources, sqlite_threads):  # noqa: F811
     result = KnowledgeSampleResult(knowledge_id=1, knowledge_revision=knowledge_search_revision(row), data_revision='b'*64,
         embedding_model={'model_id': 2, 'revision': 'v1'}, documents=[{
             'file_ref': {'knowledge_id': 1, 'file_id': 'c'*32, 'file_version': 0}, 'filename': 'source.txt',
-            'chunks': [{'chunk_index': 0, 'content': 'one', 'embedding': [1.0, 0.0]},
-                       {'chunk_index': 1, 'content': 'three!', 'embedding': [0.0, 1.0]}],
+            'chunks': [{'chunk_id': 'one', 'chunk_index': 0, 'content': 'one', 'embedding': [1.0, 0.0]},
+                       {'chunk_id': 'two', 'chunk_index': 1, 'content': 'three!', 'embedding': [0.0, 1.0]}],
         }])
     client = SimpleNamespace(sample_knowledge=AsyncMock(return_value=result))
     return SimpleNamespace(service=KnowledgeSummaryService(client=client, resources=ports), actor=actor, client=client,
@@ -164,6 +164,8 @@ async def test_actual_map_reduce_keeps_embeddings_and_model_identity(setup, monk
 
 async def test_sample_deadline_cancels_one_request_without_retry(setup):
     s = setup; cancelled = []
+    s.service._resource = AsyncMock(return_value=SimpleNamespace(knowledge_id=1,
+        revision=s.result.knowledge_revision, embedding_model_id=2))
     async def hanging(*args):
         try: await asyncio.Event().wait()
         finally: cancelled.append(True)
@@ -183,6 +185,51 @@ def test_neutral_adapter_keeps_weighted_document_embeddings(setup):
     assert documents['doc_0000']['filename'] == 'source.txt'
     assert documents['doc_0000']['path_or_url'] == 'c'*32
     np.testing.assert_allclose(embeddings['doc_0000'], [1/3, 2/3])
+
+
+async def test_mutable_sample_keeps_plaintext_and_sparse_indices_without_fabricated_embeddings(setup):
+    from management.services.knowledge_base.summary import (
+        sample_documents_for_clustering,
+    )
+
+    s = setup
+    data = s.result.model_dump()
+    data['documents'][0]['chunks'][1].update(chunk_index=0, embedding=None)
+    data['documents'].append({'standalone_key':'a'*64, 'path_or_url':'manual/source', 'filename':None,
+        'chunks':[{'chunk_id':'independent', 'chunk_index':None, 'content':'body', 'embedding':None}]})
+    s.client.sample_knowledge.return_value = KnowledgeSampleResult.model_validate(data)
+    result = await s.service.sample('kb-one', user_id='user-a', tenant_id='tenant-a')
+    documents, embeddings = sample_documents_for_clustering(result)
+    assert len(documents) == 2 and documents['doc_0001']['path_or_url'] == 'manual/source'
+    assert documents['doc_0000']['chunks'][1]['embedding'] is None
+    assert set(embeddings) == {'doc_0000'}
+    np.testing.assert_allclose(embeddings['doc_0000'], [1.,0.])
+
+
+async def test_plaintext_only_document_keeps_existing_empty_clustering_behavior(setup, monkeypatch):
+    s = setup
+    data = s.result.model_dump()
+    data['documents'] = [{'standalone_key':'a'*64, 'filename':None,
+        'chunks':[{'chunk_id':'independent', 'content':'plain body', 'embedding':None}]}]
+    s.client.sample_knowledge.return_value = KnowledgeSampleResult.model_validate(data)
+    invoke = Mock(side_effect=AssertionError('Plaintext must not invent embeddings or model requests'))
+    monkeypatch.setattr('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker', invoke)
+    assert await s.service.generate(index_name='kb-one',user_id='user-a',tenant_id='tenant-a',model_id=5) == ''
+    invoke.assert_not_called()
+
+
+@pytest.mark.parametrize('fault', ['duplicate-key','file-index-absent','independent-index-present'])
+def test_mutable_sample_rejects_duplicate_identity_and_wrong_source_position(setup, fault):
+    data = setup.result.model_dump()
+    if fault == 'duplicate-key':
+        data['documents'][0]['chunks'][1]['chunk_id'] = 'one'
+    elif fault == 'file-index-absent':
+        data['documents'][0]['chunks'][0]['chunk_index'] = None
+    else:
+        data['documents'][0].update(file_ref=None, standalone_key='a'*64)
+    with pytest.raises(Conflict):
+        KnowledgeSummaryService._validate(KnowledgeSampleResult.model_validate(data),
+            SimpleNamespace(knowledge_id=1,revision=setup.result.knowledge_revision,embedding_model_id=2),200)
 
 
 async def test_revocation_during_model_work_prevents_returning_summary(setup, monkeypatch):
