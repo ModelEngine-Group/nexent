@@ -157,3 +157,18 @@ print('source_cli_without_es_ok')
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr
     assert 'source_cli_without_es_ok' in result.stdout
+
+
+def test_tasks_command_uses_managed_report_and_keeps_unattributable_evidence_pending(cli, monkeypatch):
+    scanner = Mock()
+    scanner.scan.return_value = {'tasks': 2, 'tasks_with_issues': 1, 'redis_only_tasks': 1, 'snapshot': False}
+    factory = Mock(return_value=scanner)
+    monkeypatch.setattr('management.services.knowledge_base.legacy_tasks.LegacyTaskInspector', factory)
+    arguments = argv(cli); arguments[0] = 'inspect-tasks'
+    assert module.main(arguments) == 0
+    values = [json.loads(line) for line in cli.args.output.read_text().splitlines()]
+    assert values[0]['kind'] == 'legacy_task_inventory_start'
+    assert values[-1]['tasks'] == 2 and values[-1]['snapshot'] is False
+    assert 'unattributed_tasks' in values[-1]['pending_checks'] and values[-1]['migration_ready'] is False
+    scanner.scan.assert_called_once()
+    cli.inspector.page.assert_not_called()

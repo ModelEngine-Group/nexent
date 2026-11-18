@@ -90,3 +90,32 @@ legacy task, Runtime visibility and model dimension checks. Model compatibility
 requires Runtime evidence through AgentOS; the stored index dimensions alone do
 not establish it. Explicit migration must revalidate these observations before
 writing. This command has no execution or retry mode and adds no public route.
+
+## Legacy task inspection
+
+Run the explicit `inspect-tasks` subcommand from the Management image with both
+`REDIS_BACKEND_URL` (legacy Celery result database) and `REDIS_URL` (auxiliary database)
+configured. It uses the same required `--tenant-id`, `--user-id`, `--knowledge-id`,
+`--output`, `--page-size` and total `--timeout` options as the source inspector.
+
+```sh
+python -m management.maintenance.knowledge inspect-tasks \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --output /tmp/kb-123-tasks.jsonl --page-size 100 --timeout 300
+```
+
+Current edit DAC and one unique historical index owner are required before Redis
+access. PG-linked process, forward and parent task references are checked even if
+the result has expired. Redis-only results are included only when their metadata
+names the selected exact index. Missing results remain UNKNOWN. The report hashes
+task IDs, allows only known status codes and canonical file IDs, and reports key
+presence for progress, errors, cancellation, chunks and parts without reading those
+values. It never invokes Celery, resumes jobs, sets TTLs or deletes keys.
+
+Redis SCAN is not a snapshot. Duplicate observations are suppressed within one
+invocation. Unattributable or corrupt Redis-only results cannot be assigned to a
+tenant, so `unattributed_tasks` always remains pending. `scan_complete` means the
+selected traversal ended, while `snapshot` and `migration_ready` remain false.
+Runtime visibility, model dimensions and source mapping still require separate
+evidence. The result revision hashes only the observed result bytes; it does not
+claim an atomic revision across Redis databases or PG.

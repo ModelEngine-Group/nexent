@@ -11,6 +11,7 @@ INSPECTION_LEDGER = 'knowledge_source_ledger_inspection'
 LEGACY_DOCUMENTS = 'legacy_knowledge_documents'
 LEGACY_VECTOR_METADATA = 'legacy_knowledge_vector_metadata'
 LEGACY_INDEX_OWNER = 'legacy_knowledge_index_owner'
+LEGACY_TASKS = 'legacy_knowledge_tasks'
 PENDING_CHECKS = ('legacy_vectors', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
 Issue = Annotated[str, Field(pattern=r'^[A-Z][A-Z0-9_]{0,79}$')]
 
@@ -61,3 +62,27 @@ class LegacyVectorPage(Contract):
     collection_dimensions: int | None = Field(default=None, gt=0)
     metric: str | None = Field(default=None, max_length=100)
     documents: list[LegacyVectorFinding] = Field(max_length=1000)
+
+
+TASK_PENDING_CHECKS = ('unattributed_tasks', 'runtime_visibility', 'model_dimensions', 'source_mapping')
+
+
+class LegacyTaskFinding(Contract):
+    task_id_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    origin: Literal['pg_reference', 'index_metadata']
+    status: Literal['PENDING', 'RECEIVED', 'STARTED', 'RETRY', 'SUCCESS', 'FAILURE', 'REVOKED', 'UNKNOWN']
+    revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    auxiliary_present: list[Literal['progress', 'error', 'cancel', 'chunks', 'parts']] = Field(default_factory=list)
+    issues: list[Issue] = Field(default_factory=list, max_length=32)
+
+
+class LegacyTaskPage(Contract):
+    schema_version: Literal[1] = 1
+    knowledge_id: int = Field(gt=0)
+    index_name: str = Field(min_length=1, max_length=100)
+    tenant_id: str = Field(min_length=1, max_length=100)
+    actor_id: str = Field(min_length=1, max_length=100)
+    knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    tasks: list[LegacyTaskFinding] = Field(max_length=1000)
+    snapshot: Literal[False] = False

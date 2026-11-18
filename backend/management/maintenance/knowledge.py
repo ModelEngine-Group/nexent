@@ -9,7 +9,11 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from contracts.knowledge_maintenance import PENDING_CHECKS, VECTOR_PENDING_CHECKS
+from contracts.knowledge_maintenance import (
+    PENDING_CHECKS,
+    TASK_PENDING_CHECKS,
+    VECTOR_PENDING_CHECKS,
+)
 from management.services.knowledge_base.source_inspection import (
     KnowledgeSourceInspector,
 )
@@ -84,7 +88,7 @@ async def _inspect(args, scanner, kind, pending):
         scope.cancel()
         clear_default_thread_manager(manager)
         if (await manager.shutdown(timeout=15)).stuck_execution_ids:
-            raise RuntimeError('Source inspection worker did not exit')
+            raise RuntimeError('Knowledge inspection worker did not exit')
 
 
 async def inspect_sources(args):
@@ -95,10 +99,24 @@ async def inspect_vectors(args):
     return await _inspect(args, _scan_vectors, 'legacy_vector', VECTOR_PENDING_CHECKS)
 
 
+def _scan_tasks(args, scope, context, emit):
+    from management.services.knowledge_base.legacy_tasks import LegacyTaskInspector
+
+    inspector = LegacyTaskInspector(cancellation_scope=scope)
+    return inspector.scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
+        lambda page: emit({'kind': 'legacy_task_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
+
+
+async def inspect_tasks(args):
+    return await _inspect(args, _scan_tasks, 'legacy_task', TASK_PENDING_CHECKS)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for command, description in [('inspect', 'Inspect source evidence'), ('inspect-vectors', 'Inspect the exact legacy vector collection')]:
+    actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks}
+    for command in actions:
+        description = 'Read-only knowledge inventory'
         inspect = commands.add_parser(command, help=description)
         inspect.add_argument('--tenant-id', required=True)
         inspect.add_argument('--user-id', required=True, help='Actual operator; current membership and edit DAC are required')
@@ -111,13 +129,13 @@ def main(argv=None):
         or any(not value.strip() or len(value) > 100 for value in (args.tenant_id, args.user_id))):
         parser.error('Select one KB, nonempty operator/tenant, page size 1..1000, and timeout 1..3600')
     try:
-        action = inspect_sources if args.command == 'inspect' else inspect_vectors
+        action = actions[args.command]
         result = asyncio.run(action(args))
         print(json.dumps(result))
         return 0
     except (TimeoutError, DeadlineExceeded) as error:
         logger.warning('knowledge_source_inspection_timeout operation_id=%s phase=%s threshold_seconds=%s exception_type=%s',
-                       getattr(error, 'operation_id', None), 'source_inventory' if args.command == 'inspect' else 'legacy_vector_inventory',
+                       getattr(error, 'operation_id', None), args.command,
                        args.timeout, type(error).__name__)
         return 1
     except KeyboardInterrupt:
