@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 
 from contracts.errors.exceptions import UnauthorizedError
 from contracts.roles import has_any_role
@@ -424,11 +424,15 @@ async def list_imports(
     authorization: str | None = Header(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    sort_by: Literal["filename", "imported_at"] = "imported_at",
+    sort_order: Literal["asc", "desc"] = "desc",
 ):
     return await dispatch(
         request,
         authorization,
-        lambda _, actor: configured_store().list(actor, page, page_size),
+        lambda _, actor: configured_store().list(
+            actor, page, page_size, sort_by=sort_by, sort_order=sort_order
+        ),
         needs_service=False,
     )
 

@@ -179,9 +179,21 @@ it("uploads saved ZIPs and uses private, cancellable list and detail requests", 
   expect(query.searchParams.has("tenant_id")).toBe(false);
   await trajectoryService.savedImport("signed/+?", signal);
   expect(String(request.mock.calls[2][0])).toContain("signed%2F%2B%3F");
-  await trajectoryService.deleteImport("one");
+  await trajectoryService.deleteImport("one", signal);
   expect(request.mock.calls[3][1]).toMatchObject({
     method: "DELETE",
+    signal,
     cache: "no-store",
+  });
+  await trajectoryService.savedImports(3, 50, signal, {
+    sort_by: "filename",
+    sort_order: "asc",
+  });
+  const sorted = new URL(String(request.mock.calls[4][0]), "http://localhost");
+  expect(Object.fromEntries(sorted.searchParams)).toEqual({
+    page: "3",
+    page_size: "50",
+    sort_by: "filename",
+    sort_order: "asc",
   });
 });

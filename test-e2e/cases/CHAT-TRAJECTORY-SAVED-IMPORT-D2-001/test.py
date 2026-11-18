@@ -1,7 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """CHAT-TRAJECTORY-SAVED-IMPORT-D2-001: persistent HTTP and ownership contracts."""
 
+from datetime import datetime
+
 import pytest
+from ops.services.trajectory import saved_imports
 from saved_trajectory_imports import call, saved_http, upload_saved
 from trajectory_exchange import BODY, exported, http_app, imported, seed
 
@@ -63,3 +66,69 @@ def test_saved_import_protocol_and_isolation(tmp_path, monkeypatch):
             }
         assert call(http, "GET", "/" + first["import_id"]).status_code == 404
         assert call(http, "GET").json()["data"]["items"] == [second]
+
+
+def test_saved_import_sort_contract(tmp_path, monkeypatch):
+    with http_app(monkeypatch, seed(tmp_path / "source")) as http:
+        raw = exported(http).content
+
+    class FixedClock:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 11, 18, tzinfo=tz)
+
+    monkeypatch.setattr(saved_imports, "datetime", FixedClock)
+    with saved_http(monkeypatch, tmp_path / "saved") as http:
+        items = []
+        for name in ["z.zip", "a.zip", "中文.zip", "A.zip"]:
+            response = http.client.post(
+                "/trajectory/imports",
+                files={"file": (name, raw, "application/zip")},
+                headers={"Authorization": "admin"},
+            )
+            assert response.status_code == 200
+            items.append(response.json()["data"]["item"])
+        name_ties = sorted([items[1], items[3]], key=lambda item: item["import_id"])
+        assert len({item["imported_at"] for item in items}) == 1
+        for field, ascending in [
+            ("filename", [*name_ties, items[0], items[2]]),
+            ("imported_at", sorted(items, key=lambda item: item["import_id"])),
+        ]:
+            for order, expected in [
+                ("asc", ascending),
+                ("desc", list(reversed(ascending))),
+            ]:
+                actual = []
+                for page in [1, 2, 3, 4]:
+                    response = call(
+                        http,
+                        "GET",
+                        params={
+                            "sort_by": field,
+                            "sort_order": order,
+                            "page": page,
+                            "page_size": 1,
+                        },
+                    )
+                    assert response.status_code == 200
+                    assert response.headers["cache-control"] == "private,no-store"
+                    data = response.json()["data"]
+                    assert data["total"] == 4 and data["page"] == page
+                    actual.extend(data["items"])
+                assert actual == expected
+        for query in [
+            {"sort_by": "size_bytes"},
+            {"sort_order": "sideways"},
+            {"sort_by": "../filename"},
+        ]:
+            assert call(http, "GET", params=query).status_code == 422
+        assert (
+            call(
+                http,
+                "GET",
+                actor="peer",
+                params={"sort_by": "filename", "sort_order": "asc"},
+            ).json()["data"]["items"]
+            == []
+        )
+        assert call(http, "GET").json()["data"]["total"] == 4

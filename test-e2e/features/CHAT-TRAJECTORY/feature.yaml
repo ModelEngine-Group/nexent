@@ -49,6 +49,7 @@ feature:
     description: 旧POST /trajectory/import保持单次请求临时解析，无持久记录；页面内存和未完成请求在关闭、刷新、离开及退出时释放，不在浏览器持久保存正文。页面上传行为由TRJ-RULE-012定义。
   - rule_id: TRJ-RULE-012
     description: 管理员导入ZIP到本地服务持久目录，每次上传新增记录，仅可信当前租户的导入者可访问和删除；独立导入列表分页倒序展示，刷新、重登、服务重启后可重新查看，保存至手动删除，不参与原采集清理与统计。
+      文件名及导入时间支持分页前升降序，勾选跨页保留并确认批量删除；成功项移除、失败项保留重试，离开或认证失效停止后续请求。
   required_test_stages:
   - D2
   - D3
@@ -56,6 +57,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
     - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
     - CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
     - CHAT-TRAJECTORY-BODY-WRAP-20261117

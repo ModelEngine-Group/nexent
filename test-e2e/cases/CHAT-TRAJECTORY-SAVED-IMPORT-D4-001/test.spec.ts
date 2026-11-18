@@ -30,6 +30,9 @@ journey("CHAT-TRAJECTORY-SAVED-IMPORT-D4-001", async ({ page, contract }) => {
     });
   const steps = contract.expectedIds("steps");
   const rows = () => page.locator("tbody tr.ant-table-row");
+  const selectedIds: string[] = [];
+  const batch = () =>
+    page.getByRole("button", { name: "删除所选", exact: true });
   await contract.step(steps[0], async () => {
     await expect(
       page.getByRole("button", { name: "导入", exact: true }),
@@ -87,22 +90,97 @@ journey("CHAT-TRAJECTORY-SAVED-IMPORT-D4-001", async ({ page, contract }) => {
         ),
       ).size,
     ).toBe(2);
+    state.saved[0].item.filename = "a.zip";
+    state.saved[0].item.imported_at = "2026-11-18T00:00:00Z";
+    state.saved[1].item.filename = "z.zip";
+    state.saved[1].item.imported_at = "2026-11-17T00:00:00Z";
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await expect(rows().first()).toContainText("a.zip");
+    const filename = page.getByRole("columnheader", {
+      name: "文件名",
+      exact: true,
+    });
+    await filename.click();
+    await expect(filename).toHaveAttribute("aria-sort", "ascending");
+    await expect(rows().first()).toContainText("a.zip");
+    await filename.click();
+    await expect(filename).toHaveAttribute("aria-sort", "descending");
+    await expect(rows().first()).toContainText("z.zip");
+    const importedAt = page.getByRole("columnheader", {
+      name: "导入时间",
+      exact: true,
+    });
+    await importedAt.click();
+    await expect(importedAt).toHaveAttribute("aria-sort", "ascending");
+    await expect(rows().first()).toContainText("z.zip");
+    await importedAt.click();
+    await expect(importedAt).toHaveAttribute("aria-sort", "descending");
+    await expect(rows().first()).toContainText("a.zip");
+    const template = state.saved[0];
+    for (let index = 0; index < 19; index++)
+      state.saved.push({
+        ...template,
+        item: {
+          ...template.item,
+          import_id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}`,
+          filename: `extra-${index}.zip`,
+          imported_at: "2026-11-16T00:00:00Z",
+        },
+      });
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await expect(rows()).toHaveCount(20);
+    await expect(batch()).toBeDisabled();
+    selectedIds.push(
+      (await rows().first().getAttribute("data-row-key")) as string,
+    );
+    await rows().first().getByRole("checkbox").check();
+    await page.getByTitle("2", { exact: true }).click();
+    await expect(rows()).toHaveCount(1);
+    selectedIds.push(
+      (await rows().first().getAttribute("data-row-key")) as string,
+    );
+    await rows().first().getByRole("checkbox").check();
+    await expect(page.getByText("已选择 2 条", { exact: true })).toBeVisible();
+    // Sorting from a later page returns to page one without losing selection.
+    await filename.click();
+    await expect(page.locator(".ant-pagination-item-active")).toHaveAttribute(
+      "title",
+      "1",
+    );
+    await expect(page.getByText("已选择 2 条", { exact: true })).toBeVisible();
+    await page.getByTitle("2", { exact: true }).click();
+    await expect(rows()).toHaveCount(1);
   });
   await contract.step(steps[2], async () => {
-    await rows()
-      .first()
-      .getByRole("button", { name: "删除", exact: true })
-      .click();
+    await batch().click();
+    await expect(page.getByRole("dialog")).toContainText("2 条");
     await page.getByRole("button", { name: "取消", exact: true }).click();
-    await expect(rows()).toHaveCount(2);
-    for (let count = 1; count >= 0; count--) {
-      await rows()
-        .first()
-        .getByRole("button", { name: "删除", exact: true })
-        .click();
-      await page.getByRole("button", { name: "确定", exact: true }).click();
-      await expect(rows()).toHaveCount(count);
-    }
+    expect(state.deleteRequests).toHaveLength(0);
+    expect(state.saved).toHaveLength(21);
+    state.deleteFailures.push(selectedIds[0]);
+    await batch().click();
+    await page.getByRole("button", { name: "确定", exact: true }).click();
+    await expect(
+      page.getByText("已删除 1 条，1 条删除失败，请重试。", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("已选择 1 条", { exact: true })).toBeVisible();
+    await expect(page.locator(".ant-pagination-item-active")).toHaveAttribute(
+      "title",
+      "1",
+    );
+    expect(state.deleteRequests).toEqual(selectedIds);
+    expect(state.saved).toHaveLength(20);
+    state.deleteFailures = [];
+    await page.getByRole("button", { name: "重试", exact: true }).click();
+    await page.getByRole("button", { name: "确定", exact: true }).click();
+    await expect(page.getByText("已选择 0 条", { exact: true })).toBeVisible();
+    expect(state.deleteRequests).toEqual([...selectedIds, selectedIds[0]]);
+    await expect(rows()).toHaveCount(19);
+    await page.locator("thead").getByRole("checkbox").check();
+    await batch().click();
+    await expect(page.getByRole("dialog")).toContainText("19 条");
+    await page.getByRole("button", { name: "确定", exact: true }).click();
+    await expect(rows()).toHaveCount(0);
     await page.reload();
     await expect(page.getByText("暂无导入轨迹", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: "返回轨迹列表" }).click();

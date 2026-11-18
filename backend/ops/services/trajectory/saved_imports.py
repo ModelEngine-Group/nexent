@@ -195,12 +195,16 @@ class SavedImports:
                     pass
         return {"item": item, "trajectory": trajectory}
 
-    def list(self, actor, page=1, page_size=20):
+    def list(
+        self, actor, page=1, page_size=20, *, sort_by="imported_at", sort_order="desc"
+    ):
         if (
             type(page) is not int
             or type(page_size) is not int
             or page < 1
             or not 1 <= page_size <= 100
+            or sort_by not in ("filename", "imported_at")
+            or sort_order not in ("asc", "desc")
         ):
             raise QueryError("invalid_parameters", 422)
         budget, items = self._budget(), []
@@ -217,8 +221,15 @@ class SavedImports:
                 if len(items) > self.candidates:
                     raise QueryError("query_budget_exceeded", 503)
         items.sort(
-            key=lambda item: (item["imported_at"], item["import_id"]), reverse=True
+            key=lambda item: (
+                item["filename"].casefold()
+                if sort_by == "filename"
+                else item["imported_at"],
+                item["import_id"],
+            ),
+            reverse=sort_order == "desc",
         )
+        budget.check()
         start = (page - 1) * page_size
         return {
             "items": items[start : start + page_size],

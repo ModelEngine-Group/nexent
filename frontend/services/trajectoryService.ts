@@ -5,6 +5,7 @@ import type {
   ImportedTrajectory,
   SavedTrajectory,
   SavedTrajectoriesPage,
+  SavedImportsSort,
   CleanupResult,
   CleanupSchedule,
   ConversationPage,
@@ -36,9 +37,18 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
-  savedImports: (page: number, pageSize: number, signal?: AbortSignal) =>
+  savedImports: (
+    page: number,
+    pageSize: number,
+    signal?: AbortSignal,
+    sorting?: SavedImportsSort
+  ) =>
     read<SavedTrajectoriesPage>(
-      queryUrl(API_ENDPOINTS.trajectory.imports, { page, page_size: pageSize }),
+      queryUrl(API_ENDPOINTS.trajectory.imports, {
+        page,
+        page_size: pageSize,
+        ...sorting,
+      }),
       signal
     ),
   savedImport: (id: string, signal?: AbortSignal) =>
@@ -57,11 +67,15 @@ export const trajectoryService = {
     );
     return (await response.json()).data as SavedTrajectory;
   },
-  async deleteImport(id: string): Promise<{ deleted: boolean }> {
+  async deleteImport(
+    id: string,
+    signal?: AbortSignal
+  ): Promise<{ deleted: boolean }> {
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.trajectory.savedImport(id),
       {
         method: "DELETE",
+        signal,
         cache: "no-store",
       }
     );

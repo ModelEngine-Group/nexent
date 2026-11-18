@@ -1,14 +1,18 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button, Empty, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { ArrowLeft, RefreshCw, Upload } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { User } from "@/types/auth";
-import type { SavedTrajectoryRecord } from "@/types/trajectory";
+import type {
+  SavedImportsSort,
+  SavedTrajectoryRecord,
+} from "@/types/trajectory";
+import { AUTH_EVENTS } from "@/const/auth";
 import { effectiveRoles } from "@/lib/roles";
 import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import { trajectoryService } from "@/services/trajectoryService";
@@ -21,13 +25,26 @@ export function ImportedTrajectories({ user }: { user: User }) {
   const { t, i18n } = useTranslation();
   const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
   const [paging, setPaging] = useState({ page: 1, page_size: 20 });
+  const [sorting, setSorting] = useState<SavedImportsSort>({
+    sort_by: "imported_at",
+    sort_order: "desc",
+  });
+  const [selected, setSelected] = useState<string[]>([]);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const deletion = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
   const [opening, setOpening] = useState<string | null>(null);
   const client = useQueryClient();
   const queryKey = ["trajectory-imports", scope];
   const records = useQuery({
-    queryKey: [...queryKey, paging],
+    queryKey: [...queryKey, paging, sorting],
     queryFn: ({ signal }) =>
-      trajectoryService.savedImports(paging.page, paging.page_size, signal),
+      trajectoryService.savedImports(
+        paging.page,
+        paging.page_size,
+        signal,
+        sorting
+      ),
     retry: false,
     gcTime: 0,
     refetchOnWindowFocus: false,
@@ -35,29 +52,98 @@ export function ImportedTrajectories({ user }: { user: User }) {
   const archive = useTrajectoryArchive(scope, true);
   const fileInput = useRef<HTMLInputElement>(null);
   const { confirm } = useConfirmModal();
+  useEffect(() => {
+    mounted.current = true;
+    const stop = () => deletion.current?.abort();
+    window.addEventListener("pagehide", stop);
+    window.addEventListener(AUTH_EVENTS.LOGOUT, stop);
+    window.addEventListener(AUTH_EVENTS.SESSION_EXPIRED, stop);
+    return () => {
+      mounted.current = false;
+      stop();
+      window.removeEventListener("pagehide", stop);
+      window.removeEventListener(AUTH_EVENTS.LOGOUT, stop);
+      window.removeEventListener(AUTH_EVENTS.SESSION_EXPIRED, stop);
+    };
+  }, [scope]);
   const remove = useMutation({
-    mutationFn: (id: string) => trajectoryService.deleteImport(id),
-    onSuccess: () => {
-      archive.clear();
-      setOpening(null);
-      if (records.data?.items.length === 1 && paging.page > 1)
-        setPaging((value) => ({ ...value, page: value.page - 1 }));
+    mutationFn: async (ids: string[]) => {
+      const controller = new AbortController();
+      deletion.current = controller;
+      const deleted: string[] = [];
+      const failed: { id: string; error: unknown }[] = [];
+      setProgress({ done: 0, total: ids.length });
+      try {
+        // Each request takes the same owner's nonblocking file lock.
+        for (const id of ids) {
+          if (controller.signal.aborted) break;
+          try {
+            await trajectoryService.deleteImport(id, controller.signal);
+            deleted.push(id);
+          } catch (error) {
+            if (controller.signal.aborted) break;
+            failed.push({ id, error });
+          }
+          if (mounted.current)
+            setProgress({
+              done: deleted.length + failed.length,
+              total: ids.length,
+            });
+        }
+        return { deleted, failed };
+      } finally {
+        if (deletion.current === controller) deletion.current = null;
+      }
     },
-    onSettled: () => client.invalidateQueries({ queryKey }),
+    onSuccess: ({ deleted }) => {
+      if (!mounted.current) return;
+      setSelected((ids) => ids.filter((id) => !deleted.includes(id)));
+      if (deleted.length) {
+        archive.clear();
+        setOpening(null);
+        const remaining = Math.max(
+          0,
+          (records.data?.total ?? 0) - deleted.length
+        );
+        setPaging((value) => ({
+          ...value,
+          page: Math.min(
+            value.page,
+            Math.max(1, Math.ceil(remaining / value.page_size))
+          ),
+        }));
+      }
+    },
+    onSettled: () =>
+      mounted.current ? client.invalidateQueries({ queryKey }) : undefined,
   });
-  const confirmDelete = (id: string) =>
+  const confirmDelete = (ids: string[]) =>
     confirm({
-      title: t("trajectory.deleteImport"),
-      content: t("trajectory.deleteImportConfirm"),
+      title: t(
+        ids.length === 1
+          ? "trajectory.deleteImport"
+          : "trajectory.deleteSelected"
+      ),
+      content: t("trajectory.deleteSelectedConfirm", { count: ids.length }),
       danger: true,
       onOk: async () => {
-        await remove.mutateAsync(id);
+        if (!mounted.current || deletion.current) return;
+        await remove.mutateAsync([...ids]);
       },
     });
+  const sortOrder = (field: SavedImportsSort["sort_by"]) =>
+    sorting.sort_by === field
+      ? sorting.sort_order === "asc"
+        ? ("ascend" as const)
+        : ("descend" as const)
+      : null;
   const columns: ColumnsType<SavedTrajectoryRecord> = [
     {
       title: t("trajectory.importFilename"),
       dataIndex: "filename",
+      key: "filename",
+      sorter: true,
+      sortOrder: sortOrder("filename"),
       ellipsis: true,
       width: 220,
     },
@@ -84,6 +170,9 @@ export function ImportedTrajectories({ user }: { user: User }) {
     },
     {
       title: t("trajectory.importedAt"),
+      key: "imported_at",
+      sorter: true,
+      sortOrder: sortOrder("imported_at"),
       render: (_, item) => formatTraceTime(item.imported_at),
       width: 180,
     },
@@ -94,7 +183,7 @@ export function ImportedTrajectories({ user }: { user: User }) {
         <div className="flex gap-2">
           <Button
             size="small"
-            disabled={archive.loading}
+            disabled={archive.loading || remove.isPending}
             onClick={() => {
               setOpening(item.import_id);
               void archive.open(item.import_id);
@@ -106,7 +195,7 @@ export function ImportedTrajectories({ user }: { user: User }) {
             size="small"
             danger
             disabled={remove.isPending}
-            onClick={() => confirmDelete(item.import_id)}
+            onClick={() => confirmDelete([item.import_id])}
           >
             {t("trajectory.deleteImport")}
           </Button>
@@ -145,6 +234,7 @@ export function ImportedTrajectories({ user }: { user: User }) {
           />
           <Button
             icon={<Upload size={14} />}
+            disabled={remove.isPending}
             loading={archive.loading}
             onClick={() => fileInput.current?.click()}
           >
@@ -153,6 +243,7 @@ export function ImportedTrajectories({ user }: { user: User }) {
           <Button
             icon={<RefreshCw size={14} />}
             loading={records.isFetching}
+            disabled={remove.isPending}
             onClick={() => void records.refetch()}
           >
             {t("common.refresh")}
@@ -181,20 +272,70 @@ export function ImportedTrajectories({ user }: { user: User }) {
           }}
         />
       )}
-      {remove.isError && (
-        <TrajectoryError
-          error={remove.error}
-          retry={() => confirmDelete(remove.variables)}
-        />
+      {!!remove.data?.failed.length && (
+        <>
+          <p role="status">
+            {t("trajectory.deleteImportsPartial", {
+              succeeded: remove.data.deleted.length,
+              failed: remove.data.failed.length,
+            })}
+          </p>
+          <TrajectoryError
+            error={remove.data.failed[0].error}
+            retry={() => confirmDelete(remove.data!.failed.map(({ id }) => id))}
+          />
+        </>
       )}
       <section className="trajectory-table-panel min-h-0 flex-1">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <Button
+            danger
+            icon={<Trash2 size={14} />}
+            disabled={!selected.length || remove.isPending}
+            loading={remove.isPending}
+            onClick={() => confirmDelete([...selected])}
+          >
+            {t("trajectory.deleteSelected")}
+          </Button>
+          <span
+            className="text-sm text-[var(--color-text-secondary)]"
+            role="status"
+          >
+            {remove.isPending
+              ? t("trajectory.deletingImports", progress)
+              : t("trajectory.selectedImports", { count: selected.length })}
+          </span>
+        </div>
         <Table<SavedTrajectoryRecord>
           size="middle"
           rowKey="import_id"
           columns={columns}
+          sortDirections={["ascend", "descend", "ascend"]}
+          rowSelection={{
+            selectedRowKeys: selected,
+            preserveSelectedRowKeys: true,
+            onChange: (keys) => setSelected(keys.map(String)),
+            getCheckboxProps: () => ({ disabled: remove.isPending }),
+          }}
           dataSource={records.data?.items ?? []}
           loading={records.isFetching}
           scroll={{ x: 1080 }}
+          onChange={(_pagination, _filters, sorter, extra) => {
+            if (
+              remove.isPending ||
+              extra.action !== "sort" ||
+              Array.isArray(sorter)
+            )
+              return;
+            const field = sorter.columnKey;
+            if (field === "filename" || field === "imported_at") {
+              setSorting({
+                sort_by: field,
+                sort_order: sorter.order === "ascend" ? "asc" : "desc",
+              });
+              setPaging((value) => ({ ...value, page: 1 }));
+            }
+          }}
           locale={{
             emptyText: <Empty description={t("trajectory.noImports")} />,
           }}
@@ -203,6 +344,7 @@ export function ImportedTrajectories({ user }: { user: User }) {
             pageSize: paging.page_size,
             total: records.data?.total ?? 0,
             showSizeChanger: true,
+            disabled: remove.isPending,
             onChange: (page, pageSize) =>
               setPaging({ page, page_size: pageSize }),
           }}

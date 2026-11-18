@@ -66,6 +66,8 @@ export async function installArchiveBrowser(page, payload) {
     release: null,
     external: [],
     saved: [],
+    deleteFailures: [],
+    deleteRequests: [],
   };
   const user = () => ({
     user_id: "archive-admin",
@@ -157,8 +159,31 @@ export async function installArchiveBrowser(page, payload) {
       const query = new URL(request.url()).searchParams;
       const current = Number(query.get("page") || 1);
       const size = Number(query.get("page_size") || 20);
+      const field = query.get("sort_by") || "imported_at";
+      const sign = query.get("sort_order") === "asc" ? 1 : -1;
+      const entries = [...state.saved].sort((left, right) => {
+        const a =
+          field === "filename"
+            ? left.item.filename.toLowerCase()
+            : left.item.imported_at;
+        const b =
+          field === "filename"
+            ? right.item.filename.toLowerCase()
+            : right.item.imported_at;
+        const comparison =
+          a < b
+            ? -1
+            : a > b
+              ? 1
+              : left.item.import_id < right.item.import_id
+                ? -1
+                : left.item.import_id > right.item.import_id
+                  ? 1
+                  : 0;
+        return sign * comparison;
+      });
       data = {
-        items: state.saved
+        items: entries
           .slice((current - 1) * size, current * size)
           .map((entry) => entry.item),
         total: state.saved.length,
@@ -169,6 +194,12 @@ export async function installArchiveBrowser(page, payload) {
       const id = path.split("/").at(-1);
       const entry = state.saved.find((entry) => entry.item.import_id === id);
       if (request.method() === "DELETE") {
+        state.deleteRequests.push(id);
+        if (state.deleteFailures.includes(id)) {
+          // Simulate a failed connection without generating a product 5xx.
+          await route.abort("connectionfailed");
+          return;
+        }
         state.saved = state.saved.filter(
           (entry) => entry.item.import_id !== id,
         );

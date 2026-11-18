@@ -15,7 +15,9 @@ notes: Self-contained owned native source and import directories, controlled aut
   Cleanup closes files, clients, workers, routes, cookies and browser contexts. No
   shared preparation family is required.
 acceptance_bindings:
-  AC-01: &id001
+  AC-01:
   - test_saved_import_protocol_and_isolation
-  AC-02: *id001
+  - test_saved_import_sort_contract
+  AC-02: &id001
+  - test_saved_import_protocol_and_isolation
   AC-03: *id001

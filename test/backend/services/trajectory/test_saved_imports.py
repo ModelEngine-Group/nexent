@@ -2,8 +2,10 @@
 """Persistent import unit contracts with controlled format-parser boundaries."""
 
 import io
+import json
 from dataclasses import replace
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 from ops.services.trajectory import saved_imports
@@ -138,4 +140,50 @@ def test_concurrent_first_lock_creation_does_not_lose_the_new_record(
 
     monkeypatch.setattr(saved_imports.Directory, "open", macos_create_race)
     item = save(store)["item"]
+    assert store.list(OWNER)["items"] == [item]
+
+
+@pytest.mark.parametrize("sort_by", ["filename", "imported_at"])
+@pytest.mark.parametrize("sort_order", ["asc", "desc"])
+def test_sorting_precedes_pagination_and_has_stable_ties(
+    store, monkeypatch, sort_by, sort_order
+):
+    ids = iter([UUID(int=1), UUID(int=3), UUID(int=2)])
+    monkeypatch.setattr(saved_imports, "uuid4", lambda: next(ids))
+    items = []
+    for name in ["B.zip", "A.zip", "a.zip"]:
+        item = store.create(OWNER, io.BytesIO(b"zip"), name)["item"]
+        item["imported_at"] = "2026-11-18T00:00:00+00:00"
+        path = store.root / ".imports/local/admin" / item["import_id"] / "record.json"
+        record = json.loads(path.read_text())
+        record["item"] = item
+        path.write_text(json.dumps(record))
+        items.append(item)
+    expected = (
+        [items[2], items[1], items[0]]
+        if sort_by == "filename"
+        else [items[0], items[2], items[1]]
+    )
+    if sort_order == "desc":
+        expected.reverse()
+    actual = [
+        store.list(OWNER, page, 1, sort_by=sort_by, sort_order=sort_order)["items"][0]
+        for page in [1, 2, 3]
+    ]
+    assert actual == expected
+    assert (
+        store.list(OWNER, 4, 1, sort_by=sort_by, sort_order=sort_order)["items"] == []
+    )
+    assert store.list(OWNER)["items"] == [items[1], items[2], items[0]]
+
+
+@pytest.mark.parametrize(
+    "sort_by,sort_order",
+    [("size_bytes", "asc"), ("filename", "sideways"), (None, "asc")],
+)
+def test_invalid_sorting_is_rejected_without_changing_files(store, sort_by, sort_order):
+    item = save(store)["item"]
+    with pytest.raises(QueryError) as error:
+        store.list(OWNER, sort_by=sort_by, sort_order=sort_order)
+    assert error.value.status == 422
     assert store.list(OWNER)["items"] == [item]

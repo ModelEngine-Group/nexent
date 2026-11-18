@@ -243,3 +243,8 @@ export interface SavedTrajectoriesPage {
   page: number;
   page_size: number;
 }
+
+export interface SavedImportsSort {
+  sort_by: "filename" | "imported_at";
+  sort_order: "asc" | "desc";
+}

@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
   - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  - CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
   business_rule_ids:
   - TRJ-RULE-012
   type: CONTRACT
@@ -34,8 +35,8 @@ case:
     - 非法包与受控存储故障
   steps:
   - order: 1
-    action: 调用新接口重复上传同一原生ZIP，分页并读取详情。
-    expected: 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。
+    action: 调用新接口重复上传同一原生ZIP，分页并读取详情。 改变文件名/导入时间排序和页码，并发送非法排序参数。
+    expected: 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。 文件名及导入时间均在分页前支持升降序，同值次序稳定；非法排序参数422。
   - order: 2
     action: 未登录、普通用户、同租户其他用户和其他租户SU访问全部新接口。
     expected: 分别401/403、读取404或空列表；删除不存在于当前归属的记录幂等成功且不影响原记录，来源身份无授权作用，错误无正文和内部路径。
@@ -43,7 +44,7 @@ case:
     action: 删除自有记录并重复删除，调用旧临时接口及上传无效包。
     expected: 删除幂等且其他记录不变，无效包不新增记录，旧接口不写持久档案。
   expected_results:
-  - 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。
+  - 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。 文件名及导入时间均在分页前支持升降序，同值次序稳定；非法排序参数422。
   - 分别401/403、读取404或空列表；删除不存在于当前归属的记录幂等成功且不影响原记录，来源身份无授权作用，错误无正文和内部路径。
   - 删除幂等且其他记录不变，无效包不新增记录，旧接口不写持久档案。
   forbidden_side_effects:
@@ -59,7 +60,7 @@ case:
     - ZIP二进制及头、完整内容、错误结构和授权逐项核验。
   acceptance:
   - id: AC-01
-    description: 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。
+    description: 每次生成不同UUID，返回摘要和完整详情，列表倒序及分页正确，响应private,no-store。 文件名及导入时间均在分页前支持升降序，同值次序稳定；非法排序参数422。
     steps:
     - 1
     expected_results:
