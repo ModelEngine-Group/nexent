@@ -20,10 +20,20 @@ def model():
 
 
 def test_unset_sampling_is_omitted_and_explicit_zero_beats_custom_body(model):
-    create = MagicMock(); model.client.chat.completions.create = create
-    model._dispatch_chat_completion(messages=[], temperature=0, top_p=None, extra_body={'temperature': 1, 'top_p': None, 'custom': 7})
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    model._dispatch_chat_completion(messages=[], temperature=0, top_p=0.995, extra_body={'temperature': 1, 'custom': 7})
     sent = create.call_args.kwargs
-    assert sent['temperature'] == 0 and 'top_p' not in sent
+    assert sent['temperature'] == 0
+    assert sent['top_p'] == 0.995
+    assert sent['extra_body'] == {'custom': 7}
+
+    model._dispatch_chat_completion(
+        messages=[], temperature=None, top_p=None, extra_body={'temperature': None, 'top_p': None, 'custom': 7}
+    )
+    sent = create.call_args.kwargs
+    assert 'temperature' not in sent
+    assert 'top_p' not in sent
     assert sent['extra_body'] == {'custom': 7}
 
 
@@ -54,23 +64,6 @@ def test_zero_top_p_never_reaches_provider(model, sampling):
     with pytest.raises(ValueError, match="Top P must be greater than 0"):
         model._dispatch_chat_completion(messages=[], **sampling)
     create.assert_not_called()
-
-
-def test_typed_top_p_reaches_provider_at_full_precision(model):
-    create = MagicMock()
-    model.client.chat.completions.create = create
-    model._dispatch_chat_completion(messages=[], top_p=0.995)
-    assert create.call_args.kwargs["top_p"] == 0.995
-
-
-def test_legacy_wire_sends_explicit_temperature_zero_and_omits_defaults(model):
-    create = MagicMock()
-    model.client.chat.completions.create = create
-    model._dispatch_chat_completion(messages=[], temperature=0)
-    assert create.call_args.kwargs["temperature"] == 0
-    model._dispatch_chat_completion(messages=[], temperature=None, extra_body={"temperature": None})
-    assert "temperature" not in create.call_args.kwargs
-    assert "temperature" not in create.call_args.kwargs["extra_body"]
 
 
 @pytest.mark.parametrize("temperature", [-0.01, 2.01, True])

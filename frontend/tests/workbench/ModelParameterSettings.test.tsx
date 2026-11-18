@@ -26,13 +26,19 @@ vi.mock("react-i18next", async (importOriginal) => ({
   }),
 }));
 
-function Harness({ changed }: { changed: (value: unknown) => void }) {
+function Harness({
+  changed,
+  inheritedValue = { temperature: 0.6, top_p: 0.85 },
+}: {
+  changed: (value: unknown) => void;
+  inheritedValue?: ModelParameterValue;
+}) {
   const [value, setValue] = useState<ModelParameterValue>({});
   return (
     <ModelParameterSettings
       value={value}
       defaultValue={{}}
-      inheritedValue={{ temperature: 0.6, top_p: 0.85 }}
+      inheritedValue={inheritedValue}
       onChange={(next) => {
         changed(next);
         setValue(next);
@@ -112,7 +118,7 @@ it("inherits until edited, preserves zero and decimals, then resets both overrid
     fireEvent.keyDown(temperature, { key: "Enter" });
     expect(changed).toHaveBeenLastCalledWith({ temperature: value });
   }
-  for (const value of [0.005, 0.95, 1]) {
+  for (const value of [0.005, 0.995, 1]) {
     fireEvent.change(topP, { target: { value: String(value) } });
     fireEvent.blur(topP);
     expect(changed).toHaveBeenLastCalledWith({ temperature: 2, top_p: value });
@@ -198,23 +204,42 @@ it("shows configured zero and exact decimal defaults without turning focus or re
   expect(p).toHaveValue("0.83");
 });
 
-it("does not invent an unknown default, but permits a runtime override", async () => {
+it("keeps unset sampling editable and stops Top P stepping at 0.01", async () => {
   const changed = vi.fn();
-  render(
-    <ModelParameterSettings value={{}} defaultValue={{}} onChange={changed} />
-  );
+  render(<Harness changed={changed} inheritedValue={{}} />);
   fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
     key: "Enter",
   });
   const t = await screen.findByRole("spinbutton", { name: "温度" });
+  const topP = screen.getByRole("spinbutton", { name: "Top P" });
   expect(t).toHaveValue("");
-  expect(t).not.toHaveAttribute("placeholder", "继承默认");
+  expect(topP).toHaveValue("");
   expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   fireEvent.blur(t);
   expect(changed).not.toHaveBeenCalled();
-  fireEvent.change(t, { target: { value: "0.4" } });
+  fireEvent.change(t, { target: { value: "0" } });
   fireEvent.blur(t);
-  expect(changed).toHaveBeenLastCalledWith({ temperature: 0.4 });
+  expect(changed).toHaveBeenLastCalledWith({ temperature: 0 });
+  fireEvent.change(t, { target: { value: "" } });
+  fireEvent.blur(t);
+  expect(changed).toHaveBeenLastCalledWith({});
+  expect(t).toBeEnabled();
+
+  changed.mockClear();
+  fireEvent.change(topP, { target: { value: "0" } });
+  fireEvent.keyDown(topP, { key: "Enter" });
+  expect(topP).toHaveAttribute("aria-invalid", "true");
+  expect(changed).not.toHaveBeenCalled();
+  fireEvent.keyDown(topP, { key: "ArrowUp" });
+  expect(topP).toHaveValue("0.01");
+  expect(changed).toHaveBeenLastCalledWith({ top_p: 0.01 });
+  fireEvent.keyDown(topP, { key: "ArrowDown" });
+  expect(topP).toHaveValue("0.01");
+  fireEvent.change(topP, { target: { value: "" } });
+  fireEvent.blur(topP);
+  expect(changed).toHaveBeenLastCalledWith({});
+  expect(topP).toHaveValue("");
+  expect(topP).toBeEnabled();
 });
 
 it("restoring discards an uncommitted numeric draft without submitting or saving the intermediate value", async () => {
