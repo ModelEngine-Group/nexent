@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: AIDP-FILE-SCOPE-D1-003
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_selected_scope_sends_original_file_name_condition
+  AC-02:
+  - test_graph_retrieval_fails_closed_for_file_scope
+  - test_selected_file_without_name_fails_closed
+  AC-03:
+  - test_out_of_scope_record_fails_closed
+  AC-04:
+  - test_all_mode_preserves_retrieval_configuration
+  - test_malformed_file_scope_is_rejected

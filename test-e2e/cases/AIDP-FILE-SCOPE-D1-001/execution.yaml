@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: AIDP-FILE-SCOPE-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_v1_scope_defaults_to_all_files
+  - test_v2_all_mode_has_no_files
+  AC-02:
+  - test_v2_selected_normalizes_and_deduplicates
+  AC-03:
+  - test_v2_rejects_invalid_combinations
+  - test_unknown_schema_version_is_rejected

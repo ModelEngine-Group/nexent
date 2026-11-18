@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from enum import Enum
+
 
 if TYPE_CHECKING:
     from contracts.tool import ToolParamsRequest
@@ -23,6 +24,9 @@ class ResolvedKnowledgeScope:
     local_display_names: List[str] = field(default_factory=list)
     aidp_kds_ids: List[str] = field(default_factory=list)
     aidp_display_names: List[str] = field(default_factory=list)
+    aidp_file_scope: Dict[str, Any] = field(
+        default_factory=lambda: {"mode": "all", "files": []}
+    )
     local_disabled: bool = False
     aidp_disabled: bool = False
     local_capable: bool = True
@@ -59,6 +63,67 @@ class ClassifiedIngestionException:
 
 
 KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
+AidpFileScopeMode = Literal["all", "selected"]
+AIDP_FILE_SCOPE_MAX_FILES = 20
+
+
+class AidpFileRefRequest(BaseModel):
+    """Structured identity of one selected AIDP knowledge-base file."""
+
+    kds_id: str
+    file_uuid: str
+    file_name: Optional[str] = Field(default=None, max_length=512)
+    kds_name: Optional[str] = Field(default=None, max_length=256)
+
+    @field_validator("kds_id", "file_uuid")
+    @classmethod
+    def normalize_identifier(cls, value: str) -> str:
+        item = str(value).strip()
+        if not item or len(item) > 256:
+            raise ValueError(
+                "AIDP file identifiers must be non-empty and at most 256 characters"
+            )
+        return item
+
+    @field_validator("file_name", "kds_name")
+    @classmethod
+    def normalize_optional_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        item = str(value).strip()
+        return item or None
+
+
+class AidpFileScopeRequest(BaseModel):
+    """Conversation-scoped file restriction inside the effective AIDP range."""
+
+    mode: AidpFileScopeMode = "all"
+    files: List[AidpFileRefRequest] = Field(
+        default_factory=list, max_length=AIDP_FILE_SCOPE_MAX_FILES
+    )
+
+    @field_validator("files")
+    @classmethod
+    def normalize_files(
+        cls, values: List[AidpFileRefRequest]
+    ) -> List[AidpFileRefRequest]:
+        normalized = []
+        seen = set()
+        for value in values:
+            key = (value.kds_id, value.file_uuid)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(value)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_files(self):
+        if self.mode == "selected" and not self.files:
+            raise ValueError("selected AIDP file scope requires at least one file")
+        if self.mode == "all" and self.files:
+            raise ValueError("AIDP all-file scope does not accept files")
+        return self
 
 
 class LocalKnowledgeScopeRequest(BaseModel):
@@ -95,6 +160,7 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     mode: KnowledgeScopeMode = "inherit"
     kds_ids: List[str] = Field(default_factory=list, max_length=10)
+    file_scope: AidpFileScopeRequest = Field(default_factory=AidpFileScopeRequest)
 
     @field_validator("kds_ids")
     @classmethod
@@ -112,6 +178,24 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_and_ids(self):
+        if self.file_scope.mode == "selected":
+            if self.mode == "disabled":
+                raise ValueError(
+                    "AIDP disabled mode does not accept a selected file scope"
+                )
+            derived_ids: List[str] = []
+            for item in self.file_scope.files:
+                if item.kds_id not in derived_ids:
+                    derived_ids.append(item.kds_id)
+            if len(derived_ids) > 10:
+                raise ValueError(
+                    "AIDP file scope may reference at most 10 knowledge bases"
+                )
+            # File mode owns the KB range: kds_ids are derived from the
+            # selected files, never maintained as a second editable list.
+            self.mode = "override"
+            self.kds_ids = derived_ids
+            return self
         if self.mode == "override" and not self.kds_ids:
             raise ValueError("AIDP override mode requires at least one kds_id")
         if self.mode != "override" and self.kds_ids:
@@ -122,11 +206,19 @@ class AidpKnowledgeScopeRequest(BaseModel):
 class ConversationKnowledgeScopeRequest(BaseModel):
     """Persisted knowledge resource selection; retrieval parameters belong to tools."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     local: LocalKnowledgeScopeRequest = Field(
         default_factory=LocalKnowledgeScopeRequest
     )
     aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
+
+    @model_validator(mode="after")
+    def validate_schema_version(self):
+        if self.schema_version == 1 and self.aidp.file_scope.mode == "selected":
+            raise ValueError(
+                "AIDP selected file scope requires knowledge_scope schema_version 2"
+            )
+        return self
 
 
 class ConversationKnowledgeScopeUpdateRequest(BaseModel):

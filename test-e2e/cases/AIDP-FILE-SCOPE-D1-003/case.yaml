@@ -1,0 +1,150 @@
+{
+  "schema_version": "1.0",
+  "stage": "D1",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-FILE-SCOPE-D1-003",
+    "feature_id": "AIDP-FILE-SCOPE",
+    "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-003",
+      "AIDP-FILE-SCOPE-REQ-005"
+    ],
+    "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-03",
+      "AIDP-FILE-SCOPE-RULE-04",
+      "AIDP-FILE-SCOPE-RULE-05"
+    ],
+    "title": "AidpSearchTool applies original_file_name metadata filter and fails closed for graph",
+    "type": "SDK-UT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Prove that a selected file scope becomes a FusionSearch metadata_condition on original_file_name for vector/full-text retrieval, while graph retrieval, nameless files, malformed scopes and out-of-scope records fail closed without an unfiltered request.",
+    "preconditions": [
+      "Construct AidpSearchTool directly with a fake AIDP URL and API key; replace the transport and HTTP client so no network call is possible.",
+      "Treat a synthetic filter field only as an adapter-wiring test; do not claim a confirmed AIDP file-filter contract."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "kds_list": [
+        "kb-1"
+      ],
+      "selected": "file-a (a.txt) and file-b (b.txt) in kb-1",
+      "graph": "vector_search plus graph_search",
+      "response": "one in-scope record and one out-of-scope record"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Call forward with selected files carrying names and vector/full-text retrieval.",
+        "expected": "FusionSearch carries metadata_condition with logical_operator or and one original_file_name = condition per selected name; retrieval configuration is otherwise preserved."
+      },
+      {
+        "order": 2,
+        "action": "Call forward with a selected file scope while the configured method includes graph_search.",
+        "expected": "No request is sent and a readable graph-unsupported denial is returned."
+      },
+      {
+        "order": 3,
+        "action": "Call forward with a selected file that has no display name.",
+        "expected": "No request is sent and a readable unavailable denial is returned."
+      },
+      {
+        "order": 4,
+        "action": "Return an in-scope record and a record whose original_file_name is outside the selected names.",
+        "expected": "The out-of-scope record is rejected, no result is emitted, and the tool fails closed."
+      },
+      {
+        "order": 5,
+        "action": "Run all-files mode and a malformed selected scope.",
+        "expected": "All-files mode keeps the existing payload without metadata_condition; malformed scope is rejected at construction."
+      }
+    ],
+    "expected_results": [
+      "A selected scope is translated into an OR metadata_condition on original_file_name for vector/full-text retrieval.",
+      "Graph-enabled retrieval and selected files without names fail closed and never send an unfiltered request.",
+      "Out-of-scope returned records are rejected and no answer is produced from them.",
+      "All-files mode keeps the existing retrieval payload; malformed scope cannot start a search."
+    ],
+    "forbidden_side_effects": [
+      "Do not send FusionSearch when the selected scope cannot be expressed for the configured channels.",
+      "Do not send graph retrieval under a file-name filter it does not honor.",
+      "Do not emit out-of-scope records, images or citations.",
+      "Do not change retrieval method, Top K, thresholds or reranking from the Agent configuration."
+    ],
+    "unit_boundary": "sdk/nexent/core/ext_components/aidp/aidp_search_tool.py and file_scope.py with the transport replaced",
+    "inputs": [
+      "selected file scope with names",
+      "graph-enabled method",
+      "selected file without a name",
+      "in-scope and out-of-scope records",
+      "all-files mode",
+      "malformed file-scope JSON"
+    ],
+    "assertions": [
+      "The payload metadata_condition uses logical_operator or and original_file_name = each selected name.",
+      "Graph-enabled file scope returns a denial and makes zero transport calls.",
+      "A selected file without a name returns a denial and makes zero transport calls.",
+      "Out-of-scope records are rejected and fail closed.",
+      "All-files mode has no metadata_condition; malformed scope raises during construction."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Selected files become an original_file_name metadata filter.",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1
+        ],
+        "forbidden_side_effects": [
+          1,
+          4
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Graph and nameless selections fail closed without HTTP.",
+        "steps": [
+          2,
+          3
+        ],
+        "expected_results": [
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Out-of-scope records are rejected.",
+        "steps": [
+          4
+        ],
+        "expected_results": [
+          3
+        ],
+        "forbidden_side_effects": [
+          3
+        ]
+      },
+      {
+        "id": "AC-04",
+        "description": "All-files and malformed scopes keep existing safety boundaries.",
+        "steps": [
+          5
+        ],
+        "expected_results": [
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          4
+        ]
+      }
+    ]
+  }
+}

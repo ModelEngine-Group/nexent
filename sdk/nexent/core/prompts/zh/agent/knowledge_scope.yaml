@@ -13,3 +13,5 @@ resources:
   no_capability: 当前 Agent 未启用知识库检索能力。
   disabled: 当前会话已禁用知识库检索。
   empty: 当前会话没有可用知识库资源。
+  aidp_files_heading: 本次 AIDP 检索仅限以下文件：
+  aidp_files_empty: 没有有效的 AIDP 文件范围，检索将安全失败。

@@ -2238,8 +2238,11 @@ def fusion_search(
             item["pages"] = chunk.get("pages", [])
         payload.append(item)
 
-    logger.info("SEARCH  query=%r kds=%r method=%s returned=%d",
-                request.query, request.kds_list, request.search_method, len(payload))
+    logger.info("SEARCH  query=%r kds=%r metadata=%r method=%s returned=%d",
+                request.query, request.kds_list,
+                (request.metadata_condition.model_dump(exclude_none=True)
+                 if request.metadata_condition is not None else None),
+                request.search_method, len(payload))
     return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
 
 

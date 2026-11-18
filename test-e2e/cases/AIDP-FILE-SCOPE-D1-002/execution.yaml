@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AIDP-FILE-SCOPE-D1-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_selected_files_are_projected_per_tool
+  AC-02:
+  - test_out_of_range_and_empty_selected_fail_closed
+  AC-03:
+  - test_selected_file_scope_applies_to_every_tool

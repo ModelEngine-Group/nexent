@@ -2,36 +2,69 @@
 
 import json
 import logging
-
-from contracts.conversation import MessageSource
-
-from management.services.agent.context import (
-    strip_current_time_prefix,
-)
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
-from contracts.constants.constants import LANGUAGE
-from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from contracts.constants.constants import MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.agent import AgentRequest
-from contracts.conversation import MessageRequest, MessageUnit
+from contracts.constants.constants import (
+    CHAT_MODE_VALUES,
+    DEFAULT_EN_TITLE,
+    DEFAULT_ZH_TITLE,
+    LANGUAGE,
+    MESSAGE_ROLE,
+    MODEL_CONFIG_MAPPING,
+)
+from contracts.conversation import MessageRequest, MessageSource, MessageUnit
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
-from contracts.constants.constants import CHAT_MODE_VALUES
-from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
+    create_conversation,
+    create_conversation_message,
+    create_message_unit,
+    create_source_image,
+    create_source_search,
+    delete_conversation,
+    delete_conversations_batch,
+    get_conversation,
+    get_conversation_history,
+    get_historical_context,
     get_last_unit_for_message,
     get_latest_assistant_message,
+    get_latest_assistant_message_id,
+    get_latest_user_message_id,
+    get_message_id_by_index,
+    get_source_images_by_conversation,
+    get_source_images_by_message,
+    get_source_searches_by_conversation,
+    get_source_searches_by_message,
+    rename_conversation,
+    replace_conversation_workbench_and_metadata,
+    replace_conversation_workbench_config,
+    save_history_summary,
+    update_conversation_agent_id,
+    update_conversation_chat_mode,
+    update_conversation_knowledge_scope,
+    update_conversation_message_content,
+    update_conversation_message_status,
+    update_message_minio_files,
+    update_message_opinion,
+    update_message_unit_content,
+    update_message_unit_status,
 )
+from management.db.conversation.repository import persist_assistant_run_batch as persist_assistant_run_batch_db
 from management.db.model.repository import get_model_by_model_id
-from management.services.model.adapter import get_llm_adapter_from_config
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 from management.services.configuration.tenant.settings import tenant_config_manager
-from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
+from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.model.text import remove_think_blocks
+
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -618,6 +651,11 @@ def update_conversation_knowledge_scope_service(
                 "disabled": resolved.aidp_disabled,
                 "kds_ids": resolved.aidp_kds_ids,
                 "display_names": resolved.aidp_display_names,
+                "file_scope": (
+                    resolved.aidp_file_scope
+                    if isinstance(getattr(resolved, "aidp_file_scope", None), dict)
+                    else {"mode": "all", "files": []}
+                ),
             },
         }
     elif knowledge_scope is not None:

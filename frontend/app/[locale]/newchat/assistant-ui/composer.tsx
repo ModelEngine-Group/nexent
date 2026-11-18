@@ -2,7 +2,6 @@
 
 "use client";
 
-
 import {
   useMemo,
   useState,
@@ -29,6 +28,7 @@ import {
   Bot,
   Sparkles,
   X,
+  FileText,
 } from "lucide-react";
 import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
 import { cn } from "@/lib/utils";
@@ -68,6 +68,11 @@ import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
+import {
+  EMPTY_AIDP_FILE_SCOPE,
+  getAidpFileScope,
+  withAidpFileScope,
 } from "@/types/knowledgeScope";
 import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -387,6 +392,46 @@ export const Composer: FC<ComposerProps> = ({
   const selectedSkillNames = conversationSkills.map((skill) => skill.name);
 
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const composerText = useAuiState((state) => state.composer.text);
+  const mentionTriggerActive = useMemo(
+    () => /(?:^|\s)@([^\s@]*)$/.test(composerText),
+    [composerText]
+  );
+  const handleMentionKeyDown = (event: {
+    key: string;
+    shiftKey: boolean;
+    preventDefault(): void;
+    stopPropagation(): void;
+  }): boolean => {
+    if (!mentionTriggerActive) return false;
+    if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return false;
+    const listbox = document.querySelector('[role="listbox"]');
+    if (!listbox) return false;
+    const options = Array.from(
+      listbox.querySelectorAll<HTMLElement>('[role="option"]')
+    );
+    if (options.length === 0) return false;
+    const highlighted =
+      listbox.querySelector<HTMLElement>("[data-highlighted]");
+    if (event.key === "Enter") {
+      if (event.shiftKey) return false;
+      const target = highlighted ?? options[0];
+      event.preventDefault();
+      event.stopPropagation();
+      target.click();
+      return true;
+    }
+    const currentIndex = highlighted ? options.indexOf(highlighted) : -1;
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const next =
+      options[(currentIndex + delta + options.length) % options.length];
+    if (!next) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    next.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    next.scrollIntoView({ block: "nearest" });
+    return true;
+  };
   const modelParameterScope = useAuiState(
     (state) => state.threads?.mainThreadId
   );
@@ -423,6 +468,31 @@ export const Composer: FC<ComposerProps> = ({
         id,
     };
   });
+  const aidpFileScope = useMemo(
+    () => getAidpFileScope(knowledgeScope),
+    [knowledgeScope]
+  );
+  const selectedAidpFiles = useMemo(
+    () => (aidpFileScope.mode === "selected" ? aidpFileScope.files : []),
+    [aidpFileScope]
+  );
+  const fileModeActive = selectedAidpFiles.length > 0;
+  const mentionEnabled = Boolean(skillFiles);
+  const knowledgeBaseNameById = new Map(
+    selectedKnowledgeBaseChips.map(({ id, name }) => [id, name])
+  );
+  const duplicatedFileNameSet = useMemo(() => {
+    const counts = new Map<string, number>();
+    selectedAidpFiles.forEach((file) => {
+      const name = file.file_name || file.file_uuid;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    });
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([name]) => name)
+    );
+  }, [selectedAidpFiles]);
   const toggleKnowledgeBase = async (id: string) => {
     if (
       isRunning ||
@@ -453,17 +523,20 @@ export const Composer: FC<ComposerProps> = ({
       message.error(t("chat.knowledgeScope.embeddingMismatch"));
       return;
     }
-    const scope: ConversationKnowledgeScope = {
-      schema_version: 1,
-      local: {
-        mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
-        knowledge_ids: enableAidpKnowledge ? [] : ids,
+    const scope: ConversationKnowledgeScope = withAidpFileScope(
+      {
+        schema_version: knowledgeScope?.schema_version ?? 1,
+        local: {
+          mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
+          knowledge_ids: enableAidpKnowledge ? [] : ids,
+        },
+        aidp: {
+          mode: enableAidpKnowledge && ids.length ? "override" : "disabled",
+          kds_ids: enableAidpKnowledge ? ids : [],
+        },
       },
-      aidp: {
-        mode: enableAidpKnowledge && ids.length ? "override" : "disabled",
-        kds_ids: enableAidpKnowledge ? ids : [],
-      },
-    };
+      EMPTY_AIDP_FILE_SCOPE
+    );
     setKnowledgeSaving(true);
     try {
       await onKnowledgeScopeChange(scope);
@@ -473,6 +546,7 @@ export const Composer: FC<ComposerProps> = ({
       setKnowledgeSaving(false);
     }
   };
+
   const hasIncompatibleScope = Boolean(
     isDeploymentReady &&
     knowledgeScope &&
@@ -605,7 +679,9 @@ export const Composer: FC<ComposerProps> = ({
 
         {/* Composer Primitive Root */}
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-          {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
+          {mentionEnabled ? (
+            <SkillFileMentionPopover files={skillFiles ?? []} />
+          ) : null}
           <ComposerPrimitive.Root
             className="flex w-full flex-col gap-2.5 outline-none"
             onSubmit={(event) => {
@@ -613,6 +689,7 @@ export const Composer: FC<ComposerProps> = ({
               else prepareSend();
             }}
             onKeyDownCapture={(event) => {
+              if (handleMentionKeyDown(event)) return;
               if (isRunning && event.key === "Enter" && !event.shiftKey)
                 event.preventDefault();
             }}
@@ -626,6 +703,7 @@ export const Composer: FC<ComposerProps> = ({
             {hasAttachments && <ComposerAttachments className="px-0" />}
             {conversationResources &&
               (selectedSkillNames.length > 0 ||
+                fileModeActive ||
                 (canSelectKnowledge &&
                   selectedKnowledgeBaseChips.length > 0)) && (
                 <div className="flex min-w-0 flex-wrap gap-2 px-2">
@@ -656,34 +734,64 @@ export const Composer: FC<ComposerProps> = ({
                       </button>
                     </span>
                   ))}
-                  {(canSelectKnowledge ? selectedKnowledgeBaseChips : []).map(
-                    ({ id, name }) => (
-                      <span
-                        key={id}
-                        className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
-                      >
-                        <KnowledgeBookIcon
-                          className="size-3.5 shrink-0 text-[#666]"
-                          aria-hidden
-                        />
-                        <span className="truncate" title={name}>
-                          {name}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={isRunning || knowledgeSaving}
-                          aria-label={`${t("common.delete")} ${name}`}
-                          className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
-                          onClick={() => void toggleKnowledgeBase(id)}
+                  {fileModeActive
+                    ? selectedAidpFiles.map((file) => {
+                        const name = file.file_name || file.file_uuid;
+                        const kbName =
+                          file.kds_name ||
+                          knowledgeBaseNameById.get(file.kds_id) ||
+                          file.kds_id;
+                        return (
+                          <button
+                            key={`${file.kds_id}:${file.file_uuid}`}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => setKnowledgeModalOpen(true)}
+                            title={`${name} · ${kbName}`}
+                            className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#cfe0ff] bg-[#eef4ff] px-2 text-xs text-[#2f5fa8] transition-colors hover:bg-[#e4eeff] disabled:cursor-not-allowed"
+                          >
+                            <FileText
+                              className="size-3.5 shrink-0"
+                              aria-hidden
+                            />
+                            <span className="truncate">{name}</span>
+                            {duplicatedFileNameSet.has(name) ? (
+                              <span className="shrink-0 text-[11px] text-[#2f5fa8]/70">
+                                {kbName}
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    : (canSelectKnowledge
+                        ? selectedKnowledgeBaseChips
+                        : []
+                      ).map(({ id, name }) => (
+                        <span
+                          key={id}
+                          className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
                         >
-                          <X className="size-3" aria-hidden />
-                        </button>
-                      </span>
-                    )
-                  )}
+                          <KnowledgeBookIcon
+                            className="size-3.5 shrink-0 text-[#666]"
+                            aria-hidden
+                          />
+                          <span className="truncate" title={name}>
+                            {name}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={isRunning || knowledgeSaving}
+                            aria-label={`${t("common.delete")} ${name}`}
+                            className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
+                            onClick={() => void toggleKnowledgeBase(id)}
+                          >
+                            <X className="size-3" aria-hidden />
+                          </button>
+                        </span>
+                      ))}
                 </div>
               )}
-            {skillFiles ? (
+            {mentionEnabled ? (
               <LexicalComposerInput
                 aria-label={t("chat.composer.inputLabel")}
                 placeholder=""
@@ -774,7 +882,11 @@ export const Composer: FC<ComposerProps> = ({
                     className="h-8 text-sm font-normal text-muted-foreground"
                     onClick={() => setKnowledgeModalOpen(true)}
                     aria-label={t("chat.composer.knowledgeBase")}
-                    title={knowledgeSummary}
+                    title={
+                      fileModeActive
+                        ? t("chat.knowledgeScope.fileScopeTitle")
+                        : knowledgeSummary
+                    }
                   >
                     <KnowledgeBookIcon className="size-5" />
                     {t("chat.composer.knowledgeBase")}

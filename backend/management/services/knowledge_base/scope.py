@@ -5,21 +5,28 @@ import json
 import re
 import unicodedata
 from copy import deepcopy
-from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
 from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
 
-from management.services.agent.preparation.tools import _get_agent_tool_overrides
-from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from contracts.errors.exceptions import ValidationError
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from contracts.tool import ToolParamsRequest
-from management.db.agent.repository import query_sub_agent_relations, resolve_sub_agent_version_no, search_agent_info_by_agent_id
+from management.db.agent.repository import (
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+    search_agent_info_by_agent_id,
+)
 from management.db.agent.version import query_current_version_no
-from management.db.knowledge_base.repository import get_knowledge_info_by_ids_and_tenant, get_knowledge_info_by_tenant_id, get_knowledge_name_map_by_index_names
+from management.db.knowledge_base.repository import (
+    get_knowledge_info_by_ids_and_tenant,
+    get_knowledge_info_by_tenant_id,
+    get_knowledge_name_map_by_index_names,
+)
+from management.services.agent.preparation.tools import _get_agent_tool_overrides
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from management.services.knowledge_base.service import ElasticSearchService
 
 
@@ -27,8 +34,10 @@ LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
 AIDP_TOOL_CLASS = AIDP_SEARCH_TOOL_CLASS
 LOCAL_RANGE_PARAM = "index_names"
 AIDP_RANGE_PARAM = "kds_list"
+AIDP_FILE_SCOPE_PARAM = "file_scope"
 LOCAL_MAX_SELECT = 50
 AIDP_MAX_SELECT = 10
+AIDP_MAX_FILE_SELECT = 20
 RESOURCE_NAME_MAX_LENGTH = 100
 RESOURCE_CONTEXT_MAX_LENGTH = 4000
 STATIC_SCOPE_PATTERN = re.compile(
@@ -258,6 +267,9 @@ def get_agent_knowledge_capabilities(
         "aidp": {
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
+            "max_file_select": AIDP_MAX_FILE_SELECT,
+            "file_scope_supported": True,
+            "file_scope_graph_supported": False,
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": aidp_default_ids,
             "default_range_values": aidp_default_ids,
@@ -421,6 +433,7 @@ def resolve_knowledge_scope(
     scope_overrides: Dict[str, Dict[str, Dict[str, Any]]] = {}
     effective_local_indices: List[str] = []
     effective_aidp_ids: List[str] = []
+    aidp_tool_kds: Dict[tuple[str, str], List[str]] = {}
     local_capable = False
     aidp_capable = False
 
@@ -461,9 +474,7 @@ def resolve_knowledge_scope(
                     kds_ids = list(aidp_ids)
                 else:
                     kds_ids = []
-                scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
-                    AIDP_RANGE_PARAM
-                ] = kds_ids
+                aidp_tool_kds[(agent_name, identifier)] = list(kds_ids)
                 effective_aidp_ids.extend(kds_ids)
 
     if scope.local.mode == "override" and not local_capable:
@@ -481,6 +492,49 @@ def resolve_knowledge_scope(
 
     effective_local_indices = list(dict.fromkeys(effective_local_indices))
     effective_aidp_ids = list(dict.fromkeys(effective_aidp_ids))
+
+    for (agent_name, identifier), kds_ids in aidp_tool_kds.items():
+        scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
+            AIDP_RANGE_PARAM
+        ] = kds_ids
+
+    aidp_file_scope: Dict[str, Any] = {"mode": "all", "files": []}
+    if scope.aidp.file_scope.mode == "selected":
+        allowed_kds = set(effective_aidp_ids)
+        valid_files: List[Dict[str, str]] = []
+        dropped_files = 0
+        for item in scope.aidp.file_scope.files:
+            if item.kds_id not in allowed_kds or not item.file_name:
+                dropped_files += 1
+                continue
+            entry = {
+                "kds_id": item.kds_id,
+                "file_uuid": item.file_uuid,
+                "file_name": item.file_name,
+            }
+            if item.kds_name:
+                entry["kds_name"] = item.kds_name
+            valid_files.append(entry)
+        if dropped_files:
+            warnings.append({
+                "code": "KNOWLEDGE_SCOPE_FILE_UNAVAILABLE",
+                "source": "aidp",
+                "count": dropped_files,
+            })
+        aidp_file_scope = {"mode": "selected", "files": valid_files}
+        for (agent_name, identifier), kds_ids in aidp_tool_kds.items():
+            tool_kds = set(kds_ids)
+            scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
+                AIDP_FILE_SCOPE_PARAM
+            ] = {
+                "mode": "selected",
+                "files": [
+                    dict(item)
+                    for item in valid_files
+                    if item["kds_id"] in tool_kds
+                ],
+            }
+
     local_by_index = {record["index_name"]: record for record in local_records}
     if scope.local.mode == "override":
         effective_local_ids = [
@@ -526,6 +580,7 @@ def resolve_knowledge_scope(
         local_display_names=local_display_names,
         aidp_kds_ids=effective_aidp_ids,
         aidp_display_names=aidp_display_names,
+        aidp_file_scope=aidp_file_scope,
         local_disabled=scope.local.mode == "disabled" or (
             scope.local.mode == "override" and not effective_local_indices
         ),
@@ -612,6 +667,8 @@ def resolve_executable_knowledge_scope(
                     name: value for name, value in metadata.get("kds_name_to_id_map", {}).items()
                     if value in allowed
                 }
+                if AIDP_FILE_SCOPE_PARAM in params:
+                    metadata[AIDP_FILE_SCOPE_PARAM] = params[AIDP_FILE_SCOPE_PARAM]
             tool.metadata = metadata
     return compiled, resolved
 
@@ -666,6 +723,12 @@ def build_runtime_knowledge_resources(
     resolved: ResolvedKnowledgeScope,
 ) -> dict[str, Any]:
     """Project the authorized scope to bounded, display-only SDK inputs."""
+    file_scope = resolved.aidp_file_scope or {"mode": "all", "files": []}
+    file_names = [
+        item.get("file_name") or item.get("file_uuid") or ""
+        for item in file_scope.get("files") or []
+        if isinstance(item, dict)
+    ]
     return {
         "local_capable": resolved.local_capable,
         "aidp_capable": resolved.aidp_capable,
@@ -673,4 +736,8 @@ def build_runtime_knowledge_resources(
         "aidp_disabled": resolved.aidp_disabled,
         "local_display_names": _bounded_resource_names(resolved.local_display_names, LOCAL_MAX_SELECT),
         "aidp_display_names": _bounded_resource_names(resolved.aidp_display_names, AIDP_MAX_SELECT),
+        "aidp_file_scope": {
+            "mode": file_scope.get("mode", "all"),
+            "display_names": _bounded_resource_names(file_names, AIDP_MAX_FILE_SELECT),
+        },
     }

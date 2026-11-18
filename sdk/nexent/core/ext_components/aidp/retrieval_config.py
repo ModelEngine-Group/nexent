@@ -113,7 +113,7 @@ def prepare_config(config, inherited):
     return raw
 
 
-def build_payload(config, query, kds_list):
+def build_payload(config, query, kds_list, file_filter=None):
     channels = active_channels(config["search_method"])
     payload = {key: config[key] for key in (
         "search_method", "score_threshold", "reranking_enable", "rewrite_enable",
@@ -132,4 +132,6 @@ def build_payload(config, query, kds_list):
     if "graph_search" in channels:
         payload["graph_search_config"] = {key: config[key] for key in (
             "graph_top_k", "graph_score_threshold", "graph_reranking_enable")}
+    if file_filter:
+        payload.update(file_filter)
     return payload

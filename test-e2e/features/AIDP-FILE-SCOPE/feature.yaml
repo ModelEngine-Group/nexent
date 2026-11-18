@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "AIDP-KNOWLEDGE",
+    "name": "Knowledge retrieval"
+  },
+  "feature": {
+    "feature_id": "AIDP-FILE-SCOPE",
+    "name": "Conversation AIDP file-scoped retrieval",
+    "status": "active",
+    "description": "Select one or more AIDP knowledge-base files in the chat retrieval-scope drawer and persist the selection as a conversation resource scope that restricts the AIDP search tool to those files, without changing Agent retrieval configuration.",
+    "business_rules": [
+      {
+        "rule_id": "AIDP-FILE-SCOPE-RULE-01",
+        "description": "The existing conversation retrieval drawer exposes two mutually exclusive modes: by knowledge base and by files. File mode shows one collapsible group per knowledge base: on entry it loads only the first KB's first backend page; other KBs stay collapsed and are fetched only when expanded; every expanded KB paginates independently from the backend and pages never mix KBs. File-name search uses the backend keyword parameter for every KB with at most three concurrent requests and shows at most the first 20 matches per KB; KBs with matches auto-expand, KBs without matches are hidden, and search progress or failure is not reported. Same-name files remain distinguishable by KB and no separate knowledge-base selector is required. The composer shows either knowledge-base tags or file tags, never both, and adds no explanatory file-scope banner. Skill @, attachments, IME and send behavior stay unchanged."
+      },
+      {
+        "rule_id": "AIDP-FILE-SCOPE-RULE-02",
+        "description": "A file selection is saved in conversation knowledge_scope schema v2 as (kds_id, file_uuid); the aidp kds_ids are derived from the selected files and are not a second editable list. File mode requires at least one file and respects the file and KB limits. Switching back to knowledge-base mode clears file_scope and restores knowledge-base tags. Scopes remain isolated per conversation, restore on history, and changes apply only to later runs."
+      },
+      {
+        "rule_id": "AIDP-FILE-SCOPE-RULE-03",
+        "description": "The backend revalidates KB READ and the Agent/conversation knowledge range, injects the derived kds_list and file_scope into every main and sub-Agent AidpSearchTool, and never lets model or sub-Agent arguments widen it. Vector/full-text retrieval uses FusionSearch metadata_condition with original_file_name OR conditions; cross-KB same-name files share the name condition as accepted. Graph retrieval cannot consume the condition, so a file-scoped run with graph enabled fails closed before an unfiltered request. The product does not claim UUID-level isolation and does not use post-topK trimming as the filter."
+      },
+      {
+        "rule_id": "AIDP-FILE-SCOPE-RULE-04",
+        "description": "Unreadable, deleted, out-of-range, empty-after-intersection, unsupported-method or upstream-refused file scopes fail closed: no unfiltered fallback, no out-of-scope result is exposed, the user receives a concise readable status, and credentials are never exposed. File mode selection cannot expand the Agent or user-authorized KB boundary."
+      },
+      {
+        "rule_id": "AIDP-FILE-SCOPE-RULE-05",
+        "description": "Search method, Top K, reranking and other retrieval parameters remain owned by the Agent tool configuration. The chat drawer does not edit them, does not force a retrieval call, and creates no fake retrieval event or source when the Agent does not call AIDP Search. The message-body @file proposal is out of scope; only the existing Skill @ remains."
+      }
+    ],
+    "required_test_stages": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ]
+  }
+}

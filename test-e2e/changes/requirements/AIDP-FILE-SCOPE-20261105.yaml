@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "AIDP-FILE-SCOPE-20261105",
+    "change_type": "requirement",
+    "requirement_id": "AIDP-FILE-SCOPE-REQ-001",
+    "title": "Conversation AIDP file-scoped retrieval",
+    "description": "Implement AIDP-UI-07 as a conversation-level retrieval scope in the existing right drawer. The drawer exposes mutually exclusive 'by knowledge base' and 'by files' modes; file mode shows collapsible KB groups, loads only the first KB page on entry, fetches other KBs on expansion, and paginates each KB independently. File-name search covers all KBs with backend keyword queries, at most three concurrent requests and the first 20 matches per KB; matched KBs auto-expand without progress or failure messaging. The mode derives kds_ids from selected files and replaces KB tags with file tags, without an extra banner. The previous @-based knowledge-file entry is removed for this iteration; Skill @, attachments, send and history are preserved. Filename filtering uses metadata_condition.original_file_name, graph-enabled file scope fails closed, and real AIDP recall/topK acceptance remains blocked.",
+    "affected_features": {
+      "added": [
+        "AIDP-FILE-SCOPE"
+      ],
+      "modified": [],
+      "retired": [],
+      "existing": [
+        "AIDP-RETRIEVAL"
+      ]
+    },
+    "affected_cases": {
+      "existing": [
+        "AIDP-RET-CONFIG-API-D2-001",
+        "AIDP-RET-JOURNEY-D4-001"
+      ],
+      "added": [
+        "AIDP-FILE-SCOPE-D1-001",
+        "AIDP-FILE-SCOPE-D1-002",
+        "AIDP-FILE-SCOPE-D1-003",
+        "AIDP-FILE-SCOPE-D2-001",
+        "AIDP-FILE-SCOPE-D2-002",
+        "AIDP-FILE-SCOPE-D3-001",
+        "AIDP-FILE-SCOPE-D4-001",
+        "AIDP-FILE-SCOPE-D5-001"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "behaviors": [
+        "knowledge_scope v1/v2 parsing, file-scope validation and unknown-version rejection",
+        "Scope resolution keeps existing kds_list intersection and preview behavior"
+      ],
+      "reason": "The existing scope model and scope service UT encode the v1-only contract that this change extends; they are updated in place. New file-scope component contracts are proven by formal D1 Cases instead of adding duplicate legacy UT.",
+      "test_selectors": [
+        "test/backend/consts/test_knowledge_scope_models.py",
+        "test/backend/services/test_knowledge_scope_service.py"
+      ]
+    }
+  }
+}

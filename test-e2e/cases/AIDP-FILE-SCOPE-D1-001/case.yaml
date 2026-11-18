@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "stage": "D1",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-FILE-SCOPE-D1-001",
+    "feature_id": "AIDP-FILE-SCOPE",
+    "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-002"
+    ],
+    "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-04"
+    ],
+    "title": "knowledge_scope v2 file scope contract, kds_ids derivation and v1 compatibility",
+    "type": "BE-UT",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Prove that conversation knowledge scopes accept v2 AIDP file scopes, normalize/deduplicate structured file identities, derive kds_ids from selected files, reject unsafe combinations, and read legacy v1 records as all files.",
+    "preconditions": [
+      "Import the backend knowledge contracts directly; no database, HTTP, AIDP or model service is required.",
+      "Do not read or write any persisted conversation record."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "v1": "schema_version 1 with local and aidp resource modes and no file_scope",
+      "v2_all": "schema_version 2 with aidp.file_scope mode all and an empty file list",
+      "v2_selected": "schema_version 2 with duplicate and whitespace-padded (kds_id, file_uuid) pairs",
+      "invalid": "selected with v1, selected with empty files, all with files, selected with aidp disabled, override file outside kds_ids, more than 20 files, unknown schema version"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Validate a legacy v1 scope and a v2 scope whose aidp.file_scope mode is all.",
+        "expected": "Both resolve aidp.file_scope.mode to all with an empty file list; no validation error is raised."
+      },
+      {
+        "order": 2,
+        "action": "Validate a v2 selected scope whose file list repeats a pair and pads identifiers with whitespace.",
+        "expected": "Identifiers are trimmed, duplicates collapse to one pair, order is preserved, and the scope keeps schema_version 2."
+      },
+      {
+        "order": 3,
+        "action": "Submit each invalid combination and an unknown schema version.",
+        "expected": "Selected identifiers are trimmed, duplicates collapse to one pair, and aidp.mode/kds_ids are derived from the files."
+      }
+    ],
+    "expected_results": [
+      "Legacy v1 and v2 all-file scopes normalize to file_scope mode all with no files.",
+      "Selected file identities are structured, trimmed and deduplicated, and their KB IDs are derived into aidp.kds_ids.",
+      "Selected is rejected with v1, empty files, aidp disabled, out-of-range override kds_ids and more than 20 files; all is rejected when files are present.",
+      "Schema versions other than 1 and 2 remain rejected."
+    ],
+    "forbidden_side_effects": [
+      "Do not persist, migrate or rewrite stored conversation scopes.",
+      "Do not contact AIDP, a database or any external service during validation.",
+      "Do not accept an empty selected list as a synonym for all files."
+    ],
+    "unit_boundary": "backend/contracts/knowledge.py Pydantic request models",
+    "inputs": [
+      "legacy v1 scope payload",
+      "v2 all-file scope payload",
+      "v2 selected scope payload with duplicates and whitespace",
+      "invalid scope payloads"
+    ],
+    "assertions": [
+      "A missing file_scope reads as mode all with no files.",
+      "Selected file pairs are trimmed and deduplicated.",
+      "Invalid mode, version, range and count combinations raise pydantic ValidationError.",
+      "schema_version 3 is rejected."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "v1 and v2 all-file scopes are backward compatible.",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Selected file identities are structured, normalized and deduplicated.",
+        "steps": [
+          2
+        ],
+        "expected_results": [
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Unsafe combinations and unknown versions are rejected.",
+        "steps": [
+          3
+        ],
+        "expected_results": [
+          3,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          2,
+          3
+        ]
+      }
+    ]
+  }
+}

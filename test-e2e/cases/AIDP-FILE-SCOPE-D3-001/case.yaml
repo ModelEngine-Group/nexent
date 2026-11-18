@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-FILE-SCOPE-D3-001",
+    "feature_id": "AIDP-FILE-SCOPE",
+    "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-003",
+      "AIDP-FILE-SCOPE-REQ-005"
+    ],
+    "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-03",
+      "AIDP-FILE-SCOPE-RULE-05"
+    ],
+    "title": "Real AIDP file-scoped recall with topK=1 and all enabled channels",
+    "type": "INTEGRATION",
+    "priority": "P0",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Prove against a real AIDP deployment that a conversation selecting file A retrieves only from A, returns A's best hit with topK=1 even when file B scores higher, and honors the same restriction for every enabled channel and across knowledge bases.",
+    "preconditions": [
+      "AIDP D2-002 contract is confirmed and a real AIDP environment with writable test KBs is available under an environment lease.",
+      "A local Nexent stack runs the changed build and an Agent whose AidpSearchTool is configured with the tested channels and topK=1.",
+      "File B in the same or another KB produces a strictly higher score for the test question than file A, verifiable through an unfiltered control run."
+    ],
+    "integration_boundary": [
+      "Nexent chat/run API -> Agent runtime -> AidpSearchTool -> real AIDP FusionSearch -> real AIDP KBs and index/graph channels",
+      "Root Agent and at least one sub-Agent that also owns an AidpSearchTool"
+    ],
+    "observations": [
+      "FusionSearch request payload fields and the number of file filters",
+      "Returned hits, their scores, metadata.kds_id/file_uuid and retrieval_source channels",
+      "Model-facing tool observation, source cards and citation list",
+      "Whether any unfiltered request was issued when the scope was invalid"
+    ],
+    "cleanup": [
+      "Delete only case-owned KB files and conversations; leave the fixed historical data directory untouched.",
+      "Stop case-owned services and release the environment lease."
+    ],
+    "test_data": {
+      "profile": "real_smoke",
+      "file_a": "selected, lower scoring",
+      "file_b": "not selected, higher scoring",
+      "top_k": 1,
+      "channels": "each channel and combined methods enabled by the Agent under test"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Run an unfiltered control question with topK=1 and record the winning file and score.",
+        "expected": "File B wins in the control run, proving the question favors the out-of-scope file."
+      },
+      {
+        "order": 2,
+        "action": "Select only file A in the conversation, send the same question, and inspect the FusionSearch request and response.",
+        "expected": "The request carries the confirmed file filter for A; the response contains A's best hit; B never enters the model context, source cards or citations."
+      },
+      {
+        "order": 3,
+        "action": "Repeat for every enabled channel combination, including graph-only and combined graph retrieval.",
+        "expected": "Every channel respects the file filter before candidate recall; no graph or combined path returns B."
+      },
+      {
+        "order": 4,
+        "action": "Repeat with the question routed to a sub-Agent that owns an AidpSearchTool.",
+        "expected": "The sub-Agent tool carries the same file scope and also returns only A."
+      }
+    ],
+    "expected_results": [
+      "The real AIDP request contains the confirmed pre-recall file filter.",
+      "topK=1 returns the selected file's best hit, never the higher-scoring out-of-scope file.",
+      "Vector, full-text and graph channels and cross-KB selections all honor the filter.",
+      "Main and sub-Agent tools behave identically and no unfiltered request is observed."
+    ],
+    "forbidden_side_effects": [
+      "Do not claim this Case is passable with the AIDP mock or with post-topK trimming.",
+      "Do not modify production KBs or the fixed historical data directory.",
+      "Do not expose AIDP credentials in requests, logs or evidence."
+    ]
+  }
+}

@@ -66,12 +66,26 @@ export function SelectedResourceChips({
           const mode = nextIds.length
             ? ("override" as const)
             : ("disabled" as const);
+          const currentFileScope = scope.aidp.file_scope;
+          const keptFiles =
+            source === "aidp" && currentFileScope?.mode === "selected"
+              ? currentFileScope.files.filter((file) =>
+                  nextIds.includes(file.kds_id)
+                )
+              : [];
           onKnowledgeChange?.({
             ...scope,
             [source]:
               source === "local"
                 ? { mode, knowledge_ids: nextIds }
-                : { mode, kds_ids: nextIds },
+                : {
+                    mode,
+                    kds_ids: nextIds,
+                    file_scope:
+                      keptFiles.length > 0
+                        ? { mode: "selected", files: keptFiles }
+                        : { mode: "all", files: [] },
+                  },
           });
         },
       }));

@@ -11,3 +11,5 @@ resources:
   no_capability: The current agent has no knowledge retrieval capability enabled.
   disabled: Knowledge retrieval is disabled for this conversation.
   empty: No knowledge base resources are available for this conversation.
+  aidp_files_heading: "This AIDP retrieval is restricted to the following files:"
+  aidp_files_empty: No valid AIDP file scope remains, so retrieval fails closed.

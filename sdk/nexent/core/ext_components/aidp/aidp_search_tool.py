@@ -32,9 +32,11 @@ from .retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
     DEFAULTS,
+    active_channels,
     build_payload,
     resolve_config,
 )
+from . import file_scope as file_scope_rules
 
 
 logger = logging.getLogger("aidp_search_tool")
@@ -183,6 +185,11 @@ class AidpSearchTool(Tool):
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
         graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
+        file_scope: dict = Field(
+            default_factory=dict,
+            exclude=True,
+            description="Server-installed conversation file scope: {mode: all|selected, files: [{kds_id, file_uuid}]}",
+        ),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
         super().__init__()
@@ -222,6 +229,9 @@ class AidpSearchTool(Tool):
         resolved = resolve_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
+        self.file_scope = file_scope_rules.normalize_file_scope(
+            unwrap_field_info(file_scope)
+        )
         self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty
@@ -256,8 +266,18 @@ class AidpSearchTool(Tool):
         path = f"/KnowledgeBase/Tenants/{self.tenant_id}/Retrieval/FusionSearch"
         return urljoin(self.base_url, path)
 
-    def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
-        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list)
+    def _build_retrieve_payload(
+        self,
+        query: str,
+        kds_list: List[str],
+        file_filter: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return build_payload(
+            {key: getattr(self, key) for key in CONFIG_KEYS},
+            query,
+            kds_list,
+            file_filter,
+        )
 
     def _emit_running_prompt(self, query: str) -> None:
         """Push the running prompt + query card to the observer if any."""
@@ -377,11 +397,16 @@ class AidpSearchTool(Tool):
                 json.dumps({"images_url": images_url}, ensure_ascii=False),
             )
 
-    def _execute_request(self, query: str, kds_list: List[str]):
+    def _execute_request(
+        self,
+        query: str,
+        kds_list: List[str],
+        file_filter: Optional[Dict[str, Any]] = None,
+    ):
         """Retrieve records through the shared transport and response boundary."""
         return post_retrieval(
             self._http_client, self._build_retrieve_url(), self.api_key,
-            self._build_retrieve_payload(query.strip(), kds_list),
+            self._build_retrieve_payload(query.strip(), kds_list, file_filter),
         )
 
     def _build_image_url(self, file_url: str) -> str:
@@ -530,8 +555,6 @@ class AidpSearchTool(Tool):
         scope = self._resolve_search_scope(kds_list)
         search_kds_list = scope.used_scope
 
-        self._emit_running_prompt(query)
-
         logger.info(
             "AidpSearchTool called query='%s' kds_list=%s method=%s top_k=%d",
             query,
@@ -553,7 +576,55 @@ class AidpSearchTool(Tool):
                 scope.scope_was_specified,
             )
 
-        records = self._execute_request(query, search_kds_list)
+        file_filter = None
+        if self.file_scope.get("mode") == "selected":
+            search_kds = set(search_kds_list)
+            selected_files = [
+                item
+                for item in self.file_scope.get("files") or []
+                if str(item.get("kds_id") or "") in search_kds
+            ]
+            if not selected_files:
+                logger.info(
+                    "AIDP file scope has no file inside the effective range; refusing to search"
+                )
+                return file_scope_rules.FILE_SCOPE_EMPTY_MESSAGE
+            if any(not str(item.get("file_name") or "").strip() for item in selected_files):
+                logger.warning(
+                    "AIDP file scope has a selected file without a display name; "
+                    "cannot build the metadata filter; no request was sent"
+                )
+                return file_scope_rules.FILE_SCOPE_UNAVAILABLE_MESSAGE
+            if "graph_search" in active_channels(self.search_method):
+                logger.warning(
+                    "AIDP file scope cannot be applied to graph retrieval; no request was sent"
+                )
+                return file_scope_rules.FILE_SCOPE_GRAPH_UNSUPPORTED_MESSAGE
+            try:
+                file_filter = file_scope_rules.build_file_filter_payload(
+                    self.file_scope, search_kds_list
+                )
+            except file_scope_rules.AidpFileScopeUnavailableError:
+                logger.warning(
+                    "AIDP selected file scope cannot be represented as a metadata filter; "
+                    "no request was sent"
+                )
+                return file_scope_rules.FILE_SCOPE_UNAVAILABLE_MESSAGE
+
+        self._emit_running_prompt(query)
+
+        records = self._execute_request(query, search_kds_list, file_filter)
+
+        if file_filter is not None:
+            records, rejected = file_scope_rules.verify_file_scope_records(
+                records, self.file_scope, search_kds_list
+            )
+            if rejected:
+                logger.error(
+                    "AIDP file-scope contract violation: %d result(s) outside the selected files; failing closed",
+                    rejected,
+                )
+                return file_scope_rules.FILE_SCOPE_VIOLATION_MESSAGE
 
         if not records:
             logger.info(

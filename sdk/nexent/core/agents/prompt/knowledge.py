@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Render authorized knowledge data into localized prompt sections."""
 
 from collections.abc import Mapping, Sequence
@@ -13,6 +15,8 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
     aidp_capable = bool(scope["aidp_capable"])
     local_names = list(scope["local_display_names"])
     aidp_names = list(scope["aidp_display_names"])
+    file_scope = scope.get("aidp_file_scope") or {}
+    file_names = list(file_scope.get("display_names") or [])
     lines = [labels["heading"], "", labels["untrusted_notice"], ""]
     if local_capable and local_names:
         lines.append(labels["local_heading"])
@@ -22,6 +26,13 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
             lines.append("")
         lines.append(labels["aidp_heading"])
         lines.extend(f"{index}. {name}" for index, name in enumerate(aidp_names, 1))
+    if aidp_capable and file_scope.get("mode") == "selected":
+        lines.append("")
+        lines.append(labels["aidp_files_heading"])
+        if file_names:
+            lines.extend(f"{index}. {name}" for index, name in enumerate(file_names, 1))
+        else:
+            lines.append(labels["aidp_files_empty"])
     has_capability = local_capable or aidp_capable
     all_disabled = has_capability and (
         (not local_capable or bool(scope["local_disabled"]))

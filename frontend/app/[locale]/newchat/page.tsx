@@ -64,6 +64,7 @@ import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
+import { useAgentSkillFiles } from "@/hooks/chat/useAgentSkillFiles";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
@@ -338,6 +339,9 @@ const HomeContent: FC<{
   const { t } = useTranslation();
   const bindModelThread = useBindConversationModelThread();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const { data: agentSkillFiles = [] } = useAgentSkillFiles(
+    selectedAgent?.id ? Number(selectedAgent.id) : null
+  );
   const [knowledgeScope, setKnowledgeScope] =
     useState<ConversationKnowledgeScope | null>(null);
   const [knowledgePreview, setKnowledgePreview] =
@@ -747,6 +751,14 @@ const HomeContent: FC<{
           );
           return;
         }
+        if (warning.code === "KNOWLEDGE_SCOPE_FILE_UNAVAILABLE") {
+          message.warning(
+            t("chat.knowledgeScope.fileUnavailableWarning", {
+              count: warning.count,
+            })
+          );
+          return;
+        }
         message.warning(t("chat.knowledgeScope.partialWarning"));
       });
     },
@@ -1119,6 +1131,7 @@ const HomeContent: FC<{
             onAgentSelected={handleAgentSelectedFromLanding}
             onBack={handleThreadBack}
             chatMode={chatMode}
+            skillFiles={agentSkillFiles}
             onChatModeChange={handleChatModeChange}
             composerTools={
               <>

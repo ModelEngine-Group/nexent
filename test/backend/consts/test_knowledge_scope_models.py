@@ -115,4 +115,23 @@ def test_aidp_disabled_mode_without_ids():
 
 def test_conversation_scope_rejects_wrong_version():
     with pytest.raises(ValidationError):
-        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 2})
+        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 3})
+
+
+def test_conversation_scope_accepts_v2_file_scope():
+    scope = ConversationKnowledgeScopeRequest.parse_obj(
+        {
+            "schema_version": 2,
+            "aidp": {
+                "mode": "inherit",
+                "file_scope": {
+                    "mode": "selected",
+                    "files": [{"kds_id": "kb-1", "file_uuid": "file-a"}],
+                },
+            },
+        }
+    )
+
+    assert scope.schema_version == 2
+    assert scope.aidp.file_scope.mode == "selected"
+    assert scope.aidp.file_scope.files[0].file_uuid == "file-a"

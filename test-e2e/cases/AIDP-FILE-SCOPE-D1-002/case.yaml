@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "stage": "D1",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-FILE-SCOPE-D1-002",
+    "feature_id": "AIDP-FILE-SCOPE",
+    "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-002",
+      "AIDP-FILE-SCOPE-REQ-003"
+    ],
+    "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-03",
+      "AIDP-FILE-SCOPE-RULE-04"
+    ],
+    "title": "Resolver injects an immutable file scope into every main and sub-Agent AIDP tool",
+    "type": "BE-UT",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Prove that scope resolution intersects selected AIDP files with the effective readable knowledge range, projects the result to every main and sub-Agent AidpSearchTool override, keeps selected-empty fail-closed, and replaces wider request tool parameters.",
+    "preconditions": [
+      "Use a synthetic root and sub-Agent runtime tree with AidpSearchTool entries and JSON kds_list defaults.",
+      "Replace the AIDP access snapshot with an in-memory accessible KB set; do not contact AIDP, Elasticsearch, a database or a model."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "readable_kbs": [
+        "kb-1",
+        "kb-2"
+      ],
+      "root_range": [
+        "kb-1",
+        "kb-2"
+      ],
+      "child_range": [
+        "kb-1"
+      ],
+      "selected_files": "kb-1/file-a and kb-2/file-b",
+      "out_of_range": "kb-3/file-c"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Resolve an override scope selecting kb-1/file-a and kb-2/file-b across a root and a child AidpSearchTool.",
+        "expected": "The conversation override applies to both tools: each carries the two resolved KBs and both files, and the existing conversation-wide override semantics are preserved."
+      },
+      {
+        "order": 2,
+        "action": "Resolve a selection containing a file from an unreadable or out-of-range KB, first together with a valid file and then alone.",
+        "expected": "The unknown file is dropped with a file-unavailable warning; the valid file survives; selecting only the unknown file yields selected with an empty list rather than all files."
+      },
+      {
+        "order": 3,
+        "action": "Resolve a selected file scope whose files force the conversation-wide KB range, with a root tool defaulting to kb-1 and a child tool defaulting to kb-2.",
+        "expected": "The derived KB range replaces both tools' configured ranges: both search only kb-1 and carry the same selected file scope, so the child cannot search kb-2."
+      },
+      {
+        "order": 4,
+        "action": "Pass request tool parameters containing a wider kds_list and an all-files scope for the same tool.",
+        "expected": "The resolved conversation kds_list and selected file scope replace the request values; no wider list survives."
+      }
+    ],
+    "expected_results": [
+      "File scope is projected per AIDP tool and never widens kds_list.",
+      "Files outside the effective readable range are dropped with KNOWLEDGE_SCOPE_FILE_UNAVAILABLE warnings.",
+      "A selected scope that resolves to zero files stays selected with an empty list so later retrieval fails closed.",
+      "Request-level tool parameters cannot replace the conversation file scope.",
+      "No AIDP, database, Elasticsearch or model access occurs."
+    ],
+    "forbidden_side_effects": [
+      "Do not turn an empty selected scope into all files.",
+      "Do not expand kds_list beyond the readable Agent range because a file was selected.",
+      "Do not contact external services or persist scope changes."
+    ],
+    "unit_boundary": "management.services.knowledge_base.scope.resolve_knowledge_scope with a synthetic runtime Agent tree and AIDP access snapshot",
+    "inputs": [
+      "override scope with valid files",
+      "scope containing an unreadable file",
+      "inherit scope with a selected default-KB file",
+      "request tool_params with a wider kds_list"
+    ],
+    "assertions": [
+      "Per-tool file_scope contains only files whose kds_id is in that tool range.",
+      "Knowledge-scope warnings report dropped files.",
+      "selected with zero files is preserved.",
+      "Resolved kds_list values replace wider request values."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Selected files are projected to root and sub-Agent tools within their own KB ranges.",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1,
+          5
+        ],
+        "forbidden_side_effects": [
+          2,
+          3
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Out-of-range files are dropped and never widen the scope.",
+        "steps": [
+          2
+        ],
+        "expected_results": [
+          2,
+          3
+        ],
+        "forbidden_side_effects": [
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Inherit scopes and wider request tool parameters remain bounded by the resolved conversation scope.",
+        "steps": [
+          3,
+          4
+        ],
+        "expected_results": [
+          1,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          2,
+          3
+        ]
+      }
+    ]
+  }
+}

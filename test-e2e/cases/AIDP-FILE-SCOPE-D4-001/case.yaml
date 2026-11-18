@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "stage": "D4",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-FILE-SCOPE-D4-001",
+    "feature_id": "AIDP-FILE-SCOPE",
+    "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-001",
+      "AIDP-FILE-SCOPE-REQ-002"
+    ],
+    "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-01",
+      "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-05"
+    ],
+    "title": "Conversation retrieval drawer dual mode, tag replacement and session isolation",
+    "type": "E2E",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Exercise the real chat drawer: switch between by-knowledge-base and by-files modes, verify the first KB loads lazily and each other KB is fetched only when expanded, page within a KB, search file names across all KBs with capped concurrent requests and auto-expanded matches, confirm a file scope, verify file tags replace KB tags without an explanatory banner, switch back to KB mode, and prove conversation isolation, history restore and Skill @ regression.",
+    "preconditions": [
+      "An authorized local Nexent stack, browser session and test user are available under an environment lease.",
+      "The Agent has at least two AIDP knowledge bases with more than one page of readable files and at least one Skill file.",
+      "Two files with the same name exist in different KBs; a second conversation has no file selection.",
+      "The Agent retrieval method is vector/full-text only for the file-mode retrieval check; a separate graph-enabled Agent is available for the fail-closed check."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "conversation_a": "select demo-file-01.txt from two different KBs",
+      "conversation_b": "no file selection",
+      "paging": "total file count exceeds one page in at least one KB; verify per-KB page navigation and lazy loading",
+      "skill": "existing Skill file reference"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Open the existing right retrieval drawer for conversation A and inspect the two mode options.",
+        "expected": "The drawer is titled '知识库检索范围' (Knowledge base retrieval scope) and shows mutually exclusive 'by knowledge base' and 'by files' modes; KB mode preserves the existing KB list, search and selected tags."
+      },
+      {
+        "order": 2,
+        "action": "Switch to file mode, verify only the first KB is loaded and expanded, then expand another KB and page within each KB; finally search a file name.",
+        "expected": "On entry only the first KB's page 1 is requested; other KBs are collapsed and show only their name plus any selected count. Expanding a KB fetches its page 1 on demand; each KB has its own page navigation and pages never mix KBs. Search runs across all KBs with at most 3 concurrent requests, shows at most the first 20 matches per KB, auto-expands KBs with matches, hides KBs without matches, and does not show a searching or per-KB failure message. The search uses the '搜索文件名' placeholder and auto-expands matching groups in KB order; no separate KB selection is required."
+      },
+      {
+        "order": 3,
+        "action": "Select two same-name files from different KBs and confirm.",
+        "expected": "The scope saves with two distinct (kds_id,file_uuid) identities and derived kds_ids; the drawer closes and the composer shows only file tags, not KB tags and not an explanatory file-scope banner; duplicate labels include the short KB name."
+      },
+      {
+        "order": 4,
+        "action": "Open the drawer again, remove one file from the selected list, and confirm.",
+        "expected": "The remaining file tag replaces the previous tags; the file scope is updated for the next run; the previous answer and sources are unchanged."
+      },
+      {
+        "order": 5,
+        "action": "Switch back to by-knowledge-base mode, adjust and confirm the KB selection.",
+        "expected": "The file scope becomes all, file tags disappear, KB tags return, and subsequent runs use the selected KB range."
+      },
+      {
+        "order": 6,
+        "action": "Switch to conversation B, return to A, and reload the page; also select a Skill file through the existing @ menu and attach a local file.",
+        "expected": "Conversation B has no file scope; conversation A restores its saved mode and tags after reload; the Skill directive, attachments, IME input and send behavior remain unchanged."
+      },
+      {
+        "order": 7,
+        "action": "On the graph-enabled Agent, select a file in file mode and trigger a question that invokes AIDP Search.",
+        "expected": "The AIDP Search tool fails closed before an unfiltered graph request; the user sees a concise status; switching back to KB mode restores graph retrieval."
+      }
+    ],
+    "expected_results": [
+      "The drawer offers two mutually exclusive modes; file mode loads the first KB on entry, expands other KBs lazily and paginates each KB independently while search covers all KBs with capped results.",
+      "File selection derives kds_ids and persists (kds_id,file_uuid); the composer shows file tags and never KB tags together with them.",
+      "Switching back to KB mode clears the file scope and restores KB tags and behavior.",
+      "Conversation A/B scopes are isolated; history restores the saved mode; Skill @, attachments, IME and send regress cleanly.",
+      "Graph-enabled file mode fails closed without an unfiltered request; KB mode retains graph retrieval."
+    ],
+    "forbidden_side_effects": [
+      "Do not show KB tags and file tags simultaneously or add a '仅检索以上 N 个文件' banner.",
+      "Do not keep the @-based knowledge-file entry in this iteration or modify the message protocol.",
+      "Do not silently widen to all files when a file is unavailable or the upstream refuses filtering.",
+      "Do not modify shared or historical data outside case-owned fixtures."
+    ],
+    "actor": "Authorized local test user in the new chat page",
+    "journey": [
+      "Open conversation A and inspect the retrieval drawer modes",
+      "Verify lazy entry, expand another KB and page within each KB",
+      "Search across all KBs and verify capped results plus auto-expanded matches",
+      "Select two cross-KB same-name files and confirm",
+      "Inspect composer file tags and absence of KB tags/banner",
+      "Remove a file and confirm; switch back to KB mode",
+      "Switch conversations, reload history, use Skill @ and attachments",
+      "Run the graph-enabled fail-closed check"
+    ],
+    "final_business_result": [
+      "The user can set a conversation file scope in the existing drawer and see file tags replace KB tags, while KB mode, session isolation, history and Skill @ remain correct."
+    ],
+    "failure_evidence": [
+      "Screenshots of both drawer modes, grouped files, file tags, KB tags and the absence of a banner",
+      "Network log of the scope save payload and the run request",
+      "Console/page errors and the exact step where the journey failed"
+    ]
+  }
+}

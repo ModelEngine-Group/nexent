@@ -285,7 +285,7 @@ def test_ut_be_fps_014_runtime_resource_names_are_sanitized_and_bounded():
     assert "aidp-10" not in data["aidp_display_names"]
     assert set(data) == {
         "local_capable", "aidp_capable", "local_disabled", "aidp_disabled",
-        "local_display_names", "aidp_display_names",
+        "local_display_names", "aidp_display_names", "aidp_file_scope",
     }
 
 

@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
 from copy import (
@@ -18,47 +17,12 @@ from typing import (
     Dict,
 )
 
-from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    AgentRunConcurrencyExceededError,
-    agent_run_manager,
-)
-from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
-from contracts.constants.constants import LANGUAGE
-from contracts.constants.constants import STREAM_STATUS_EVENT
-from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, ValidationError, WorkbenchError
-from contracts.agent import AgentRequest
-from contracts.knowledge import ConversationKnowledgeScopeRequest
-from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.conversation.repository import resolve_conversation_runtime_metadata
 from fastapi import (
     Request,
 )
 from fastapi.responses import (
     JSONResponse,
     StreamingResponse,
-)
-from management.services.agent.context import (
-    build_agent_run_context,
-    prepend_current_time,
-)
-from management.services.agent.execution import (
-    _agent_run_identifier,
-    _agent_stream_producer_tasks,
-    _consume_agent_stream_producer,
-)
-from management.services.agent.run import (
-    apply_workbench_runtime_plan,
-    generate_stream,
-    save_messages,
-)
-from management.services.agent.stream import (
-    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
-)
-from runtime.adapters.nexent.runner import (
-    DeferredAgentRun,
 )
 from nexent.core.concurrency import (
     ManagedTaskSpec,
@@ -68,6 +32,66 @@ from nexent.core.concurrency import (
 )
 from nexent.monitor import (
     agent_monitoring_context,
+)
+
+from contracts.agent import AgentRequest
+from contracts.constants.constants import (
+    DEFAULT_EN_TITLE,
+    DEFAULT_ZH_TITLE,
+    LANGUAGE,
+    MESSAGE_ROLE,
+    STREAM_STATUS_EVENT,
+)
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    RuntimeCapacityExceededError,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    RuntimeQueueTimeoutError,
+    UnauthorizedError,
+    ValidationError,
+    WorkbenchError,
+)
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from infrastructure.concurrency import (
+    runtime_thread_manager,
+)
+from infrastructure.serialization.runtime_metadata import (
+    validate_runtime_metadata,
+)
+from infrastructure.streaming.channels import (
+    streaming_channel_manager,
+)
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.conversation.repository import resolve_conversation_runtime_metadata
+from management.services.agent.context import (
+    build_agent_run_context,
+    prepend_current_time,
+)
+from management.services.agent.execution import (
+    _agent_run_identifier,
+    _agent_stream_producer_tasks,
+    _consume_agent_stream_producer,
+)
+from management.services.agent.lifecycle import (
+    AgentRunAlreadyActiveError,
+    AgentRunConcurrencyExceededError,
+    agent_run_manager,
+)
+from management.services.agent.run import (
+    apply_workbench_runtime_plan,
+    generate_stream,
+    save_messages,
+)
+from management.services.agent.run_state import (
+    runtime_state_service,
+)
+from management.services.agent.stream import (
+    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
 from management.services.conversation.service import (
     create_new_conversation,
@@ -86,19 +110,11 @@ from management.services.knowledge_base.scope import (
     prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
-from management.services.agent.run_state import (
-    runtime_state_service,
-)
-from infrastructure.streaming.channels import (
-    streaming_channel_manager,
-)
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
 from management.utils.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
-    validate_runtime_metadata,
+from runtime.adapters.nexent.runner import (
+    DeferredAgentRun,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +434,13 @@ async def run_agent_stream(
                     "disabled": resolved_scope.aidp_disabled,
                     "kds_ids": resolved_scope.aidp_kds_ids,
                     "display_names": resolved_scope.aidp_display_names,
+                    "file_scope": (
+                        resolved_scope.aidp_file_scope
+                        if isinstance(
+                            getattr(resolved_scope, "aidp_file_scope", None), dict
+                        )
+                        else {"mode": "all", "files": []}
+                    ),
                 },
             },
             "warnings": resolved_scope.warnings,
