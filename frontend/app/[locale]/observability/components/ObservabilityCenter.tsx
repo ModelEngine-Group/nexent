@@ -542,7 +542,10 @@ export function ObservabilityCenter({ user }: { user: User }) {
             </Tag>
           ))}
       </div>
-      <TrajectorySummary summary={records.data?.summary} />
+      <TrajectorySummary
+        summary={records.data?.summary}
+        pending={records.isPending}
+      />
       {records.isError && (
         <TrajectoryError error={records.error} retry={refresh} />
       )}

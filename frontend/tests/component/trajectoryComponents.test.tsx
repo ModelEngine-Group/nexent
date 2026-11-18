@@ -788,6 +788,36 @@ describe("administrator page and cleanup confirmation", () => {
     render(<ObservabilityCenter user={admin} />, { wrapper });
     expect(await screen.findByText("V3")).toBeVisible();
   });
+  it("keeps the statistics status mounted while loading the next page", async () => {
+    const firstPage = recordsPage();
+    firstPage.summary.scope_type = "tenant";
+    firstPage.summary.computed_at = "2026-11-13T00:00:00Z";
+    let resolveNextPage!: (page: ReturnType<typeof recordsPage>) => void;
+    const nextPage = new Promise<ReturnType<typeof recordsPage>>((resolve) => {
+      resolveNextPage = resolve;
+    });
+    api.records.mockResolvedValueOnce(firstPage).mockReturnValueOnce(nextPage);
+
+    render(<ObservabilityCenter user={admin} />, { wrapper });
+    const status = (
+      await screen.findByText("trajectory.statisticsComputedAt")
+    ).closest('[role="status"]');
+
+    fireEvent.click(within(screen.getByTitle("2")).getByText("2"));
+
+    expect(
+      await screen.findByText("trajectory.statisticsPreparing")
+    ).toBeVisible();
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(status).toHaveTextContent("trajectory.statisticsPreparing");
+    expect(api.records.mock.calls[1][0]).toMatchObject({ page: 2 });
+
+    await act(async () => resolveNextPage({ ...firstPage, page: 2 }));
+    await waitFor(() => {
+      expect(status).toHaveAttribute("aria-busy", "false");
+      expect(status).toHaveTextContent("trajectory.statisticsComputedAt");
+    });
+  });
   it("opens with the authenticated tenant and queries on explicit ID submit", async () => {
     render(<ObservabilityCenter user={admin} />, { wrapper });
     await waitFor(() => expect(api.records).toHaveBeenCalledOnce());
