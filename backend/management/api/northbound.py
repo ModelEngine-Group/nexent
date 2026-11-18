@@ -1037,13 +1037,15 @@ async def delete_documents(
                     index_name,
                     redis_error,
                 )
-                result["redis_cleanup_error"] = str(redis_error)
+                result["redis_cleanup_error"] = "Redis cleanup could not be completed."
                 original_message = result.get("message", "Documents deleted successfully")
-                result["message"] = f"{original_message}, but Redis cleanup encountered an error: {str(redis_error)}"
+                result["message"] = f"{original_message}. Redis cleanup could not be completed."
 
         return result
     except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail="Invalid document deletion request"
+        ) from exc
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting documents")
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL)

@@ -37,8 +37,9 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
 
 
 def _authorization_error(error: HTTPException) -> JSONResponse:
-    code = "UNAUTHORIZED" if error.status_code == HTTPStatus.UNAUTHORIZED else "FORBIDDEN"
-    return _error(error.status_code, code, str(error.detail))
+    if error.status_code == HTTPStatus.UNAUTHORIZED:
+        return _error(HTTPStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication required")
+    return _error(HTTPStatus.FORBIDDEN, "FORBIDDEN", "Operations permission required")
 
 
 @router.get("")

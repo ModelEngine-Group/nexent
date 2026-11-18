@@ -142,7 +142,7 @@ def test_patch_permission_denied_uses_safe_error(mocker):
 
     mocker.patch(
         "ops.api.system_configurations.authorize_configuration_write",
-        side_effect=HTTPException(status_code=403, detail="Operations permission required"),
+        side_effect=HTTPException(status_code=403, detail="private authorization state"),
     )
 
     response = _request("PATCH",
@@ -151,7 +151,9 @@ def test_patch_permission_denied_uses_safe_error(mocker):
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"]["code"] == "FORBIDDEN"
+    assert response.json()["detail"] == {
+        "code": "FORBIDDEN", "message": "Operations permission required",
+    }
 
 
 def test_patch_database_failure_is_a_safe_503(mocker):

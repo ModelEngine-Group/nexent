@@ -171,7 +171,6 @@ const isProduction = process.env.NODE_ENV === "production";
 function buildCookieOptions(httpOnly) {
   return {
     httpOnly,
-    secure: true,
     sameSite: "lax",
     path: BASE_PATH || "/",
   };
@@ -194,6 +193,7 @@ function setAuthCookies(res, session) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, session.access_token, {
         ...buildCookieOptions(true),
+        secure: true,
         maxAge: expiresInSeconds, // Use backend-provided value
       })
     );
@@ -203,6 +203,7 @@ function setAuthCookies(res, session) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, session.refresh_token, {
         ...buildCookieOptions(true),
+        secure: true,
         maxAge: refreshTokenMaxAge, // 10x access token lifetime
       })
     );
@@ -212,6 +213,7 @@ function setAuthCookies(res, session) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
         ...buildCookieOptions(true),
+        secure: true,
         maxAge: 0,
       })
     );
@@ -221,6 +223,7 @@ function setAuthCookies(res, session) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.EXPIRES_AT, String(session.expires_at), {
         ...buildCookieOptions(false), // readable by frontend JS
+        secure: true,
         maxAge: expiresInSeconds, // Same as access token
       })
     );
@@ -237,15 +240,18 @@ function clearAuthCookies(res) {
     cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
       ...expired,
       httpOnly: true,
+      secure: true,
     }),
     cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
       ...expired,
       httpOnly: true,
+      secure: true,
     }),
-    cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
+    cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", { ...expired, secure: true }),
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
       ...expired,
       httpOnly: true,
+      secure: true,
     }),
   ]);
 }
@@ -254,6 +260,7 @@ function setPendingOAuthCookie(res, pendingToken) {
   appendSetCookies(res, [
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, pendingToken, {
       ...buildCookieOptions(true),
+      secure: true,
       maxAge: 10 * 60,
     }),
   ]);
@@ -263,6 +270,7 @@ function clearPendingOAuthCookie(res) {
   appendSetCookies(res, [
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
       ...buildCookieOptions(true),
+      secure: true,
       maxAge: 0,
     }),
   ]);

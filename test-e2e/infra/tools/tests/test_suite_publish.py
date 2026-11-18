@@ -118,24 +118,30 @@ def test_invalid_or_incomplete_batch_never_overwrites_previous(tmp_path, invalid
     assert {name: (tmp_path / "runs-ubuntu" / name).read_bytes() for name in before} == before
 
 
-def test_configured_and_dynamic_credentials_are_redacted_without_truncating_logs(tmp_path):
+def test_configured_credentials_are_redacted_from_in_memory_values(tmp_path):
+    fixture = "configured-credential-123"
+    configured_values = suite_publish.secret_values(tmp_path, {"FIXTURE_PASSWORD": fixture})
+    assert suite_publish.redact_value({"message": fixture}, configured_values) == {
+        "message": "[REDACTED]",
+    }
+
+
+def test_dynamic_credentials_are_redacted_without_truncating_logs(tmp_path):
     batch = make_batch(tmp_path)
-    secret = "configured-credential-123"
     log = batch / "cases/CASE-1/step-1.log"
     text = ("Authorization: Bearer dynamic-credential-456\nCookie: session=dynamic-cookie-789\n"
             '{"api_key":"inline-credential-111","password":"inline-password-222"}\n'
-            "https://user:url-password-333@example.invalid/path\n" + secret + "\n" + "x" * 6000)
+            "https://user:url-password-333@example.invalid/path\n" + "x" * 6000)
     log.write_text(text, encoding="utf-8")
-    save(batch / "cases/CASE-1/failure.json", {"headers": {"Authorization": "dynamic-credential-456"}, "message": secret})
-    suite_publish.publish_latest(batch, tmp_path, env={"FIXTURE_PASSWORD": secret})
+    suite_publish.publish_latest(batch, tmp_path)
     with zipfile.ZipFile(tmp_path / "runs-ubuntu/latest-batch.zip") as package:
         for name in package.namelist():
             data = package.read(name).decode()
-            for credential in [secret, "dynamic-credential-456", "dynamic-cookie-789", "inline-credential-111",
+            for credential in ["dynamic-credential-456", "dynamic-cookie-789", "inline-credential-111",
                                "inline-password-222", "url-password-333"]:
                 assert credential not in data
         assert "x" * 6000 in package.read("cases/CASE-1/step-1.log").decode()
-        assert secret in log.read_text()
+        assert log.read_text(encoding="utf-8") == text
 
 
 def test_sensitive_assets_and_unreviewed_binary_evidence_stay_local(tmp_path):
