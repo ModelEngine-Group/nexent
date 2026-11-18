@@ -3,7 +3,12 @@
 
 from typing import Annotated, Literal
 
-from contracts.agentos_knowledge import Contract, ObjectReference
+from contracts.agentos_knowledge import (
+    Contract,
+    KnowledgeBaseState,
+    ModelVersion,
+    ObjectReference,
+)
 from pydantic import Field
 
 INSPECTION_FILES = 'knowledge_source_inspection'
@@ -86,3 +91,16 @@ class LegacyTaskPage(Contract):
     knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     tasks: list[LegacyTaskFinding] = Field(max_length=1000)
     snapshot: Literal[False] = False
+
+
+RUNTIME_PENDING_CHECKS = ('source_mapping', 'legacy_vectors', 'legacy_tasks')
+
+
+class RuntimeInspectionPage(KnowledgeBaseState):
+    schema_version: Literal[1] = 1
+    tenant_id: str = Field(min_length=1, max_length=100)
+    actor_id: str = Field(min_length=1, max_length=100)
+    index_name: str = Field(min_length=1, max_length=100)
+    embedding_model: ModelVersion | None = None
+    embedding_dimensions: int | None = Field(default=None, gt=0)
+    issues: list[Issue] = Field(default_factory=list, max_length=32)

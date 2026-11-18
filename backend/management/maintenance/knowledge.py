@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from contracts.knowledge_maintenance import (
     PENDING_CHECKS,
+    RUNTIME_PENDING_CHECKS,
     TASK_PENDING_CHECKS,
     VECTOR_PENDING_CHECKS,
 )
@@ -76,8 +77,12 @@ async def _inspect(args, scanner, kind, pending):
                 'knowledge_id': args.knowledge_id, 'tenant_id': actor.tenant_id, 'actor_id': actor.user_id,
                 'pending_checks': list(pending), 'migration_ready': False})
             async with asyncio.timeout(context.remaining()):
-                result = await run_blocking('knowledge-' + kind + '-inspection', scanner, args, scope, context,
-                    lambda value: _emit(stream, value), lane='control-io', owner='management.knowledge.maintenance')
+                emit = lambda value: _emit(stream, value)
+                if asyncio.iscoroutinefunction(scanner):
+                    result = await scanner(args, scope, context, emit)
+                else:
+                    result = await run_blocking('knowledge-' + kind + '-inspection', scanner, args, scope, context,
+                        emit, lane='control-io', owner='management.knowledge.maintenance')
             result = {'kind': kind + '_inventory_finished', 'operation_id': context.operation_id, 'scan_complete': True,
                 **result, 'pending_checks': list(pending), 'migration_ready': False}
             _emit(stream, result)
@@ -111,10 +116,23 @@ async def inspect_tasks(args):
     return await _inspect(args, _scan_tasks, 'legacy_task', TASK_PENDING_CHECKS)
 
 
+async def _scan_runtime(args, scope, context, emit):
+    from management.services.knowledge_base.runtime_inspection import (
+        RuntimeKnowledgeInspector,
+    )
+
+    return await RuntimeKnowledgeInspector().scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
+        lambda page: emit({'kind': 'runtime_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
+
+
+async def inspect_runtime(args):
+    return await _inspect(args, _scan_runtime, 'runtime', RUNTIME_PENDING_CHECKS)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks}
+    actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks, 'inspect-runtime': inspect_runtime}
     for command in actions:
         description = 'Read-only knowledge inventory'
         inspect = commands.add_parser(command, help=description)

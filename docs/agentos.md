@@ -280,3 +280,10 @@ DataMate 目录属于 Management 的本地关联，远端仍拥有内容。租�
 KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_known，Runtime File.inspect补充 writer_ended、reconcile_required。它们是可空严格布尔值，缺失表示未知。Runtime upload同时拒绝旧writer仍需reconcile的同版本替换。已确认、仍由旧job精确归属的局部对象保留到正常File.delete统一清理，不声称物理删除完成；未知历史义务留待维护。升级先完成全部Management实例，再升级Runtime，回滚先Runtime后Management，避免旧严格解析器收到新增字段。没有新AgentOS operation、SQL或公开请求参数。
 
 模型的 `embedding_dimensions` 表示 Runtime 已配置的向量维度。`Model.get` 与 `Model.list` 使用同一规则，embedding 和 multi_embedding 从现有模型配置读取正整数，缺失或无效时返回 null；其他模型类型返回 null。该字段不代表已探测提供商输出。Management 可以将它与旧索引维度核对，无须读取 Runtime 数据库。实际摄取继续校验模型版本及配置维度，缺失值保持原有错误，不选择备用模型。内部响应增加字段仍遵循先升级Management、再升级Runtime的顺序，旧严格解析器不能先接收新Runtime响应。
+### KnowledgeBase 已登记文件清单
+
+`KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。
+
+返回 `KnowledgeBaseState` 包括资源版本、全量 `manifest_revision`、当前配置的 `embedding_model_id` 和一页文件状态。每项报告最新接纳版本、可见版本及代次、删除水位、记录版本与上传任务引用是否存在。上传引用可能在任务完成后保留，不能据此判断任务正在运行。清单包含未发布或设有删除水位的活动登记记录，不读取正文、模型、ES或对象存储，不证明物理向量完整。
+
+Runtime用实际签名身份在读取前后重新请求Management授权。全量清单参与两次摘要核对，游标绑定实际user/tenant、KB资源版本与全量manifest版本，变化拒绝继续且不自动重试。游标只表示读取位置，不授予权限，不声称跨服务数据库事务快照。Management维护命令 `inspect-runtime` 另外读取 `Model.get` 的版本与配置维度，保留缺失模型/维度问题及 `migration_ready=false`。

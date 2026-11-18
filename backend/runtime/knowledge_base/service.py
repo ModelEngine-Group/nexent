@@ -58,6 +58,11 @@ class KnowledgeService:
 
         return await KnowledgeSampleService(self.client, self.models).sample(payload, actor, context=context)
 
+    async def inspect_base(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.manifest import KnowledgeManifestService
+
+        return await KnowledgeManifestService(self.client).inspect(payload, actor, context=context)
+
     async def delete_base(self, payload, actor, *, context=None):
         return await KnowledgeBaseDeletionService(self.client).delete(payload, actor, context=context)
 

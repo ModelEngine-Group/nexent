@@ -114,6 +114,33 @@ def test_cli_rejects_mutation_mode_or_unbounded_selection(cli, extra):
     cli.inspector.page.assert_not_called()
 
 
+async def test_runtime_async_scan_uses_shared_report_and_total_deadline(cli, monkeypatch):
+    observed=[]
+    async def scan(*args, **kwargs):
+        observed.append(current_thread().name)
+        return {'files': 2, 'visible_files': 1, 'embedding_dimensions': 2}
+    scanner=Mock(scan=AsyncMock(side_effect=scan))
+    monkeypatch.setattr('management.services.knowledge_base.runtime_inspection.RuntimeKnowledgeInspector', Mock(return_value=scanner))
+    result=await module.inspect_runtime(cli.args)
+    assert result['files']==2 and result['migration_ready'] is False
+    values=[json.loads(line) for line in cli.args.output.read_text().splitlines()]
+    assert values[-1]['kind']=='runtime_inventory_finished' and values[-1]['embedding_dimensions']==2
+    assert observed==['MainThread']
+
+
+async def test_runtime_stalled_http_is_cancelled_without_finished_report_or_retry(cli, monkeypatch):
+    cli.args.timeout=0.05
+    closed=[]
+    async def blocked(*args, **kwargs):
+        try: await asyncio.Event().wait()
+        finally: closed.append(True)
+    scanner=Mock(scan=AsyncMock(side_effect=blocked))
+    monkeypatch.setattr('management.services.knowledge_base.runtime_inspection.RuntimeKnowledgeInspector', Mock(return_value=scanner))
+    with pytest.raises(DeadlineExceeded): await module.inspect_runtime(cli.args)
+    assert closed==[True] and scanner.scan.await_count==1
+    assert 'runtime_inventory_finished' not in cli.args.output.read_text()
+
+
 def test_timeout_logs_once_without_exporting_error_payload(cli, monkeypatch, caplog):
     monkeypatch.setattr(module, 'inspect_sources', AsyncMock(side_effect=DeadlineExceeded()))
     assert module.main(argv(cli)) == 1

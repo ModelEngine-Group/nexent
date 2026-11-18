@@ -4,6 +4,7 @@
 from typing import ClassVar
 
 import sqlalchemy as sa
+from nexent.storage.errors import InvalidInput, ScopeDenied
 from sqlalchemy.dialects.postgresql import JSONB
 
 from infrastructure.rdb.base import TableBase
@@ -342,3 +343,17 @@ def bind_knowledge_jobs(scope, engine):
             for name in tables
         },
     )
+
+
+def bind_knowledge_manifest(scope, knowledge_id, engine):
+    if type(knowledge_id) is not int or knowledge_id <= 0: raise InvalidInput()
+    if scope.system or scope.resource_prefix or scope.service_role != 'runtime' or scope.namespaces != {FILES}:
+        raise ScopeDenied()
+    names = ('record_id', 'tenant_id', 'knowledge_id', 'file_id', 'latest_version', 'active_job_id',
+             'visible_job_id', 'visible_version', 'visible_generation', 'tombstone_version', 'revision', 'delete_flag')
+    integer = {'knowledge_id', 'latest_version', 'visible_version', 'tombstone_version', 'revision'}
+    projection = sa.select(*(files.c[name] for name in names)).where(files.c.knowledge_id == knowledge_id).subquery(FILES)
+    definition = DatasetDefinition(FILES, 'record_id', tuple(FieldDefinition(name,
+        'integer' if name in integer else 'string', nullable=files.c[name].nullable) for name in names),
+        frozenset({'runtime'}), tenant_field='tenant_id', active_field='delete_flag')
+    return SQLRecordStore(scope, DatasetCatalog((definition,)), {FILES: projection}, engine, revision_fields={})

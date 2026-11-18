@@ -182,6 +182,7 @@ MIGRATED_MODULES = {
     'knowledge_base/mount.py',
     'knowledge_base/owner_cleanup.py',
     'knowledge_base/permission.py',
+    'knowledge_base/runtime_inspection.py',
     'knowledge_base/providers/aidp.py',
     'knowledge_base/providers/datamate.py',
     'knowledge_base/providers/dify.py',

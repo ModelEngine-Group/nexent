@@ -39,6 +39,7 @@ from contracts.agentos import (
 from contracts.agentos_knowledge import (
     FileCleanseReleased,
     FileCleanseState,
+    KnowledgeBaseState,
     KnowledgeContentGrant,
     KnowledgeFileGrant,
     KnowledgeJobState,
@@ -139,6 +140,9 @@ class AgentOSClient:
 
     async def sample_knowledge(self, payload, user_id, tenant_id):
         return await self._knowledge_read(KnowledgeOperation.SAMPLE, payload, user_id, tenant_id, KnowledgeSampleResult)
+
+    async def inspect_knowledge_base(self, payload, user_id, tenant_id):
+        return await self._knowledge_read(KnowledgeOperation.INSPECT_BASE, payload, user_id, tenant_id, KnowledgeBaseState)
 
     async def _knowledge_read(self, operation, payload, user_id, tenant_id, schema):
         try:

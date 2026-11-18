@@ -119,3 +119,30 @@ selected traversal ended, while `snapshot` and `migration_ready` remain false.
 Runtime visibility, model dimensions and source mapping still require separate
 evidence. The result revision hashes only the observed result bytes; it does not
 claim an atomic revision across Redis databases or PG.
+## Runtime manifest inspection
+
+```sh
+python -m management.maintenance.knowledge inspect-runtime \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --output /tmp/kb-123-runtime.jsonl --page-size 100 --timeout 300
+```
+
+Configure `RUNTIME_SERVICE_URL` in Management and `MANAGEMENT_AGENTOS_URL` in
+Runtime, with the existing shared AgentOS signing configuration. This command
+requires the actual operator's current edit permission. Runtime rechecks read
+authorization through the signed reverse callback on every page. Management reads
+only its own resource ports; Runtime catalog and model evidence use standard
+`KnowledgeBase.inspect` and `Model.get` operations.
+
+The report records all active registered file manifests, including unpublished and
+tombstoned versions. A global revision covers every manifest, including those on
+other pages. Changes reject traversal; there is no automatic retry. Job reference
+presence is not running-job status. This metadata scan does not read document
+content or validate physical vectors, and does not invoke any provider.
+
+Explicit MODEL_NOT_FOUND responses and missing configured dimensions remain
+findings with null evidence. Other upstream failures stop the report without a
+finished marker. Resources and model metadata are checked again before completion.
+All requests share the command's total deadline. Existing reports are not
+overwritten. `migration_ready` remains false; source mapping, legacy vectors and
+legacy tasks still require the separate evidence reports and explicit migration.

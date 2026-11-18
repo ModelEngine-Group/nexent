@@ -279,6 +279,40 @@ class KnowledgeSample(Contract):
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class KnowledgeBaseInspect(Contract):
+    knowledge_id: int = Field(gt=0)
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    page_size: int = Field(default=100, ge=1, le=1000)
+    cursor: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
+class KnowledgeManifest(Contract):
+    file_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    latest_version: int = Field(ge=-1)
+    visible_version: int | None = Field(default=None, ge=0)
+    visible_generation: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    tombstone_version: int = Field(ge=-1)
+    record_revision: int = Field(gt=0)
+    upload_job_reference_present: bool
+
+    @model_validator(mode='after')
+    def visible_generation_matches(self):
+        if (self.visible_version is None) != (self.visible_generation is None):
+            raise ValueError('Visible version and generation must be present together')
+        if self.visible_version is not None and not self.tombstone_version < self.visible_version <= self.latest_version:
+            raise ValueError('Visible version must exceed the tombstone and be admitted')
+        return self
+
+
+class KnowledgeBaseState(Contract):
+    knowledge_id: int = Field(gt=0)
+    knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    manifest_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    embedding_model_id: int = Field(gt=0)
+    files: list[KnowledgeManifest] = Field(max_length=1000)
+    next_cursor: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
 class KnowledgeSampleChunk(Contract):
     chunk_index: int = Field(ge=0)
     content: str
@@ -361,6 +395,7 @@ class FileCleanseReleased(FileCleanseLookup):
 
 
 class KnowledgeOperation(str, Enum):
+    INSPECT_BASE = '/internal/agentos/v1/knowledge/bases/state'
     DELETE_BASE = '/internal/agentos/v1/knowledge/bases/delete'
     INSPECT_BASE_DELETION = '/internal/agentos/v1/knowledge/bases/inspect'
     UPLOAD = "/internal/agentos/v1/knowledge/files/upload"

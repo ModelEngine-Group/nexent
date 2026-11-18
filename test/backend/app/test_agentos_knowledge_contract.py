@@ -4,20 +4,26 @@
 import hashlib
 
 import pytest
-from pydantic import ValidationError
-
 from contracts.agentos_knowledge import (
     CleanseArtifact,
     CleanseBlock,
     KnowledgeFileUpload,
     ObjectReference,
 )
+from pydantic import ValidationError
 
 
 def reference():
     return ObjectReference(
         space="knowledge", key="tenant/file.txt", version="v1", sha256="a" * 64
     )
+
+
+@pytest.mark.parametrize('change', [{'page_size': 0}, {'page_size': 1001}, {'expected_revision': 'unknown'}, {'cursor': ''}])
+def test_manifest_request_rejects_unbounded_or_unpinned_reads(change):
+    from contracts.agentos_knowledge import KnowledgeBaseInspect
+    with pytest.raises(ValidationError):
+        KnowledgeBaseInspect.model_validate({'knowledge_id': 1, 'expected_revision': 'a'*64, **change})
 
 
 @pytest.mark.parametrize("revisions", [{1: "a" * 64}, {1: "b" * 64, 2: "c" * 64}, {1: "unsafe"}])
@@ -80,15 +86,15 @@ def test_text_checksum_is_verified():
 
 
 def test_upload_requires_versioned_models_and_rejects_credentials():
-    payload = dict(
-        knowledge_id=1,
-        file_id="b" * 32,
-        file_version=1,
-        artifact=reference().model_dump(),
-        parser_version="1",
-        idempotency_key="upload-1",
-        embedding_model={"model_id": 2, "revision": "r1"},
-    )
+    payload = {
+        'knowledge_id': 1,
+        'file_id': 'b' * 32,
+        'file_version': 1,
+        'artifact': reference().model_dump(),
+        'parser_version': '1',
+        'idempotency_key': 'upload-1',
+        'embedding_model': {'model_id': 2, 'revision': 'r1'},
+    }
     assert KnowledgeFileUpload.model_validate(payload).embedding_model.model_id == 2
     with pytest.raises(ValidationError):
         KnowledgeFileUpload.model_validate({**payload, "api_key": "forbidden"})
@@ -105,6 +111,7 @@ def test_operations_use_existing_direction_and_body_bound_signature(
     from contracts.agentos import OPERATIONS_BY_PATH, ManagementOperation
     from contracts.agentos_knowledge import KnowledgeOperation
     from contracts.constants import environment
+
     from infrastructure.agentos_identity import (
         AgentOSIdentityError,
         ServicePrincipal,
