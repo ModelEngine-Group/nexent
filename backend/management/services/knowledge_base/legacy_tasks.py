@@ -9,6 +9,8 @@ from contracts.knowledge_ingestion import KnowledgeIngestionIntent
 from contracts.knowledge_maintenance import (
     INSPECTION_FILES,
     LEGACY_TASKS,
+    LegacyTaskArchiveFinding,
+    LegacyTaskArchivePage,
     LegacyTaskFinding,
     LegacyTaskPage,
 )
@@ -52,6 +54,8 @@ def _finding(row, file_ids):
     if not file_ids: item.issues.append('REDIS_ONLY_TASK')
     elif len(file_ids) > 1: item.issues.append('LEGACY_TASK_FILE_AMBIGUOUS')
     elif row['file_id'] is not None and row['file_id'] not in file_ids: item.issues.append('LEGACY_TASK_FILE_CONFLICT')
+    if 'archive' in row:
+        return LegacyTaskArchiveFinding(**item.model_dump(), archive=row['archive'])
     return item
 
 
@@ -59,7 +63,8 @@ class LegacyTaskInspector:
     def __init__(self, *, ports=source_inspection_ports, tasks=legacy_task_records, cancellation_scope=None):
         self.ports, self.tasks, self.cancellation_scope = ports, tasks, cancellation_scope
 
-    def scan(self, knowledge_id, actor, emit, *, page_size=100, context):
+    def scan(self, knowledge_id, actor, emit, *, page_size=100, archive=False, context):
+        if type(archive) is not bool: raise InvalidInput()
         if type(knowledge_id) is not int or knowledge_id <= 0: raise InvalidInput()
         PageRequest(limit=page_size)
         with self.ports(actor, knowledge_id, context=context) as (files, resources):
@@ -103,17 +108,20 @@ class LegacyTaskInspector:
                     item = _finding(row, references.get(row['task_id'], set()))
                     findings.append(item); count += 1; issues += bool(item.issues); redis_only += not bool(references.get(row['task_id']))
                 check()
-                emit(LegacyTaskPage(knowledge_id=knowledge_id, index_name=knowledge['index_name'], tenant_id=actor.tenant_id,
+                page_type = LegacyTaskArchivePage if archive else LegacyTaskPage
+                emit(page_type(knowledge_id=knowledge_id, index_name=knowledge['index_name'], tenant_id=actor.tenant_id,
                     actor_id=actor.user_id, knowledge_revision=revision, tasks=findings))
             with self.tasks(actor, knowledge_id, knowledge['index_name'], known_tasks=set(references), context=context,
                             cancellation_scope=self.cancellation_scope) as tasks:
                 _scope(tasks, actor)
                 keys = sorted(references)
                 for offset in range(0, len(keys), page_size):
-                    output([tasks.get(LEGACY_TASKS, key, context=context) for key in keys[offset:offset+page_size]])
+                    output([tasks.get(LEGACY_TASKS, key, fields=('archive',), context=context) if archive
+                        else tasks.get(LEGACY_TASKS, key, context=context) for key in keys[offset:offset+page_size]])
                 cursor = None
                 while True:
-                    page = tasks.query(LEGACY_TASKS, RecordQuery(), PageRequest(limit=page_size, cursor=cursor), context=context)
+                    page = tasks.query(LEGACY_TASKS, RecordQuery(fields=('archive',) if archive else ()),
+                        PageRequest(limit=page_size, cursor=cursor), context=context)
                     output(page.items)
                     cursor = page.next_cursor
                     if cursor is None: break

@@ -107,3 +107,24 @@ def test_task_backend_failure_is_not_an_empty_finished_scan(inspection):
     s = inspection; s.records.get.side_effect = Unavailable()
     with pytest.raises(Unavailable): scan(s)
     assert not s.frames and s.records.get.call_count == 1
+
+
+def test_private_archive_selects_explicit_projection_and_retains_binary_evidence(inspection):
+    s = inspection
+    s.row['archive'] = [{'binding': 'general', 'key': 'error:reason:old-task', 'encoding': 'redis-dump',
+        'ttl_ms': -1, 'value_base64': 'AP8=', 'sha256': 'e'*64}]
+    s.records.query.return_value = Page(())
+    result = s.service.scan(1, s.source.actor, s.frames.append, archive=True, page_size=1, context=context())
+    assert result['tasks'] == 1 and result['snapshot'] is False
+    assert s.records.get.call_args.kwargs['fields'] == ('archive',)
+    assert s.records.query.call_args.args[1].fields == ('archive',)
+    assert s.frames[0].model_dump(mode='json')['tasks'][0]['archive'][0]['value_base64'] == 'AP8='
+
+
+def test_archive_permission_revocation_does_not_read_any_task_values(inspection):
+    s = inspection
+    s.source.update_resource('cleanse_memberships', delete_flag='Y')
+    with pytest.raises(ScopeDenied):
+        s.service.scan(1, s.source.actor, s.frames.append, archive=True, context=context())
+    s.records.get.assert_not_called()
+    s.records.query.assert_not_called()

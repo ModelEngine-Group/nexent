@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import re
+from base64 import b64encode
 from collections import deque
 from contextlib import contextmanager
 from threading import Lock
@@ -51,7 +52,7 @@ class LegacyTaskRecords:
 
     def _authorize(self, dataset, *, fields=(), consistency=ReadConsistency.AUTHORITATIVE):
         if self._closed or dataset != LEGACY_TASKS: raise ScopeDenied()
-        if fields or consistency != ReadConsistency.AUTHORITATIVE: raise CapabilityUnsupported()
+        if tuple(fields) not in {(), ('archive',)} or consistency != ReadConsistency.AUTHORITATIVE: raise CapabilityUnsupported()
 
     @contextmanager
     def _client(self, kind, context):
@@ -86,12 +87,12 @@ class LegacyTaskRecords:
             if token is not None: scope.unregister_closer(token)
             once()
 
-    def _result(self, client, task_id, context):
+    def _result(self, client, task_id, context, *, archive=False):
         context.remaining()
         raw = client.get('celery-task-meta-' + task_id)
         valid, payload, result = False, {}, {}
         if raw is not None and not isinstance(raw, bytes): raise Unavailable()
-        if raw is not None and len(raw) <= 1024 * 1024:
+        if raw is not None and len(raw) <= (16 if archive else 1) * 1024 * 1024:
             try:
                 payload = json.loads(raw)
                 valid = isinstance(payload, dict) and payload.get('status') in STATUSES
@@ -102,12 +103,51 @@ class LegacyTaskRecords:
                 payload, result = {}, {}
         index, tenant = result.get('index_name'), result.get('tenant_id')
         file_id = result.get('file_id')
-        return {'task_id': task_id, 'status': payload['status'] if valid else 'UNKNOWN',
+        row = {'task_id': task_id, 'status': payload['status'] if valid else 'UNKNOWN',
             'revision': hashlib.sha256(raw or b'').hexdigest(), 'result_present': raw is not None, 'metadata_valid': valid,
             'index_matches': None if index is None else index == self._index,
             'tenant_matches': None if tenant is None else tenant == self.scope.tenant_id,
             'file_id': file_id if isinstance(file_id, str) and re.fullmatch(r'[0-9a-f]{32}', file_id) else None,
             'origin': 'pg_reference' if task_id in self._known else 'index_metadata'}
+        if archive and (task_id in self._known or row['index_matches'] is True):
+            if row['index_matches'] is False or row['tenant_matches'] is False: raise ScopeDenied()
+            row['archive'] = [self._value('backend', 'celery-task-meta-'+task_id, raw, 'raw',
+                client.pttl('celery-task-meta-'+task_id))]
+        return row
+
+    @staticmethod
+    def _value(binding, key, raw, encoding, ttl=None):
+        if raw is not None and (not isinstance(raw, bytes) or len(raw) > 16 * 1024 * 1024): raise InvalidInput()
+        if ttl is not None and (type(ttl) is not int or ttl < -2): raise Unavailable()
+        return {'binding': binding, 'key': key, 'encoding': encoding, 'ttl_ms': ttl,
+            'value_base64': b64encode(raw).decode('ascii') if raw is not None else None,
+            'sha256': hashlib.sha256(raw).hexdigest() if raw is not None else None}
+
+    def _archive_auxiliary(self, row, context):
+        task_id = row['task_id']
+        keys = ['progress:'+task_id, 'error:reason:'+task_id, 'cancel:'+task_id, 'dp:'+task_id+':chunks']
+        with self._client('general', context) as client:
+            cursor, seen = 0, set(keys)
+            while True:
+                cursor, parts = self._scan_keys(client, cursor, 'dp:'+task_id+':part:*', context)
+                for raw in parts:
+                    try: key = raw.decode('ascii')
+                    except UnicodeError: raise Unavailable() from None
+                    if not re.fullmatch(re.escape('dp:'+task_id+':part:')+r'[A-Za-z0-9:_-]{1,128}', key): raise ScopeDenied()
+                    if key not in seen: keys.append(key); seen.add(key)
+                if not cursor: break
+            for key in keys:
+                context.remaining()
+                value = client.dump(key)
+                ttl = client.pttl(key)
+                row['archive'].append(self._value('general', key, value, 'redis-dump', ttl))
+                if sum(len(item['value_base64'] or '') for item in row['archive']) > 4 * ((64 * 1024 * 1024 + 2)//3):
+                    raise InvalidInput()
+        row['auxiliary_present'] = [name for name, prefix in [('progress', 'progress:'), ('error', 'error:reason:'),
+            ('cancel', 'cancel:'), ('chunks', 'dp:'+task_id+':chunks'), ('parts', 'dp:'+task_id+':part:')]
+            if any(item['binding'] == 'general' and item['key'].startswith(prefix) and item['value_base64'] is not None
+                for item in row['archive'])]
+        return row
 
     def _auxiliary(self, row, context):
         task_id = row['task_id']; present = []
@@ -141,13 +181,13 @@ class LegacyTaskRecords:
     def get(self, dataset, key, *, fields=(), consistency=ReadConsistency.AUTHORITATIVE, context):
         self._authorize(dataset, fields=fields, consistency=consistency)
         if key not in self._known: raise ScopeDenied()
-        with self._client('backend', context) as client: row = self._result(client, key, context)
-        return self._auxiliary(row, context)
+        with self._client('backend', context) as client: row = self._result(client, key, context, archive=bool(fields))
+        return self._archive_auxiliary(row, context) if fields else self._auxiliary(row, context)
 
     def query(self, dataset, query, page, *, context):
-        self._authorize(dataset)
         if not isinstance(query, RecordQuery) or not isinstance(page, PageRequest): raise InvalidInput()
-        if query.where is not None or query.order_by or query.fields: raise CapabilityUnsupported()
+        self._authorize(dataset, fields=query.fields)
+        if query.where is not None or query.order_by: raise CapabilityUnsupported()
         if self._finished or page.cursor != self._next or (self._started and page.cursor is None): raise InvalidInput()
         self._started = True
         selected = []
@@ -160,12 +200,14 @@ class LegacyTaskRecords:
                     try: task_id = self._buffer.popleft().decode('ascii').removeprefix('celery-task-meta-')
                     except UnicodeError: continue
                     if not TASK_ID.fullmatch(task_id): continue
-                    row = self._result(client, task_id, context)
-                    if row['index_matches'] is True: selected.append(row)
+                    row = self._result(client, task_id, context, archive=bool(query.fields))
+                    if row['index_matches'] is True:
+                        selected.append(row)
                 if not self._buffer and not self._scan: break
         self._finished = not self._buffer and not self._scan
         self._next = None if self._finished else uuid4().hex
-        return Page(tuple(self._auxiliary(row, context) for row in selected), self._next)
+        return Page(tuple(self._archive_auxiliary(row, context) if query.fields else self._auxiliary(row, context)
+            for row in selected), self._next)
 
     def close(self):
         if self._closed: return

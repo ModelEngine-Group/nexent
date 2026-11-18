@@ -93,6 +93,23 @@ class LegacyTaskPage(Contract):
     snapshot: Literal[False] = False
 
 
+class LegacyTaskValue(Contract):
+    binding: Literal['backend', 'general']
+    key: str = Field(min_length=1, max_length=256)
+    encoding: Literal['raw', 'redis-dump']
+    ttl_ms: int = Field(ge=-2)
+    value_base64: str | None
+    sha256: str | None = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class LegacyTaskArchiveFinding(LegacyTaskFinding):
+    archive: list[LegacyTaskValue]
+
+
+class LegacyTaskArchivePage(LegacyTaskPage):
+    tasks: list[LegacyTaskArchiveFinding] = Field(max_length=1000)
+
+
 RUNTIME_PENDING_CHECKS = ('source_mapping', 'legacy_vectors', 'legacy_tasks')
 
 

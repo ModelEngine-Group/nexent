@@ -220,3 +220,39 @@ cannot be loaded; all commands share a total deadline and cancel owned resources
 `migration_complete` refers only to an observed completed file in the new pipeline;
 `retirement_complete` remains false. Historical task archival, missing/unversioned
 sources, noncanonical IDs and full deployment/rollback acceptance remain pending.
+
+
+## Private legacy task archive
+
+After stopping and draining old admission and workers, export one authorized KB:
+
+```sh
+python -m management.maintenance.knowledge archive-tasks \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --legacy-quiesced --output /maintenance/kb-123-task-archive.jsonl \
+  --page-size 1 --timeout 300
+```
+
+The flag records the operator's confirmation and does not stop containers. Current
+edit DAC and unique historical index ownership are checked as for `inspect-tasks`.
+This command explicitly requests the private `archive` RecordStore projection.
+The default task inventory stays redacted. The archive includes original backend
+result bytes and Redis DUMP bytes for progress, error, cancel, chunks and part
+keys. Values are Base64-encoded with SHA-256 and observed TTL in milliseconds;
+`-1` means no expiry and `-2` means the key was absent when TTL was read. Missing
+values have null payload/hash. Redis DUMP is an opaque Redis-format export, not
+a portable interpreted record. No payload is unpickled or restored.
+
+Archives are exclusive owner-only JSONL files. Keep them in a private persistent
+mount. Values over 16 MiB or tasks exceeding 64 MiB stop the command without
+truncation or a finished marker. Original errors may contain sensitive content;
+only counts and safe status fields are printed by the command. Explicit foreign
+index/tenant metadata prevents raw export. Permission or PG reference changes
+also stop traversal. Unattributable Redis-only tasks remain pending.
+
+`scan_complete` covers this selected traversal. Redis SCAN, values and TTL reads
+do not form a cross-database snapshot; expiration can occur during a read. The
+command never changes TTLs, clears PG task references, deletes keys, invokes
+Celery or replays work. A completed archive alone does not authorize source
+rebuild or prove retirement. Verify the remaining mapping and cutover steps
+before removing any legacy data.

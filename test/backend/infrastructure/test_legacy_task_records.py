@@ -32,6 +32,8 @@ def store():
     backend.scan.return_value = (0, [b'celery-task-meta-known'])
     general.exists.return_value = 0
     general.scan.return_value = (0, [])
+    backend.pttl.return_value = -1
+    general.pttl.return_value = -2
     factory = Mock(side_effect=lambda url, **kw: backend if url.endswith('/0') else general)
     port = LegacyTaskRecords(StorageScope('management', 'tenant-a', 'operator', {LEGACY_TASKS}), 'old-kb',
         {'known'}, backend_url='redis://local/0', general_url='redis://local/1', client_factory=factory)

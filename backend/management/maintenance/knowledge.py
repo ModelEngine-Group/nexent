@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
@@ -72,10 +73,11 @@ async def _inspect(args, scanner, kind, pending):
     })
     manager.start(); set_default_thread_manager(manager)
     try:
-        with args.output.open('x', encoding='utf-8', newline='\n') as stream:
+        with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w', encoding='utf-8', newline='\n') as stream:
             _emit(stream, {'kind': kind + '_inventory_start', 'operation_id': context.operation_id,
                 'knowledge_id': args.knowledge_id, 'tenant_id': actor.tenant_id, 'actor_id': actor.user_id,
-                'pending_checks': list(pending), 'migration_ready': False})
+                'pending_checks': list(pending), 'migration_ready': False,
+                **({'legacy_quiesced': getattr(args, 'legacy_quiesced', False)} if kind == 'legacy_task_archive' else {})})
             async with asyncio.timeout(context.remaining()):
                 emit = lambda value: _emit(stream, value)
                 if asyncio.iscoroutinefunction(scanner):
@@ -112,6 +114,21 @@ def _scan_tasks(args, scope, context, emit):
         lambda page: emit({'kind': 'legacy_task_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
 
 
+def _archive_tasks(args, scope, context, emit):
+    from management.services.knowledge_base.legacy_tasks import LegacyTaskInspector
+
+    if getattr(args, 'legacy_quiesced', False) is not True:
+        from nexent.storage.errors import InvalidInput
+        raise InvalidInput()
+    return LegacyTaskInspector(cancellation_scope=scope).scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
+        lambda page: emit({'kind': 'legacy_task_archive_page', **page.model_dump(mode='json')}),
+        page_size=args.page_size, archive=True, context=context)
+
+
+async def archive_tasks(args):
+    return await _inspect(args, _archive_tasks, 'legacy_task_archive', TASK_PENDING_CHECKS)
+
+
 async def inspect_tasks(args):
     return await _inspect(args, _scan_tasks, 'legacy_task', TASK_PENDING_CHECKS)
 
@@ -132,15 +149,19 @@ async def inspect_runtime(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks, 'inspect-runtime': inspect_runtime}
+    actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks,
+        'inspect-runtime': inspect_runtime, 'archive-tasks': archive_tasks}
     for command in actions:
         description = 'Read-only knowledge inventory'
         inspect = commands.add_parser(command, help=description)
+        if command == 'archive-tasks':
+            inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
+                help='Operator confirms old admission and workers are stopped and drained; export includes private contents')
         inspect.add_argument('--tenant-id', required=True)
         inspect.add_argument('--user-id', required=True, help='Actual operator; current membership and edit DAC are required')
         inspect.add_argument('--knowledge-id', type=int, required=True)
         inspect.add_argument('--output', type=Path, required=True, help='New JSONL report path; existing reports are never overwritten')
-        inspect.add_argument('--page-size', type=int, default=100)
+        inspect.add_argument('--page-size', type=int, default=1 if command == 'archive-tasks' else 100)
         inspect.add_argument('--timeout', type=int, default=300, help='Total deadline in seconds, at most 3600')
     args = parser.parse_args(argv)
     if (not 1 <= args.page_size <= 1000 or not 1 <= args.timeout <= 3600 or args.knowledge_id <= 0
