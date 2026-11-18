@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+from dataclasses import replace
 
 from elasticsearch import Elasticsearch
 from nexent.storage.errors import InvalidInput
@@ -78,4 +79,14 @@ def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True, reso
         scope,
         (vector_binding(tenant, collection, dimensions, writable=writable),),
         _configured_client,
+    )
+
+
+def bind_knowledge_chunk_vectors(actor, collection):
+    """Grant exact-record maintenance without models, vectors or file identity edits."""
+    binding = replace(vector_binding(actor.tenant_id, collection, None),
+                      mutable_fields=frozenset({"content", "filename", "location"}))
+    return ElasticsearchVectorStore(
+        StorageScope("runtime", actor.tenant_id, actor.user_id, {collection}),
+        (binding,), _configured_client,
     )

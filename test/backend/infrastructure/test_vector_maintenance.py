@@ -35,7 +35,7 @@ def test_dimensionless_binding_rejects_vector_operations_before_transport(mainte
         operation(port)
     factory.assert_not_called()
     assert port.capabilities.supported == {
-        "vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload",
+        "vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload", "vector.get.payload", "vector.delete.key",
     }
 
 

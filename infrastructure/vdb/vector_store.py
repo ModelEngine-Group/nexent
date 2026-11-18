@@ -53,6 +53,8 @@ class ElasticsearchVectorStore:
                 "vector.collection.exists",
                 "vector.upsert",
                 "vector.get",
+                "vector.get.payload",
+                "vector.delete.key",
                 "vector.scan",
                 "vector.scan.payload",
                 "vector.search.dense",
@@ -83,7 +85,7 @@ class ElasticsearchVectorStore:
             raise ScopeDenied()
         self._factory = client_factory
         if any(binding.dimensions is None for binding in bindings):
-            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload"}))
+            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload", "vector.get.payload", "vector.delete.key"}))
         if any(binding.owns_collection and binding.writable for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         if any(binding.writable and binding.mutable_fields for binding in bindings):
@@ -313,10 +315,12 @@ class ElasticsearchVectorStore:
             (Revision(generation) if generation is not None else None),
         )
 
-    def get(self, key, *, context):
+    def get(self, key, *, context, include_vector=True):
         if not isinstance(key, VectorKey):
             raise InvalidInput()
-        binding = self._binding(key.collection)
+        if type(include_vector) is not bool:
+            raise InvalidInput()
+        binding = self._binding(key.collection, maintenance=not include_vector)
         with self._client(context) as client:
             try:
                 result = self._call(
@@ -330,8 +334,8 @@ class ElasticsearchVectorStore:
                         "_si_collection",
                         "_si_key",
                         "_si_generation",
-                        "embedding",
                     ]
+                    + (["embedding"] if include_vector else [])
                     + ["payload." + field for field in binding.schema],
                 )
             except NotFound:
@@ -341,7 +345,7 @@ class ElasticsearchVectorStore:
         if actual != key:
             raise ScopeDenied()
         return VectorRecord(
-            actual, vector(binding, source.get("embedding")), data, generation
+            actual, vector(binding, source.get("embedding")) if include_vector else (), data, generation
         )
 
     def patch_payload(self, key, patch, *, expected_generation, context):
@@ -361,20 +365,10 @@ class ElasticsearchVectorStore:
             raise ScopeDenied()
         provider_key = self._key(binding.collection, key.key)
         with self._client(context) as client:
-            try:
-                result = self._call(client, 'get', context, index=binding.index, id=provider_key,
-                    source_includes=['_si_tenant', '_si_collection', '_si_key', '_si_generation']
-                        + ['payload.' + field for field in binding.schema])
-            except NotFound:
+            target = self._payload_target(client, binding, key, expected_generation, context)
+            if target is None:
                 return WriteReceipt(context.operation_id, False)
-            actual, _data, generation = self._decode(binding, result.get('_source', {}))
-            if actual != key:
-                raise ScopeDenied()
-            if generation != expected_generation:
-                raise Conflict(operation_id=context.operation_id)
-            sequence, term = result.get('_seq_no'), result.get('_primary_term')
-            if type(sequence) is not int or sequence < 0 or type(term) is not int or term < 1:
-                raise Unavailable(operation_id=context.operation_id)
+            sequence, term = target
             try:
                 result = self._call(client, 'update', context, write=True, index=binding.index, id=provider_key,
                     if_seq_no=sequence, if_primary_term=term, retry_on_conflict=0, scripted_upsert=False,
@@ -385,6 +379,43 @@ class ElasticsearchVectorStore:
             if result.get('result') not in {'updated', 'noop'}:
                 raise OutcomeUnknown(operation_id=context.operation_id)
         return WriteReceipt(context.operation_id, True)
+
+    def _payload_target(self, client, binding, key, expected_generation, context):
+        try:
+            result = self._call(client, "get", context, index=binding.index,
+                id=self._key(key.collection, key.key),
+                source_includes=["_si_tenant", "_si_collection", "_si_key", "_si_generation"]
+                    + ["payload." + field for field in binding.schema])
+        except NotFound:
+            return None
+        actual, _data, generation = self._decode(binding, result.get("_source", {}))
+        if actual != key:
+            raise ScopeDenied()
+        if generation != expected_generation:
+            raise Conflict(operation_id=context.operation_id)
+        sequence, term = result.get("_seq_no"), result.get("_primary_term")
+        if type(sequence) is not int or sequence < 0 or type(term) is not int or term < 1:
+            raise Unavailable(operation_id=context.operation_id)
+        return sequence, term
+
+    def delete_key(self, key, *, expected_generation, context):
+        if not isinstance(key, VectorKey) or expected_generation is not None and not isinstance(expected_generation, Revision):
+            raise InvalidInput()
+        binding = self._binding(key.collection, write=True, maintenance=True)
+        provider_key = self._key(binding.collection, key.key)
+        with self._client(context) as client:
+            target = self._payload_target(client, binding, key, expected_generation, context)
+            if target is None:
+                return DeleteReceipt(context.operation_id, False)
+            sequence, term = target
+            try:
+                result = self._call(client, "delete", context, write=True, index=binding.index, id=provider_key,
+                    if_seq_no=sequence, if_primary_term=term, refresh="wait_for")
+            except NotFound:
+                return DeleteReceipt(context.operation_id, False)
+            if result.get("result") != "deleted":
+                raise OutcomeUnknown(operation_id=context.operation_id)
+        return DeleteReceipt(context.operation_id, True)
 
     def search(self, collection, query, *, context):
         binding = self._binding(collection)
