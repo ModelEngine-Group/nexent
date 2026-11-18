@@ -50,6 +50,7 @@ from nexent.monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_context_budget_snapshot,
 )
+from nexent.monitor.agent_fact import AgentRunObservation
 
 
 logger = logging.getLogger("run_agent")
@@ -247,6 +248,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
 
 def _agent_run_thread(agent_run_info: AgentRunInfo):
+    observation = AgentRunObservation.from_context(get_agent_monitoring_context())
     mcp_host = getattr(agent_run_info, "mcp_host", None)
     if hasattr(agent_run_info, "run_result"):
         agent_run_info.run_result = None
@@ -263,7 +265,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         )
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
-        execute_adapter(agent_run_info)
+        run_scope = observation.measure(agent_run_info.stop_event) if observation is not None else None
+        execute_adapter(agent_run_info, run_scope=run_scope)
 
         from nexent.core.agents.contracts.output import RunResult
 
@@ -290,11 +293,15 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         # Agent construction, MCP setup, and executor initialization can fail
         # before NexentAgent.agent_run_with_observer() enters its own cleanup
         # block. This idempotent outer guard owns the complete worker lifetime.
-        cleanup_run_workspace(
-            getattr(agent_run_info, "workspace_path", None),
-            getattr(agent_run_info, "workspace_run_id", None),
-            logger,
-        )
+        try:
+            cleanup_run_workspace(
+                getattr(agent_run_info, "workspace_path", None),
+                getattr(agent_run_info, "workspace_run_id", None),
+                logger,
+            )
+        finally:
+            if observation is not None:
+                observation.report_terminal(getattr(agent_run_info, "attempt_outcome", None))
 
 
 async def agent_run(

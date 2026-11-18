@@ -10,7 +10,9 @@ feature:
   business_rules:
   - rule_id: OPS-AGENT-FACTS-RULE-01
     description: A main Agent's start, end and terminal replay share one Elasticsearch document routed by the execution start time.
+  - rule_id: OPS-AGENT-FACTS-RULE-02
+    description: A formal main Agent run emits start and terminal facts with core run timing independent of trajectory capture. An SSE reconnection replays that run.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-AGENT-FACTS-20261117]
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118]
     notes: Agent collection contract and shared Ops monitoring pipeline.

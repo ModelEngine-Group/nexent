@@ -128,6 +128,11 @@ Snapshot-bound pagination is follow-up work.
 
 ## Main Agent fact sample
 
+The main Agent worker collects facts when Ops monitoring is enabled. It emits
+the start revision before the core adapter runs and measures that call with a
+monotonic clock. The terminal revision uses those timestamps and is offered
+after worker cleanup. Trajectory capture can be disabled independently.
+
 With the monitoring producer configured, submit an execution's revisions through
 the same SDK entry point. Keep the execution ID, start timestamp, initiating
 groups and resource identity stable across revisions. This sample crosses a UTC

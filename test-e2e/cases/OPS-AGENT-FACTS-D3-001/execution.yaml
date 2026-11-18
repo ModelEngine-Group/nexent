@@ -7,9 +7,10 @@ implementations:
   selector: test_agent_start_finish_and_replay
 acceptance_bindings:
   AC-01: [test_agent_start_finish_and_replay]
+  AC-02: [test_real_root_agent_capture_survives_sse_reconnect]
 preparation:
   families: []
   anchors: false
   special_assets: false
   d4_groups: []
-notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace through the isolated Ops test profile. The fixture owns the sample tenant rows and monitoring indices and templates created during execution and cleans them up.
+notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace. The case owns and cleans up its model peer, worker, sample tenant rows and monitoring namespace.
