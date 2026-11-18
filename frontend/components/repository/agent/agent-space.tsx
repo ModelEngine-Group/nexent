@@ -12,7 +12,6 @@ import {
   useRepositoryPageSize,
   useRepositoryQueryState,
 } from "@/hooks/useRepositoryQueryState";
-import ResourcePublishedAt from "@/components/repository/ResourcePublishedAt";
 import { useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
 import { App, Button, Dropdown, Empty, Input, Modal, Select, Spin } from "antd";
@@ -50,6 +49,8 @@ import {
 import { useRepositoryAgentDetail } from "@/hooks/agentRepository/useRepositoryAgentDetail";
 
 type RepositorySortOrder = "default" | "latest";
+
+const REPOSITORY_AVATAR_CLASS = "!shrink-0 !rounded !bg-primary/10 !text-primary";
 
 export function AgentSpace({
   active,
@@ -189,7 +190,7 @@ export function AgentSpace({
       listing.author?.trim() || ""
     );
     const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
-    const toolCount = listing.tool_count ?? 0;
+    const toolCount = presentation ? 0 : (listing.tool_count ?? 0);
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
     const isOfficialListing = listing.is_official === true;
@@ -222,41 +223,18 @@ export function AgentSpace({
         subtitle={presentation ? author : undefined}
         onClick={() => setDetailListing(listing)}
         icon={
-          <div
-            className={
-              presentation
-                ? "flex size-[56px] shrink-0 items-center justify-center rounded bg-[#f6f5f5]"
-                : "flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary"
-            }
-          >
-            <RepositoryAgentIcon
-              agentId={listing.agent_id}
-              iconUrl={listing.icon_url}
-              size={presentation ? 56 : 44}
-              iconSize={20}
-              className={
-                presentation
-                  ? "!shrink-0 !rounded !bg-[#f6f5f5] !text-primary"
-                  : undefined
-              }
-            />
-          </div>
-        }
-        statusRow={
-          presentation ? (
-            <ResourcePublishedAt
-              value={listing.published_at}
-              className="block truncate font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[#191919]/70"
-            />
-          ) : undefined
-        }
-        descriptionLabel={
-          presentation ? t("resourceCenter.details") : undefined
+          <RepositoryAgentIcon
+            agentId={listing.agent_id}
+            iconUrl={listing.icon_url}
+            size={presentation ? 56 : 44}
+            iconSize={20}
+            className={presentation ? REPOSITORY_AVATAR_CLASS : undefined}
+          />
         }
         description={
           listing.description?.trim() || t("agentRepository.card.noDescription")
         }
-        descriptionLines={presentation ? 1 : undefined}
+        descriptionLines={presentation ? 2 : undefined}
         badge={
           showBadge && !presentation ? (
             <>
@@ -289,7 +267,7 @@ export function AgentSpace({
           ) : undefined
         }
         tags={
-          presentation || tags.length > 0 || toolCount > 0 ? (
+          tags.length > 0 || toolCount > 0 ? (
             <div
               className={
                 presentation
@@ -297,14 +275,6 @@ export function AgentSpace({
                   : "flex w-full min-w-0 items-center gap-3"
               }
             >
-              {presentation && (
-                <span className="shrink-0 text-xs leading-5 text-[#191919]/70">
-                  {t("resourceCenter.tags")}
-                </span>
-              )}
-              {presentation && tags.length === 0 && (
-                <span className="text-muted-foreground">—</span>
-              )}
               {tags.length > 0 ? (
                 <AgentCardTags
                   labels={tags.map((tag) => getAgentRepositoryTagLabel(tag, t))}
@@ -321,30 +291,31 @@ export function AgentSpace({
         footerLayout="inline"
         meta={
           presentation ? (
-            <div className="flex w-full min-w-0 items-center gap-2 leading-5 text-[#191919]/70">
-              <span className="flex min-w-0 items-center gap-1">
-                <Bot className="shrink-0" size={12} aria-hidden />
-                <span className="truncate">
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 leading-5 text-[#191919]/70">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                  <Bot className="shrink-0" size={12} aria-hidden />
                   {t(
                     isMainAgent
                       ? "agentRepository.card.mainAgent"
                       : "space.detail.tabs.subAgents"
                   )}
                 </span>
-              </span>
-              <span className="whitespace-nowrap">
-                {t("resourceCenter.agentCardCopies", {
-                  count: downloads,
-                  formattedCount: downloads.toLocaleString(),
-                })}
-              </span>
-              <span className="ml-auto mr-12 flex min-w-0 items-center gap-1">
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                  <Copy className="shrink-0" size={12} aria-hidden />
+                  {t("resourceCenter.agentCardCopies", {
+                    count: downloads,
+                    formattedCount: downloads.toLocaleString(),
+                  })}
+                </span>
+              </div>
+              <span className="ml-auto flex w-[clamp(8rem,45%,12rem)] max-w-full shrink-0 items-center gap-1">
                 <span className="shrink-0 whitespace-nowrap">
                   {t("resourceCenter.publishedVersion")}
                 </span>
                 <span
                   title={listing.version_label || undefined}
-                  className="h-5 min-w-0 max-w-[240px] truncate rounded bg-blue-50 px-2 leading-5"
+                  className="h-5 min-w-0 truncate rounded bg-blue-50 px-2 leading-5"
                 >
                   {listing.version_label || "—"}
                 </span>
@@ -551,6 +522,7 @@ export function AgentSpace({
               iconUrl={repositoryDetail?.icon_url ?? detailListing.icon_url}
               size={presentation ? 64 : 48}
               iconSize={24}
+              className={presentation ? REPOSITORY_AVATAR_CLASS : undefined}
             />
           ) : undefined
         }
