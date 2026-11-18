@@ -5,12 +5,20 @@ import hashlib
 import json
 from typing import Literal
 
-from contracts.agentos_knowledge import Contract, KnowledgeFileReference
+from contracts.agentos_knowledge import Contract, KnowledgeFileReference, ModelVersion
 from pydantic import Field, JsonValue, model_validator
 
 CHANGES = "runtime_knowledge_chunk_changes"
 STATES = "runtime_knowledge_chunk_states"
 ACTIVE_STATUSES = ("reserved", "writing", "unknown")
+
+
+class ChunkCreateData(Contract):
+    content: str
+    filename: str | None = None
+    location: dict[str, JsonValue] = Field(default_factory=dict)
+    embedding_model: ModelVersion | None = None
+    embedding_input: str | None = None
 
 
 class ChunkMutationIntent(Contract):

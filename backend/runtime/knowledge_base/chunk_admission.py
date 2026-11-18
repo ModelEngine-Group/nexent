@@ -20,14 +20,27 @@ class ChunkMutationAdmission(ChunkMutationJournal):
             raise ScopeDenied()
         with self.records.transaction(context=context) as tx:
             self._locked_state(tx, context)
-            assert_knowledge_open(tx, self.knowledge_id, context=context)
-            if intent.file_ref is not None:
-                manifest = lock_file_manifest(tx, intent.file_ref, context)
-                if (
-                    manifest["visible_version"] != intent.file_ref.file_version
-                    or manifest["visible_generation"] != intent.generation
-                    or manifest["tombstone_version"] >= intent.file_ref.file_version
-                ):
-                    raise Conflict()
-                published_job(tx, intent, manifest, context=context)
+            self._validate_target(tx, intent, context)
             return self._reserve(tx, intent, context)
+
+    def _validate_target(self, tx, intent, context):
+        assert_knowledge_open(tx, self.knowledge_id, context=context)
+        if intent.file_ref is not None:
+            manifest = lock_file_manifest(tx, intent.file_ref, context)
+            if (
+                manifest["visible_version"] != intent.file_ref.file_version
+                or manifest["visible_generation"] != intent.generation
+                or manifest["tombstone_version"] >= intent.file_ref.file_version
+            ):
+                raise Conflict()
+            published_job(tx, intent, manifest, context=context)
+
+    def revalidate(self, intent, *, context):
+        if not isinstance(intent, ChunkMutationIntent):
+            raise InvalidInput()
+        intent = ChunkMutationIntent.model_validate(intent.model_dump(mode="json"))
+        if intent.knowledge_id != self.knowledge_id:
+            raise ScopeDenied()
+        with self.records.transaction(context=context) as tx:
+            self._locked_state(tx, context)
+            self._validate_target(tx, intent, context)
