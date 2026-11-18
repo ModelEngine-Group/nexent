@@ -42,6 +42,7 @@ from contracts.agentos import (
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.constants import environment
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
+from nexent.monitor import get_monitoring_manager
 
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
@@ -75,7 +76,8 @@ class AgentOSClient:
             token = sign_call(operation, body, ServicePrincipal(user_id, tenant_id))
         except AgentOSIdentityError as exc:
             raise RuntimeServiceUnavailableError("Internal runtime authentication is not configured") from exc
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = get_monitoring_manager().get_trace_headers()
+        headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         return f"{self.runtime_url}/api{operation.value}", body, headers
 
     async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
