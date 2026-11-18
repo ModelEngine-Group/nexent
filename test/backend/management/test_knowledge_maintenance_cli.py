@@ -3,6 +3,8 @@
 
 import asyncio
 import json
+import subprocess
+import sys
 from threading import Event, current_thread
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -123,3 +125,35 @@ def test_unexpected_error_message_is_redacted(cli, monkeypatch, caplog):
     monkeypatch.setattr(module, 'inspect_sources', AsyncMock(side_effect=RuntimeError('https://secret:password@host/?key=value')))
     assert module.main(argv(cli)) == 1
     assert 'exception_type=RuntimeError' in caplog.text and 'secret' not in caplog.text and 'password' not in caplog.text
+
+
+def test_vectors_command_uses_shared_managed_report_without_source_reads(cli, monkeypatch):
+    scanner = Mock()
+    scanner.scan.return_value = {'documents': 3, 'documents_with_issues': 1}
+    factory = Mock(return_value=scanner)
+    monkeypatch.setattr('management.services.knowledge_base.legacy_vectors.LegacyVectorInspector', factory)
+    arguments = argv(cli); arguments[0] = 'inspect-vectors'
+    assert module.main(arguments) == 0
+    values = [json.loads(line) for line in cli.args.output.read_text().splitlines()]
+    assert values[0]['kind'] == 'legacy_vector_inventory_start'
+    assert values[-1]['documents'] == 3 and not values[-1]['migration_ready']
+    assert values[-1]['pending_checks'] == ['source_mapping', 'legacy_tasks', 'runtime_visibility', 'model_dimensions']
+    scanner.scan.assert_called_once()
+    cli.inspector.page.assert_not_called()
+
+
+def test_source_cli_import_does_not_require_native_es_dependency():
+    script = '''
+import sys
+from importlib.abc import MetaPathFinder
+class Block(MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'elasticsearch', 'elastic_transport'}:
+            raise AssertionError('Unexpected native ES import')
+sys.meta_path.insert(0, Block())
+import management.maintenance.knowledge
+print('source_cli_without_es_ok')
+'''
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr
+    assert 'source_cli_without_es_ok' in result.stdout

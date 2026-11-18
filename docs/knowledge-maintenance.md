@@ -1,4 +1,4 @@
-# Historical KB source inspection
+# Historical KB inspection
 
 The server-side maintenance command inspects one tenant and KB. It checks the
 operator's current membership and edit permission before reading source objects.
@@ -55,3 +55,38 @@ Source inspection is the first part of the data-process retirement maintenance
 work. Legacy ES inventory, Redis-only task handling, explicit ingestion into the
 new visible manifests, rollback and cutover rehearsal remain separate required
 steps. Keep old data and queues until those checks are complete.
+
+## Legacy vector inventory
+
+Run this separate command with the Management PG configuration and the existing
+Elasticsearch endpoint. The ES driver loads when this command runs; the source
+inspection command does not require that driver.
+
+```bash
+python -m management.maintenance.knowledge inspect-vectors \
+  --tenant-id tenant-id \
+  --user-id actual-operator-id \
+  --knowledge-id 42 \
+  --page-size 100 \
+  --timeout 300 \
+  --output /tmp/kb-42-legacy-vectors.jsonl
+```
+
+The operator needs current edit permission. Infrastructure also verifies that
+the physical index belongs to exactly this KB across known PG ownership history,
+including soft-deleted rows. Shared indexes, aliases and ambiguous ownership are
+rejected before document scanning. The command reads the old physical index
+through StorageInterface and leaves its data intact. It creates no new index.
+
+One PIT supplies the count and all pages. The command checks vector values and
+dimensions against the stored mapping, records unresolved file identities and
+tenant conflicts, then closes the PIT and clients. The report contains document
+ID and source-reference hashes, storage revisions and confirmed canonical file
+IDs. It omits raw URLs, credentials, content and vectors.
+
+The `legacy_vector_inventory_finished` record confirms that this snapshot scan
+completed. The report retains `migration_ready=false` and pending source mapping,
+legacy task, Runtime visibility and model dimension checks. Model compatibility
+requires Runtime evidence through AgentOS; the stored index dimensions alone do
+not establish it. Explicit migration must revalidate these observations before
+writing. This command has no execution or retry mode and adds no public route.

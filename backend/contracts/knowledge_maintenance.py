@@ -8,6 +8,9 @@ from pydantic import Field
 
 INSPECTION_FILES = 'knowledge_source_inspection'
 INSPECTION_LEDGER = 'knowledge_source_ledger_inspection'
+LEGACY_DOCUMENTS = 'legacy_knowledge_documents'
+LEGACY_VECTOR_METADATA = 'legacy_knowledge_vector_metadata'
+LEGACY_INDEX_OWNER = 'legacy_knowledge_index_owner'
 PENDING_CHECKS = ('legacy_vectors', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
 Issue = Annotated[str, Field(pattern=r'^[A-Z][A-Z0-9_]{0,79}$')]
 
@@ -32,3 +35,29 @@ class SourceInspectionPage(Contract):
     next_cursor: str | None = None
     pending_checks: tuple[Literal['legacy_vectors'], Literal['legacy_tasks'],
                           Literal['runtime_visibility'], Literal['model_dimensions']] = PENDING_CHECKS
+
+
+VECTOR_PENDING_CHECKS = ('source_mapping', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
+
+
+class LegacyVectorFinding(Contract):
+    document_id_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    revision: str = Field(min_length=1, max_length=128)
+    source_reference_hash: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    chunk_index: int | None = Field(default=None, ge=0)
+    dimensions: int | None = Field(default=None, ge=0)
+    issues: list[Issue] = Field(default_factory=list, max_length=32)
+
+
+class LegacyVectorPage(Contract):
+    schema_version: Literal[1] = 1
+    knowledge_id: int = Field(gt=0)
+    index_name: str = Field(min_length=1, max_length=100)
+    tenant_id: str = Field(min_length=1, max_length=100)
+    actor_id: str = Field(min_length=1, max_length=100)
+    knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    collection_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    collection_dimensions: int | None = Field(default=None, gt=0)
+    metric: str | None = Field(default=None, max_length=100)
+    documents: list[LegacyVectorFinding] = Field(max_length=1000)
