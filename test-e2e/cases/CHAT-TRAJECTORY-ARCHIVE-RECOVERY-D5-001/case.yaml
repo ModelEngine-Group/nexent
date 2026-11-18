@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  type: RELIABILITY
+  priority: P1
+  status: blocked
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-003
+    - AC-IE-005
+    - AC-IE-006
+    - AC-IE-007
+    - AC-IE-008
+  title: 取消、刷新和页面退出释放临时轨迹并允许重新上传
+  objective: 取消、刷新和页面退出释放临时轨迹并允许重新上传
+  preconditions:
+  - 设计阶段，产品、固定脚本与execution.yaml尚未实现；本Case保持blocked，不能计为通过。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 在解压、hash校验和正文查看中分别取消、关闭详情、刷新、route离开、pagehide后再pageshow、退出登录。
+    expected: 不依赖可靠unload，Worker/正文/File引用/URL和缓存释放；刷新与返回后的页面为空，必须重新选择ZIP；晚到的旧解析结果被generation丢弃。
+  - order: 2
+    action: 覆盖压缩/实际解压长度、metadata和条目数的上限及超一，模拟解析错误/超时，之后重传同一合法文件。
+    expected: 限额内正确打开，超限立即停止并显示错误，解析至多30秒；取消后5秒内Worker/URL和受控资源计数回到基线；同一文件可重选且无半份视图。
+  - order: 3
+    action: 后端导出中客户端断连、源清理/撤权、磁盘写失败，解除故障后再次点击导出。
+    expected: 失败不返回完整ZIP假成功，独占暂存与文件句柄在故障解除后5秒内释放；再次导出成功，原文件和业务统计不受影响，无后台导入恢复任务。
+  expected_results:
+  - 不依赖可靠unload，Worker/正文/File引用/URL和缓存释放；刷新与返回后的页面为空，必须重新选择ZIP；晚到的旧解析结果被generation丢弃。
+  - 限额内正确打开，超限立即停止并显示错误，解析至多30秒；取消后5秒内Worker/URL和受控资源计数回到基线；同一文件可重选且无半份视图。
+  - 失败不返回完整ZIP假成功，独占暂存与文件句柄在故障解除后5秒内释放；再次导出成功，原文件和业务统计不受影响，无后台导入恢复任务。
+  forbidden_side_effects:
+  - 不得新增导入HTTP、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  risk_type: RELIABILITY
+  risk: 浏览器生命周期与异步结果导致临时内容残留、旧数据覆盖或导出暂存泄漏。
+  condition:
+  - 真实浏览器生命周期/后退缓存、产品Worker、可控字节预算及真实Ops导出故障；不新增持久导入服务。
+  metrics:
+  - Worker/URL/缓存可达引用数、迟到覆盖次数、恢复页面可读数据数、导出暂存与句柄、解析和取消耗时。
+  thresholds:
+  - 旧结果覆盖及恢复后可读内容为0；解析预算30秒、取消或故障解除后5秒内受控资源回到基线；检查可达引用和实际Worker，不把GC即时回收量当作可靠断言。
+  recovery_expectations:
+  - 清空后重新选择合法ZIP可查看，再次导出可成功；独占浏览器和导出暂存资源全部释放。
+  acceptance:
+  - id: AC-01
+    description: 不依赖可靠unload，Worker/正文/File引用/URL和缓存释放；刷新与返回后的页面为空，必须重新选择ZIP；晚到的旧解析结果被generation丢弃。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 限额内正确打开，超限立即停止并显示错误，解析至多30秒；取消后5秒内Worker/URL和受控资源计数回到基线；同一文件可重选且无半份视图。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 失败不返回完整ZIP假成功，独占暂存与文件句柄在故障解除后5秒内释放；再次导出成功，原文件和业务统计不受影响，无后台导入恢复任务。
+    steps:
+    - 3
+    expected_results:
+    - 3

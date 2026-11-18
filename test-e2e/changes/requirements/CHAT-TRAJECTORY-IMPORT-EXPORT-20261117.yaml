@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  title: 会话轨迹一键导出ZIP与浏览器临时导入查看
+  description: 详情右上角导出、列表右上角选择ZIP，本地浏览器解析后临时查看；刷新或离开需重新上传，不新增持久化或导入接口。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    added:
+    - CHAT-TRAJECTORY-ARCHIVE-D2-001
+    - CHAT-TRAJECTORY-ARCHIVE-D3-001
+    - CHAT-TRAJECTORY-ARCHIVE-D4-001
+    - CHAT-TRAJECTORY-ARCHIVE-SECURITY-D5-001
+    - CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 完整展示快照ZIP、正文/Unicode、原会话权限和清理竞态。
+    - 浏览器ZIP结构/hash/预算校验，页面内存数据源和Worker取消、迟到结果隔离。
+    - 两个按钮、失败重试、同文件重选、刷新/路由离开/后退缓存/退出登录清空，禁止持久存储和导入HTTP。
+    reason: 既有UT证明原运行存储和查看，新增格式交换及临时页面生命周期需要局部测试；D2导出协议、D3格式集成、D4完整交互、D5风险分别证明。
+  notes: 2026-11-18按用户明确要求直接修订设计。无目标租户选择、导入API、持久索引或后台任务；保留五个未实施Case的ID并修订合同，均blocked。责任域runtime；实施后填写preparation与真实选择器。

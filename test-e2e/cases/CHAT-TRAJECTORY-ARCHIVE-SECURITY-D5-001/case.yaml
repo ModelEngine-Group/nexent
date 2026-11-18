@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-SECURITY-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  type: SECURITY
+  priority: P0
+  status: blocked
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-002
+    - AC-IE-004
+    - AC-IE-005
+    - AC-IE-008
+  title: 恶意ZIP不能执行内容、越过预算或留下持久数据
+  objective: 恶意ZIP不能执行内容、越过预算或留下持久数据
+  preconditions:
+  - 设计阶段，产品、固定脚本与execution.yaml尚未实现；本Case保持blocked，不能计为通过。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 用产品Worker解析缺文件、坏hash/CRC、未知版本、父节点循环、重复路径、..、绝对路径、链接、加密/嵌套ZIP及伪造长度高膨胀包。
+    expected: 全部明确拒绝，无半份内容显示；实际解压达到预算时即停止，不先无界分配再检查，Worker释放后正常包仍可导入。
+  - order: 2
+    action: 合法包正文带HTML/脚本、远程图片和URL以及其他租户/用户标识；导入并展开全部正文。
+    expected: 脚本执行、自动外部请求、导入上传、权限变化和持久存储写入均为0；内容安全展示与复制，不请求包内来源资源。
+  - order: 3
+    action: 普通角色访问入口和导出API；结束临时查看后检查持久存储、浏览器后退缓存和目标业务数据。
+    expected: 普通角色无入口且导出被拒绝；数据不能从持久存储或恢复URL重新打开，目标会话/用量不变，本Case资源清理完成。
+  expected_results:
+  - 全部明确拒绝，无半份内容显示；实际解压达到预算时即停止，不先无界分配再检查，Worker释放后正常包仍可导入。
+  - 脚本执行、自动外部请求、导入上传、权限变化和持久存储写入均为0；内容安全展示与复制，不请求包内来源资源。
+  - 普通角色无入口且导出被拒绝；数据不能从持久存储或恢复URL重新打开，目标会话/用量不变，本Case资源清理完成。
+  forbidden_side_effects:
+  - 不得新增导入HTTP、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  risk_type: SECURITY
+  risk: 不可信压缩包导致解压资源失控、脚本执行、自动请求或持久数据泄漏。
+  condition:
+  - 独占真实浏览器运行产品Worker及查看器、受控恶意包、网络/存储/执行探针和既有导出接口。
+  metrics:
+  - 解压实际字节和条目计数、脚本/外部请求/上传次数、持久写入数、可恢复导入数据数。
+  thresholds:
+  - 恶意输入全部拒绝，解压不超公开预算；违规执行/请求/上传/持久写入/可恢复内容均为0。
+  recovery_expectations:
+  - 停止恶意解析后合法包成功，Worker和URL释放；只清理本Case独占身份和样本。
+  acceptance:
+  - id: AC-01
+    description: 全部明确拒绝，无半份内容显示；实际解压达到预算时即停止，不先无界分配再检查，Worker释放后正常包仍可导入。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 脚本执行、自动外部请求、导入上传、权限变化和持久存储写入均为0；内容安全展示与复制，不请求包内来源资源。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 普通角色无入口且导出被拒绝；数据不能从持久存储或恢复URL重新打开，目标会话/用量不变，本Case资源清理完成。
+    steps:
+    - 3
+    expected_results:
+    - 3

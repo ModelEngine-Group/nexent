@@ -43,6 +43,10 @@ feature:
     description: 'Historical contract retained only for the two retired Cases; the
       user withdrew execution-recovery preparation on 2026-11-05. Retirement evidence:
       nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json'
+  - rule_id: TRJ-RULE-010
+    description: 设计新增：会话轨迹详情右上角直接导出ZIP，后端收集全部可读已归档轮次及完整展示正文，名称/历史版本/指标和缺失状态保持，不受浏览器加载页数限制。
+  - rule_id: TRJ-RULE-011
+    description: 设计新增：轨迹列表右上角选择ZIP，在浏览器当前页面内存中校验并复用查看器临时查看；不上传后端，不建持久档案/列表/去重记录；刷新、离开页面、关闭临时详情和退出登录清空数据及Worker/缓存，重新查看需重新选择文件。
   required_test_stages:
   - D2
   - D3
@@ -67,7 +71,9 @@ feature:
     - CHAT-TRAJECTORY-MEMORY-GROUP-20261116
     - CHAT-TRAJECTORY-SANDBOX-TIMING-20261116
     - CHAT-TRAJECTORY-REFRESH-20261116
+    - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
       historical provenance for retired Cases. Unit contracts stay in UT; preserve
-      existing D1.
+      existing D1. Proposed archive extension; TRJ-RULE-010/011; see changes/ops-trajectory-import-export.
+      No product implementation or acceptance execution yet.

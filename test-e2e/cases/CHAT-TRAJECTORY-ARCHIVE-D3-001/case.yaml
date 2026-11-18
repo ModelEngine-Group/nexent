@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  type: INTEGRATION
+  priority: P1
+  status: blocked
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-001
+    - AC-IE-002
+    - AC-IE-003
+    - AC-IE-006
+    - AC-IE-007
+    - AC-IE-008
+  title: 真实导出包可由独立浏览器数据源读取且不依赖来源资源
+  objective: 真实导出包可由独立浏览器数据源读取且不依赖来源资源
+  preconditions:
+  - 设计阶段，产品、固定脚本与execution.yaml尚未实现；本Case保持blocked，不能计为通过。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 真实写入器产生多轮轨迹，通过运行的Ops及真实来源授权/存储导出ZIP，将包交给独立浏览器中的产品Worker读取器。
+    expected: 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，不使用浏览器已加载DTO或原服务content_id。
+  - order: 2
+    action: 浏览器加载本地产品后禁用来源网络，本地没有来源身份和Agent，TRAJECTORY_READ_ENABLED=false；实际Worker解析并读取所有字段。
+    expected: 本地查看成功，无文件上传或来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复解析，不需要去重。
+  - order: 3
+    action: 切换同Trace ID不同文件后终止旧Worker；卸载数据源并重新挂载页面。
+    expected: 旧数据/选择/缓存和迟到结果不覆盖新文件；重新挂载为空，需要重新选择ZIP；释放本Case所有Worker、对象URL、账号及来源夹具。
+  expected_results:
+  - 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，不使用浏览器已加载DTO或原服务content_id。
+  - 本地查看成功，无文件上传或来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复解析，不需要去重。
+  - 旧数据/选择/缓存和迟到结果不覆盖新文件；重新挂载为空，需要重新选择ZIP；释放本Case所有Worker、对象URL、账号及来源夹具。
+  forbidden_side_effects:
+  - 不得新增导入HTTP、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  integration_boundary:
+  - 真实来源Ops HTTP、权限存储与持久文件→ZIP展示快照→产品浏览器Worker/只读数据源；不替换格式转换和解码。
+  - 目标无需新增数据库和导入服务；本Case只证明数据交换，完整UI在D4验证。
+  observations:
+  - 文件/原文hash、节点及引用映射、HTTP调用和存储写入计数、Worker释放及冷挂载状态。
+  cleanup:
+  - 删除本Case自有来源夹具/身份及后端导出暂存，关闭独占浏览器与服务，核对Worker/URL及连接释放。
+  acceptance:
+  - id: AC-01
+    description: 全部节点、父子关系、顺序、历史名称/版本、指标、缺失状态和正文一致；长Unicode分块拼接逐字节相同，不使用浏览器已加载DTO或原服务content_id。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 本地查看成功，无文件上传或来源/正文HTTP请求，无模型工具调用，不创建目标数据库记录；同一文件可重复解析，不需要去重。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 旧数据/选择/缓存和迟到结果不覆盖新文件；重新挂载为空，需要重新选择ZIP；释放本Case所有Worker、对象URL、账号及来源夹具。
+    steps:
+    - 3
+    expected_results:
+    - 3
