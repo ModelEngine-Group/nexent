@@ -45,7 +45,7 @@ from infrastructure.nl2agent_tool_config import (
     SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION as SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
     create_nl2agent_mcp_tool_configs as create_nl2agent_mcp_tool_configs,
 )
-from management.services.permission.identity.session import get_current_user_id
+from management.services.permission.identity.session import authenticate_identity
 
 logger = logging.getLogger(__name__)
 
@@ -610,7 +610,8 @@ def _tool_actor() -> tuple[str, str]:
     scope = _tool_scope.get()
     if scope is not None:
         return scope.user_id, scope.tenant_id
-    return get_current_user_id(get_http_request().headers.get("Authorization"))
+    principal = authenticate_identity(get_http_request().headers.get("Authorization"))
+    return principal.user_id, principal.tenant_id
 
 
 def _policy_clarification_required() -> bool:
@@ -710,8 +711,7 @@ async def search_installed_mcp_tools(keywords: list[str]) -> dict[str, Any]:
         # Keep NL2Agent runtime dependencies out of the MCP server startup path.
         from management.services.agent.nl2agent import search_installed_mcp_tools_by_query
 
-        authorization = get_http_request().headers.get("Authorization")
-        _, tenant_id = get_current_user_id(authorization)
+        _, tenant_id = _tool_actor()
         recommendations = search_installed_mcp_tools_by_query(
             tenant_id=tenant_id,
             query_text=" ".join(prepared_keywords),

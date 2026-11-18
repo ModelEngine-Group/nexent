@@ -5,7 +5,7 @@ import json
 
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import NEXENT_AGENT_CORE
-from management.services.agent.core_policy import apply_agent_core_policy
+from infrastructure.agent_core_policy import apply_agent_core_policy
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.prompt.meta import compose_nl2agent_system
@@ -95,4 +95,4 @@ def create_nl2agent_agent_config(language: str, tools: list[ToolConfig], snapsho
         ],
         enable_planning=False,
     )
-    return apply_agent_core_policy(config)
+    return apply_agent_core_policy(config, NEXENT_AGENT_CORE)

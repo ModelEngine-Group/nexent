@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 from management.db.skill import repository as skill_db
 from management.db.configuration.tenant import create_tenant_with_default_group, get_single_config_info, insert_config, update_config_by_tenant_config_id, get_all_tenant_ids, delete_config_by_tenant_config_id, get_all_configs_by_tenant_id
 from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
-from management.services.permission.identity.users import delete_user_and_cleanup
 from management.db.identity.group import query_groups_by_tenant, remove_group
 from management.services.model.commands import deactivate_tenant_models
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record

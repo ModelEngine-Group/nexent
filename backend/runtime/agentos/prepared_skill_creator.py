@@ -6,11 +6,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from contracts.agentos import PreparedSkillCreatorRun
+from contracts.constants.environment import NEXENT_AGENT_CORE
+from infrastructure.agent_core_policy import apply_agent_core_policy
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextItemInput, ContextItemType
-from nexent.core.agents.context_input import build_authorized_context_input
+from nexent.core.agents.context.authorized_input import build_authorized_context_input
 from nexent.core.agents.prompt.meta import compose_nl2skill
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from runtime.adapters.nexent.factory import build_run_info
@@ -40,7 +42,7 @@ def create_nl2skill_agent_config(
     if not system_prompt.strip():
         raise ValueError("Skill creation system prompt must not be empty")
 
-    return AgentConfig(
+    config = AgentConfig(
         name=NL2SKILL_NAME,
         display_name="技能创建助手",
         description="Ephemeral natural-language skill builder",
@@ -59,6 +61,7 @@ def create_nl2skill_agent_config(
         tools=[],
         max_steps=5,
         model_name=model_name,
+        response_mode="artifact",
         output_protocol="final_envelope",
         provide_run_summary=False,
         context_items=[
@@ -73,6 +76,7 @@ def create_nl2skill_agent_config(
         ],
         enable_planning=False,
     )
+    return apply_agent_core_policy(config, NEXENT_AGENT_CORE)
 
 
 def _skill_history_turns(history: list[AgentHistory]) -> list[dict[str, Any]]:

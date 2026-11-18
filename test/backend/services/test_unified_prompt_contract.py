@@ -89,7 +89,7 @@ async def test_partial_prompt_save_retains_unrequested_fields_and_uses_canonical
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
     }))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("owner", "tenant"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="owner", tenant_id="tenant"))
     mocker.patch.object(service, "require_agent_draft_edit", return_value=dict(draft))
     update = mocker.patch.object(service, "update_agent_draft_fields", return_value=1)
     mocker.patch.object(service, "validate_agent_generation_complete_impl", return_value=None)

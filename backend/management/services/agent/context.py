@@ -18,7 +18,7 @@ from nexent.monitor import AgentRunMetadata
 
 
 def build_authorized_context_input(agent_run_info, historical_context=None):
-    from nexent.core.agents.context_input import build_authorized_context_input as build_context
+    from nexent.core.agents.context.authorized_input import build_authorized_context_input as build_context
 
     return build_context(agent_run_info, historical_context)
 

@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
 from contracts.agentos import ManagementOperation
-from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, verify_call
+from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, read_bearer_token, verify_call
 
 Payload = TypeVar("Payload", bound=BaseModel)
 
@@ -15,9 +15,10 @@ Payload = TypeVar("Payload", bound=BaseModel)
 async def read_agentos_callback(
     request: Request, operation: ManagementOperation, schema: type[Payload], *, max_bytes: int = 1024,
 ) -> tuple[Payload, ServicePrincipal]:
-    authorization = request.headers.getlist("authorization")
-    if len(authorization) != 1 or not authorization[0].startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "AGENTOS_UNAUTHORIZED"})
+    try:
+        token = read_bearer_token(request.headers.getlist("authorization"))
+    except AgentOSIdentityError as exc:
+        raise HTTPException(status_code=401, detail={"code": "AGENTOS_UNAUTHORIZED"}) from exc
     if request.scope["query_string"]:
         raise HTTPException(status_code=400, detail={"code": "AGENTOS_INVALID_REQUEST"})
     buffer = bytearray()
@@ -27,7 +28,7 @@ async def read_agentos_callback(
         buffer.extend(chunk)
     body = bytes(buffer)
     try:
-        actor = verify_call(authorization[0].removeprefix("Bearer "), operation, body)
+        actor = verify_call(token, operation, body)
     except AgentOSIdentityError as exc:
         raise HTTPException(status_code=401, detail={"code": "AGENTOS_UNAUTHORIZED"}) from exc
     try:

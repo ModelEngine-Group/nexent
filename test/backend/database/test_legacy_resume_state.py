@@ -1,9 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, literal
 from sqlalchemy.orm import Session
 
 from infrastructure.rdb import conversation_state
@@ -15,7 +16,6 @@ def resume_db(monkeypatch):
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS nexent")
         for ddl in (
-            "CREATE TABLE nexent.user_account_t (user_id TEXT, user_role TEXT, delete_flag TEXT)",
             "CREATE TABLE nexent.user_tenant_t (user_id TEXT, tenant_id TEXT, delete_flag TEXT)",
             "CREATE TABLE nexent.conversation_record_t "
             "(conversation_id INTEGER, created_by TEXT, delete_flag TEXT, workbench_config TEXT)",
@@ -42,6 +42,15 @@ def resume_db(monkeypatch):
             yield current
 
     monkeypatch.setattr(conversation_state, "get_db_session", session)
+    # SQLite has no PostgreSQL ARRAY role projection. These rows use a nonempty
+    # membership tenant, so keep the real predicates without an account override.
+    membership = conversation_state.UserTenant
+    monkeypatch.setattr(conversation_state, "UserTenant", SimpleNamespace(
+        user_id=membership.user_id,
+        tenant_id=membership.tenant_id,
+        delete_flag=membership.delete_flag,
+        user_role=literal(None).label("user_role"),
+    ))
     yield
     engine.dispose()
 

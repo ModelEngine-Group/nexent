@@ -573,10 +573,12 @@ class RuntimeCapacityExceededError(RuntimeError):
     retry_after_seconds = 1
 
 
-from nexent.core.model_service.profiles.configuration_errors import ModelOutletConflictError as ModelOutletConflictError
+def __getattr__(name):
+    if name in {"ModelOutletConflictError", "ModelOutletValidationError"}:
+        from nexent.core.model_service.profiles import configuration_errors
 
-
-from nexent.core.model_service.profiles.configuration_errors import ModelOutletValidationError as ModelOutletValidationError
+        return getattr(configuration_errors, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ModelOutletDatabaseError(RuntimeError):

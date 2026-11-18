@@ -24,6 +24,16 @@ class AgentOSIdentityError(ValueError):
     """An invalid AgentOS credential, without request details."""
 
 
+def read_bearer_token(headers: list[str]) -> str:
+    """Require exactly one Bearer credential on an AgentOS call."""
+    if len(headers) != 1:
+        raise AgentOSIdentityError("Invalid AgentOS authorization")
+    scheme, _, token = headers[0].partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise AgentOSIdentityError("Invalid AgentOS authorization")
+    return token
+
+
 @dataclass(frozen=True)
 class ServicePrincipal:
     user_id: str

@@ -20,7 +20,7 @@ from infrastructure.nl2agent_tool_config import (
 )
 from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextItemInput, ContextItemType
-from nexent.core.agents.context_input import build_authorized_context_input
+from nexent.core.agents.context.authorized_input import build_authorized_context_input
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from runtime.adapters.nexent.factory import build_run_info
 from runtime.agentos.creator_context import apply_creator_budget

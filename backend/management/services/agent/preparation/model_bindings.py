@@ -33,6 +33,10 @@ def export_resolved_model(alias, selected, tenant_id, resource, preferences, cat
         resolved = merge_agent_parameters(resolved, entry)
     if resolved != captured:
         raise ValueError("Model parameters changed during resource preparation")
+    default_profile = None
+    if alias in {"main_model", "sub_model"} and selected.extra_body == {"logprobs": True}:
+        base = base.model_copy(update={"extra_body": {"logprobs": True}})
+        default_profile = "logprobs"
     changes = {key: getattr(selected, key) for key in RunModelOverrides.model_fields
                if getattr(selected, key) != getattr(base, key)}
     if selected != base.model_copy(update={"cite_name": alias, "resolved_profile": resolved, **changes}):
@@ -41,4 +45,5 @@ def export_resolved_model(alias, selected, tenant_id, resource, preferences, cat
         model_id=captured.outlet_id, alias=alias, revision=revision,
         overrides=RunModelOverrides(**changes) if changes else None,
         agent_parameters=entry or None, conversation_parameters=parameters,
+        tenant_default_profile=default_profile,
     )

@@ -48,7 +48,7 @@ from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.context_input import build_authorized_context_input
+from nexent.core.agents.context.authorized_input import build_authorized_context_input
 from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS

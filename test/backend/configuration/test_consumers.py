@@ -191,8 +191,9 @@ async def test_resolved_model_bindings_capture_current_logprobs_flag(mocker):
         return_value=main_record,
     )
     mocker.patch.object(run_bindings, "restore_model_snapshot", return_value=snapshot)
+    mocker.patch("infrastructure.agent_model_config.restore_model_snapshot", return_value=snapshot)
     mocker.patch(
-        "management.services.model.outlet_projection.project_saved_outlet",
+        "infrastructure.model_adapter.project_saved_outlet",
         return_value={"reasoning_capability": None},
     )
     mocker.patch.object(

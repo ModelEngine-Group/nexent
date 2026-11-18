@@ -2,7 +2,7 @@
 
 """Run-scoped input contract for context data authorized by the application."""
 
-from .contracts.context import ContextInput, ContextItemInput
+from ..contracts.context import ContextInput, ContextItemInput
 
 
 def build_authorized_context_input(

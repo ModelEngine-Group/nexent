@@ -72,7 +72,6 @@ class UserAccount(TableBase):
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
     source_metadata = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
                              comment="Migration/provider provenance, API-only and system identity markers; never grants permissions")
-    user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
 
 # Read projections preserve established association query/response contracts.
 # These expressions create no role or email columns on the association table.

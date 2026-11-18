@@ -58,7 +58,7 @@ def draft_boundary(mocker):
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
     }))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("owner", "tenant-a"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="owner", tenant_id="tenant-a"))
     authorize = mocker.patch.object(service, "require_agent_draft_edit", return_value={
         "agent_id": 170, "name": None, "display_name": "Existing draft", "description": "",
     })
