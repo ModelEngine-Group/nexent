@@ -30,18 +30,40 @@ def inspection(source_fixture):  # noqa: F811 -- Imported pytest fixture is inje
         'origin': 'pg_reference', 'auxiliary_present': ['chunks']}
     records.get.return_value = row
     records.query.return_value = Page((row, {**row, 'task_id': 'redis-only', 'origin': 'index_metadata'}))
-    closed, frames = [], []
+    closed, frames, expected_known = [], [], {'old-task'}
     @contextmanager
     def tasks(*args, **kwargs):
-        assert kwargs['known_tasks'] == {'old-task'}
+        assert kwargs['known_tasks'] == expected_known
         try: yield records
         finally: closed.append(True)
     return SimpleNamespace(service=LegacyTaskInspector(ports=source_fixture.service.ports, tasks=tasks),
-        source=source_fixture, records=records, row=row, closed=closed, frames=frames)
+        source=source_fixture, records=records, row=row, closed=closed, frames=frames, expected_known=expected_known)
 
 
 def scan(s):
     return s.service.scan(1, s.source.actor, s.frames.append, page_size=2, context=context())
+
+
+def test_modern_ingestion_references_are_not_read_from_legacy_redis(inspection):
+    from contracts.knowledge_cleanse import cleanse_job_id
+
+    from test.backend.services.test_knowledge_ingestion_contract import intent
+    s=inspection;value=intent()
+    s.source.update(ingestion_request=value.model_dump(mode='json'),
+        process_task_id=cleanse_job_id(value.cleanse_request(),'tenant-a','user-a'))
+    s.expected_known.clear();s.records.query.return_value=Page(())
+    result=scan(s)
+    assert result['tasks']==0 and result['managed_files_not_scanned']==1
+    s.records.get.assert_not_called()
+
+
+def test_unknown_ingestion_intent_is_reported_unreconciled_without_guessing_task_origin(inspection):
+    s=inspection
+    s.source.update(ingestion_request={'unknown':'legacy-or-corrupt'})
+    s.expected_known.clear();s.records.query.return_value=Page(())
+    result=scan(s)
+    assert result['unreconciled_ingestion_intents']==1 and result['managed_files_not_scanned']==0
+    s.records.get.assert_not_called()
 
 
 def test_known_and_redis_only_tasks_are_deduplicated_and_redacted(inspection):

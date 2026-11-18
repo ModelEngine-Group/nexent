@@ -128,17 +128,20 @@ class KnowledgeSourceInspector:
             finally:
                 objects.close()
 
-    def page(self, knowledge_id, actor, *, cursor=None, page_size=100, context):
+    def page(self, knowledge_id, actor, *, cursor=None, page_size=100, file_id=None, context):
         if type(knowledge_id) is not int or knowledge_id <= 0:
             raise InvalidInput()
         page_request = PageRequest(limit=page_size, cursor=cursor)
+        if file_id is not None and (not isinstance(file_id, str) or len(file_id) > 64): raise InvalidInput()
         with self.ports(actor, knowledge_id, context=context) as (records, resources):
             _scope(records, actor); _scope(resources, actor)
             authorize = KnowledgeFileAuthorization(resources, user_id=actor.user_id)
             resource = authorize.resolve_knowledge(knowledge_id, edit=True, context=context)
             if resource['knowledge_sources'] != 'elasticsearch':
                 raise ScopeDenied()
-            rows = records.query(INSPECTION_FILES, RecordQuery(where=Comparison('knowledge_id', 'eq', knowledge_id),
+            where = Comparison('knowledge_id', 'eq', knowledge_id)
+            if file_id is not None: where = Junction('and', (where, Comparison('file_id', 'eq', file_id)))
+            rows = records.query(INSPECTION_FILES, RecordQuery(where=where,
                 order_by=(Sort('file_id'),)), page_request, context=context)
             findings, evidence = [], []
             for row in rows.items:

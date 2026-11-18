@@ -287,3 +287,10 @@ KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_k
 返回 `KnowledgeBaseState` 包括资源版本、全量 `manifest_revision`、当前配置的 `embedding_model_id` 和一页文件状态。每项报告最新接纳版本、可见版本及代次、删除水位、记录版本与上传任务引用是否存在。上传引用可能在任务完成后保留，不能据此判断任务正在运行。清单包含未发布或设有删除水位的活动登记记录，不读取正文、模型、ES或对象存储，不证明物理向量完整。
 
 Runtime用实际签名身份在读取前后重新请求Management授权。全量清单参与两次摘要核对，游标绑定实际user/tenant、KB资源版本与全量manifest版本，变化拒绝继续且不自动重试。游标只表示读取位置，不授予权限，不声称跨服务数据库事务快照。Management维护命令 `inspect-runtime` 另外读取 `Model.get` 的版本与配置维度，保留缺失模型/维度问题及 `migration_ready=false`。
+### 历史文件显式重建
+
+维护命令 `management.maintenance.migration` 的 plan/admit/execute/restore 复用现有Management摄取流程，未增加AgentOS执行接口。计划与接纳先核对实际操作者的current edit DAC，通过 `Model.get` 固定模型、通过 `KnowledgeBase.inspect` 确认目标文件尚未登记。执行继续使用本地清洗与标准AgentOS File.upload/inspect，保留原file_id及source_generation。
+
+Management的 `KnowledgeIngestionIntent.legacy_snapshot` 只保存历史状态和审计，不随子请求发送。普通意图没有该字段时序列化形状保持不变。显式失败重处理保留既有迁移快照。旧任务引用、非canonical ID、缺失或未固定源仍拒绝接纳；维护前必须先停旧接纳并排空旧worker。仅INGEST_ACCEPTED且尚未预约子执行时允许SQL状态撤销，完整执行后的回滚仍需单独验证。
+
+历史迁移维护入口增加只读 `management.maintenance.migration inspect`。它在当前实际用户 edit DAC 下通过 StorageInterface 核对已有计划回执，不要求 Runtime 在线，不调用模型或重新提交任务。旧任务盘点会跳过已确认的新摄取任务引用，无法解析的意图单独计数，避免把 AgentOS 任务误归入 Celery。

@@ -84,6 +84,15 @@ def inspect(s, **kwargs):
     return s.service.page(1, s.actor, context=context(), **kwargs)
 
 
+def test_explicit_file_filter_does_not_read_other_file_sources(inspection):
+    s=inspection
+    page=inspect(s,file_id=s.row['file_id'])
+    assert [item.file_id for item in page.files]==[s.row['file_id']]
+    before=s.factory.call_count
+    assert not inspect(s,file_id='not-an-existing-id').files
+    assert s.factory.call_count==before
+
+
 def test_reads_fixed_revision_hashes_actual_bytes_and_never_grants_migration(inspection):
     s = inspection
     report = inspect(s)

@@ -159,6 +159,8 @@ class IngestionCoordinator:
                 "parser_version": self.cleanse.parser_version,
                 "chunking_strategy": strategy,
             }
+            if prior is not None and prior.legacy_snapshot is not None:
+                values['legacy_snapshot'] = prior.legacy_snapshot.model_dump(mode='json')
             return row, values, knowledge["embedding_model_id"], prior
 
     async def _prior_children(self, row, prior, actor, context):

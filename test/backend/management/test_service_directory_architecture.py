@@ -176,6 +176,7 @@ MIGRATED_MODULES = {
     'knowledge_base/ingestion_journal.py',
     'knowledge_base/ingestion_selection.py',
     'knowledge_base/legacy_tasks.py',
+    'knowledge_base/legacy_migration.py',
     'knowledge_base/legacy_vectors.py',
     'knowledge_base/listing.py',
     'knowledge_base/management.py',

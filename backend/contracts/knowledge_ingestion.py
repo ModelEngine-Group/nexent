@@ -1,21 +1,64 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-owned immutable ingestion intent; no credentials or provider setup."""
 
+from datetime import datetime
 from typing import Literal
 
 from contracts.agentos_knowledge import (
+    Contract,
     KnowledgeFileReference,
     KnowledgeFileUpload,
     ModelVersion,
     ObjectReference,
 )
 from contracts.knowledge_cleanse import KnowledgeCleanseRequest
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 INGESTION_DATASET = "knowledge_ingestion_files"
 LOCAL_SOURCE_DATASET = "management_local_sources"
 FILE_READ_DATASET = "management_file_lifecycle"
 FILE_KNOWLEDGE_READ_DATASET = "management_file_knowledge"
+
+
+class LegacyFileState(Contract):
+    status: Literal['UPLOADED', 'COMPLETED', 'FAILED']
+    stage: str | None = None
+    processing_attempt: int = Field(ge=0)
+    error_code: str | None = None
+    error_message: str | None = None
+    error_stage: str | None = None
+    failed_at: str | None = None
+    completed_at: str | None = None
+    cleanse_status: str | None = None
+    runtime_status: str | None = None
+    processed_chunks: int | None = Field(default=None, ge=0)
+    total_chunks: int | None = Field(default=None, ge=0)
+
+    @classmethod
+    def capture(cls, row):
+        values = {name: row.get(name) for name in cls.model_fields}
+        for name in ('failed_at', 'completed_at'):
+            if isinstance(values[name], datetime): values[name] = values[name].isoformat()
+        return cls.model_validate(values)
+
+
+class LegacyIngestionSnapshot(Contract):
+    schema_version: Literal[1] = 1
+    mode: Literal['rebuild_source'] = 'rebuild_source'
+    tenant_id: str = Field(min_length=1, max_length=100)
+    resource_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    lifecycle_revision: int = Field(ge=0)
+    legacy_quiesced: Literal[True]
+    previous: LegacyFileState
+    original_updated_by: str | None = None
+    original_update_time: str | None = None
+
+    @classmethod
+    def capture(cls, row, *, resource_revision, legacy_quiesced):
+        updated = row.get('update_time')
+        return cls(tenant_id=row['tenant_id'], resource_revision=resource_revision, lifecycle_revision=row['version'],
+                   legacy_quiesced=legacy_quiesced, previous=LegacyFileState.capture(row), original_updated_by=row.get('updated_by'),
+                   original_update_time=updated.isoformat() if isinstance(updated, datetime) else updated)
 
 
 class KnowledgeIngestionIntent(KnowledgeFileReference):
@@ -29,6 +72,13 @@ class KnowledgeIngestionIntent(KnowledgeFileReference):
     parser_version: str = Field(min_length=1, max_length=128)
     embedding_model: ModelVersion
     chunking_strategy: Literal["basic", "by_title", "none"] = "basic"
+    legacy_snapshot: LegacyIngestionSnapshot | None = None
+
+    @model_serializer(mode='wrap')
+    def serialize_intent(self, handler):
+        value = handler(self)
+        if self.legacy_snapshot is None: value.pop('legacy_snapshot', None)
+        return value
 
     @model_validator(mode="after")
     def bounded_snapshot(self):

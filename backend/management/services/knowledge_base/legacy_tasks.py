@@ -4,6 +4,8 @@
 import hashlib
 import re
 
+from contracts.knowledge_cleanse import cleanse_job_id
+from contracts.knowledge_ingestion import KnowledgeIngestionIntent
 from contracts.knowledge_maintenance import (
     INSPECTION_FILES,
     LEGACY_TASKS,
@@ -15,6 +17,7 @@ from management.services.knowledge_base.file_authorization import (
 )
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import PageRequest, RecordQuery, Sort
+from pydantic import ValidationError
 
 from infrastructure.knowledge_search import knowledge_search_revision
 from infrastructure.legacy_tasks import legacy_task_records
@@ -65,10 +68,20 @@ class LegacyTaskInspector:
             knowledge = authorize.resolve_knowledge(knowledge_id, edit=True, context=context)
             if knowledge['knowledge_sources'] != 'elasticsearch': raise ScopeDenied()
             baseline = _files(files, context, page_size)
-            references, invalid = {}, 0
+            references, invalid, managed, unreconciled = {}, 0, 0, 0
             for row in baseline:
                 if (row['tenant_id'] != actor.tenant_id or row['knowledge_id'] != knowledge_id
                     or row['index_name'] != knowledge['index_name']): raise ScopeDenied()
+                if row['ingestion_request'] is not None:
+                    try:
+                        intent = KnowledgeIngestionIntent.model_validate(row['ingestion_request'])
+                        valid = (intent.knowledge_id == knowledge_id and intent.file_id == row['file_id']
+                            and intent.file_version == row['source_generation']
+                            and row['process_task_id'] == cleanse_job_id(intent.cleanse_request(), actor.tenant_id, intent.user_id))
+                    except ValidationError: valid = False
+                    if valid: managed += 1
+                    else: unreconciled += 1
+                    continue
                 for name in TASK_FIELDS:
                     task_id = row[name]
                     if task_id is None: continue
@@ -106,4 +119,5 @@ class LegacyTaskInspector:
                     if cursor is None: break
             check()
             return {'tasks': count, 'tasks_with_issues': issues, 'redis_only_tasks': redis_only,
-                'invalid_pg_task_references': invalid, 'knowledge_revision': revision, 'snapshot': False}
+                'invalid_pg_task_references': invalid, 'managed_files_not_scanned': managed,
+                'unreconciled_ingestion_intents': unreconciled, 'knowledge_revision': revision, 'snapshot': False}

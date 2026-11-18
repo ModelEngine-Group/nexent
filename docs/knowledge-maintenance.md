@@ -111,6 +111,9 @@ names the selected exact index. Missing results remain UNKNOWN. The report hashe
 task IDs, allows only known status codes and canonical file IDs, and reports key
 presence for progress, errors, cancellation, chunks and parts without reading those
 values. It never invokes Celery, resumes jobs, sets TTLs or deletes keys.
+Valid standard ingestion references are counted as `managed_files_not_scanned`
+and excluded from legacy Redis lookup. Invalid or mismatched ingestion snapshots
+remain `unreconciled_ingestion_intents`; they are not silently classified as old tasks.
 
 Redis SCAN is not a snapshot. Duplicate observations are suppressed within one
 invocation. Unattributable or corrupt Redis-only results cannot be assigned to a
@@ -146,3 +149,74 @@ finished marker. Resources and model metadata are checked again before completio
 All requests share the command's total deadline. Existing reports are not
 overwritten. `migration_ready` remains false; source mapping, legacy vectors and
 legacy tasks still require the separate evidence reports and explicit migration.
+## Explicit source rebuild migration
+
+Stop and drain old data-process admission and workers before using these commands.
+Upgrade every Management instance before admitting a migration snapshot. Deploy
+the matching Runtime with manifest inspection and configured model dimensions
+before planning, and run the inventory commands to review unsupported records. The
+`--legacy-quiesced` flag records the operator's confirmation; it does not stop
+containers. Use the actual operator and keep the generated plan private because
+it contains the selected file's original error and audit context. Reports use
+exclusive owner-only creation. Keep plans and results in a private persistent
+mount such as `/maintenance`; container temporary storage is not an archival copy.
+
+```sh
+python -m management.maintenance.migration plan \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID --legacy-quiesced --output /maintenance/file-plan.jsonl
+
+python -m management.maintenance.migration execute \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID --legacy-quiesced \
+  --plan /maintenance/file-plan.jsonl --output /maintenance/file-execution.jsonl
+```
+
+`plan` verifies current edit DAC, the exact PG source/ledger, actual pinned object
+bytes, current model configuration and absence of a Runtime manifest for the file.
+This batch supports canonical IDs, fully pinned sources and no legacy task
+references. Other records remain blocked for explicit archival or identity/source
+review. It never guesses a mapping from a filename or copies legacy vectors.
+
+`admit` writes one immutable ingestion snapshot using the existing lifecycle CAS.
+The snapshot preserves original status, errors, progress, terminal timestamps and
+update audit context. The existing 16 KiB limit applies without truncation. The
+source identity and original creator remain unchanged. Repeating the same plan
+observes its existing receipt. Stale plans, changed actors/resources/models or
+source evidence are rejected. Ordinary ingestion omits the migration field when
+absent; archived state is not sent in AgentOS child requests.
+
+`execute` admits and advances the existing ingestion coordinator once. Management
+performs cleansing and Runtime receives standard AgentOS file operations. A queued
+or running result is progress, not completion. Repeated execution follows the
+durable child states without resubmitting reserved model/storage writes. Existing
+Management lifecycle discovery can also advance an admitted record, so `admit`
+is a write operation and may start processing immediately.
+
+After a timeout or unknown write result, use the same plan for a read-only receipt:
+
+```sh
+python -m management.maintenance.migration inspect \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID \
+  --plan /maintenance/file-plan.jsonl --output /maintenance/file-receipt.jsonl
+```
+
+`inspect` requires current edit DAC but not legacy quiescence. It reads only the
+Management lifecycle through StorageInterface, without contacting Runtime or
+revalidating the model/parser configuration. `intent_matches_plan` distinguishes
+an absent receipt, an exact match and an unreadable stored intent. A receipt is
+not an instruction to replay an unknown write.
+
+`restore` accepts the same `--plan` arguments and restores the archived state only
+while the row remains `INGEST_ACCEPTED` before child execution reservation. It
+retains the actual operator's update audit and rejects later phases. The isolated
+admission/restore rehearsal does not prove rollback after model or vector effects.
+That path still requires standard execution drain/deletion and a separate cutover
+rehearsal. Legacy indexes, Redis keys and source objects are not deleted here.
+
+Reports are exclusive JSONL files with operation IDs. Incomplete plan reports
+cannot be loaded; all commands share a total deadline and cancel owned resources.
+`migration_complete` refers only to an observed completed file in the new pipeline;
+`retirement_complete` remains false. Historical task archival, missing/unversioned
+sources, noncanonical IDs and full deployment/rollback acceptance remain pending.
