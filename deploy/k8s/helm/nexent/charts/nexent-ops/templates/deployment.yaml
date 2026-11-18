@@ -70,6 +70,11 @@ spec:
                   key: {{ . }}
                   optional: true
             {{- end }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-env
+                  key: REDIS_URL
             {{- range list "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB" "ELASTICSEARCH_HOST" }}
             - name: {{ . }}
               valueFrom:

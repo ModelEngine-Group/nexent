@@ -109,6 +109,7 @@ feature_overrides:
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
   OPS-MODEL-MONITORING: model
+  SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
   SAI-001: runtime

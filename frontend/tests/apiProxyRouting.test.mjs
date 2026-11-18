@@ -8,8 +8,11 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 const start = source.indexOf("function handleAllApiProxy(");
 const end = source.indexOf("// ======================", start);
-const trajectoryHelper = source.indexOf("function isTrajectoryOpsRequest(");
-assert.ok(start >= 0 && end > start && trajectoryHelper >= 0);
+assert.ok(start >= 0 && end > start);
+const trajectoryHelperStart = source.indexOf(
+  "function isTrajectoryOpsRequest("
+);
+assert.ok(trajectoryHelperStart > end);
 
 function dispatch(method, url) {
   const calls = [];
@@ -32,12 +35,13 @@ function dispatch(method, url) {
     proxy: { web: (_req, _res, config) => calls.push(config) },
   });
   vm.runInContext(
-    source.slice(start, end) + source.slice(trajectoryHelper),
+    source.slice(start, end) + source.slice(trajectoryHelperStart),
     context
   );
   const pathname = new URL(url, "http://localhost").pathname;
-  const handled = context.handleAllApiProxy(pathname, { method, url }, {});
-  return { handled, calls };
+  const req = { method, url };
+  const handled = context.handleAllApiProxy(pathname, req, {});
+  return { handled, calls, req };
 }
 
 for (const [method, path, target] of [
@@ -87,5 +91,23 @@ test("authentication interception and streaming timeout are preserved", () => {
   assert.deepEqual(dispatch("GET", "/zh/newchat"), {
     handled: false,
     calls: [],
+    req: { method: "GET", url: "/zh/newchat" },
   });
+});
+
+test("system configuration requests reach ops through the same-origin proxy", () => {
+  for (const [method, path, forwarded] of [
+    ["GET", "/api/system_configurations", "/system_configurations"],
+    ["PATCH", "/api/system_configurations", "/system_configurations"],
+    [
+      "POST",
+      "/api/system_configurations/recommendations",
+      "/system_configurations/recommendations",
+    ],
+  ]) {
+    const result = dispatch(method, path);
+    assert.equal(result.handled, true);
+    assert.equal(result.calls[0].target, "http://ops:5016");
+    assert.equal(result.req.url, forwarded);
+  }
 });

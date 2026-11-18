@@ -3,19 +3,19 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
+import ops_service
 from ops import lifespan
 from ops.api.application import create_app
 from ops.lifespan import ops_lifespan
-import ops_service
 
 BACKEND = Path(__file__).resolve().parents[3] / 'backend'
 
@@ -29,14 +29,21 @@ def test_health_follows_application_lifetime():
     assert before.json() == {'status': 'not_ready'}
 
     with client:
+        manager = app.state.thread_manager
+        assert manager.service_name == 'ops'
+        assert manager.state.value == 'running'
         assert client.get('/health/live').status_code == 200
         assert client.get('/health/ready').status_code == 200
         assert client.get('/health/ready').json() == {'status': 'ready'}
-        assert set(client.get('/openapi.json').json()['paths']) == {'/ops/authorization', '/ops/resources', '/ops/scope'}
+        assert set(client.get('/openapi.json').json()['paths']) == {
+            '/system_configurations', '/system_configurations/recommendations',
+            '/ops/authorization', '/ops/resources', '/ops/scope',
+        }
         assert client.get('/ops/authorization').status_code == 401
         assert client.get('/docs').status_code == 200
 
     assert app.state.ready is False
+    assert manager.state.value in {'closed', 'closed_with_stuck'}
     assert client.get('/health/ready').status_code == 503
 
 
@@ -72,13 +79,18 @@ async def test_trajectory_and_monitoring_share_ops_readiness(monkeypatch):
     monkeypatch.setattr(lifespan, "create_thread_manager", lambda: manager)
     monkeypatch.setattr(lifespan, "create_trajectory_workers", lambda: workers)
     monkeypatch.setattr("ops.monitoring.runtime.ops_monitoring_lifespan", monitoring)
+    dispose = Mock()
+    monkeypatch.setattr(lifespan.configuration_database, "dispose", dispose)
 
     async with ops_lifespan(app):
         assert app.state.ready is True
+        assert app.state.thread_manager is manager
+        manager.start.assert_called_once()
         workers.start.assert_called_once_with(manager)
         assert events == ["monitoring started"]
     workers.stop.assert_awaited_once_with(manager)
     manager.shutdown.assert_awaited_once()
+    dispose.assert_called_once()
     assert events == ["monitoring started", "monitoring stopped"]
 
 
