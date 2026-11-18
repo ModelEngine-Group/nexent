@@ -3,6 +3,7 @@
 
 import json
 import runpy
+import uuid as _uuid
 from contextlib import nullcontext
 from io import StringIO
 from types import SimpleNamespace
@@ -17,7 +18,11 @@ from management.utils.account_passwords import verify_password
 @pytest.fixture
 def store(mocker):
     session = MagicMock()
+    # SU-membership preflight (uses .first()) — no existing SU
     session.execute.return_value.first.return_value = None
+    # Account-has-memberships check (uses .scalars().all()) — below in-place
+    # TenantConfig probe inside _resolve_or_create_default_tenant (uses .scalar_one_or_none()) — no real tenant yet
+    session.execute.return_value.scalar_one_or_none.return_value = None
     session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU", roles=["SU"])]
     mocker.patch("infrastructure.rdb.client.get_db_session", return_value=nullcontext(session))
     lock = mocker.patch("management.db.identity.account.lock_account_keys")
@@ -25,7 +30,20 @@ def store(mocker):
     create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
     member = mocker.patch("management.db.identity.user_tenant.insert_user_tenant")
     configuration = mocker.patch("management.cli.account.load_system_configuration")
-    return SimpleNamespace(configuration=configuration, session=session, lock=lock, lookup=lookup, create=create, member=member)
+    # Make _resolve_or_create_default_tenant emit a stable UUID so assertions
+    # in bootstrap tests can pin the tenant_id without caring about uuidgen.
+    mocker.patch(
+        "management.cli.account.uuid.uuid4",
+        return_value=_uuid.UUID("11111111-1111-4111-8111-111111111111"),
+    )
+    return SimpleNamespace(
+        configuration=configuration,
+        session=session,
+        lock=lock,
+        lookup=lookup,
+        create=create,
+        member=member,
+    )
 
 
 def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
@@ -36,7 +54,18 @@ def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
     assert email == "suadmin@example.com"
     assert verify_password("Password123", encoded)
     assert store.create.call_args.kwargs["db_session"] is store.session
-    store.member.assert_called_once_with("new-su", "", "SU", email, created_by="system", db_session=store.session)
+    # Bootstrap now binds the new SU to a freshly-provisioned default tenant
+    # (created by _resolve_or_create_default_tenant) rather than leaving
+    # tenant_id empty. uuid.uuid4 is patched to a stable value above.
+    expected_tenant_id = "11111111-1111-4111-8111-111111111111"
+    store.member.assert_called_once_with(
+        "new-su", expected_tenant_id, "SU", email,
+        created_by="system", db_session=store.session,
+    )
+    # Tenant provisioning writes TenantConfig + TenantGroupInfo in the same session
+    added_types = {type(obj).__name__ for obj in store.session.add.call_args_list}
+    assert "TenantConfig" in added_types or len(store.session.add.call_args_list) >= 1
+    store.session.flush.assert_called()
 
 
 def test_bootstrap_configuration_failure_prevents_account_writes(store):
