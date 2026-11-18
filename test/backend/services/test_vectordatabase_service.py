@@ -3410,7 +3410,7 @@ class TestElasticSearchService(unittest.TestCase):
             "page_size": None,
         }
 
-        result = ElasticSearchService.get_index_chunks(
+        result = ElasticSearchService.get_external_file_chunks(
             index_name="kb-index",
             vdb_core=self.mock_vdb_core
         )
@@ -3439,7 +3439,7 @@ class TestElasticSearchService(unittest.TestCase):
             "page_size": 1,
         }
 
-        result = ElasticSearchService.get_index_chunks(
+        result = ElasticSearchService.get_external_file_chunks(
             index_name="kb-index",
             vdb_core=self.mock_vdb_core
         )
@@ -3454,7 +3454,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_index_chunks.side_effect = Exception("boom")
 
         with self.assertRaises(Exception) as exc:
-            ElasticSearchService.get_index_chunks(
+            ElasticSearchService.get_external_file_chunks(
                 index_name="kb-index",
                 vdb_core=self.mock_vdb_core
             )

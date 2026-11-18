@@ -30,6 +30,28 @@ def test_scan_preserves_vector_generation_and_mandatory_scope(store):  # noqa: F
     client.close.assert_called_once()
 
 
+def test_payload_only_scan_needs_no_model_dimensions_or_embedding(store):  # noqa: F811
+    original, client, factory = store
+    binding = replace(original._bindings['kb'], dimensions=None)
+    port = ElasticsearchVectorStore(original.scope, (binding,), factory)
+    row = hit('a')
+    del row['_source']['embedding']
+    client.search.return_value = {'hits': {'hits': [row]}}
+    result = port.scan('kb', None, PageRequest(), context=context(), include_vector=False)
+    assert result.items[0].vector == () and result.items[0].payload['content'] == 'a'
+    assert 'embedding' not in client.search.call_args.kwargs['source']
+
+
+def test_vector_cursor_cannot_be_reused_for_payload_only_scan(store):  # noqa: F811
+    port, client, factory = store
+    client.search.return_value = {'hits': {'hits': [hit('a'), hit('b')]}}
+    first = port.scan('kb', None, PageRequest(limit=1), context=context())
+    factory.reset_mock()
+    with pytest.raises(InvalidInput):
+        port.scan('kb', None, PageRequest(limit=1, cursor=first.next_cursor), context=context(), include_vector=False)
+    factory.assert_not_called()
+
+
 def test_cursor_resumes_by_key_after_previous_rows_disappear(store):  # noqa: F811
     port, client, _ = store
     client.search.return_value = {'hits': {'hits': [hit('a'), hit('b'), hit('c')]}}

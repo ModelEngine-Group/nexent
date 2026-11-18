@@ -85,6 +85,7 @@ from management.services.permission.api_keys import (
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
+    list_knowledge_chunks_for_northbound,
     delete_knowledge_base_for_northbound,
     list_knowledge_files_for_northbound,
     delete_knowledge_document_for_northbound,
@@ -922,7 +923,6 @@ async def get_index_chunks(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
 
         if path_or_url is not None and not check_file_access(path_or_url, ctx.user_id, ctx.tenant_id):
             raise HTTPException(
@@ -930,13 +930,10 @@ async def get_index_chunks(
                 detail="You don't have permission to access this file",
             )
 
-        return ElasticSearchService.get_index_chunks(
-            index_name=index_name,
-            page=page,
-            page_size=page_size,
-            path_or_url=path_or_url,
-            vdb_core=vdb_core,
-        )
+        return await list_knowledge_chunks_for_northbound(ctx=ctx, index_name=index_name, page=page,
+            page_size=page_size, path_or_url=path_or_url)
+    except ScopeDenied:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="You don't have permission to access this knowledge base") from None
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except LimitExceededError as e:

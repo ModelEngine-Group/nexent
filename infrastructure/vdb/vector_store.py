@@ -53,6 +53,7 @@ class ElasticsearchVectorStore:
                 "vector.upsert",
                 "vector.get",
                 "vector.scan",
+                "vector.scan.payload",
                 "vector.search.dense",
                 "vector.search.text",
                 "vector.search.weighted_text",
@@ -81,7 +82,7 @@ class ElasticsearchVectorStore:
             raise ScopeDenied()
         self._factory = client_factory
         if any(binding.dimensions is None for binding in bindings):
-            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists"}))
+            self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload"}))
         if any(binding.owns_collection and binding.writable for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         self._closed = False
@@ -409,10 +410,13 @@ class ElasticsearchVectorStore:
             hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
 
-    def scan(self, collection, where, page, *, context):
+    def scan(self, collection, where, page, *, context, include_vector=True):
         from infrastructure.vdb.vector_scan import scan_vectors
 
-        return scan_vectors(self, self._binding(collection), where, page, context=context)
+        if type(include_vector) is not bool:
+            raise InvalidInput()
+        return scan_vectors(self, self._binding(collection, maintenance=not include_vector), where, page,
+                            context=context, include_vector=include_vector)
 
     def count(self, collection, where, *, context):
         binding = self._binding(collection, maintenance=True)

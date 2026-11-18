@@ -61,7 +61,7 @@ class KnowledgeService:
     async def chunks(self, payload, actor, *, context=None):
         from runtime.knowledge_base.chunks import KnowledgeChunksService
 
-        return await KnowledgeChunksService(self.client, self.models).chunks(payload, actor, context=context)
+        return await KnowledgeChunksService(self.client).chunks(payload, actor, context=context)
 
     async def inspect_base(self, payload, actor, *, context=None):
         from runtime.knowledge_base.manifest import KnowledgeManifestService

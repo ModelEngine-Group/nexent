@@ -109,7 +109,7 @@ async def test_chunks_uses_signed_reader_and_rejects_tampering(setup):
     request = KnowledgeChunks(knowledge_id=1, expected_revision='a' * 64)
     service.chunks = AsyncMock(return_value=KnowledgeChunksResult(
         knowledge_id=1, knowledge_revision='a' * 64, data_revision='b' * 64,
-        embedding_model={'model_id': 2, 'revision': 'v1'}, total=0, chunks=[]))
+        total=0, chunks=[]))
     response = await send(app, KnowledgeOperation.CHUNKS, request)
     assert response.status_code == 200 and response.json()['total'] == 0
     assert response.json()['chunks'] == [] and response.json()['next_offset'] is None

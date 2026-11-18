@@ -40,6 +40,7 @@ from contracts.agentos_knowledge import (
     FileCleanseReleased,
     FileCleanseState,
     KnowledgeBaseState,
+    KnowledgeChunksGrant,
     KnowledgeChunksResult,
     KnowledgeContentGrant,
     KnowledgeFileGrant,
@@ -123,6 +124,9 @@ class AgentOSClient:
 
     async def authorize_knowledge_search(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
+
+    async def authorize_knowledge_chunks(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_CHUNKS_AUTHORIZE, payload, user_id, tenant_id, KnowledgeChunksGrant)
 
     async def authorize_knowledge_content(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, payload, user_id, tenant_id, KnowledgeContentGrant)

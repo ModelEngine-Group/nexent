@@ -184,6 +184,8 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 | Runtime 查询 Management 的实时资源授权 | `/internal/agentos/v1/knowledge/authorize` | `authorize_knowledge(KnowledgeAuthorizationRequest, user_id, tenant_id)`，返回 `KnowledgeFileGrant` |
 | 文本检索与重排 | `/internal/agentos/v1/knowledge/search` | `search_knowledge(KnowledgeSearch, user_id, tenant_id)`，返回 `KnowledgeSearchResult`，HTTP 200 |
 | Runtime 查询 Management 的 KB 读权限 | `/internal/agentos/v1/knowledge/authorize-search` | `authorize_knowledge_search(KnowledgeSearchAuthorization, user_id, tenant_id)`，返回 `KnowledgeSearchGrant` |
+| Runtime 查询分块浏览只读授权 | `/internal/agentos/v1/knowledge/authorize-chunks` | `authorize_knowledge_chunks(KnowledgeChunksAuthorization, user_id, tenant_id)`，返回 `KnowledgeChunksGrant`，无模型配置依赖 |
+| 分页浏览已发布分块 | `/internal/agentos/v1/knowledge/chunks` | `knowledge_chunks(KnowledgeChunks, user_id, tenant_id)`，返回 `KnowledgeChunksResult`，HTTP 200 |
 | Runtime 查询来源/图片只读授权 | `/internal/agentos/v1/knowledge/authorize-content` | `authorize_knowledge_content(KnowledgeContentRequest, user_id, tenant_id)`，返回 `KnowledgeContentGrant` |
 | 删除已排空的 KB 物理集合 | `/internal/agentos/v1/knowledge/bases/delete` | `delete_knowledge_base(KnowledgeBaseDelete, user_id, tenant_id)`，返回 `KnowledgeBaseDeleteState`，HTTP 202 |
 | 核对 KB 集合删除结果 | `/internal/agentos/v1/knowledge/bases/inspect` | `inspect_knowledge_base_deletion(KnowledgeBaseDeleteLookup, user_id, tenant_id)`，HTTP 200 |
@@ -282,11 +284,13 @@ KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_k
 模型的 `embedding_dimensions` 表示 Runtime 已配置的向量维度。`Model.get` 与 `Model.list` 使用同一规则，embedding 和 multi_embedding 从现有模型配置读取正整数，缺失或无效时返回 null；其他模型类型返回 null。该字段不代表已探测提供商输出。Management 可以将它与旧索引维度核对，无须读取 Runtime 数据库。实际摄取继续校验模型版本及配置维度，缺失值保持原有错误，不选择备用模型。内部响应增加字段仍遵循先升级Management、再升级Runtime的顺序，旧严格解析器不能先接收新Runtime响应。
 ### KnowledgeBase 已发布分块分页
 
-`KnowledgeBase.chunks` 使用内部路径 `/internal/agentos/v1/knowledge/chunks`，客户端方法为 `knowledge_chunks`。请求包含 `knowledge_id`、当前授权的 `expected_revision`、非负 `offset` 和 1 至 1000 的 `limit`。后续页可携带首轮返回的 `expected_data_revision`，可见文件集合变化时返回冲突。可选 `file_refs` 只接受同一 KB 的唯一精确文件版本，省略表示全部，空列表表示不选择文件。
+`KnowledgeBase.chunks` 使用内部路径 `/internal/agentos/v1/knowledge/chunks`，客户端方法为 `knowledge_chunks`。请求包含 `knowledge_id`、当前授权的 `expected_revision`、非负 `offset` 和 1 至 1000 的 `limit`。后续页可携带首轮返回的 `expected_data_revision`，可见文件集合变化时返回冲突。可选 `file_ids` 接受唯一稳定文件 ID，省略表示全部，空列表表示不选择文件。Runtime 只选择各文件当前可见版本，允许上传新版本期间浏览上一已发布版本。
 
-结果包含资源版本、数据版本、模型标识、`total`、`chunks` 和 `next_offset`。每个分块只返回文件引用、`chunk_index`、文件名、正文和 location，不返回 embedding 或模型凭据。Runtime 通过 StorageInterface 读取已发布 manifest 和完成的上传任务，按发布计数计算总数，只扫描分页所需的分块区间，过滤旧 generation 与已删除文件。缺片、重复、版本变化和撤权均拒绝结果，不重试、不调用模型推理。沿用读取操作的 180 秒总截止和 ES 单请求 5 秒无重试限制。
+结果包含资源版本、数据版本、`total`、`chunks` 和 `next_offset`。每个分块返回文件引用、逻辑 `chunk_id`、`chunk_index`、文件名、正文和 location，不返回 embedding 或模型配置。Runtime 通过 StorageInterface 读取已发布 manifest 和完成的上传任务，按发布计数计算总数，只扫描分页所需的分块区间，过滤旧 generation 与已删除文件。模型标识仅与原已完成 job 核对，不再查询模型管理。缺片、重复、版本变化和撤权均拒绝结果，不重试、不调用模型推理。沿用读取操作的 180 秒总截止和 ES 单请求 5 秒无重试限制。
 
-该入口是旧公开分块浏览迁移的前置能力。Management 的公开 `/{index_name}/chunks` 尚未切换，分块 CRUD 和旧 documents 向量化入口仍待迁移。跨租户共享资产还需在标准授权中明确资源所属命名空间，同时保留实际用户身份；当前接口覆盖既有 AgentOS 当前租户范围，不能替代全部公开兼容性验收。
+Runtime 使用标准 `authorize-chunks` 回调获取 Management 的 `KnowledgeChunksGrant`，其中只含 KB、集合、资源租户及 revision。Management 按实际调用者的活动账号、租户成员和原 own/shared DAC 授权，拒绝 KB 删除意图；无需 embedding 模型配置。Runtime 的只读 SI 端口限定该 KB 与资源所属租户，actor_id 仍为实际用户。签名 user_id/tenant_id 始终保持原请求身份，不使用创建者身份，也不扩大为跨租户模型或写入权限。
+
+普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。分块 CRUD、旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
 
 ### KnowledgeBase 已登记文件清单
 

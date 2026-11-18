@@ -28,19 +28,19 @@ def _after(cursor, fingerprint):
     return data['after']
 
 
-def scan_vectors(store, binding, where, page, *, context):
+def scan_vectors(store, binding, where, page, *, context, include_vector=True):
     if not isinstance(page, PageRequest):
         raise InvalidInput()
     query = store._filter(binding, where)
     fingerprint = hashlib.sha256(json.dumps(
-        [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, asdict(binding), query],
+        [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, asdict(binding), query, include_vector],
         sort_keys=True, separators=(',', ':'), allow_nan=False,
     ).encode()).hexdigest()
     after = _after(page.cursor, fingerprint)
     options = {
         'index': binding.index, 'query': query, 'size': page.limit + 1,
         'sort': [{'_si_key': 'asc'}],
-        'source': ['_si_tenant', '_si_collection', '_si_key', '_si_generation', 'embedding']
+        'source': ['_si_tenant', '_si_collection', '_si_key', '_si_generation'] + (['embedding'] if include_vector else [])
                   + ['payload.' + name for name in binding.schema],
     }
     if after is not None:
@@ -64,7 +64,7 @@ def scan_vectors(store, binding, where, page, *, context):
         source = hit.get('_source')
         try:
             key, data, generation = store._decode(binding, source)
-            record = VectorRecord(key, vector(binding, source.get('embedding')), data, generation)
+            record = VectorRecord(key, vector(binding, source.get('embedding')) if include_vector else (), data, generation)
         except InvalidInput:
             raise Unavailable(operation_id=context.operation_id) from None
         if previous is not None and key.key <= previous:

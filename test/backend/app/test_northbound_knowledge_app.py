@@ -51,6 +51,7 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
+northbound_service_module.list_knowledge_chunks_for_northbound = AsyncMock(return_value={"chunks": [{"id": "c1", "content": "hello"}], "total": 1})
 northbound_service_module.list_knowledge_files_for_northbound = AsyncMock(return_value={"files": []})
 northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_document_for_northbound = AsyncMock()
@@ -451,7 +452,7 @@ class TestGetIndexChunks:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.list_knowledge_chunks_for_northbound",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -460,7 +461,7 @@ class TestGetIndexChunks:
     def test_value_error_returns_404(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.list_knowledge_chunks_for_northbound",
             side_effect=ValueError("index not found"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -470,7 +471,7 @@ class TestGetIndexChunks:
     def test_unauthorized_returns_401(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.list_knowledge_chunks_for_northbound",
             side_effect=UnauthorizedError("bad token"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -480,7 +481,7 @@ class TestGetIndexChunks:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.list_knowledge_chunks_for_northbound",
             side_effect=RuntimeError("es down"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")

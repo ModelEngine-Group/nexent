@@ -201,7 +201,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             raise Exception(error_msg)
 
     @staticmethod
-    def get_index_chunks(
+    def get_external_file_chunks(
         index_name: str,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
@@ -209,7 +209,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
-        Retrieve chunk records for the specified index with optional pagination.
+        Adapt external DataMate file records to the established chunk-list response.
 
         Args:
             index_name: Name of the index to query

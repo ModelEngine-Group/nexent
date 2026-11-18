@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Published chunk windows require current grants and never invoke a model."""
 
+from contextlib import contextmanager
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
@@ -26,8 +28,8 @@ from test.backend.services.test_knowledge_sample import (
 
 @pytest.mark.parametrize('updates', [
     {'offset': -1}, {'limit': 0}, {'limit': 1001},
-    {'file_refs': [{'knowledge_id': 2, 'file_id': 'a' * 32, 'file_version': 0}]},
-    {'file_refs': [{'knowledge_id': 1, 'file_id': 'a' * 32, 'file_version': 0}] * 2},
+    {'file_ids': ['invalid']},
+    {'file_ids': ['a' * 32] * 2},
 ])
 def test_chunk_request_rejects_invalid_windows_and_file_scope(updates):
     from contracts.agentos_knowledge import KnowledgeChunks
@@ -38,13 +40,19 @@ def test_chunk_request_rejects_invalid_windows_and_file_scope(updates):
 
 @pytest.fixture
 def browse(sample):
-    from contracts.agentos_knowledge import KnowledgeChunks
+    from contracts.agentos_knowledge import KnowledgeChunks, KnowledgeChunksGrant
     from runtime.knowledge_base.chunks import KnowledgeChunksService
 
     s, original, grant, record, samples = sample
+    grant = KnowledgeChunksGrant(knowledge_id=1, collection='kb', resource_tenant_id=s.actor.tenant_id, revision='a' * 64)
+    s.client.authorize_knowledge_chunks = AsyncMock(return_value=grant)
     s.vectors.scope = StorageScope('runtime',s.actor.tenant_id,s.actor.user_id,{'kb'})
     request = KnowledgeChunks(knowledge_id=original.knowledge_id,expected_revision=original.expected_revision,limit=1)
-    return s,request,grant,record,KnowledgeChunksService(s.client,s.models,ports=samples.ports)
+    @contextmanager
+    def ports(actor, resource, *, context):
+        with samples.ports(actor, resource, context=context) as (records, vectors):
+            yield records, vectors['kb']
+    return s,request,grant,record,KnowledgeChunksService(s.client,ports=ports)
 
 
 async def test_window_returns_only_published_content_and_total_without_vectors(browse):
@@ -55,7 +63,9 @@ async def test_window_returns_only_published_content_and_total_without_vectors(b
     assert result.chunks[0].chunk_index==0 and result.chunks[0].filename=='source.txt'
     assert 'embedding' not in result.chunks[0].model_dump()
     s.models.invoke.assert_not_awaited()
-    assert s.closed==[True] and s.client.authorize_knowledge_search.await_count==2
+    assert s.closed==[True] and s.client.authorize_knowledge_chunks.await_count==2
+    s.models.get.assert_not_awaited()
+    assert s.vectors.scan.call_args.kwargs['include_vector'] is False
 
 
 async def test_window_beyond_total_does_not_scan_physical_vectors(browse):
@@ -77,7 +87,7 @@ async def test_middle_window_filters_chunk_range_and_returns_next_offset(browse)
 
 async def test_empty_exact_file_selection_is_deny_all(browse):
     s,request,_,_,service=browse
-    result=await service.chunks(request.model_copy(update={'file_refs':[]}),s.actor)
+    result=await service.chunks(request.model_copy(update={'file_ids':[]}),s.actor)
     assert result.total==0 and result.chunks==[]
     s.vectors.scan.assert_not_called()
 
@@ -104,7 +114,7 @@ async def test_publication_change_during_read_discards_content(browse):
 
 async def test_revoked_grant_does_not_return_the_read_window(browse):
     s,request,grant,_,service=browse
-    s.client.authorize_knowledge_search.side_effect=[grant,grant.model_copy(update={'knowledge_bases':[]})]
+    s.client.authorize_knowledge_chunks.side_effect=[grant,ScopeDenied()]
     with pytest.raises(ScopeDenied): await service.chunks(request,s.actor)
 
 
@@ -126,7 +136,7 @@ async def test_changed_data_revision_is_rejected_before_vector_reads(browse):
     s.vectors.scan.assert_not_called()
 
 
-async def test_stalled_model_metadata_read_obeys_total_deadline(browse):
+async def test_stalled_authorization_read_obeys_total_deadline(browse):
     import asyncio
 
     s,request,_,_,service = browse
@@ -134,7 +144,7 @@ async def test_stalled_model_metadata_read_obeys_total_deadline(browse):
     async def stalled(*args):
         try: await asyncio.Event().wait()
         finally: cancelled.append(True)
-    s.models.get.side_effect=stalled
+    s.client.authorize_knowledge_chunks.side_effect=stalled
     service.operation_seconds=0.02
     with pytest.raises(DeadlineExceeded): await service.chunks(request,s.actor)
     assert cancelled==[True]

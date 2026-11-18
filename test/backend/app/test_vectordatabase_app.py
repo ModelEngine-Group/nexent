@@ -1291,7 +1291,7 @@ async def test_get_index_chunks_success(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.check_file_access", return_value=True), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.get_index_chunks") as mock_get_chunks:
+            patch("management.api.knowledge_base.vectordatabase.KnowledgeChunkBrowser.browse") as mock_get_chunks:
 
         expected_response = {
             "status": "success",
@@ -1312,11 +1312,10 @@ async def test_get_index_chunks_success(vdb_core_mock, auth_data):
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_get_chunks.assert_called_once_with(
-            index_name=index_name,
+            index_name, ANY,
             page=2,
             page_size=50,
             path_or_url="/foo",
-            vdb_core=ANY,
         )
 
 
@@ -1330,7 +1329,7 @@ async def test_get_index_chunks_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.get_index_chunks") as mock_get_chunks:
+            patch("management.api.knowledge_base.vectordatabase.KnowledgeChunkBrowser.browse") as mock_get_chunks:
 
         mock_get_chunks.side_effect = Exception("Chunk failure")
 
@@ -1343,11 +1342,10 @@ async def test_get_index_chunks_error(vdb_core_mock, auth_data):
         assert response.json() == {
             "detail": "Error getting chunks: Chunk failure"}
         mock_get_chunks.assert_called_once_with(
-            index_name=index_name,
+            index_name, ANY,
             page=None,
             page_size=None,
             path_or_url=None,
-            vdb_core=ANY,
         )
 
 
@@ -2441,7 +2439,7 @@ async def test_get_index_chunks_value_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
         patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
               return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-        patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.get_index_chunks") as mock_get_chunks:
+        patch("management.api.knowledge_base.vectordatabase.KnowledgeChunkBrowser.browse") as mock_get_chunks:
 
         mock_get_chunks.side_effect = ValueError("Unknown index")
 
@@ -2453,11 +2451,10 @@ async def test_get_index_chunks_value_error(vdb_core_mock, auth_data):
         assert response.status_code == 404
         assert response.json() == {"detail": "Unknown index"}
         mock_get_chunks.assert_called_once_with(
-            index_name=index_name,
+            index_name, ANY,
             page=None,
             page_size=None,
             path_or_url=None,
-            vdb_core=ANY,
         )
 
 
@@ -3234,9 +3231,9 @@ async def test_get_index_chunks_preserves_read_permission_error(vdb_core_mock, a
         return_value=vdb_core_mock,
     ), patch(
         "management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission",
-        side_effect=HTTPException(status_code=403, detail="private KB"),
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.ElasticSearchService.get_index_chunks"
+    ) as native_permission, patch(
+        "management.api.knowledge_base.vectordatabase.KnowledgeChunkBrowser.browse",
+        side_effect=ScopeDenied(),
     ) as mock_get_chunks:
         response = client.post(
             f"/indices/{auth_data['index_name']}/chunks",
@@ -3244,7 +3241,8 @@ async def test_get_index_chunks_preserves_read_permission_error(vdb_core_mock, a
         )
 
     assert response.status_code == 403
-    mock_get_chunks.assert_not_called()
+    mock_get_chunks.assert_awaited_once()
+    native_permission.assert_not_called()
 
 
 

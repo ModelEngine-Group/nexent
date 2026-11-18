@@ -282,8 +282,14 @@ sa.Index(
 )
 
 
-def bind_knowledge_jobs(scope, engine):
+def bind_knowledge_jobs(scope, engine, *, knowledge_id=None, writable=True):
     tables = {JOBS: jobs, FILES: files}
+    if type(writable) is not bool or knowledge_id is not None and (type(knowledge_id) is not int or knowledge_id <= 0):
+        raise InvalidInput()
+    if knowledge_id is not None:
+        if writable:
+            raise ScopeDenied()
+        tables = {name: sa.select(table).where(table.c.knowledge_id == knowledge_id).subquery(name) for name, table in tables.items()}
     integer = {
         "knowledge_id",
         "file_version",
@@ -304,7 +310,7 @@ def bind_knowledge_jobs(scope, engine):
     definitions = tuple(
         DatasetDefinition(
             name,
-            next(iter(table.primary_key.columns)).name,
+            'job_id' if name == JOBS else 'record_id',
             tuple(
                 FieldDefinition(
                     field.name,
@@ -320,7 +326,7 @@ def bind_knowledge_jobs(scope, engine):
                 for field in table.columns
             ),
             frozenset({"runtime"}),
-            frozenset({"runtime"}),
+            frozenset({"runtime"}) if writable else frozenset(),
             tenant_field="tenant_id",
             active_field="delete_flag",
         )
@@ -331,7 +337,7 @@ def bind_knowledge_jobs(scope, engine):
         DatasetCatalog(definitions),
         tables,
         engine,
-        revision_fields={name: "revision" for name in tables},
+        revision_fields={name: "revision" for name in tables} if writable else {},
         audit_mappings={
             name: RecordAudit(
                 "create_time",

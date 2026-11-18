@@ -178,9 +178,9 @@ class VectorStore(StoragePort, Protocol):
 
     def scan(
         self, collection: str, where: Comparison | Junction | None, page: PageRequest,
-        *, context: OperationContext,
+        *, context: OperationContext, include_vector: bool = True,
     ) -> Page[VectorRecord]:
-        """Read scoped records in key order; cursors do not provide snapshot isolation."""
+        """Read scoped keys; payload-only mode omits vectors and needs no dimensions."""
         ...
 
     def delete(

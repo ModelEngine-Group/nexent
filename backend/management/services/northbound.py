@@ -70,6 +70,15 @@ async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
                                                 user_id=ctx.user_id, tenant_id=ctx.tenant_id)
 
 
+async def list_knowledge_chunks_for_northbound(*, ctx, index_name, page=None, page_size=None, path_or_url=None):
+    """Keep Northbound chunk responses while signing AgentOS calls as the actual user."""
+    from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    return await KnowledgeChunkBrowser().browse(index_name, ServicePrincipal(ctx.user_id, ctx.tenant_id),
+        page=page, page_size=page_size, path_or_url=path_or_url)
+
+
 async def delete_knowledge_document_for_northbound(*, ctx, index_name, path_or_url, scope):
     """Preserve Northbound's public response while using the standard deletion owner."""
     from management.services.knowledge_base.deletion_public import with_cleanup_summary

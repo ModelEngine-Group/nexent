@@ -130,7 +130,7 @@ async def test_chunks_use_standard_signature_and_close_transport(monkeypatch):
         token=message.headers['Authorization'].removeprefix('Bearer ')
         assert verify_call(token,KnowledgeOperation.CHUNKS,message.content)==ServicePrincipal('reader','tenant')
         return httpx.Response(200,json={'knowledge_id':1,'knowledge_revision':'a'*64,'data_revision':'b'*64,
-            'embedding_model':{'model_id':2,'revision':'v1'},'total':0,'chunks':[],'next_offset':None})
+            'total':0,'chunks':[],'next_offset':None})
     def create(**kwargs):
         client=httpx.AsyncClient(transport=httpx.MockTransport(reply),**kwargs);clients.append(client);return client
     result=await AgentOSClient('http://runtime',create).knowledge_chunks(

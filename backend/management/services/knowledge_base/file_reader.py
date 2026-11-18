@@ -36,7 +36,7 @@ class KnowledgeFileReader:
         self.ports = ports
 
     @contextmanager
-    def _records(self, index_name, actor, *, context):
+    def _records(self, index_name, actor, *, context, knowledge_id=None):
         context.remaining()
         with self.ports(actor, context=context) as (knowledge, identity, scoped_files):
             if any(
@@ -49,7 +49,8 @@ class KnowledgeFileReader:
                 raise ScopeDenied()
             page = knowledge.query(
                 KNOWLEDGE,
-                RecordQuery(where=Comparison("index_name", "eq", index_name)),
+                RecordQuery(where=Comparison("index_name" if knowledge_id is None else 'knowledge_id', "eq",
+                                             index_name if knowledge_id is None else knowledge_id)),
                 PageRequest(limit=2),
                 context=context,
             )
@@ -72,7 +73,7 @@ class KnowledgeFileReader:
                 membership,
                 groups,
                 speed_mode=False,
-            )[index_name]
+            )[row['index_name']]
             if permission is None:
                 raise ScopeDenied()
             records = scoped_files(resource_tenant)
@@ -84,6 +85,10 @@ class KnowledgeFileReader:
             ):
                 raise ScopeDenied()
             yield records, row
+
+    def knowledge(self, index_name, actor, *, context, knowledge_id=None):
+        with self._records(index_name, actor, context=context, knowledge_id=knowledge_id) as (_, row):
+            return row
 
     def files(self, index_name, actor, *, context):
         with self._records(index_name, actor, context=context) as (records, knowledge):

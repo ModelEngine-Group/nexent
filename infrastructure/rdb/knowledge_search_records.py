@@ -1,9 +1,21 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared read models for authorized knowledge search."""
 
-from sqlalchemy import TIMESTAMP, BigInteger, Boolean, Column, Integer, Sequence, String, select
+from typing import ClassVar
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    Boolean,
+    Column,
+    Integer,
+    Sequence,
+    String,
+    select,
+)
+
 from infrastructure.rdb.account_record import TenantGroupUser, UserTenant
 from infrastructure.rdb.base import TableBase
 
@@ -13,7 +25,7 @@ class KnowledgeRecord(TableBase):
     Records the description and status information of knowledge bases
     """
     __tablename__ = "knowledge_record_t"
-    __table_args__ = {"schema": "nexent"}
+    __table_args__: ClassVar[dict] = {"schema": "nexent"}
 
     knowledge_id = Column(BigInteger, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"),
                           primary_key=True, nullable=False, doc="Knowledge base ID, unique primary key")
@@ -21,6 +33,7 @@ class KnowledgeRecord(TableBase):
     knowledge_name = Column(String(100), doc="User-facing knowledge base name")
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
+    deletion_request = Column(JSON, nullable=True, doc="Management-owned KB deletion admission")
     embedding_model_name = Column(String(
         200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
     embedding_model_id = Column(

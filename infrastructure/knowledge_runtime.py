@@ -3,6 +3,8 @@
 
 from contextlib import contextmanager
 
+from contracts.agentos_knowledge import KnowledgeChunksGrant
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
 
@@ -89,3 +91,17 @@ def knowledge_search_ports(actor, grant, dimensions, *, context):
             yield records, vectors
     finally:
         close_owned(context, [port.close for port in vectors.values()])
+
+
+@contextmanager
+def knowledge_chunks_ports(actor, grant, *, context):
+    if not isinstance(grant, KnowledgeChunksGrant) or grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+        raise ScopeDenied()
+    engine, records, vectors = record_engine(context), None, None
+    try:
+        scope = StorageScope('runtime', grant.resource_tenant_id, actor.user_id, {FILES, JOBS})
+        records = bind_knowledge_jobs(scope, engine, knowledge_id=grant.knowledge_id, writable=False)
+        vectors = bind_knowledge_vectors(actor, grant.collection, None, writable=False, resource_tenant_id=grant.resource_tenant_id)
+        yield records, vectors
+    finally:
+        close_owned(context, ([vectors.close] if vectors is not None else []) + ([records.close] if records is not None else []) + [engine.dispose])

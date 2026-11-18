@@ -66,10 +66,16 @@ def _configured_client(remaining):
     )
 
 
-def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True):
-    scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {collection})
+def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True, resource_tenant_id=None):
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from nexent.storage.errors import ScopeDenied
+
+    tenant = actor.tenant_id if resource_tenant_id is None else resource_tenant_id
+    if tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} or writable and tenant != actor.tenant_id:
+        raise ScopeDenied()
+    scope = StorageScope("runtime", tenant, actor.user_id, {collection})
     return ElasticsearchVectorStore(
         scope,
-        (vector_binding(actor.tenant_id, collection, dimensions, writable=writable),),
+        (vector_binding(tenant, collection, dimensions, writable=writable),),
         _configured_client,
     )

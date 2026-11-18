@@ -23,6 +23,8 @@ knowledge, files = KnowledgeRecord.__table__, KnowledgeFileLifecycle.__table__
 def bind_readable_knowledge(actor, engine):
     names = (
         "knowledge_id",
+        "embedding_model_id",
+        "deletion_request",
         "index_name",
         "created_by",
         "group_ids",
@@ -44,7 +46,7 @@ def bind_readable_knowledge(actor, engine):
         tuple(
             FieldDefinition(
                 c.name,
-                "integer" if c.name == "knowledge_id" else "string",
+                "object" if c.name == 'deletion_request' else "integer" if c.name in {"knowledge_id", "embedding_model_id"} else "string",
                 nullable=True,
             )
             for c in projection.c

@@ -343,24 +343,36 @@ class KnowledgeSampleResult(Contract):
     documents: list[KnowledgeSampleDocument] = Field(max_length=200)
 
 
-class KnowledgeChunks(Contract):
+class KnowledgeChunksAuthorization(Contract):
+    knowledge_id: int = Field(gt=0)
+
+
+class KnowledgeChunksGrant(KnowledgeChunksAuthorization):
+    collection: str = Field(min_length=1, max_length=100)
+    resource_tenant_id: str = Field(min_length=1, max_length=100)
+    revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class KnowledgeChunks(KnowledgeChunksAuthorization):
     knowledge_id: int = Field(gt=0)
     expected_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     expected_data_revision: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
-    file_refs: list[KnowledgeFileReference] | None = Field(default=None, max_length=1000)
+    file_ids: list[str] | None = Field(default=None, max_length=1000)
     offset: int = Field(default=0, ge=0, le=2**31-1)
     limit: int = Field(default=100, ge=1, le=1000)
 
-    @model_validator(mode='after')
-    def exact_file_scope(self):
-        if self.file_refs is not None:
-            refs = {(ref.file_id, ref.file_version) for ref in self.file_refs}
-            if len(refs) != len(self.file_refs) or any(ref.knowledge_id != self.knowledge_id for ref in self.file_refs):
-                raise ValueError('Expected unique exact files from the selected knowledge base')
-        return self
+    @field_validator('file_ids')
+    @classmethod
+    def exact_file_scope(cls, values):
+        if values is not None and (len(values) != len(set(values)) or any(
+            len(value) != 32 or any(c not in '0123456789abcdef' for c in value) for value in values
+        )):
+            raise ValueError('Expected distinct file IDs')
+        return values
 
 
 class KnowledgeChunk(KnowledgeFileReference):
+    chunk_id: str = Field(min_length=1, max_length=1024)
     chunk_index: int = Field(ge=0)
     filename: str = Field(max_length=1024)
     content: str
@@ -371,7 +383,6 @@ class KnowledgeChunksResult(Contract):
     knowledge_id: int = Field(gt=0)
     knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     data_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
-    embedding_model: ModelVersion
     total: int = Field(ge=0)
     chunks: list[KnowledgeChunk] = Field(max_length=1000)
     next_offset: int | None = Field(default=None, ge=0)
