@@ -1,9 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Read-only Runtime scheduling metadata, excluding all previously begun attempts."""
 
+from contracts.knowledge_chunk_mutation import ACTIVE_STATUSES
 from nexent.storage.models import StorageScope
 from sqlalchemy import and_, exists, or_, select
 
+from infrastructure.rdb.knowledge_chunk_mutations import changes
 from infrastructure.rdb.knowledge_jobs import jobs
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
@@ -30,9 +32,18 @@ def bind_knowledge_dispatch(engine):
         writer.c.operation == "upload", writer.c.delete_flag == "N",
         writer.c.write_started.is_(True), writer.c.writer_ended.is_(False),
     ))
+    chunk = changes.alias("covered_chunk")
+    chunk_scope = (
+        chunk.c.tenant_id == jobs.c.tenant_id,
+        chunk.c.knowledge_id == jobs.c.knowledge_id,
+        chunk.c.file_id == jobs.c.file_id,
+        chunk.c.status.in_(ACTIVE_STATUSES),
+    )
+    covered_chunk = exists(select(chunk.c.mutation_id).where(*chunk_scope, chunk.c.file_version <= jobs.c.file_version))
+    same_version_chunk = exists(select(chunk.c.mutation_id).where(*chunk_scope, chunk.c.file_version == jobs.c.file_version))
     projection = select(*(jobs.c[name] for name in names)).where(
-        or_(and_(jobs.c.operation == "upload", jobs.c.status == "queued"),
-            and_(jobs.c.operation == "delete", jobs.c.status == "cleanup_pending", ~active_writer)),
+        or_(and_(jobs.c.operation == "upload", jobs.c.status == "queued", ~same_version_chunk),
+            and_(jobs.c.operation == "delete", jobs.c.status == "cleanup_pending", ~active_writer, ~covered_chunk)),
         jobs.c.write_started.is_(False),
         jobs.c.reconcile_required.is_(False),
         jobs.c.owner_id.is_(None),

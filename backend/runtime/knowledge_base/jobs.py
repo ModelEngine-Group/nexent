@@ -13,6 +13,7 @@ from contracts.agentos_knowledge import (
     KnowledgeJobState,
     knowledge_job_id,
 )
+from contracts.knowledge_chunk_mutation import ACTIVE_STATUSES, CHANGES
 from nexent.storage.errors import (
     Conflict,
     InvalidInput,
@@ -28,6 +29,10 @@ from nexent.storage.models import (
     RecordQuery,
     Revision,
     WriteOutcome,
+)
+from runtime.knowledge_base.chunk_journal import (
+    ChunkMutationJournal,
+    assert_knowledge_open,
 )
 
 JOBS = "runtime_knowledge_jobs"
@@ -68,6 +73,52 @@ def _lookup(row):
     )
 
 
+def _file_id(tenant_id, reference):
+    return uuid5(
+        NAMESPACE_URL,
+        json.dumps(
+            [
+                "runtime-kb-file",
+                tenant_id,
+                reference.knowledge_id,
+                reference.file_id,
+            ],
+            separators=(",", ":"),
+        ),
+    ).hex
+
+
+def _file_record(tx, reference, context, *, create=False):
+    key = _file_id(tx.scope.tenant_id, reference)
+    row = tx.get(FILES, key, context=context)
+    if row is None and create:
+        row = tx.create(
+            FILES,
+            {
+                "record_id": key,
+                "knowledge_id": reference.knowledge_id,
+                "file_id": reference.file_id,
+                "latest_version": -1,
+                "active_job_id": None,
+                "visible_job_id": None,
+                "visible_version": None,
+                "visible_generation": None,
+                "tombstone_version": -1,
+            },
+            context=context,
+        )
+    return row
+
+
+def lock_file_manifest(tx, reference, context, *, create=False):
+    ChunkMutationJournal(tx, reference.knowledge_id)._locked_state(tx, context)
+    row = _file_record(tx, reference, context, create=create)
+    if row is None:
+        raise NotFound()
+    # A CAS update holds the file row lock until the surrounding transaction ends.
+    return KnowledgeJobs._patch(tx, FILES, row, {}, context)
+
+
 class KnowledgeJobs:
     def __init__(self, records, *, authorize, clock=None):
         scope = records.scope
@@ -81,41 +132,6 @@ class KnowledgeJobs:
             raise InvalidInput()
         self.records, self.authorize = records, authorize
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-
-    def _file_id(self, reference):
-        return uuid5(
-            NAMESPACE_URL,
-            json.dumps(
-                [
-                    "runtime-kb-file",
-                    self.records.scope.tenant_id,
-                    reference.knowledge_id,
-                    reference.file_id,
-                ],
-                separators=(",", ":"),
-            ),
-        ).hex
-
-    def _file(self, tx, reference, context, *, create=False):
-        key = self._file_id(reference)
-        row = tx.get(FILES, key, context=context)
-        if row is None and create:
-            row = tx.create(
-                FILES,
-                {
-                    "record_id": key,
-                    "knowledge_id": reference.knowledge_id,
-                    "file_id": reference.file_id,
-                    "latest_version": -1,
-                    "active_job_id": None,
-                    "visible_job_id": None,
-                    "visible_version": None,
-                    "visible_generation": None,
-                    "tombstone_version": -1,
-                },
-                context=context,
-            )
-        return row
 
     def _job(self, tx, lookup, context):
         row = tx.get(JOBS, lookup.job_id, context=context)
@@ -145,13 +161,6 @@ class KnowledgeJobs:
         if receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.matched:
             raise Conflict()
         return tx.get(dataset, key, context=context)
-
-    def _lock_file(self, tx, reference, context, *, create=False):
-        row = self._file(tx, reference, context, create=create)
-        if row is None:
-            raise NotFound()
-        # A CAS update holds the file row lock until the surrounding transaction ends.
-        return self._patch(tx, FILES, row, {}, context)
 
     @staticmethod
     def _covered(reference):
@@ -208,8 +217,9 @@ class KnowledgeJobs:
                 raise Conflict()
             return job_state(existing)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, request, context, create=True)
+            manifest = lock_file_manifest(tx, request, context, create=True)
             if operation == "upload":
+                assert_knowledge_open(tx, request.knowledge_id, context=context)
                 if (
                     request.file_version <= manifest["tombstone_version"]
                     or request.file_version < manifest["latest_version"]
@@ -300,7 +310,7 @@ class KnowledgeJobs:
         self._job(self.records, lookup, context)
         now = self.clock()
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, lookup, context)
+            manifest = lock_file_manifest(tx, lookup, context)
             row = self._job(tx, lookup, context)
             eligible = row["status"] == "queued" or (
                 row["status"] == "running"
@@ -343,9 +353,16 @@ class KnowledgeJobs:
     def begin_execution(self, handle, *, context):
         self.authorize(_lookup(handle), context=context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, _lookup(handle), context)
+            manifest = lock_file_manifest(tx, _lookup(handle), context)
             row = self._attempt(tx, handle, context)
-            if row is None or row["write_started"] or not self._current(manifest, row):
+            assert_knowledge_open(tx, handle["knowledge_id"], context=context)
+            chunk_writes = tx.count(CHANGES, RecordQuery(where=_all(
+                Comparison("knowledge_id", "eq", handle["knowledge_id"]),
+                Comparison("file_id", "eq", handle["file_id"]),
+                Comparison("file_version", "eq", handle["file_version"]),
+                Comparison("status", "in", list(ACTIVE_STATUSES)),
+            )), context=context)
+            if row is None or row["write_started"] or not self._current(manifest, row) or chunk_writes:
                 return False
             self._patch(
                 tx,
@@ -377,7 +394,7 @@ class KnowledgeJobs:
             raise InvalidInput()
         self.authorize(_lookup(handle), context=context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, _lookup(handle), context)
+            manifest = lock_file_manifest(tx, _lookup(handle), context)
             row = self._attempt(tx, handle, context)
             if row is None or not self._current(manifest, row):
                 return False
@@ -400,7 +417,7 @@ class KnowledgeJobs:
             raise InvalidInput()
         self.authorize(_lookup(handle), context=context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, _lookup(handle), context)
+            manifest = lock_file_manifest(tx, _lookup(handle), context)
             row = self._attempt(tx, handle, context)
             if row is None or not row["write_started"] or not self._current(manifest, row):
                 return False
@@ -416,7 +433,7 @@ class KnowledgeJobs:
             raise InvalidInput()
         self.authorize(_lookup(handle), context=context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, _lookup(handle), context)
+            manifest = lock_file_manifest(tx, _lookup(handle), context)
             row = self._attempt(tx, handle, context)
             if (
                 row is None
@@ -458,7 +475,7 @@ class KnowledgeJobs:
             raise InvalidInput()
         # A cancelled or revoked owner may still record its own definitive resource closure.
         with self.records.transaction(context=context) as tx:
-            self._lock_file(tx, _lookup(handle), context)
+            lock_file_manifest(tx, _lookup(handle), context)
             row = self._attempt(tx, handle, context, allow_cancelled=True, lease=False)
             if row is None:
                 return False
@@ -480,6 +497,10 @@ class KnowledgeJobs:
         return True
 
     def _writers_active(self, tx, reference, context):
+        if tx.count(CHANGES, RecordQuery(where=_all(
+            self._covered(reference), Comparison("status", "in", list(ACTIVE_STATUSES)),
+        )), context=context):
+            return True
         return bool(
             tx.count(
                 JOBS,
@@ -501,7 +522,7 @@ class KnowledgeJobs:
         if row["operation"] != "delete":
             raise InvalidInput()
         with self.records.transaction(context=context) as tx:
-            self._lock_file(tx, lookup, context)
+            lock_file_manifest(tx, lookup, context)
             return not self._writers_active(tx, lookup, context)
 
     def begin_delete(self, lookup, *, owner_id, context):
@@ -510,7 +531,7 @@ class KnowledgeJobs:
         self.authorize(lookup, context=context)
         self._job(self.records, lookup, context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, lookup, context)
+            manifest = lock_file_manifest(tx, lookup, context)
             row = self._job(tx, lookup, context)
             if row["operation"] != "delete":
                 raise InvalidInput()
@@ -534,7 +555,7 @@ class KnowledgeJobs:
         lookup = _lookup(handle)
         self.authorize(lookup, context=context)
         with self.records.transaction(context=context) as tx:
-            manifest = self._lock_file(tx, lookup, context)
+            manifest = lock_file_manifest(tx, lookup, context)
             row = self._job(tx, lookup, context)
             if row["operation"] != "delete":
                 raise InvalidInput()
@@ -563,7 +584,7 @@ class KnowledgeJobs:
 
     def is_visible(self, reference, generation, *, context):
         # Search authorizes its knowledge scope before applying this authoritative final filter.
-        row = self._file(self.records, reference, context)
+        row = _file_record(self.records, reference, context)
         return bool(
             row
             and row["visible_version"] == reference.file_version

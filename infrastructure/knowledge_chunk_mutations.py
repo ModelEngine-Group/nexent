@@ -3,15 +3,19 @@
 
 from contextlib import contextmanager
 
+from contracts.knowledge_chunk_mutation import CHANGES, STATES
+from nexent.storage.models import StorageScope
+
 from infrastructure.rdb.composition import close_owned, record_engine
-from infrastructure.rdb.knowledge_chunk_mutations import bind_chunk_mutations
+from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
 
 
 @contextmanager
-def knowledge_chunk_mutation_ports(actor, *, context, writable=True):
+def knowledge_chunk_mutation_ports(actor, *, context):
     engine, records = record_engine(context), None
     try:
-        records = bind_chunk_mutations(actor, engine, writable=writable)
+        scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {CHANGES, STATES})
+        records = bind_knowledge_lifecycle(scope, engine, mode="mutation")
         yield records
     finally:
         close_owned(

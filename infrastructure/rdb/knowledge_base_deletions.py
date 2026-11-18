@@ -4,20 +4,8 @@
 from typing import ClassVar
 
 import sqlalchemy as sa
-from contracts.knowledge_base_deletion import BASE_DELETION_DATASET as BASE
-from contracts.knowledge_base_deletion import RUNTIME_FILES as FILES
-from contracts.knowledge_base_deletion import RUNTIME_JOBS as JOBS
-from nexent.storage.errors import ScopeDenied
 
 from infrastructure.rdb.base import TableBase
-from infrastructure.rdb.knowledge_jobs import files, jobs
-from infrastructure.rdb.record_audit import RecordAudit
-from infrastructure.rdb.record_store import SQLRecordStore
-from infrastructure.storage.catalog import (
-    DatasetCatalog,
-    DatasetDefinition,
-    FieldDefinition,
-)
 
 
 class RuntimeKnowledgeBaseDeletion(TableBase):
@@ -47,26 +35,6 @@ sa.CheckConstraint("revision > 0 AND knowledge_id > 0 AND status IN ('deleting',
 
 
 def bind_base_deletion_records(scope, engine):
-    tables = {BASE: deletions, JOBS: jobs, FILES: files}
-    if scope.system or scope.service_role != 'runtime' or not scope.namespaces <= tables.keys():
-        raise ScopeDenied()
-    names = {
-        BASE: tuple(c.name for c in deletions.c),
-        JOBS: ('job_id', 'tenant_id', 'knowledge_id', 'writer_ended', 'delete_flag'),
-        FILES: ('record_id', 'tenant_id', 'knowledge_id', 'latest_version', 'tombstone_version',
-                'active_job_id', 'visible_job_id', 'visible_version', 'visible_generation', 'delete_flag'),
-    }
-    definitions = []
-    for name, table in tables.items():
-        definitions.append(DatasetDefinition(
-            name, next(iter(table.primary_key.columns)).name,
-            tuple(FieldDefinition(field, 'integer' if isinstance(table.c[field].type, sa.Integer)
-                                  else 'boolean' if isinstance(table.c[field].type, sa.Boolean) else 'string',
-                                  nullable=table.c[field].nullable) for field in names[name]),
-            frozenset({'runtime'}), frozenset({'runtime'}) if name == BASE else frozenset(),
-            tenant_field='tenant_id', active_field='delete_flag',
-        ))
-    return SQLRecordStore(scope, DatasetCatalog(tuple(definitions)),
-                          {name: tables[name] for name in scope.namespaces}, engine,
-                          revision_fields={BASE: 'revision'},
-                          audit_mappings={BASE: RecordAudit('create_time', 'update_time', 'created_by', 'updated_by')})
+    from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
+
+    return bind_knowledge_lifecycle(scope, engine, mode="deletion")

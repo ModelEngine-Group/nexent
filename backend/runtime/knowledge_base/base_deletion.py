@@ -26,6 +26,10 @@ from nexent.storage.models import (
     Sort,
     WriteOutcome,
 )
+from runtime.knowledge_base.chunk_journal import (
+    ChunkMutationJournal,
+    assert_knowledge_open,
+)
 
 
 class KnowledgeBaseDeletionJournal:
@@ -36,6 +40,7 @@ class KnowledgeBaseDeletionJournal:
         self.records, self.actor, self.grant = records, actor, grant
 
     def ready(self, records, *, context):
+        ChunkMutationJournal(records, self.grant.knowledge_id).assert_drained(context=context)
         unended = records.query(JOBS, RecordQuery(where=Junction('and', (
             Comparison('knowledge_id', 'eq', self.grant.knowledge_id), Comparison('writer_ended', 'eq', False),
         ))), PageRequest(limit=1), context=context)
@@ -75,6 +80,11 @@ class KnowledgeBaseDeletionJournal:
         if existing is not None:
             return self._identity(existing, lookup), False
         with self.records.transaction(context=context) as tx:
+            ChunkMutationJournal(tx, self.grant.knowledge_id)._locked_state(tx, context)
+            existing = tx.get(BASE, lookup.job_id, context=context)
+            if existing is not None:
+                return self._identity(existing, lookup), False
+            assert_knowledge_open(tx, request.knowledge_id, context=context)
             self.ready(tx, context=context)
             row = tx.create(BASE, {'job_id': lookup.job_id, 'knowledge_id': request.knowledge_id,
                                   'user_id': self.actor.user_id, 'collection': self.grant.collection,
@@ -91,6 +101,7 @@ class KnowledgeBaseDeletionJournal:
         if physical_absence_confirmed is not True:
             raise Conflict()
         with self.records.transaction(context=context) as tx:
+            ChunkMutationJournal(tx, self.grant.knowledge_id)._locked_state(tx, context)
             lookup = KnowledgeBaseDeleteLookup(knowledge_id=row['knowledge_id'], job_id=row['job_id'])
             current = self._identity(tx.get(BASE, row['job_id'], context=context), lookup)
             self.ready(tx, context=context)

@@ -283,9 +283,13 @@ sa.Index(
 
 
 def bind_knowledge_jobs(scope, engine, *, knowledge_id=None, writable=True):
-    tables = {JOBS: jobs, FILES: files}
     if type(writable) is not bool or knowledge_id is not None and (type(knowledge_id) is not int or knowledge_id <= 0):
         raise InvalidInput()
+    if writable and knowledge_id is None:
+        from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
+
+        return bind_knowledge_lifecycle(scope, engine, mode="jobs")
+    tables = {JOBS: jobs, FILES: files}
     if knowledge_id is not None:
         if writable:
             raise ScopeDenied()

@@ -45,6 +45,11 @@ def setup():
     )
     files.create(engine)
     jobs.create(engine)
+    from infrastructure.rdb.knowledge_base_deletions import deletions
+    from infrastructure.rdb.knowledge_chunk_mutations import metadata as chunk_metadata
+
+    chunk_metadata.create_all(engine)
+    deletions.create(engine)
     scope = StorageScope("runtime", "tenant", "user", {FILES, JOBS})
     records = bind_knowledge_jobs(scope, engine)
     now = [datetime(2026, 11, 16, tzinfo=timezone.utc)]

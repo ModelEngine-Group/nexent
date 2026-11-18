@@ -30,6 +30,8 @@ from test.backend.services.test_cleanse_jobs import context
 
 @pytest.fixture
 def journal(monkeypatch):
+    from infrastructure.rdb import knowledge_lifecycle as lifecycle_mapping
+
     metadata = sa.MetaData()
 
     def clone(table, name):
@@ -39,11 +41,9 @@ def journal(monkeypatch):
             for c in table.c
         ])
 
-    base = clone(mapping.deletions, 'base')
-    jobs, files = clone(mapping.jobs, 'jobs'), clone(mapping.files, 'files')
-    monkeypatch.setattr(mapping, 'deletions', base)
-    monkeypatch.setattr(mapping, 'jobs', jobs)
-    monkeypatch.setattr(mapping, 'files', files)
+    for name in ("deletions", "jobs", "files", "changes", "states"):
+        monkeypatch.setattr(lifecycle_mapping, name, clone(getattr(lifecycle_mapping, name), name))
+    base, jobs, files = lifecycle_mapping.deletions, lifecycle_mapping.jobs, lifecycle_mapping.files
     engine = sa.create_engine('sqlite://')
     metadata.create_all(engine)
     records = mapping.bind_base_deletion_records(StorageScope('runtime', 'tenant-a', 'user-a', {BASE, JOBS, FILES}), engine)

@@ -4,6 +4,7 @@
 import re
 
 from contracts.agentos_knowledge import KnowledgeFileReference
+from contracts.knowledge_base_deletion import BASE_DELETION_DATASET as BASE
 from contracts.knowledge_chunk_mutation import (
     ACTIVE_STATUSES,
     CHANGES,
@@ -29,6 +30,13 @@ from nexent.storage.models import (
     Revision,
     WriteOutcome,
 )
+
+
+def assert_knowledge_open(records, knowledge_id, *, context):
+    rows = records.query(BASE, RecordQuery(where=Comparison("knowledge_id", "eq", knowledge_id)),
+                         PageRequest(limit=1), context=context)
+    if rows.items:
+        raise Conflict()
 
 
 class ChunkMutationJournal:
@@ -135,64 +143,67 @@ class ChunkMutationJournal:
         intent = ChunkMutationIntent.model_validate(intent.model_dump(mode="json"))
         if intent.knowledge_id != self.knowledge_id:
             raise ScopeDenied()
+        with self.records.transaction(context=context) as tx:
+            return self._reserve(tx, intent, context)
+
+    def _reserve(self, tx, intent, context):
         key = mutation_id(self.tenant, self.user, intent)
         digest = intent.fingerprint()
-        with self.records.transaction(context=context) as tx:
-            existing = tx.get(CHANGES, key, context=context)
-            if existing is not None:
-                row = self._owned(tx, key, context)
-                if row["request_sha256"] != digest:
-                    raise Conflict()
-                return row, False
-            state = self._locked_state(tx, context)
-            existing = tx.get(CHANGES, key, context=context)
-            if existing is not None:
-                row = self._owned(tx, key, context)
-                if row["request_sha256"] != digest:
-                    raise Conflict()
-                return row, False
-            logical_key = chunk_key(self.tenant, self.knowledge_id, intent.chunk_id)
-            pending = tx.query(
-                CHANGES,
-                RecordQuery(
-                    where=self._where(
-                        Comparison("chunk_key", "eq", logical_key),
-                        Comparison("status", "in", list(ACTIVE_STATUSES)),
-                    )
-                ),
-                PageRequest(limit=1),
-                context=context,
-            )
-            if pending.items:
+        existing = tx.get(CHANGES, key, context=context)
+        if existing is not None:
+            row = self._owned(tx, key, context)
+            if row["request_sha256"] != digest:
                 raise Conflict()
-            ref = intent.file_ref
-            row = tx.create(
-                CHANGES,
-                {
-                    "mutation_id": key,
-                    "knowledge_id": self.knowledge_id,
-                    "user_id": self.user,
-                    "chunk_id": intent.chunk_id,
-                    "chunk_key": logical_key,
-                    "operation": intent.operation,
-                    "request_sha256": digest,
-                    "resource_revision": intent.resource_revision,
-                    "file_id": ref.file_id if ref else None,
-                    "file_version": ref.file_version if ref else None,
-                    "generation": intent.generation,
-                    "chunk_index": intent.chunk_index,
-                    "status": "reserved",
-                    "writer_ended": True,
-                    "count_delta": None,
-                    "commit_epoch": None,
-                    "error_code": None,
-                },
-                context=context,
-            )
-            self._patch(
-                tx, STATES, state, {"active_count": state["active_count"] + 1}, context
-            )
-            return row, True
+            return row, False
+        state = self._locked_state(tx, context)
+        existing = tx.get(CHANGES, key, context=context)
+        if existing is not None:
+            row = self._owned(tx, key, context)
+            if row["request_sha256"] != digest:
+                raise Conflict()
+            return row, False
+        logical_key = chunk_key(self.tenant, self.knowledge_id, intent.chunk_id)
+        pending = tx.query(
+            CHANGES,
+            RecordQuery(
+                where=self._where(
+                    Comparison("chunk_key", "eq", logical_key),
+                    Comparison("status", "in", list(ACTIVE_STATUSES)),
+                )
+            ),
+            PageRequest(limit=1),
+            context=context,
+        )
+        if pending.items:
+            raise Conflict()
+        ref = intent.file_ref
+        row = tx.create(
+            CHANGES,
+            {
+                "mutation_id": key,
+                "knowledge_id": self.knowledge_id,
+                "user_id": self.user,
+                "chunk_id": intent.chunk_id,
+                "chunk_key": logical_key,
+                "operation": intent.operation,
+                "request_sha256": digest,
+                "resource_revision": intent.resource_revision,
+                "file_id": ref.file_id if ref else None,
+                "file_version": ref.file_version if ref else None,
+                "generation": intent.generation,
+                "chunk_index": intent.chunk_index,
+                "status": "reserved",
+                "writer_ended": True,
+                "count_delta": None,
+                "commit_epoch": None,
+                "error_code": None,
+            },
+            context=context,
+        )
+        self._patch(
+            tx, STATES, state, {"active_count": state["active_count"] + 1}, context
+        )
+        return row, True
 
     def inspect(self, key, *, context):
         return self._owned(self.records, key, context)
