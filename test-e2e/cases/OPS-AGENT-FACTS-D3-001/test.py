@@ -4,7 +4,7 @@
 import asyncio
 import json
 import os
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -76,7 +76,8 @@ def isolated_monitoring(monkeypatch):
         try:
             with store.engine.begin() as connection:
                 for table in (BATCH, DAY):
-                    connection.execute(text(f"DELETE FROM {table} WHERE tenant_id=:tenant"), {"tenant": tenant})
+                    connection.execute(text(f"DELETE FROM {table} WHERE tenant_id IN (:tenant, :other)"),
+                                       {"tenant": tenant, "other": f"{tenant}-other"})
         finally:
             store.engine.dispose()
 
@@ -86,10 +87,14 @@ async def _submit_and_read(service, tenant, event):
     return await _apply_and_read(service, tenant)
 
 
-async def _apply_and_read(service, tenant):
+async def _wait_for_agent_batch(service, tenant):
     async with asyncio.timeout(15):
         while not service.apply_batch(tenant, "agent"):
             await asyncio.sleep(0.05)
+
+
+async def _apply_and_read(service, tenant):
+    await _wait_for_agent_batch(service, tenant)
     hits = service.es.search(
         index=f"{FACTS}-*", query={"term": {"fact_kind": "agent"}}, track_total_hits=True,
     )["hits"]
@@ -252,8 +257,94 @@ def _resume_app(info, tenant, channel, threads, monkeypatch):
     return app
 
 
+async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
+    from gateway.authentication import auth
+    from ops.api import application
+    from ops.monitoring import query
+    from permissions import rbac
+
+    other = f"{tenant}-other"
+    previous = day - timedelta(days=1)
+    fixtures = [
+        (tenant, previous, 21, [12, 13], 200),
+        (tenant, day, 22, [12], 500),
+        (tenant, day, 21, [99], 600),
+        (other, day, 21, [12, 13], 800),
+    ]
+    for scope, statistic_day, agent_id, groups, duration in fixtures:
+        _, fact = _run_across_midnight(scope)
+        instant = datetime.combine(statistic_day, time.min, timezone.utc)
+        emit_fact(dict(
+            fact, started_at=instant.isoformat(), ended_at=(instant + timedelta(milliseconds=duration)).isoformat(),
+            agent_id=agent_id, initiator_group_ids=groups, duration_ms=duration,
+        ))
+        await _wait_for_agent_batch(service, scope)
+    service.tick()
+
+    principals = {
+        "Bearer ops": ("operator", tenant, "OPS"),
+        "Bearer admin": ("administrator", tenant, "SU"),
+        "Bearer user": ("regular-user", tenant, "USER"),
+    }
+    monkeypatch.setattr(auth, "get_current_user_context", principals.__getitem__)
+    monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}, "SU": {"ops.dashboard:read"}})
+    monkeypatch.setattr(rbac, "_INITIALIZED", True)
+    monkeypatch.setattr(query, "agent_catalog_tenants", lambda _: {tenant, other})
+    monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+    app = application.create_app()
+    app.state.monitoring = service
+    selection = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13], "agent_id": 21}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
+        async def get(params, actor="ops"):
+            headers = {"Authorization": f"Bearer {actor}"} if actor else {}
+            return await client.get("/ops/v1/monitoring/agents/summary", params=params, headers=headers)
+
+        actual = await get(dict(selection, tenant_id=tenant))
+        assert actual.status_code == 200
+        observed = actual.json()
+        assert observed["data"] == {"execution_count": 1, "avg_duration_ms": duration_ms, "duration_sample_count": 1}
+        assert observed["data_as_of"] and observed["coverage_state"] == "covered" and not observed["is_stale"]
+        assert (await get(selection)).json() == observed
+
+        group_filtered = await get(dict(selection, group_ids=[99]))
+        assert group_filtered.json()["data"] == {
+            "execution_count": 1, "avg_duration_ms": 600, "duration_sample_count": 1,
+        }
+        agent_filtered = await get(dict(selection, agent_id=22))
+        assert agent_filtered.json()["data"] == {
+            "execution_count": 1, "avg_duration_ms": 500, "duration_sample_count": 1,
+        }
+        dates = await get(dict(selection, start_date=previous.isoformat()))
+        assert dates.json()["data"] == {
+            "execution_count": 2, "avg_duration_ms": (duration_ms + 200) / 2, "duration_sample_count": 2,
+        }
+        zero = (await get(dict(selection, group_ids=[555]))).json()
+        assert zero["coverage_state"] == "covered"
+        assert zero["data"] == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}
+        missing_day = (previous - timedelta(days=1)).isoformat()
+        uncovered = (await get(dict(selection, start_date=missing_day, end_date=missing_day))).json()
+        assert uncovered["coverage_state"] == "uncovered" and uncovered["data_as_of"] is None
+        assert uncovered["data"] == dict.fromkeys(observed["data"])
+
+        assert (await get(dict(selection, tenant_id=other))).status_code == 403
+        assert (await get(selection, actor="user")).status_code == 403
+        assert (await get(selection, actor=None)).status_code == 401
+        other_only = await get(dict(selection, tenant_id=other), actor="admin")
+        assert other_only.json()["data"] == {
+            "execution_count": 1, "avg_duration_ms": 800, "duration_sample_count": 1,
+        }
+        all_tenants = await get(selection, actor="admin")
+        assert all_tenants.json()["data"] == {
+            "execution_count": 2, "avg_duration_ms": (duration_ms + 800) / 2, "duration_sample_count": 2,
+        }
+    return actual.request.url.raw_path.decode("ascii"), observed
+
+
 @pytest.mark.asyncio
-async def test_real_root_agent_capture_survives_sse_reconnect(isolated_monitoring, model_peer, monkeypatch):
+async def test_real_root_agent_capture_survives_sse_reconnect(
+    isolated_monitoring, model_peer, monkeypatch, record_property,
+):
     from infrastructure.streaming.channels import StreamingChannel, runtime_state_service
 
     service, tenant = isolated_monitoring
@@ -364,6 +455,9 @@ async def test_real_root_agent_capture_survives_sse_reconnect(isolated_monitorin
             assert state["source_revision"] == state["published_source_revision"]
             assert daily["execution_count"] == daily["duration_sample_count"] == 1
             assert daily["duration_sum_ms"] == finished["duration_ms"]
+            request_path, response_body = await _verify_ops_query(service, tenant, day, finished["duration_ms"], monkeypatch)
+            record_property("agent_summary_request", request_path)
+            record_property("agent_summary_response", json.dumps(response_body))
         finally:
             release.set()
             worker.cancel()

@@ -174,6 +174,38 @@ publisher groups Agent executions by start day, tenant, initiating groups
 and Agent ID. It writes the execution count, exact duration sum and number of
 ended executions with a measured duration. A measured zero is a valid sample.
 
+## Agent summary query
+
+Use `GET /ops/v1/monitoring/agents/summary` directly on Ops or
+`/api/ops/v1/monitoring/agents/summary` through the Web proxy. Supply a session
+bearer token with `ops.dashboard:read`. Ops operators are scoped to their own
+tenant. Super Admin can select a tenant or omit `tenant_id` for all tenants.
+
+`start_date` and `end_date` are inclusive dates in the Ops monitoring timezone.
+The range can cover up to 366 days. Repeat `group_ids` to match any of those
+initiating groups. A record matching multiple groups contributes once.
+`agent_id` selects a single Agent.
+
+```http
+GET /ops/v1/monitoring/agents/summary?tenant_id=example&start_date=2026-11-18&end_date=2026-11-18&group_ids=12&group_ids=13&agent_id=21
+Authorization: Bearer <session-token>
+```
+
+```json
+{
+  "data": {"execution_count": 2, "avg_duration_ms": 250.0, "duration_sample_count": 2},
+  "data_as_of": "2026-11-18T08:40:00+00:00",
+  "coverage_state": "covered",
+  "is_stale": false
+}
+```
+
+The endpoint reads the latest published version and averages the total duration
+over all selected duration samples. A covered selection with zero matches
+returns zero executions and samples and a null average. An uncovered
+selection returns null metrics. Partial coverage can report the published
+subset, and `is_stale` indicates that source changes or failed writes are pending.
+
 ## Storage and process resources
 
 Both Runtime and ops must see the same `TRAJECTORY_ROOT_DIR`, default

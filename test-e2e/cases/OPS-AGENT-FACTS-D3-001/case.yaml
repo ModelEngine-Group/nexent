@@ -4,15 +4,15 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
   status: active
   automation: automated
-  objective: Prove sample revisions, real main Agent capture and daily publication through the shared producer, Ops PostgreSQL and Elasticsearch.
-  integration_boundary: [Real Agent worker and model HTTP transport, SSE recovery, Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch]
+  objective: Prove sample revisions, real main Agent capture, daily publication and the authorized Ops summary.
+  integration_boundary: [Real Agent worker and model HTTP transport, SSE recovery, Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch, Ops HTTP and tenant authorization]
   observations: [Confirmed batches, Elasticsearch document identity and source fields]
   cleanup: [Stop the model fixture and managed worker, Close producer and clients, Remove sample tenant rows and test-owned Elasticsearch indices and templates]
   preconditions: [A disposable migrated Ops database and a clean isolated Elasticsearch instance]
@@ -45,6 +45,12 @@ case:
   - order: 9
     action: Run the normal Ops tick on the real worker fact.
     expected: One published execution and one duration sample match the recorded worker fact.
+  - order: 10
+    action: Query the root run through the Ops summary with overlapping groups, an Agent filter and a selected day in the presence of contrasting published data.
+    expected: Counts and duration match the real run. Filters and inclusive dates select the correct records. Published zero and uncovered data are distinguishable.
+  - order: 11
+    action: Repeat the query using single-tenant Ops, global Super Admin, unauthorized and missing session contexts.
+    expected: Ops reads its own tenant and receives 403 for another tenant. Super Admin can select a tenant or aggregate both. Unauthorized and missing sessions receive 403 and 401 respectively.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -53,10 +59,13 @@ case:
   - The current Agent day points to one exact daily row with the valid duration sample.
   - Publication failure and same-revision replay preserve the correct published pointer.
   - The real worker fact is reflected in its published daily row.
+  - The Ops summary matches the real run and applies date, group and Agent filters.
+  - Ops authorization controls explicit and implicit tenant selection.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
   - An Agent aggregate on the end day or a premature switch to an unconfirmed publication.
+  - Duplicate counts from matching multiple groups or unauthorized cross-tenant results.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -73,3 +82,8 @@ case:
     steps: [6, 7, 8, 9]
     expected_results: [5, 6, 7]
     forbidden_side_effects: [3]
+  - id: AC-04
+    description: The Ops summary exposes the correct published metrics within the authenticated tenant scope.
+    steps: [10, 11]
+    expected_results: [8, 9]
+    forbidden_side_effects: [4]

@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
-from ops.monitoring.agent import AgentFact, accumulate_agent
+from ops.monitoring.agent import AgentFact, accumulate_agent, summarize_agent
 from ops.monitoring.contracts import MonitoringKind
 from ops.monitoring.model import accumulate_model
 from ops.monitoring.runtime import MONITORING_KINDS, Producer
@@ -133,3 +133,13 @@ def test_daily_dimensions_preserve_tenant_day_group_and_agent_scope(started):
         ("t1", "2026-10-31", "known", (1, 2), 22): 1,
         ("t2", "2026-10-31", "known", (1, 2), 21): 1,
     }
+
+
+def test_summary_averages_all_duration_samples_across_rows():
+    rows = [
+        {"execution_count": 3, "duration_sum_ms": 200, "duration_sample_count": 2},
+        {"execution_count": 1, "duration_sum_ms": 400, "duration_sample_count": 1},
+        {"execution_count": 2, "duration_sum_ms": 0, "duration_sample_count": 0},
+    ]
+    assert summarize_agent(rows) == {"execution_count": 6, "avg_duration_ms": 200, "duration_sample_count": 3}
+    assert summarize_agent(()) == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}

@@ -54,6 +54,20 @@ def accumulate_agent(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
     return groups.items()
 
 
+def summarize_agent(rows: Iterable[dict]) -> dict:
+    """Compute a weighted average over complete, measured executions."""
+    totals = dict.fromkeys(COUNTERS, 0)
+    for row in rows:
+        for counter in totals:
+            totals[counter] += row[counter]
+    samples = totals["duration_sample_count"]
+    return {
+        "execution_count": totals["execution_count"],
+        "avg_duration_ms": totals["duration_sum_ms"] / samples if samples else None,
+        "duration_sample_count": samples,
+    }
+
+
 AGENT_MONITORING = MonitoringKind(
     fact_model=AgentFact,
     aggregate=accumulate_agent,

@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Read published monitoring metrics and current model inventory."""
+"""Read published monitoring metrics and resource coverage."""
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
@@ -7,7 +7,9 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import select
 
 from infrastructure.rdb.client import get_db_session
+from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
+from ops.monitoring.agent import summarize_agent
 from ops.monitoring.model import summarize
 from ops.monitoring.search import filters
 
@@ -26,10 +28,9 @@ def model_catalog(tenant: str | None) -> list[dict]:
         return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def read_models(service, *, tenant, start: date, end: date, groups, model_id, model_type):
-    write_failed = service.store.has_failed_batches(tenant, "model", start, end)
+def _read_published_rows(service, *, tenant, kind, start, end, **criteria):
     rows = []
-    with service.publication_snapshot(tenant, "model", start, end) as (states, point):
+    with service.publication_snapshot(tenant, kind, start, end) as (states, point):
         published = [row for row in states if row["publish_id"]]
         if point is not None:
             for offset in range(0, len(published), 250):
@@ -38,35 +39,80 @@ def read_models(service, *, tenant, start: date, end: date, groups, model_id, mo
                             publish_id=str(state["publish_id"]))
                     for state in published[offset:offset + 250]
                 ], "minimum_should_match": 1}}
-                constraints = filters(fact_kind="model")
-                for name, value in (("initiator_group_ids", groups), ("model_id", model_id), ("model_type", model_type)):
-                    if value:
-                        constraints["bool"]["filter"].extend(filters(**{name: value})["bool"]["filter"])
+                constraints = filters(fact_kind=kind, **{name: value for name, value in criteria.items() if value})
                 constraints["bool"]["filter"].append(selection)
                 rows.extend(point.documents(constraints))
-    available = sorted({row["statistic_date"] for row in published})
-    inventory = [row for row in model_catalog(tenant)
-                 if (model_id is None or row["model_id"] == model_id)
-                 and (model_type is None or row["model_type"] == model_type)]
-    tenants = {row["tenant_id"] for row in inventory} | {row["tenant_id"] for row in states}
-    if tenant is not None:
-        tenants.add(tenant)
+    return rows, states, published
+
+
+def _publication_status(service, *, kind, start, end, tenants, states, published, write_failed):
+    tenants = tenants | {row["tenant_id"] for row in states}
     whole_days = (end - start).days + 1
     coverage = "uncovered"
     if published:
-        starts = service.store.coverage_starts(tenants, "model")
+        starts = service.store.coverage_starts(tenants, kind)
         complete = len(published) == whole_days * len(tenants) and all(
             row["tenant_id"] in starts and starts[row["tenant_id"]] <=
             datetime.combine(row["statistic_date"], time.min, tzinfo=service.zone)
             for row in published
         )
         coverage = "covered" if complete else "partial"
-    status = {
+    return {
         "data_as_of": min((row["source_snapshot_at"] for row in published), default=None),
         "coverage_state": coverage,
         "is_stale": write_failed or any(row["source_revision"] != row["published_source_revision"] for row in states),
     }
+
+
+def read_models(service, *, tenant, start: date, end: date, groups, model_id, model_type):
+    write_failed = service.store.has_failed_batches(tenant, "model", start, end)
+    rows, states, published = _read_published_rows(
+        service, tenant=tenant, kind="model", start=start, end=end,
+        initiator_group_ids=groups, model_id=model_id, model_type=model_type,
+    )
+    available = sorted({row["statistic_date"] for row in published})
+    inventory = [row for row in model_catalog(tenant)
+                 if (model_id is None or row["model_id"] == model_id)
+                 and (model_type is None or row["model_type"] == model_type)]
+    tenants = {row["tenant_id"] for row in inventory}
+    if tenant is not None:
+        tenants.add(tenant)
+    status = _publication_status(
+        service, kind="model", start=start, end=end, tenants=tenants,
+        states=states, published=published, write_failed=write_failed,
+    )
     return rows, inventory, available, status
+
+
+def agent_catalog_tenants(agent_id: int | None) -> set[str]:
+    """Find current Agent tenants when checking global coverage."""
+    statement = select(AgentInfo.tenant_id).where(
+        AgentInfo.delete_flag == "N", AgentInfo.tenant_id.is_not(None),
+    ).distinct()
+    if agent_id is not None:
+        statement = statement.where(AgentInfo.agent_id == agent_id)
+    with get_db_session() as session:
+        return set(session.scalars(statement))
+
+
+def read_agents(service, *, tenant, start: date, end: date, groups, agent_id):
+    write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
+    rows, states, published = _read_published_rows(
+        service, tenant=tenant, kind="agent", start=start, end=end,
+        initiator_group_ids=groups, agent_id=agent_id,
+    )
+    if tenant is not None:
+        tenants = {tenant}
+    else:
+        tenants = agent_catalog_tenants(agent_id) if published else set()
+    status = _publication_status(
+        service, kind="agent", start=start, end=end, tenants=tenants,
+        states=states, published=published, write_failed=write_failed,
+    )
+    values = summarize_agent(rows)
+    if not rows and status["coverage_state"] != "covered":
+        values = dict.fromkeys(values)
+    return values, status
 
 
 def model_rows(rows, inventory, *, covered):

@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Operations model monitoring HTTP routes."""
+"""Operations monitoring HTTP routes."""
 
 import logging
 from base64 import urlsafe_b64decode, urlsafe_b64encode
@@ -12,12 +12,12 @@ from typing import Annotated, Literal
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from contracts.constants.environment import JWT_SECRET
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.model import summarize
-from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_models
+from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_agents, read_models
 from permissions.models import CurrentUser
 from permissions.operations import operations_scope
 
@@ -26,22 +26,34 @@ logger = logging.getLogger(__name__)
 ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
 Metric = Literal["request_count", "total_tokens", "error_rate", "avg_duration_ms", "avg_ttft_ms",
                  "avg_generation_rate"]
+PositiveResourceId = Annotated[int, Field(gt=0, le=2**31 - 1)]
 
 
-class Selection(BaseModel):
+class MonitoringSelection(BaseModel):
     tenant_id: str | None
     start_date: date
     end_date: date
     group_ids: list[int]
+
+
+class Selection(MonitoringSelection):
     model_id: int | None
     model_type: str | None
+
+
+class AgentSelection(MonitoringSelection):
+    agent_id: int | None
+
+
+def _validate_range(start_date: date, end_date: date, group_ids: list[int] | None) -> None:
+    if not 0 <= (end_date - start_date).days < 366 or any(group <= 0 for group in group_ids or ()):
+        raise HTTPException(422, "Invalid monitoring date range or group ID")
 
 
 def selection(start_date: date, end_date: date, tenant_id: str | None = None,
               group_ids: Annotated[list[int] | None, Query(max_length=100)] = None,
               model_id: Annotated[int | None, Query(gt=0)] = None, model_type: str | None = None):
-    if not 0 <= (end_date - start_date).days < 366 or any(group <= 0 for group in group_ids or ()):
-        raise HTTPException(422, "Invalid monitoring date range or group ID")
+    _validate_range(start_date, end_date, group_ids)
     return Selection(tenant_id=tenant_id, start_date=start_date, end_date=end_date, group_ids=group_ids or [],
                      model_id=model_id, model_type=model_type)
 
@@ -115,6 +127,33 @@ def trends(request: Request, scope: Annotated[Selection, Depends(selection)],
         metrics = summarize(by_date.get(day.isoformat(), ())) if day in published else missing_metrics
         history.append({"statistic_date": day, **metrics})
     return {"data": history, **status}
+
+
+def agent_selection(
+    start_date: date, end_date: date,
+    tenant_id: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    group_ids: Annotated[list[PositiveResourceId] | None, Query(max_length=100)] = None,
+    agent_id: Annotated[int | None, Query(gt=0, le=2**31 - 1)] = None,
+):
+    _validate_range(start_date, end_date, group_ids)
+    return AgentSelection(tenant_id=tenant_id, start_date=start_date, end_date=end_date,
+                          group_ids=group_ids or [], agent_id=agent_id)
+
+
+@ops_router.get("/agents/summary", tags=["agent monitoring"])
+def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
+                  user: Annotated[CurrentUser, Depends(authenticate)]):
+    tenant = operations_scope(user, scope.tenant_id)
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None:
+        raise HTTPException(503, "Agent monitoring is unavailable")
+    try:
+        values, status = read_agents(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+                                     groups=scope.group_ids, agent_id=scope.agent_id)
+    except Exception as error:
+        logger.warning("Agent monitoring query failed error=%s", type(error).__name__)
+        raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
+    return {"data": values, **status}
 
 
 class RefreshSelection(BaseModel):
