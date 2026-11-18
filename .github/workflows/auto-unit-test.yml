@@ -62,6 +62,26 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # clean: false — skip git-clean so checkout does not trip over
+          # root-owned leftover files inside .pytest-tmp/ (some earlier
+          # tests spawn subprocesses that land files owned by root; the
+          # runner user cannot unlink them).  New temp dirs are already
+          # kept outside the repo tree (see test/conftest.py) so the old
+          # .pytest-tmp/ is now dead weight and nothing writes there.
+          clean: false
+
+      - name: Remove stale pytest temp tree (best-effort)
+        run: |
+          if [ -d ".pytest-tmp" ]; then
+            # Repair permissions first so the runner user can delete; any
+            # still-root-owned files we cannot touch are left behind —
+            # they do not run again because conftest.py now writes tmp
+            # dirs to $HOME/pytest-tmp.
+            find .pytest-tmp -type d -exec chmod u+rwx {} + 2>/dev/null || true
+            find .pytest-tmp -type f -exec chmod u+rw {} + 2>/dev/null || true
+            rm -rf .pytest-tmp 2>/dev/null || echo "Some .pytest-tmp files remain (non-blocking)"
+          fi
 
       - name: Install uv
         # astral-sh/setup-uv@v10.3.3
