@@ -696,7 +696,12 @@ class JiuwenAdapter(AgentCoreAdapter):
         return prepared
 
     def _connect_mcp(self):
-        """Establish blocking session owners on the admitted Agent worker."""
+        """Establish the blocking session owner on the admitted Agent worker.
+
+        Entering the collection does not contact any server: tools are built
+        from the cached ToolConfig schemas and each server connects lazily on
+        the first invocation of one of its tools.
+        """
         from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection
 
         info = self.run_info
@@ -704,14 +709,16 @@ class JiuwenAdapter(AgentCoreAdapter):
                      (tool.name or tool.class_name) in self.visible_tool_names]
         if mcp_tools:
             self.mcp = JiuwenMCPCollection(
-                authorized_tools=mcp_tools, observe=self._observe_tool, manager=self.manager,
+                observe=self._observe_tool, manager=self.manager,
                 emit_result=self._resource_result, user_context=info.user_context,
                 server_parameters=info.mcp_host, cancellation_scope=self.scope,
                 tool_timeout_seconds=info.mcp_tool_timeout_seconds,
                 close_timeout_seconds=info.mcp_close_timeout_seconds,
                 connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
             )
-            for tool in self.mcp.__enter__().tools:
+            collection = self.mcp.__enter__()
+            for tool_config in mcp_tools:
+                tool = collection.create_tool(tool_config)
                 self._set_tool_timeout(tool.card)
                 self.native_agent.ability_manager.add_ability(tool.card, tool)
 

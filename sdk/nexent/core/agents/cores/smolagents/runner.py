@@ -12,7 +12,6 @@ from nexent.core.agents.orchestration.execution import (
 )
 from nexent.core.agents.resources.mcp import (
     ManagedMCPToolCollection,
-    _normalize_mcp_config,
     _resolve_mcp_request_timeout_seconds,
 )
 from nexent.core.concurrency import RunCancellationScope
@@ -104,14 +103,16 @@ def _run_smolagents(agent_run_info):
     if not mcp_host:
         return _run_with_resources(agent_run_info)
     agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
-    from nexent.core.agents.resources.compatibility.smolagents_tools import mcp_adapter_factory
+    from nexent.core.agents.resources.compatibility.smolagents_tools import build_lazy_smolagents_tool
+    # Lazy MCP: entering the collection only starts the session loop; each
+    # server connects when one of its tools is first invoked during the run.
     with ManagedMCPToolCollection(
         manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
-        server_parameters=[_normalize_mcp_config(item) for item in mcp_host],
+        server_parameters=list(mcp_host),
         cancellation_scope=agent_run_info.cancellation_scope or RunCancellationScope(agent_run_info.stop_event),
         tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
         close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
         connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
-        tool_adapter_factory=mcp_adapter_factory,
+        tool_builder=build_lazy_smolagents_tool,
     ) as tool_collection:
         return _run_with_resources(agent_run_info, tool_collection)

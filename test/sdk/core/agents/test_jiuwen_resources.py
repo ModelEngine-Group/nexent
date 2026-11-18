@@ -60,22 +60,28 @@ async def test_mcp_configured_values_and_captured_identity_override_model_input(
     manager = Mock()
     scope = RunCancellationScope()
     user = {"user_id": "captured", "user_groups": ["original"]}
-    owner = JiuwenMCPCollection(authorized_tools=[], observe=Mock(), manager=manager, user_context=user,
+    owner = JiuwenMCPCollection(observe=Mock(), manager=manager, user_context=user,
         server_parameters=[], cancellation_scope=scope, tool_timeout_seconds=1, close_timeout_seconds=1)
-    owner._call_tool = Mock(return_value=20)
+
+    dispatched = []
+
+    def dispatch(lazy_arguments):
+        dispatched.append(("session", "multiply", lazy_arguments))
+        return 20
+
     def submit(lane, spec, forward, *args):
         future = Future()
         future.set_result(forward(*args))
         return SimpleNamespace(future=future)
     manager.submit.side_effect = submit
     params = {"b": 4, "user_id": "untrusted-config"}
-    client = _ManagedNativeClient(owner, "session", "multiply", ["user_id", "user_groups"], params)
+    client = _ManagedNativeClient(owner, dispatch, "multiply", ["user_id", "user_groups"], params)
     user["user_id"] = "later"
     user["user_groups"].append("later")
     params["b"] = 99
     assert await client.call_tool("multiply", {"a": 5, "b": 99, "user_id": "spoofed"}) == 20
-    owner._call_tool.assert_called_once_with("session", "multiply", {
-        "a": 5, "b": 4, "user_id": "captured", "user_groups": ["original"]})
+    assert dispatched == [("session", "multiply", {
+        "a": 5, "b": 4, "user_id": "captured", "user_groups": ["original"]})]
     assert manager.submit.call_args.args[0] == "model-tool-io"
 
 

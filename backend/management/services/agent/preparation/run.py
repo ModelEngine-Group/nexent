@@ -487,6 +487,10 @@ async def create_agent_run_info(
             mcp_config = {
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http",
+                # Server name lets the SDK route each MCP tool (ToolConfig.usage)
+                # to its server lazily at first tool call instead of connecting
+                # to every server at run start.
+                "name": mcp_record.get("remote_mcp_server_name"),
             }
             if url == default_mcp_url:
                 mcp_config["httpx_client_factory"] = create_httpx_client

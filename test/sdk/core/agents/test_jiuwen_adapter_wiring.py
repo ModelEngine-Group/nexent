@@ -174,15 +174,17 @@ def test_parallel_registration_limits_calls_to_authorized_bindings(adapter, mock
 
 @pytest.mark.parametrize("visible", [False, True])
 def test_mcp_connection_uses_only_visible_authorized_tools_and_resolved_deadlines(adapter, mocker, visible):
-    allowed = ToolConfig(name="lookup", class_name="Lookup", source="mcp")
-    hidden = ToolConfig(name="hidden", class_name="Hidden", source="mcp")
+    allowed = ToolConfig(name="lookup", class_name="Lookup", source="mcp",
+                         inputs='{"provider": {"type": "string"}}', usage="fixture-server")
+    hidden = ToolConfig(name="hidden", class_name="Hidden", source="mcp",
+                        inputs='{"provider": {"type": "string"}}', usage="fixture-server")
     adapter.tool_configs, adapter.visible_tool_names = [allowed, hidden], {"lookup"} if visible else set()
     adapter.run_info.mcp_host = ["http://fixture.invalid/mcp"]
     adapter.run_info.user_context = {"user_id": "captured", "tenant_id": "tenant"}
+    lazy_tool = SimpleNamespace(card=SimpleNamespace(name="lookup", properties=None))
     collection = MagicMock()
-    from openjiuwen.core.foundation.tool import ToolCard
-    card = ToolCard(name="lookup", description="Remote lookup", properties={"provider": "fixture"})
-    collection.__enter__.return_value.tools = [SimpleNamespace(card=card)]
+    entered = collection.__enter__.return_value
+    entered.create_tool.return_value = lazy_tool
     adapter.run_info.tool_call_timeout_seconds = 900
     owner = mocker.patch("nexent.core.agents.cores.jiuwen.mcp.JiuwenMCPCollection", return_value=collection)
     adapter._connect_mcp()
@@ -191,12 +193,14 @@ def test_mcp_connection_uses_only_visible_authorized_tools_and_resolved_deadline
         adapter.native_agent.ability_manager.add_ability.assert_not_called()
         return
     values = owner.call_args.kwargs
-    assert values["authorized_tools"] == [allowed] and values["user_context"] == adapter.run_info.user_context
+    assert "authorized_tools" not in values, "lazy tools are created per config after enter"
+    assert values["user_context"] == adapter.run_info.user_context
     assert values["server_parameters"] == adapter.run_info.mcp_host
     assert values["cancellation_scope"] is adapter.scope and values["connect_timeout_seconds"] == 10.0
-    adapter.native_agent.ability_manager.add_ability.assert_called_once_with(
-        card, collection.__enter__.return_value.tools[0])
-    assert card.properties == {"provider": "fixture", "resilience": {"timeout_s": 900}}
+    entered.create_tool.assert_called_once_with(allowed)
+    adapter.native_agent.ability_manager.add_ability.assert_called_once_with(lazy_tool.card, lazy_tool)
+    # The real timeout setter annotated the lazy tool's card.
+    assert lazy_tool.card.properties == {"resilience": {"timeout_s": 900}}
 
 
 @pytest.mark.asyncio

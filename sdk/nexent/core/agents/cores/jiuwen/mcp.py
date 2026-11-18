@@ -1,20 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Jiuwen native MCP tools with Nexent managed session ownership."""
+"""Jiuwen native MCP tools with Nexent managed lazy session ownership."""
 
 import asyncio
-import keyword
 import logging
-import re
-from contextlib import AsyncExitStack, nullcontext
+from contextlib import nullcontext
 from copy import deepcopy
-from types import SimpleNamespace
 
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig, MCPTool, McpToolCard
 from openjiuwen.core.foundation.tool.mcp.client.streamable_http_client import StreamableHttpClient
 
 from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.tool_schemas import parse_mcp_tool_inputs
 from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
 from nexent.core.concurrency import ManagedTaskSpec
 
@@ -22,93 +20,84 @@ from nexent.core.concurrency import ManagedTaskSpec
 logger = logging.getLogger(__name__)
 
 
-def _registered_tool_name(name):
-    """Match the naming contract used by Nexent's MCP registration adapter."""
-    normalized = re.sub(r"[^\w_]", "", name.replace("-", "_"))
-    if normalized and normalized[0].isdigit():
-        normalized = "_" + normalized
-    if keyword.iskeyword(normalized):
-        normalized += "_"
-    return normalized
-
-
 class JiuwenMCPCollection(ManagedMCPToolCollection):
-    """Reuse bounded lifecycle ownership, never instantiate a smolagents MCP adapter."""
+    """Reuse the lazy lifecycle ownership with native Jiuwen MCP clients.
 
-    def __init__(self, *, authorized_tools, observe, user_context=None, emit_result=None, **kwargs):
+    Tool objects are built from the DB-cached ToolConfig schemas without any
+    network I/O; each server connects lazily when one of its tools is first
+    invoked, and the native client is reused for the rest of the run.
+    """
+
+    def __init__(self, *, observe, emit_result=None, user_context=None, **kwargs):
+        kwargs.setdefault("tool_builder", self._build_tool)
         super().__init__(**kwargs)
-        self.authorized_tools = authorized_tools
         self.observe = observe
         self.emit_result = emit_result
         self.terminal_error = None
         self.user_context = deepcopy(dict(user_context or {}))
 
-    async def _run_async_session(self):
-        from nexent.core.agents.orchestration.entry import _normalize_mcp_config
+    def _build_tool(self, tool_config, call_fn):
+        """Build one observed native tool from its cached ToolConfig."""
+        server_key = self._resolve_server_key(tool_config)
+        wire_name = self._wire_name_for(tool_config)
 
-        async with AsyncExitStack() as stack:
-            available = {}
-            for index, raw in enumerate(self.server_parameters):
-                parameters = _normalize_mcp_config(raw)
-                headers = dict(parameters.get("headers") or {})
-                if parameters.get("authorization"):
-                    headers["Authorization"] = parameters["authorization"]
-                config = McpServerConfig(
-                    server_name=f"nexent_{index}", server_path=parameters["url"],
-                    client_type=parameters["transport"], auth_headers=headers,
-                )
-                client = _ConfiguredNativeClient(config, parameters.get("httpx_client_factory"))
-                # Connect and disconnect in this owner task: MCP uses task-bound cancel scopes.
-                stack.push_async_callback(client.disconnect, timeout=self.close_timeout_seconds)
-                try:
-                    if not await client.connect(timeout=self.connect_timeout_seconds):
-                        raise MCPConnectionTimeoutError("Jiuwen MCP connection failed")
-                    cards = await client.list_tools(timeout=self.connect_timeout_seconds)
-                except Exception as exc:
-                    failure = MCPConnectionFailure(url=parameters["url"], transport=parameters["transport"])
-                    failure.__cause__ = exc
-                    # Retain the cause before task-bound MCP cleanup can cancel this owner.
-                    with self._lock:
-                        self._startup_error = failure
-                    raise failure from exc
-                for card in cards:
-                    # The public saved name may be normalized; the proxy keeps the raw wire name.
-                    for name in {card.name, _registered_tool_name(card.name)} - {""}:
-                        available[name] = None if name in available else (client, card)
+        def lazy_call(arguments=None):
+            return self.call_tool(server_key, wire_name, arguments)
 
-            tools = []
-            for tool_config in self.authorized_tools:
-                match = available.get(tool_config.class_name)
-                if match is None:
-                    raise ValueError(f"Authorized MCP tool missing or ambiguous: {tool_config.class_name}")
-                client, remote_card = match
-                properties = remote_card.input_params.get("properties", {})
-                hidden = [name for name in USER_CONTEXT_FIELDS if name in properties]
-                proxy = _ManagedNativeClient(self, client, remote_card.name, hidden, tool_config.params)
-                card = remote_card.model_copy(deep=True)
-                for name in hidden:
-                    card.input_params["properties"].pop(name, None)
-                card.input_params["required"] = [name for name in card.input_params.get("required", [])
-                                                 if name not in hidden]
-                card.name = tool_config.name or tool_config.class_name
-                if tool_config.description:
-                    card.description = tool_config.description
-                tools.append(_ObservedMCPTool(proxy, card, self.observe, self.emit_result))
+        properties = parse_mcp_tool_inputs(tool_config)
+        hidden = [name for name in USER_CONTEXT_FIELDS if name in properties]
+        proxy = _ManagedNativeClient(self, lazy_call, wire_name, hidden, tool_config.params)
+        card_properties = {name: spec for name, spec in properties.items() if name not in hidden}
+        # The DB cache stores only inputSchema["properties"]; the required list
+        # is not persisted, so the card advertises properties without it.
+        input_params = {"type": "object", "properties": card_properties}
+        card = McpToolCard(
+            name=tool_config.name or tool_config.class_name,
+            server_name=tool_config.usage or server_key,
+            description=tool_config.description or "",
+            input_params=input_params,
+        )
+        return _ObservedMCPTool(proxy, card, self.observe, self.emit_result)
 
-            close_event = asyncio.Event()
+    def wrap_tool(self, tool):
+        """Native tools enforce their own deadline inside _ManagedNativeClient."""
+        return tool
+
+    async def _connect_server(self, parameters):
+        """Connect one server with a native Jiuwen client; return (client, live names)."""
+        headers = dict(parameters.get("headers") or {})
+        if parameters.get("authorization"):
+            headers["Authorization"] = parameters["authorization"]
+        config = McpServerConfig(
+            server_name=parameters.get("name") or parameters["url"],
+            server_path=parameters["url"],
+            client_type=parameters["transport"],
+            auth_headers=headers,
+        )
+        client = _ConfiguredNativeClient(config, parameters.get("httpx_client_factory"))
+        # Connect and disconnect in this owner task: MCP uses task-bound cancel scopes.
+        self._stack.push_async_callback(client.disconnect, timeout=self.close_timeout_seconds)
+        try:
+            if not await client.connect(timeout=self.connect_timeout_seconds):
+                raise MCPConnectionTimeoutError("Jiuwen MCP connection failed")
+            cards = await client.list_tools(timeout=self.connect_timeout_seconds)
+        except Exception as exc:
+            failure = MCPConnectionFailure(url=parameters["url"], transport=parameters["transport"])
+            failure.__cause__ = exc
+            # Retain the cause before task-bound MCP cleanup can cancel this owner.
             with self._lock:
-                self._async_close_event = close_event
-                self.tools = tools
-                self._public_collection = SimpleNamespace(tools=tools)
-            if self._close_requested.is_set():
-                close_event.set()
-            self._ready.set()
-            await close_event.wait()
+                if self._startup_error is None:
+                    self._startup_error = failure
+            raise failure from exc
+        return client, {card.name for card in cards}
 
 
 class _ManagedNativeClient:
-    def __init__(self, owner, client, remote_name, hidden_fields=(), configured_arguments=None):
-        self.owner, self.client, self.remote_name = owner, client, remote_name
+    """Lazy proxy that routes calls through the owning collection on demand."""
+
+    def __init__(self, owner, call_fn, remote_name, hidden_fields=(), configured_arguments=None):
+        self.owner, self._call_fn = owner, call_fn
+        self.remote_name = remote_name
         self.hidden_fields = hidden_fields
         self.configured_arguments = deepcopy(dict(configured_arguments or {}))
 
@@ -122,10 +111,14 @@ class _ManagedNativeClient:
         execution = owner.manager.submit(
             "model-tool-io",
             ManagedTaskSpec(task_name="jiuwen-mcp-tool", owner=__name__, close_hook=owner.request_close),
-            owner._call_tool, self.client, self.remote_name, arguments,
+            self._call_fn, arguments,
         )
         try:
             return await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
+        except MCPConnectionTimeoutError:
+            # Lazy connect failed inside the tool call; keep the connection
+            # error instead of misreporting it as the tool deadline.
+            raise
         except asyncio.TimeoutError as exc:
             logger.warning("event=mcp_tool_timeout tool_name=%s timeout_seconds=%s phase=execution",
                            tool_name, owner.tool_timeout_seconds)
