@@ -275,7 +275,6 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
-      ELASTICSEARCH_SERVICE: "http://nexent-gateway:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"

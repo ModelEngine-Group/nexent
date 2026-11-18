@@ -114,6 +114,7 @@ def test_conversation_share_and_pins_are_mounted_by_management():
     ("PATCH", "/api/conversation/1/model_preferences/7"),
     ("GET", "/api/ops/authorization"),
     ("GET", "/api/ops/scope"),
+    ("GET", "/api/indices/kb/documents/error-info"),
 ])
 def test_web_features_are_exposed_only_to_sessions(method, path):
     match = default_registry().match(method, path)

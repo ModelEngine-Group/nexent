@@ -2346,6 +2346,17 @@
     },
     {
       "method": "GET",
+      "path": "/api/indices/{index_name}/documents/error-info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "management-document-error-info-query",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/indices/{index_name}/documents/{path_or_url:path}/error-info",
       "transport": "http",
       "target": "management",
@@ -6306,5 +6317,5 @@
       ]
     }
   ],
-  "revision": "2026-11-18.2"
+  "revision": "2026-11-18.3"
 }
