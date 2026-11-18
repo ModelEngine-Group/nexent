@@ -238,6 +238,12 @@ from management.db.conversation.repository import _parse_history_summary_content
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
 
 
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
     monkeypatch, mock_session_ctx
 ):
@@ -780,7 +786,8 @@ def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_sessio
     session, ctx = mock_session_ctx
     session.scalar.return_value = 1
     monkeypatch.setattr(
-        "management.db.conversation.repository.MAX_CONVERSATIONS_PER_USER", 1
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATIONS_PER_USER=1),
     )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -976,7 +983,10 @@ def test_create_conversation_message_rejects_turn_limit(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.conversation.repository.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATION_TURNS=1),
+    )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
@@ -3753,6 +3763,10 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
 
 
 @pytest.fixture(autouse=True)

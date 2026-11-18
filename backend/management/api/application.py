@@ -140,8 +140,6 @@ async def config_lifespan(_app):
                     await stop_dreaming_scheduler()
             finally:
                 if maintenance_started:
-                    from management.services.evaluation.maintenance import stop as stop_eval_maintenance
-
                     stop_eval_maintenance()
 
 

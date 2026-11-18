@@ -7,6 +7,7 @@ import sys
 
 
 from contracts.errors.exceptions import AccountConflictError
+from management.configuration.runtime import load_system_configuration
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
@@ -67,6 +68,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             raise ValueError(
                 "Password must contain uppercase, lowercase and digit and be at least 8 characters"
             )
+        load_system_configuration()
         account = create_account(email, hash_password(password), db_session=session)
         insert_user_tenant(
             account["user_id"], "", "SU", email, created_by="system", db_session=session

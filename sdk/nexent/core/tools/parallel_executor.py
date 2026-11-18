@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import math
 import threading
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from copy import deepcopy
@@ -48,7 +49,7 @@ class ParallelExecutorTool(Tool):
             ),
         },
         "timeout": {
-            "type": "integer",
+            "type": "number",
             "description": "Per-task timeout in seconds (default 120)",
             "description_zh": "单个任务超时秒数（默认120）",
             "default": 120,
@@ -68,27 +69,28 @@ class ParallelExecutorTool(Tool):
     output_type = "any"
 
     @classmethod
-    def inputs_for_timeout(cls, default_timeout_seconds: int) -> dict:
+    def inputs_for_timeout(cls, default_timeout_seconds: float) -> dict:
         inputs = deepcopy(cls.inputs)
         inputs["timeout"]["default"] = default_timeout_seconds
         inputs["timeout"]["description"] = f"Per-task timeout in seconds (default {default_timeout_seconds})"
         inputs["timeout"]["description_zh"] = f"单个任务超时秒数（默认{default_timeout_seconds}）"
         return inputs
 
-    def __init__(self, default_timeout_seconds: int = 120, *, execution_lane: str = "model-tool-io"):
+    def __init__(self, default_timeout_seconds: float = 120, *, execution_lane: str = "model-tool-io"):
         if (
             isinstance(default_timeout_seconds, bool)
-            or not isinstance(default_timeout_seconds, int)
+            or not isinstance(default_timeout_seconds, (int, float))
+            or not math.isfinite(default_timeout_seconds)
             or default_timeout_seconds <= 0
         ):
-            raise ValueError("default_timeout_seconds must be a positive integer")
+            raise ValueError("default_timeout_seconds must be a finite positive number")
         super().__init__()
         self.default_timeout_seconds = default_timeout_seconds
         self.execution_lane = execution_lane
         self.inputs = self.inputs_for_timeout(default_timeout_seconds)
         self.description_zh = self.description_zh.replace("默认120秒", f"默认{default_timeout_seconds}秒")
 
-    def forward(self, tasks, timeout: int | None = None, max_workers: int = 4):
+    def forward(self, tasks, timeout: float | None = None, max_workers: int = 4):
         """Execute the tasks in parallel.
 
         ``tasks`` is a list where each element is a 2-tuple
@@ -194,7 +196,7 @@ def _execute_tasks(tasks, names, timeout, max_workers, *, lane="model-tool-io"):
     return results
 
 
-def _parallel_executor(tasks, timeout: int = 120, max_workers: int = 4, *, lane="model-tool-io"):
+def _parallel_executor(tasks, timeout: float = 120, max_workers: int = 4, *, lane="model-tool-io"):
     names, has_names = _validate_tasks(tasks)
     if not tasks:
         return []

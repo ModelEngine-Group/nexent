@@ -3,12 +3,12 @@
 
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
-from urllib.error import URLError
+from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, build_opener
 
 import pytest
@@ -31,23 +31,40 @@ def test_ops_isolated_start_and_restart(tmp_path):
         }
     }
     environment.update(
-        PYTHON_DOTENV_DISABLED='1', OPS_PORT=str(port), LOG_LEVEL='info', LOG_DIR=str(tmp_path / 'persistent-logs'),
+        PYTHONPATH=os.pathsep.join((str(backend.parent), str(backend), str(backend.parent / 'sdk'))),
+        PYTHON_DOTENV_DISABLED='1', GATEWAY_AUTH_ENABLED='false', OPS_PORT=str(port), LOG_LEVEL='info', LOG_DIR=str(tmp_path / 'persistent-logs'),
     )
     # Audit the real launcher rather than substituting its application or clients.
     bootstrap = '''
 import importlib.abc
+import platform
 import runpy
 import socket
 import sys
 
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {
-            'management', 'runtime', 'nexent', 'redis',
-            'elasticsearch', 'minio', 'supabase', 'sqlalchemy', 'psycopg2',
+        allowed_base_imports = {
+            'management', 'management.db', 'management.utils',
+            'management.utils.exception_handlers', 'management.utils.request_context',
+            'management.utils.account_passwords',
+            'management.configuration',
+        }
+        allowed_shared_import = (
+            fullname in allowed_base_imports
+            or fullname.startswith('management.db.')
+            or fullname.startswith('management.services.permission.identity')
+            or fullname in {'management.services', 'management.services.permission'}
+            or fullname.startswith('management.configuration.')
+            or fullname == 'nexent' or fullname.startswith('nexent.')
+        )
+        if not allowed_shared_import and fullname.split('.')[0] in {
+            'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
-        if fullname.startswith('infrastructure.') and fullname != 'backend.http.logging':
+        if fullname.startswith('infrastructure.') and fullname not in {
+            'infrastructure.rdb', 'infrastructure.rdb.orm', 'infrastructure.rdb.client',
+        }:
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):
@@ -64,9 +81,12 @@ def audit(event, args):
     if event in {'subprocess.Popen', 'os.system'}:
         raise RuntimeError('Forbidden child command')
 
+# Cache OS metadata before the audit guard; Windows platform probing can spawn cmd.
+if sys.platform == 'win32':
+    platform.uname()
 sys.meta_path.insert(0, BusinessImportGuard())
 sys.addaudithook(audit)
-runpy.run_path('ops_service.py', run_name='__main__')
+runpy.run_module('backend.http.ops_service', run_name='__main__')
 '''
     opener = build_opener(ProxyHandler({}))
     for attempt in range(2):
@@ -96,7 +116,15 @@ runpy.run_path('ops_service.py', run_name='__main__')
                     assert response.status == 200
                     schema = json.load(response)
                     assert schema['info']['title'] == 'Nexent Operations API'
-                    assert schema['paths'] == {}
+                    assert set(schema['paths']) == {
+                        '/system_configurations', '/system_configurations/recommendations',
+                        '/ops/authorization', '/ops/resources', '/ops/scope',
+                    }
+                try:
+                    opener.open(f'http://127.0.0.1:{port}/system_configurations', timeout=2)
+                    raise AssertionError('Anonymous configuration query must be rejected')
+                except HTTPError as error:
+                    assert error.code == 401
             finally:
                 process.terminate()
                 try:

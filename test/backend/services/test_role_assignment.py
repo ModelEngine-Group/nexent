@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from copy import deepcopy
 
 import pytest
-
 from contracts.errors.exceptions import ForbiddenError, RoleAssignmentConflict
 from management.db.identity import membership
 from management.db.identity import roles as repository
@@ -33,6 +32,9 @@ def state(mocker):
     mocker.patch.object(repository, "active_admin_count", return_value=2)
     mocker.patch.object(membership, "active_admin_count", return_value=2)
     mocker.patch.object(repository, "api_only_account", return_value=False)
+    mocker.patch.object(
+        repository, "get_config_snapshot"
+    ).return_value.get.return_value = 1000
     write = mocker.patch.object(
         repository,
         "set_account_profile",
@@ -152,7 +154,8 @@ def test_membership_move_after_lock_requires_retry(state, mocker):
 
 def test_admin_limit_applies_only_to_new_admin_grants(state, mocker):
     members, write = state
-    mocker.patch.object(repository, "active_admin_count", return_value=repository.MAX_ADMINS_PER_TENANT)
+    mocker.patch.object(repository, "get_config_snapshot").return_value.get.return_value = 2
+    mocker.patch.object(repository, "active_admin_count", return_value=2)
 
     with pytest.raises(RoleAssignmentConflict, match="administrator limit"):
         service.replace_roles("actor", "target", ["ADMIN", "OPS"])
@@ -161,6 +164,24 @@ def test_admin_limit_applies_only_to_new_admin_grants(state, mocker):
     members["target"]["roles"] = ["ADMIN"]
     assert service.replace_roles("actor", "target", ["ADMIN", "OPS"])["roles"] == ["ADMIN", "OPS"]
     write.assert_called_once()
+
+
+def test_admin_limit_follows_refreshed_configuration(state, mocker):
+    _members, write = state
+    config = mocker.patch.object(repository, "get_config_snapshot").return_value
+    config.get.side_effect = [2, 3]
+    mocker.patch.object(repository, "active_admin_count", return_value=2)
+
+    with pytest.raises(RoleAssignmentConflict, match="administrator limit"):
+        service.replace_roles("actor", "target", ["ADMIN"])
+
+    write.assert_not_called()
+    assert service.replace_roles("actor", "target", ["ADMIN"])["roles"] == [
+        "ADMIN"
+    ]
+    write.assert_called_once()
+    assert config.get.call_count == 2
+    config.get.assert_called_with("MAX_ADMINS_PER_TENANT")
 
 
 def test_reapplying_same_roles_does_not_write_account(state):

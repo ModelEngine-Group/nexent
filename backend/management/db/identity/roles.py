@@ -1,13 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Atomic role writes with locked authorization and membership invariants."""
 
-from contracts.constants.environment import MAX_ADMINS_PER_TENANT
 from contracts.errors.exceptions import (
     ForbiddenError,
     NotFoundException,
     RoleAssignmentConflict,
 )
 from contracts.roles import normalize_roles, primary_role, roles_from_record
+from management.configuration.runtime import get_config_snapshot
 from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.identity.membership import (
@@ -52,7 +52,8 @@ def replace_member_roles(actor_id, user_id, values, *, legacy=False):
         if (
             "ADMIN" in requested
             and "ADMIN" not in old
-            and active_admin_count(session, target["tenant_id"]) >= MAX_ADMINS_PER_TENANT
+            and active_admin_count(session, target["tenant_id"])
+            >= get_config_snapshot().get("MAX_ADMINS_PER_TENANT")
         ):
             raise RoleAssignmentConflict("Tenant administrator limit reached")
         if old != requested:

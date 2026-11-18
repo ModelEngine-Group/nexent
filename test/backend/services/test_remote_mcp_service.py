@@ -165,6 +165,12 @@ from management.services.mcp.service import (
 )
 # Patch exception classes to ensure tests use correct exceptions
 from management.services.mcp import service as remote_service
+from test.backend.configuration.helpers import system_config_snapshot
+
+patch_import_context(
+    "management.services.mcp.health.get_config_snapshot",
+    lambda: system_config_snapshot(),
+).start()
 bind_import_attribute(remote_service, 'MCPConnectionError', MCPConnectionError)
 bind_import_attribute(remote_service, 'MCPNameIllegal', MCPNameIllegal)
 bind_import_attribute(remote_service, 'McpNotFoundError', McpNotFoundError)
@@ -244,6 +250,8 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "MCP connection failed")
 
     async def test_connection_handshake_timeout_is_normalized(self):
+        from test.backend.configuration.helpers import system_config_snapshot
+
         class SlowConnectClient:
             async def __aenter__(self):
                 await asyncio.sleep(0.05)
@@ -256,7 +264,10 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
                 return []
 
         with patch_import_context("management.services.mcp.service.Client", return_value=SlowConnectClient()), \
-             patch_import_context("management.services.mcp.service.MCP_REQUEST_TIMEOUT_SECONDS", 0.001):
+             patch_import_context(
+                "management.services.mcp.health.get_config_snapshot",
+                lambda: system_config_snapshot(MCP_REQUEST_TIMEOUT_SECONDS=0.001),
+             ):
             with self.assertRaises(MCPConnectionError) as context:
                 await _mcp_protocol_health_check("http://example.com/mcp", {})
 

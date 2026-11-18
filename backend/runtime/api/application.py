@@ -26,6 +26,10 @@ from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.identity_routes import is_runtime_service_request
+from management.configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -68,9 +72,23 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
+
+    async def run_configuration_io(fn):
+        return await runtime_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="system-configuration-refresh",
+                owner="management.configuration.runtime",
+            ),
+            fn,
+        )
+
     from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         if local_trajectory_processor is not None:
             from infrastructure.trace.trajectory_runtime import (
                 conversation_deleted,
@@ -91,11 +109,18 @@ async def runtime_lifespan(_app):
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
         try:
             await stop_agent_automation_scheduler()
-            from management.services.agent.execution import shutdown_agent_stream_tasks
+            from management.services.agent.execution import (
+                shutdown_agent_stream_tasks,
+            )
 
-            pending = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
-            if pending:
-                logger.warning("Agent stream tasks exceeded shutdown grace pending=%s", pending)
+            pending_stream_tasks = await shutdown_agent_stream_tasks(
+                timeout=max(0, shutdown_deadline - time.monotonic())
+            )
+            if pending_stream_tasks:
+                logger.warning(
+                    "Agent stream tasks exceeded shutdown grace pending=%s",
+                    pending_stream_tasks,
+                )
             from nexent.core.agents.sandbox.execution import SandboxPoolManager
 
             sandbox_pool = SandboxPoolManager._instance
@@ -107,15 +132,22 @@ async def runtime_lifespan(_app):
                     local_trajectory_processor.request_stop()
                     await runtime_thread_manager.run(
                         "control-io",
-                        ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                        ManagedTaskSpec(
+                            task_name="trajectory-file-shutdown",
+                            owner="runtime.api.application",
+                        ),
                         local_trajectory_processor.shutdown,
                     )
             finally:
                 try:
-                    await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                    await stop_system_configuration()
                 finally:
-                    clear_default_thread_manager(runtime_thread_manager)
-
+                    try:
+                        await runtime_thread_manager.shutdown(
+                            timeout=max(0, shutdown_deadline - time.monotonic())
+                        )
+                    finally:
+                        clear_default_thread_manager(runtime_thread_manager)
 
 app = create_app(
     title="Nexent Runtime API",

@@ -1,17 +1,20 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared isolated PostgreSQL/FastAPI fixtures for native authentication contracts."""
 
+import asyncio
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock
 
+import psycopg2
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from psycopg2.extensions import parse_dsn
-from sqlalchemy import text
-
 from local_auth import disposable_database
+from psycopg2.extensions import parse_dsn
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(scope="module")
@@ -32,6 +35,7 @@ def native_runtime():
         from contracts.errors.exceptions import AppException
         from management.services.permission.identity import session as helpers
         from management.api.identity import user_management as routes
+        from management.configuration.runtime import stop_system_configuration
         from management.db import models
         from infrastructure.rdb.client import db_client
         from management.services.permission.identity import authentication as auth
@@ -49,8 +53,15 @@ def native_runtime():
             models.TenantInvitationCode,
             models.TenantInvitationRecord,
         ]
-        with db_client.engine.begin() as connection:
-            connection.execute(text("CREATE SCHEMA nexent"))
+        asyncio.run(stop_system_configuration())
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA nexent")
+            cursor.execute(
+                (
+                    ROOT
+                    / "deploy/sql/migrations/v2.9.0_009_system_configuration.sql"
+                ).read_text(encoding="utf-8")
+            )
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
@@ -68,6 +79,7 @@ def native_runtime():
 
         with TestClient(app) as client:
             yield client, auth, helpers, models
+        asyncio.run(stop_system_configuration())
         db_client.engine.dispose()
 
 
@@ -125,10 +137,9 @@ def bearer(token):
 
 def seed_membership_roles(user_id, roles):
     """Fixture setup for identity/API-key contracts, not an authorization bypass in product code."""
-    from sqlalchemy import update
-
     from infrastructure.rdb.client import get_db_session
     from management.db.models import UserAccount
+    from sqlalchemy import update
     with get_db_session() as session:
         session.execute(update(UserAccount).where(UserAccount.user_id == user_id).values(user_roles=roles))
     return True

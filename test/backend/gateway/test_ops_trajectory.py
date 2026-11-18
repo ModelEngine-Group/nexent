@@ -3,6 +3,7 @@
 
 import httpx
 import pytest
+from fastapi import APIRouter
 
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
@@ -20,9 +21,11 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
     monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: SECRET)
     monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: SECRET)
     monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
+    # Exercise forwarding and authentication without running configuration business logic.
+    monkeypatch.setattr(ops_application, "system_configuration_router", APIRouter())
     ops = ops_application.create_app()
 
-    @ops.api_route("/{path:path}", methods=["GET", "POST", "PUT"])
+    @ops.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH"])
     async def capture_identity(path: str):
         return {"identity": trusted_identity("session")["user_id"]}
 
@@ -44,6 +47,9 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
         async with edge.router.lifespan_context(edge):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=edge), base_url="http://edge") as client:
                 for method, path in (
+                    ("GET", "/api/system_configurations"),
+                    ("PATCH", "/api/system_configurations"),
+                    ("POST", "/api/system_configurations/recommendations"),
                     ("GET", "/api/trajectory/records"),
                     ("POST", "/api/trajectory/cleanup"),
                     ("PUT", "/api/trajectory/cleanup/schedule"),

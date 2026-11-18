@@ -5,9 +5,15 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
-
 from contracts.errors.exceptions import AccountConflictError
 from management.cli.account import bootstrap_super_admin
+
+
+@pytest.fixture(autouse=True)
+def configuration_loader(mocker):
+    return mocker.patch(
+        "management.cli.account.load_system_configuration"
+    )
 
 
 @pytest.mark.parametrize("check_only", [True, False])
