@@ -24,7 +24,7 @@ from contracts.conversation import ConversationTarget, HistoryItem, MessageAnnot
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from contracts.agent_prompt import normalize_imported_agent_bundle
 
 
 @dataclass(frozen=True)

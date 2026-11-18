@@ -111,7 +111,7 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
 
 @pytest.mark.parametrize("protocol", ["native", "text"])
 def test_clarification_terminal_history_before_and_after_submission(monkeypatch, protocol):
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import ConversationMessage, ConversationMessageUnit
     from management.db.conversation.repository import create_conversation_message, get_conversation_history
     from management.services.conversation.service import get_conversation_history_service

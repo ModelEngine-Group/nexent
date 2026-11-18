@@ -9,9 +9,9 @@ from uuid import uuid4
 
 import pytest
 from google.protobuf.json_format import ParseDict
-from infrastructure.observability.trajectory_otlp import span_request
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_otlp import span_request
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
@@ -127,7 +127,7 @@ def test_server_message_identity_reaches_root_and_manifest(capture):
 
 def test_local_span_duration_is_monotonic_and_does_not_change_remote_span(capture, monkeypatch):
     clock = SimpleNamespace(value=10.0)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.perf_counter", lambda: clock.value)
     remote = InMemorySpanExporter()
     capture.provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(remote)))
     with capture.tracer.start_as_current_span("agent.run"):
@@ -146,7 +146,7 @@ def test_local_span_duration_is_monotonic_and_does_not_change_remote_span(captur
 @pytest.mark.parametrize("elapsed", [-1.0, float("nan"), float("inf")])
 def test_invalid_local_clock_keeps_completed_business_and_unknown_duration(capture, monkeypatch, elapsed):
     clock = SimpleNamespace(value=10.0)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.perf_counter", lambda: clock.value)
     with capture.tracer.start_as_current_span("agent.run"):
         clock.value += elapsed
     assert capture.processor.force_flush(2000)
@@ -159,7 +159,7 @@ def test_invalid_local_clock_keeps_completed_business_and_unknown_duration(captu
 @pytest.mark.parametrize("duration", [0, 7])
 def test_sdk_reported_duration_takes_priority_over_local_observer(capture, monkeypatch, duration):
     clock = SimpleNamespace(value=10.0)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.perf_counter", lambda: clock.value)
     with capture.tracer.start_as_current_span("agent.run", attributes={"nexent.duration_ms": duration}):
         clock.value = 11.0
     assert capture.processor.force_flush(2000)
@@ -170,7 +170,7 @@ def test_sdk_reported_duration_takes_priority_over_local_observer(capture, monke
 @pytest.mark.parametrize("prefix", ["", "nexent.local."])
 def test_sdk_unavailable_duration_prevents_local_fallback(capture, monkeypatch, prefix):
     clock = SimpleNamespace(value=10.0)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.perf_counter", lambda: clock.value)
     with capture.tracer.start_as_current_span(
         "agent.run", attributes={f"{prefix}nexent.availability.duration_ms": "not_captured"},
     ):
@@ -244,7 +244,7 @@ def test_invocation_ownership_survives_technical_spans_and_remote_projection(cap
 @pytest.mark.parametrize("business_status", ["completed", "failed", "cancelled", "interrupted"])
 @pytest.mark.parametrize("serialization_failed", [False, True])
 def test_root_capture_preserves_business_outcome(capture, monkeypatch, business_status, serialization_failed):
-    from infrastructure.observability import trajectory_processor as module
+    from infrastructure.trace import trajectory_processor as module
 
     def fail_serialization(span, **kwargs):
         raise ValueError("Controlled invalid URL or unsupported local payload")

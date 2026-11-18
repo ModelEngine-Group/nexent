@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import CaptureIdentity
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import CaptureIdentity
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Decision
 
@@ -87,7 +87,7 @@ def test_end_serialization_failure_keeps_terminal_outcome_and_releases_active_sp
     provider = TracerProvider(shutdown_on_exit=False)
     provider.add_span_processor(processor)
     mocker.patch(
-        "infrastructure.observability.trajectory_processor.span_request",
+        "infrastructure.trace.trajectory_processor.span_request",
         side_effect=ValueError("encoding"),
     )
     try:
@@ -116,7 +116,7 @@ def test_start_failure_and_capacity_limit_do_not_escape_to_agent(
     processor.on_start(span)
     span.set_attributes.assert_not_called()
     mocker.patch(
-        "infrastructure.observability.trajectory_processor.trace.get_current_span",
+        "infrastructure.trace.trajectory_processor.trace.get_current_span",
         return_value=SimpleNamespace(attributes={"nexent.trajectory_id": "run"}),
     )
     processor._active = dict.fromkeys(range(10000))
@@ -180,7 +180,7 @@ def test_active_snapshot_failure_cannot_retain_or_publish_generated_body(
     }
     payload = request(("output.value", True))
     mocker.patch(
-        "infrastructure.observability.trajectory_processor.span_request",
+        "infrastructure.trace.trajectory_processor.span_request",
         return_value=payload,
     )
     if failure == "large":
@@ -257,7 +257,7 @@ def test_worker_recovery_scan_resumes_at_bounded_turn_without_rechecking_old_run
     }
     store.recover.side_effect = RuntimeError("active elsewhere")
     mocker.patch(
-        "infrastructure.observability.trajectory_processor.time.monotonic",
+        "infrastructure.trace.trajectory_processor.time.monotonic",
         return_value=100,
     )
     mocker.patch.object(processor._queue, "empty", side_effect=[True, False])

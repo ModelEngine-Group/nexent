@@ -40,7 +40,7 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/ops_service.py
+            - backend/http/ops_service.py
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -62,9 +62,11 @@ spec:
                   fieldPath: metadata.name
             - name: LOG_DIR
               value: "/mnt/nexent-data/logs/$(POD_NAME)"
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
             - name: OPS_PORT
               value: {{ .Values.service.port | quote }}
-            {{- range list "LOG_LEVEL" "IS_DEBUG" "LOG_MAX_BYTES" "LOG_ROTATION_INTERVAL" "LOG_BACKUP_COUNT" "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB" "NEXENT_POSTGRES_PASSWORD" "JWT_SECRET" "JWT_ISSUER" }}
+            {{- range list "LOG_LEVEL" "IS_DEBUG" "LOG_MAX_BYTES" "LOG_ROTATION_INTERVAL" "LOG_BACKUP_COUNT" "REDIS_URL" }}
             - name: {{ . }}
               valueFrom:
                 secretKeyRef:
@@ -72,19 +74,23 @@ spec:
                   key: {{ . }}
                   optional: true
             {{- end }}
-            {{- range list "POSTGRES_HOST" "POSTGRES_USER" "POSTGRES_DB" "POSTGRES_PORT" "NEXENT_POSTGRES_PASSWORD" "REDIS_URL" "JWT_SECRET" }}
+            {{- range list "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB" "JWT_ISSUER" }}
+            - name: {{ . }}
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: {{ . }}
+            {{- end }}
+            {{- range list "NEXENT_POSTGRES_PASSWORD" "JWT_SECRET" "GATEWAY_SIGNING_SECRET" }}
             - name: {{ . }}
               valueFrom:
                 secretKeyRef:
-                  name: nexent-env
+                  name: nexent-secrets
                   key: {{ . }}
-            {{- end }}
-            - name: JWT_ISSUER
-              valueFrom:
-                secretKeyRef:
-                  name: nexent-env
-                  key: JWT_ISSUER
+                  {{- if eq . "GATEWAY_SIGNING_SECRET" }}
                   optional: true
+                  {{- end }}
+            {{- end }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: PYTHON_DOTENV_DISABLED

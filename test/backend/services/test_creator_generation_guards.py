@@ -14,7 +14,7 @@ from contracts.errors.exceptions import (
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
 )
-from management.services.agent.run_state import RuntimeStateService
+from infrastructure.redis.run_state import RuntimeStateService
 from management.services.conversation import creator_runtime
 from management.services.conversation.creator_runtime import CreatorControl
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
@@ -23,7 +23,7 @@ from services import nl2skill_service
 
 def test_creator_redis_claim_lease_and_stale_generation_fences(monkeypatch):
     monkeypatch.setattr(
-        "management.services.agent.run_state.RUNTIME_STATE_REDIS_URL",
+        "infrastructure.redis.run_state.RUNTIME_STATE_REDIS_URL",
         "redis://controlled-fixture",
     )
     state = RuntimeStateService()

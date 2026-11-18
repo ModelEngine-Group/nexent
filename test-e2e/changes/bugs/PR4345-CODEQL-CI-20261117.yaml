@@ -1,0 +1,61 @@
+schema_version: '1.0'
+change:
+  change_id: PR4345-CODEQL-CI-20261117
+  change_type: bugfix
+  bug_id: PR4345-CODEQL-CI-20261117
+  title: Remove credential-derived user logging and reconcile Gateway CI regressions
+  description: Use a static user-update event message and preserve strict Gateway
+    flag validation while updating relocated and multi-role regression inputs. Shell
+    orchestration tests replace calls to retired host Python migration APIs.
+  observed_behavior: CodeQL alert522 reports credential-derived actor data reaching
+    user update logging; CI job133120061166 reports15 failing test files after service
+    relocation and role/schema integration.
+  expected_behavior: Ordinary user update logs contain only an operation message;
+    request behavior and structured audit fields are preserved. Tests exercise current
+    Management, account-role and Shell/worker ownership without restoring obsolete
+    APIs or disabling authentication.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing user route tests did not check ordinary log contents; historical
+      tests retained removed import paths, single-role fixtures and host-only migration
+      APIs.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - GW-AUTH
+    - AUTH-LOCAL
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Static ordinary update log, unchanged HTTP payload/service/audit behavior.
+    - Strict true/false authentication flags are read directly in a single constant assignment.
+    - Account role lists, no downstream credential fallback, explicit allowlist rejection
+      and canonical service ownership.
+    - Shell migration environment/address rules, source preservation until committed
+      result, bounded startup, source storage and owned resource cleanup.
+    test_selectors:
+    - test/backend/app/test_user_update_logging.py
+    - test/backend/configs/test_auth_boundary_configuration.py
+    - test/backend/management/test_gateway_identity_lookup.py
+    - test/backend/management/test_production_identity_boundary.py
+    - test/backend/services/test_auth_migration_settings.py
+    - test/backend/services/test_auth_migration_cleanup.py
+    - test/backend/services/test_auth_migration_container.py
+    - test/backend/services/test_auth_migration_kubernetes.py
+    - test/backend/services/test_auth_migration_legacy_stack.py
+    reason: 'No formal contract changes: UT captures log sink data, same-semantics
+      helper extraction and corrected test isolation/ownership. Existing formal identity
+      and migration protocols are unchanged; no duplicate D1 or new live deployment
+      is required.'
+  notes: Baseline1a3f1773d in feat-gateway-independent-image. SPEC nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-gateway-independent-image/task.md.
+    Changes do not touch workflows, SQL migrations, external authentication policy,
+    live services or formal case contracts.

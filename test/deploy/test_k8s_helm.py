@@ -20,7 +20,7 @@ APPLICATION_DEPLOYMENTS = {
     "nexent-config",
     "nexent-data-process",
     "nexent-mcp",
-    "nexent-northbound",
+    "nexent-gateway",
     "nexent-runtime",
     "nexent-supabase-auth",
     "nexent-supabase-db",
@@ -40,7 +40,7 @@ APPLICATION_SINGLE_REPLICA = {
     "nexent-mcp",
     "nexent-config",
     "nexent-data-process",
-    "nexent-northbound",
+    "nexent-gateway",
     "nexent-runtime",
     "nexent-supabase-kong",
     "nexent-supabase-auth",
@@ -49,7 +49,6 @@ APPLICATION_SINGLE_REPLICA = {
 STARTUP_RECOVERY_DEPLOYMENTS = {
     "nexent-config",
     "nexent-data-process",
-    "nexent-northbound",
     "nexent-runtime",
 }
 APPLICATION_PVCS = {
@@ -263,6 +262,8 @@ def _instrument_shell_function(path: Path, function_name: str) -> None:
 
 def _application_dynamic_args() -> list[str]:
     return [
+        "--set",
+        "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
         "--set",
         "global.sharedStorage.mode=dynamic",
         "--set",
@@ -634,7 +635,7 @@ def test_deploy_and_uninstall_scripts_have_valid_shell_syntax() -> None:
 
 @pytest.mark.parametrize(
     ("component", "port"),
-    (("nexent-config", 5010), ("nexent-runtime", 5014), ("nexent-northbound", 5013)),
+    (("nexent-config", 5010), ("nexent-runtime", 5014), ("nexent-gateway", 5013)),
 )
 def test_backend_charts_declare_delayed_process_health_probes(component: str, port: int) -> None:
     chart = APPLICATION_CHART_SOURCE / "charts" / component
@@ -871,7 +872,7 @@ def test_default_deploy_bootstraps_while_paused_then_activates_application(
             "nexent-config",
             "nexent-runtime",
             "nexent-mcp",
-            "nexent-northbound",
+            "nexent-gateway",
             "nexent-web",
         )
     ]

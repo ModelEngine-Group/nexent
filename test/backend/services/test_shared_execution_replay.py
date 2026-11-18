@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from infrastructure.streaming.replay import CompactReplay, replay_after, subscribe_shared_checkpoint
+from management.services.agent.replay import CompactReplay, replay_after, subscribe_shared_checkpoint
 
 
 def checkpoint(entries, generation="run", cursor="1-0"):

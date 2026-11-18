@@ -30,7 +30,7 @@ from contracts.errors.exceptions import (
 )
 from contracts.roles import has_any_role, roles_from_record
 from contracts.tool import MCPConfigRequest
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.mcp.market import (

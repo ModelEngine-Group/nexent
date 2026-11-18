@@ -18,7 +18,7 @@ def runtime_module(monkeypatch):
     app = Mock()
     app.get.return_value = lambda function: function
     stubs = {
-        "management.utils.app_factory": {"create_app": Mock(return_value=app)},
+        "backend.http.server.app_factory": {"create_app": Mock(return_value=app)},
         "runtime.api.agent.execution": {"agent_runtime_router": Mock()},
         "management.api.automation.agent_automation": {"conversation_automation_router": Mock(), "router": Mock()},
         "runtime.api.evaluation.execution": {"router": Mock()},
@@ -28,14 +28,15 @@ def runtime_module(monkeypatch):
         "management.api.conversation.conversation_share": {"router": Mock()},
         "runtime.api.file.upload": {"file_management_runtime_router": Mock()},
         "runtime.api.skill.creation": {"skill_creator_router": Mock()},
-        "middleware.exception_handler": {"ExceptionHandlerMiddleware": Mock()},
-        "infrastructure.concurrency": {"runtime_thread_manager": manager},
         "management.configuration.runtime": {
             "start_system_configuration": AsyncMock(),
             "stop_system_configuration": AsyncMock(),
         },
-        "management.services.agent.run_state": {"runtime_state_service": Mock()},
-        "infrastructure.observability.bootstrap": {"local_trajectory_processor": processor},
+        "runtime.api.exception_handler": {"ExceptionHandlerMiddleware": Mock()},
+        "runtime.api.identity_routes": {"is_runtime_service_request": Mock()},
+        "runtime.thread_management": {"runtime_thread_manager": manager},
+        "infrastructure.redis.run_state": {"runtime_state_service": Mock()},
+        "infrastructure.trace.bootstrap": {"local_trajectory_processor": processor},
         "management.services.agent.execution": {"shutdown_agent_stream_tasks": AsyncMock(return_value=[])},
         "management.services.conversation.creator_runtime": {"shutdown_creator_streams": AsyncMock(return_value=0)},
         "nexent.core.agents.sandbox.execution": {"SandboxPoolManager": SimpleNamespace(_instance=None)},

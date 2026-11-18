@@ -8,13 +8,12 @@ from contextlib import suppress
 
 from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
-from infrastructure.nexent_output import adapt_nexent_stream
+from infrastructure.redis.run_state import runtime_state_service
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from management.services.agent.run_state import runtime_state_service
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (
     prepare_creation_history,
@@ -31,6 +30,7 @@ from management.services.conversation.creator_runtime import (
     resume_creator,
 )
 from management.services.conversation.creator_targets import authorize_target
+from management.services.conversation.nexent_output import adapt_nexent_stream
 from management.services.conversation.service import save_message, update_message_status
 from nexent.core.concurrency import run_blocking
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context

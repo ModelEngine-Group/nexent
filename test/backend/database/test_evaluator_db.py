@@ -18,7 +18,7 @@ Targets
 * ``publish_evaluator`` – first-publish sets ``version_group_id``.
 
 All tests drive the logic by injecting a MagicMock ``session`` through the
-``management.db.client.get_db_session`` context-manager helper (a pattern borrowed
+``infrastructure.rdb.client.get_db_session`` context-manager helper (a pattern borrowed
 from the existing ``test_agent_evaluation_service`` suite).  A dedicated
 ``_SessionHarness`` helper class wires the common ``session.query(...)`` chain
 to return configurable mock rows so each branch path can be exercised with
@@ -130,9 +130,9 @@ def _install_stubs():
     _ex_mod = mk_mod("contracts.errors.exceptions", AppException=_AppException)
     _consts_pkg.exceptions = _ex_mod
 
-    # management.db.client.get_db_session – wired lazily by the harness per test.
+    # infrastructure.rdb.client.get_db_session – wired lazily by the harness per test.
     _db_pkg = _register_package("database")
-    _dc_mod = mk_mod("management.db.client")
+    _dc_mod = mk_mod("infrastructure.rdb.client")
     _dc_mod.get_db_session = None  # patched per test
     _db_pkg.client = _dc_mod
 
@@ -158,10 +158,10 @@ def evaluator_mod():
     The module-under-test is loaded by ``importlib.util.spec_from_file_location``
     because: (1) the ``database`` package on ``sys.path`` has a real
     ``__init__.py`` that pulls in SQLAlchemy-heavy imports; (2) we need
-    ``management.db.client`` and ``management.db.models`` to resolve to our stubs
+    ``infrastructure.rdb.client`` and ``management.db.models`` to resolve to our stubs
     instead of the real implementations.  Using ``spec_from_file_location``
     lets us skip the ``database`` package-import step and still satisfy the
-    ``from management.db.client import get_db_session`` line in the module.
+    ``from infrastructure.rdb.client import get_db_session`` line in the module.
 
     Stubs are pre-installed at module-collection time (see ``_install_stubs``
     above) and captured in ``_INSTALLED`` — no ``monkeypatch`` undo is needed
@@ -622,9 +622,9 @@ class _SessionHarness:
         """Patch ``evaluator_mod.get_db_session`` to yield our harness session.
 
         The patch targets the import-time binding inside the module under test
-        rather than ``management.db.client`` because Python's ``from X import Y``
+        rather than ``infrastructure.rdb.client`` because Python's ``from X import Y``
         statement copies the reference at import time, so a later assignment
-        to ``management.db.client.get_db_session`` would be invisible to the
+        to ``infrastructure.rdb.client.get_db_session`` would be invisible to the
         already-loaded module.
         """
         sess = self.build_session()
@@ -636,9 +636,9 @@ class _SessionHarness:
         target = self.evaluator_mod
         old = getattr(target, "get_db_session", None)
         target.get_db_session = _fake_cm
-        # Also keep management.db.client patched for any nested code path
+        # Also keep infrastructure.rdb.client patched for any nested code path
         try:
-            from management.db import client as _client
+            from infrastructure.rdb import client as _client
 
             _client_old = getattr(_client, "get_db_session", None)
             _client.get_db_session = _fake_cm
@@ -650,7 +650,7 @@ class _SessionHarness:
             if old is not None:
                 target.get_db_session = old
             try:
-                from management.db import client as _client2
+                from infrastructure.rdb import client as _client2
 
                 if _client_old is not None:
                     _client2.get_db_session = _client_old

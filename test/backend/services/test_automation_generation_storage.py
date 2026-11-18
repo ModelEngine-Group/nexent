@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from contracts.conversation import MessageRequest
-from management.services.agent import run_state
+from infrastructure.redis import run_state
 from management.services.automation import conversation
 
 

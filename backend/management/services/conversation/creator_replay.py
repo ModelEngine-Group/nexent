@@ -3,7 +3,7 @@
 
 from redis.exceptions import RedisError
 
-from infrastructure.streaming.replay import subscribe_shared_checkpoint
+from management.services.agent.replay import subscribe_shared_checkpoint
 
 
 async def creator_checkpoint_stream(service, channel, generation, user_id, conversation_id):

@@ -30,7 +30,7 @@ from management.services.conversation.agent_history import (
     list_agent_group_conversations,
     list_agent_groups,
 )
-from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from contracts.clarification import ClarificationResponse
 from contracts.errors.exceptions import UnauthorizedError
 from management.services.conversation.creation_mode import confirm_creation_mode

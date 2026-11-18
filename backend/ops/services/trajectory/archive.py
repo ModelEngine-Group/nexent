@@ -8,16 +8,16 @@ import os
 from contextlib import contextmanager
 from datetime import timedelta
 
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
     prefix_hash,
 )
-from infrastructure.observability.trajectory_sources import (
+from infrastructure.trace.trajectory_sources import (
     unverified_sources,
     verified_sources,
 )
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     parse_time,
     timestamp,

@@ -5,8 +5,8 @@ import asyncio
 import json
 import time
 
-from infrastructure.runtime_output import is_runtime_event
-from infrastructure.creator_events import CreatorAnswer, creator_event_content
+from management.services.conversation.runtime_output import is_runtime_event
+from management.services.conversation.creator_events import CreatorAnswer, creator_event_content
 from management.db.conversation.repository import checkpoint_creator_message
 from nexent.core.concurrency import run_blocking
 

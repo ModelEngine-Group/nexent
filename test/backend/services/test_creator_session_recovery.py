@@ -410,7 +410,7 @@ async def test_duplicate_request_id_does_not_create_another_conversation(store):
 
 @pytest.mark.asyncio
 async def test_truncated_local_buffer_recovers_from_the_complete_memory_checkpoint(store, monkeypatch):
-    from infrastructure.streaming import channels
+    from management.services.agent import channels
 
     saved = [
         {"unit_type": "final_answer", "unit_index": i, "unit_content": str(i)}

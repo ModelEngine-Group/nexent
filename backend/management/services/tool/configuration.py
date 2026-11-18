@@ -18,7 +18,7 @@ from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError,
 from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
 from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
-from management.db.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
 from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service
@@ -27,7 +27,7 @@ from management.db.tool.repository import check_tool_list_initialized, create_or
 from management.db.identity.user_tenant import get_user_email_map
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.file.service import validate_urls_access
 from management.services.knowledge_base.service import (

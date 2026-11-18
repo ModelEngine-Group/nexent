@@ -32,7 +32,7 @@ from management.services.skill.stream_parser import SkillStreamParser
 from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency import run_blocking
 from management.services.agent.system import system_agent_provider
 from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls

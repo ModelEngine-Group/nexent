@@ -7,7 +7,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
     parse_time,
@@ -145,7 +145,7 @@ def test_compensation_does_not_hide_database_failure(mocker):
 def test_unchanged_archive_reuses_checksum_but_file_changes_are_rejected(
     archived, mocker
 ):
-    from infrastructure.observability.trajectory_io import prefix_hash
+    from infrastructure.trace.trajectory_io import prefix_hash
     from ops.services.trajectory.primitives import QueryError
 
     store, _, run_id, row = archived

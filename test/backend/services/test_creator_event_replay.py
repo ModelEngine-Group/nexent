@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from infrastructure.creator_events import CreatorAnswer, creator_event_content, unit_event, unpack_creator_event
-from infrastructure.nexent_output import normalize_nexent_history
-from infrastructure.streaming.channels import StreamingChannel
+from management.services.conversation.creator_events import CreatorAnswer, creator_event_content, unit_event, unpack_creator_event
+from management.services.conversation.nexent_output import normalize_nexent_history
+from management.services.agent.channels import StreamingChannel
 from management.services.conversation import creator_checkpoints as checkpoints
 from management.services.conversation import creator_runtime as runtime
 from test.backend.services.test_creator_session_recovery import store  # noqa: F401
@@ -76,7 +76,7 @@ async def read(store):
 async def test_local_complete_checkpoint_wins_over_database_and_trimmed_tail(recovery, monkeypatch):
     channel = StreamingChannel(91, recovery.user, history_size=1)
     channel.generation = "owned"
-    monkeypatch.setattr("infrastructure.streaming.channels.runtime_state_service.append_stream_event_async", AsyncMock())
+    monkeypatch.setattr("management.services.agent.channels.runtime_state_service.append_stream_event_async", AsyncMock())
     events = [{"type": "final_answer", "content": p, "answer_phase": "delta", "step_id": "s"}
               for p in ["first ", "second ", "last"]]
     for i, event in enumerate(events):

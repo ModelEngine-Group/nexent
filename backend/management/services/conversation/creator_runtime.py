@@ -16,10 +16,10 @@ from contracts.errors.exceptions import (
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
 )
-from infrastructure.concurrency import runtime_thread_manager
-from infrastructure.streaming.channels import streaming_channel_manager
-from infrastructure.runtime_output import is_runtime_event
-from infrastructure.creator_events import unit_event
+from runtime.thread_management import runtime_thread_manager
+from management.services.agent.channels import streaming_channel_manager
+from management.services.conversation.runtime_output import is_runtime_event
+from management.services.conversation.creator_events import unit_event
 from management.services.conversation.creator_replay import creator_checkpoint_stream
 from management.db.conversation.repository import (
     checkpoint_creator_message,
@@ -30,7 +30,7 @@ from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.agents.orchestration.entry import DeferredAgentRun
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, run_blocking
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
