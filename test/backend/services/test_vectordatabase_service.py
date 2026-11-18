@@ -260,6 +260,9 @@ setattr(nexent_mock, 'core', nexent_core_module)
 
 nexent_core_gateway_module = _create_package_mock('nexent.core.gateway')
 nexent_core_gateway_modality_module = types.ModuleType('nexent.core.gateway.modality')
+nexent_core_gateway_modality_module.__path__ = [
+    str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/gateway/modality")
+]
 nexent_core_gateway_modality_module.EmbeddingAdapter = MockBaseEmbedding
 nexent_core_gateway_module.modality = nexent_core_gateway_modality_module
 nexent_core_module.gateway = nexent_core_gateway_module

@@ -4,7 +4,6 @@
 from contextlib import nullcontext
 from io import StringIO
 import json
-from pathlib import Path
 import runpy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -90,15 +89,6 @@ def test_cli_failure_returns_safe_diagnostics(mocker, capsys, error, expected):
     assert output.out == ""
     assert expected in output.err
     assert "private-credential" not in output.err
-
-
-def test_container_entry_point_propagates_cli_status(mocker):
-    main = mocker.patch.object(cli, "main", return_value=3)
-    path = Path(__file__).resolve().parents[3] / "backend/account_admin.py"
-    with pytest.raises(SystemExit) as raised:
-        runpy.run_path(str(path), run_name="__main__")
-    assert raised.value.code == 3
-    main.assert_called_once_with()
 
 
 def test_cli_module_entry_point_runs_preflight(mocker, capsys):

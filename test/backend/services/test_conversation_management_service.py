@@ -32,6 +32,7 @@ def _stub_nexent_openai_model():
             self.generated = messages
             return types.SimpleNamespace(content="The Title")
     mod.OpenAIModel = Stub
+    mod.OpenAILongContextModel = Stub
     sys.modules["nexent.core.models"] = mod
 
 _stub_nexent_openai_model()

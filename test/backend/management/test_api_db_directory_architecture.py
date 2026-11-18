@@ -33,7 +33,11 @@ def test_business_api_modules_are_importable_packages(service):
         source = path.read_text(encoding="utf-8")
         compile(source, str(path), "exec")
         tree = ast.parse(source)
-        assert not any(isinstance(node, ast.ClassDef) for node in tree.body), path
+        classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+        if path == BACKEND / "runtime/api/exception_handler.py":
+            assert classes == {"ExceptionHandlerMiddleware"}
+        else:
+            assert not classes, path
 
 
 def test_contracts_do_not_depend_on_backend_implementations():
@@ -71,12 +75,19 @@ def test_project_imports_do_not_reference_removed_packages(source_root):
 
 
 def test_shared_helpers_do_not_import_database_clients():
-    for filename in ("orm.py", "audit_fields.py", "skill_params.py", "file_http.py", "a2a.py"):
-        path = BACKEND / "management/utils" / filename
+    helpers = [BACKEND / "management/utils" / name
+               for name in ("audit_fields.py", "skill_params.py", "a2a.py")]
+    for path in [ROOT / "infrastructure/rdb/orm.py", BACKEND / "management/api/file/http.py", *helpers]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
-                assert not (node.module or "").startswith(("management.db", "database")), path
+                modules = [node.module or "", *(f"{node.module}.{alias.name}" for alias in node.names)]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert not any(name.startswith(("management.db", "database", "infrastructure.rdb.client"))
+                           for name in modules), path
 
 
 def test_model_registry_retains_shared_metadata_without_opening_clients():

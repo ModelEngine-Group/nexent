@@ -73,7 +73,10 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
+object_storage_stub = types.ModuleType("infrastructure.object_storage.client")
+object_storage_stub.MinioClient = MagicMock(return_value=minio_client_mock)
+object_storage_stub.minio_client = minio_client_mock
+sys.modules[object_storage_stub.__name__] = object_storage_stub
 
 # Stub out the database package hierarchy expected by auth_utils
 sys.modules['database'] = MagicMock()

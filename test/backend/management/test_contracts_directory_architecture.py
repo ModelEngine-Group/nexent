@@ -70,6 +70,8 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
     assert {p.stem for p in CONTRACTS.glob("*.py") if p.name != "__init__.py"} == {
         "a2a",
         "agent",
+        "agent_prompt",
+        "runtime_metadata",
         "authentication",
         "automation",
         "clarification",
@@ -134,6 +136,8 @@ def test_error_definitions_have_one_canonical_directory():
         "messages.py",
         "exceptions.py",
         "trajectory.py",
+        "capabilities.py",
+        "ingestion.py",
     }
     assert not any(
         (CONTRACTS / name).exists()
