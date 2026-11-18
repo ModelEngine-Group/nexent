@@ -940,9 +940,57 @@ class TestResolveTenantIdFromUserTenantRecord:
         record = {"tenant_id": "", "user_role": "ASSET_OWNER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.ASSET_OWNER_TENANT_ID
 
-    def test_empty_tenant_other_role_falls_back_to_default(self):
+    def test_empty_tenant_db_has_real_tenant_uses_it(self, monkeypatch):
+        """Runtime guard: when DB has a real tenant it wins over DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: "real-tenant-from-db")
+        record = {"tenant_id": None, "user_role": "USER", "user_id": "suadmin"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == "real-tenant-from-db"
+
+    def test_empty_tenant_db_lookup_falls_back_to_default(self, monkeypatch):
+        """When DB lookup returns None (no real tenant yet) we land on DEFAULT_TENANT_ID."""
+        set_import_attribute(monkeypatch, au, "_lookup_first_active_tenant",
+                            lambda: None)
         record = {"tenant_id": None, "user_role": "USER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID
+
+
+class TestLookupFirstActiveTenant:
+    """Tests for _lookup_first_active_tenant — DB-side runtime guard."""
+
+    def setup_method(self):
+        au.DEFAULT_TENANT_ID = "tenant_id"
+        au.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+    def test_returns_first_real_tenant_from_db(self, monkeypatch):
+        """Happy path: session.execute returns a real tenant_id that filters pass."""
+        session = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+        session.execute.return_value = result
+
+        ctx_mgr = MagicMock()
+        ctx_mgr.__enter__.return_value = session
+        get_db_session = MagicMock(return_value=ctx_mgr)
+
+        # _lookup_first_active_tenant imports get_db_session lazily from
+        # management.db.client — patch that module attribute before the
+        # lazy import fires.
+        import management.db.client as _dbc
+        monkeypatch.setattr(_dbc, "get_db_session", get_db_session)
+
+        tid = au._lookup_first_active_tenant()
+        assert tid == "fe7f7c1e-e113-4976-8a48-773b1304b00b"
+
+    def test_db_lookup_exception_returns_none(self, monkeypatch):
+        """try/except swallow any DB failure and return None so caller can fallback."""
+        import management.db.client as _dbc
+        monkeypatch.setattr(
+            _dbc, "get_db_session",
+            MagicMock(side_effect=RuntimeError("db down")),
+        )
+
+        assert au._lookup_first_active_tenant() is None
 
 
 class TestGetCurrentUserContext:
