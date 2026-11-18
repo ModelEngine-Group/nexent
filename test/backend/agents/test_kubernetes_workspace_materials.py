@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import os
+import stat
 from dataclasses import replace
 
 import pytest
@@ -16,6 +17,19 @@ def trusted_runtime_identity(monkeypatch):
         monkeypatch.setattr('runtime.sandbox_workspace.os.chown', lambda *args, **kwargs: None)
 
 
+@pytest.fixture
+def restore_workspace_write_permission(tmp_path):
+    yield
+    if os.name == 'posix':
+        # Sealed directories must be writable by the test user for tmp_path cleanup.
+        for path in tmp_path.rglob('*'):
+            if not path.is_symlink() and path.is_dir():
+                mode = stat.S_IMODE(path.stat().st_mode)
+                if not mode & stat.S_IWUSR:
+                    path.chmod(mode | stat.S_IWUSR)
+
+
+@pytest.mark.usefixtures('restore_workspace_write_permission')
 def test_staging_normalizes_only_private_shell_copy_and_child_cleanup_preserves_parent(tmp_path, monkeypatch):
     # Identity hashing has separate tests; keep filesystem fixture paths short on Windows.
     monkeypatch.setattr('runtime.sandbox_workspace._business_key', lambda value: value)
@@ -40,6 +54,7 @@ def test_staging_normalizes_only_private_shell_copy_and_child_cleanup_preserves_
         workspace.cleanup_skills(str(run), '../foreign')
 
 
+@pytest.mark.usefixtures('restore_workspace_write_permission')
 def test_sealing_materials_keeps_outputs_writable_and_never_follows_links(tmp_path, monkeypatch):
     monkeypatch.setattr('runtime.sandbox_workspace._business_key', lambda value: value)
     owner = SandboxOwner('release', 'ns', 'runtime', 'uid', '10.0.0.1', 'epoch')
