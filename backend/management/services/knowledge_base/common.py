@@ -16,7 +16,6 @@ import json
 import logging
 from typing import Any, Optional
 
-from contracts.constants.constants import DATAMATE_URL
 from contracts.constants.environment import ES_API_KEY, ES_HOST
 from contracts.knowledge import VectorDatabaseType
 from infrastructure.vdb.client import create_datamate_core, create_elasticsearch_core
@@ -26,7 +25,7 @@ from management.services.model.resolver import (
 )
 from nexent.vector_database.base import VectorDatabaseCore
 from management.services.knowledge_base.task_state import get_redis_service
-from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.knowledge_base.providers.configuration import datamate_configuration_url
 
 
 def _update_progress(task_id: str, processed: int, total: int):
@@ -205,9 +204,7 @@ def get_vector_db_core(
 
     if db_type == VectorDatabaseType.DATAMATE:
         if tenant_id:
-            datamate_url = tenant_config_manager.get_app_config(
-                DATAMATE_URL, tenant_id=tenant_id
-            )
+            datamate_url = datamate_configuration_url(tenant_id)
             if not datamate_url:
                 raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
             return create_datamate_core(base_url=datamate_url)

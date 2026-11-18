@@ -8,8 +8,7 @@ This service layer uses the DataMate SDK client to interact with DataMate APIs.
 import logging
 from typing import Dict, List, Any, Optional
 
-from contracts.constants.constants import DATAMATE_URL
-from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.knowledge_base.providers.configuration import datamate_configuration_url
 from management.db.knowledge_base.repository import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore
 from nexent.core.concurrency import run_blocking
@@ -87,8 +86,7 @@ def _get_datamate_core(tenant_id: str, datamate_url: Optional[str] = None) -> Da
     Returns:
         DataMateCore instance
     """
-    datamate_server_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
-        DATAMATE_URL, tenant_id=tenant_id)
+    datamate_server_url = datamate_url if datamate_url else datamate_configuration_url(tenant_id)
     if not datamate_server_url:
         raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
 
@@ -110,7 +108,8 @@ async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str, tenant
         Dictionary containing file list with status, files array, etc.
     """
     try:
-        core = _get_datamate_core(tenant_id)
+        core = await run_blocking('datamate-configure-client', _get_datamate_core, tenant_id,
+                                  lane='control-io', owner='management.knowledge_base')
         files = await run_blocking(
             "datamate-list-files",
             core.get_documents_detail,
@@ -148,8 +147,9 @@ async def sync_datamate_knowledge_bases_and_create_records(
         Dictionary containing knowledge bases list and created records.
     """
     # Use provided datamate_url from request, fallback to tenant config
-    effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
-        DATAMATE_URL, tenant_id=tenant_id)
+    effective_datamate_url = datamate_url if datamate_url else await run_blocking(
+        'datamate-read-url', datamate_configuration_url, tenant_id,
+        lane='control-io', owner='management.knowledge_base')
 
     if not effective_datamate_url:
         logger.warning(
@@ -290,8 +290,9 @@ async def check_datamate_connection(
         return (False, "ModelEngine is disabled")
 
     # Use provided datamate_url from request, fallback to tenant config
-    effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
-        DATAMATE_URL, tenant_id=tenant_id)
+    effective_datamate_url = datamate_url if datamate_url else await run_blocking(
+        'datamate-read-url', datamate_configuration_url, tenant_id,
+        lane='control-io', owner='management.knowledge_base')
 
     if not effective_datamate_url:
         logger.warning(

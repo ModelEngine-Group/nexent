@@ -4157,7 +4157,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
 
-    @patch('management.services.knowledge_base.common.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.datamate_configuration_url')
     @patch('infrastructure.vdb.client.DataMateCore')
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
@@ -4166,18 +4166,18 @@ class TestRethrowOrPlain(unittest.TestCase):
         from contracts.constants.constants import DATAMATE_URL
 
         # Setup mocks
-        mock_tenant_config_manager.get_app_config.return_value = DATAMATE_URL
+        mock_tenant_config_manager.return_value = DATAMATE_URL
         mock_datamate_core.return_value = MagicMock()
 
         # Execute
         result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
 
         # Assert
-        mock_tenant_config_manager.get_app_config.assert_called_once_with(DATAMATE_URL, tenant_id="test-tenant")
+        mock_tenant_config_manager.assert_called_once_with("test-tenant")
         mock_datamate_core.assert_called_once_with(base_url=DATAMATE_URL)
         self.assertEqual(result, mock_datamate_core.return_value)
 
-    @patch('management.services.knowledge_base.common.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.datamate_configuration_url')
     @patch('infrastructure.vdb.client.DataMateCore')
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
@@ -4186,7 +4186,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         from contracts.constants.constants import DATAMATE_URL
 
         # Setup mocks
-        mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
+        mock_tenant_config_manager.return_value = "https://datamate.example.com"
         mock_datamate_instance = MagicMock()
         mock_datamate_core.return_value = mock_datamate_instance
 
@@ -4196,19 +4196,18 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, mock_datamate_instance)
-        mock_tenant_config_manager.get_app_config.assert_called_once_with(
-            DATAMATE_URL, tenant_id="test-tenant")
+        mock_tenant_config_manager.assert_called_once_with("test-tenant")
         mock_datamate_core.assert_called_once_with(
             base_url="https://datamate.example.com")
 
-    @patch('management.services.knowledge_base.common.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.datamate_configuration_url')
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
         """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
         from management.services.knowledge_base.service import get_vector_db_core
         from contracts.knowledge import VectorDatabaseType
 
         # Setup mock to return None (no URL configured)
-        mock_tenant_config_manager.get_app_config.return_value = None
+        mock_tenant_config_manager.return_value = None
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:
@@ -4217,7 +4216,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn(
             "DataMate URL not configured for tenant test-tenant", str(exc.exception))
-        mock_tenant_config_manager.get_app_config.assert_called_once()
+        mock_tenant_config_manager.assert_called_once()
 
     def test_get_vector_db_core_datamate_no_tenant_id(self):
         """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""

@@ -88,6 +88,7 @@ install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_exc_mock
 sys.modules['sqlalchemy.sql'] = sqlalchemy_sql_mock
+sys.modules['management.services.knowledge_base.providers.configuration'] = MagicMock()
 
 # Patch storage factory before importing the module under test
 with patch_minio_client_initialization():
@@ -108,11 +109,11 @@ def mock_datamate_sync_setup(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a valid DataMate URL
+    # Mock the tenant-scoped SI URL reader to return a valid DataMate URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     return mock_config_manager
@@ -136,27 +137,27 @@ def test_get_datamate_core_success(monkeypatch):
     """Test _get_datamate_core function with valid configuration."""
     # Mock DATAMATE_URL constant in the service module
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.DATAMATE_URL", "DATAMATE_URL"
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", MagicMock()
     )
 
-    # Mock tenant_config_manager
+    # Mock the tenant-scoped SI URL reader
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
 
     # Mock DataMateCore
     mock_datamate_core = MagicMock()
     datamate_core_class = MagicMock(return_value=mock_datamate_core)
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager)
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager)
     monkeypatch.setattr(
         "management.services.knowledge_base.providers.datamate.DataMateCore", datamate_core_class)
 
     result = _get_datamate_core("tenant1")
 
     assert result == mock_datamate_core
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1")
+    mock_config_manager.assert_called_once_with(
+        "tenant1")
     datamate_core_class.assert_called_once_with(
         base_url="http://datamate.example.com", verify_ssl=True)
 
@@ -165,27 +166,27 @@ def test_get_datamate_core_https_ssl_verification(monkeypatch):
     """Test _get_datamate_core function with HTTPS URL disables SSL verification."""
     # Mock DATAMATE_URL constant in the service module
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.DATAMATE_URL", "DATAMATE_URL"
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", MagicMock()
     )
 
-    # Mock tenant_config_manager
+    # Mock the tenant-scoped SI URL reader
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "https://datamate.example.com"
+    mock_config_manager.return_value = "https://datamate.example.com"
 
     # Mock DataMateCore
     mock_datamate_core = MagicMock()
     datamate_core_class = MagicMock(return_value=mock_datamate_core)
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager)
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager)
     monkeypatch.setattr(
         "management.services.knowledge_base.providers.datamate.DataMateCore", datamate_core_class)
 
     result = _get_datamate_core("tenant1")
 
     assert result == mock_datamate_core
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1")
+    mock_config_manager.assert_called_once_with(
+        "tenant1")
     datamate_core_class.assert_called_once_with(
         base_url="https://datamate.example.com", verify_ssl=False)
 
@@ -194,27 +195,27 @@ def test_get_datamate_core_http_ssl_verification(monkeypatch):
     """Test _get_datamate_core function with HTTP URL enables SSL verification."""
     # Mock DATAMATE_URL constant in the service module
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.DATAMATE_URL", "DATAMATE_URL"
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", MagicMock()
     )
 
-    # Mock tenant_config_manager
+    # Mock the tenant-scoped SI URL reader
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
 
     # Mock DataMateCore
     mock_datamate_core = MagicMock()
     datamate_core_class = MagicMock(return_value=mock_datamate_core)
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager)
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager)
     monkeypatch.setattr(
         "management.services.knowledge_base.providers.datamate.DataMateCore", datamate_core_class)
 
     result = _get_datamate_core("tenant1")
 
     assert result == mock_datamate_core
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1")
+    mock_config_manager.assert_called_once_with(
+        "tenant1")
     datamate_core_class.assert_called_once_with(
         base_url="http://datamate.example.com", verify_ssl=True)
 
@@ -223,23 +224,23 @@ def test_get_datamate_core_missing_config(monkeypatch):
     """Test _get_datamate_core function with missing configuration."""
     # Mock DATAMATE_URL constant in the service module
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.DATAMATE_URL", "DATAMATE_URL"
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", MagicMock()
     )
 
-    # Mock tenant_config_manager to return None
+    # Mock the tenant-scoped SI URL reader to return None
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = None
+    mock_config_manager.return_value = None
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager)
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager)
 
     with pytest.raises(ValueError) as excinfo:
         _get_datamate_core("tenant1")
 
     assert "DataMate URL not configured for tenant tenant1" in str(
         excinfo.value)
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1")
+    mock_config_manager.assert_called_once_with(
+        "tenant1")
 
 
 @pytest.mark.asyncio
@@ -496,11 +497,11 @@ async def test_sync_datamate_knowledge_bases_datamate_url_not_configured(monkeyp
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return None (no DataMate URL configured)
+    # Mock the tenant-scoped SI URL reader to return None (no DataMate URL configured)
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = None
+    mock_config_manager.return_value = None
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock logger to capture warning message
@@ -534,11 +535,11 @@ async def test_sync_datamate_knowledge_bases_datamate_url_empty_string(monkeypat
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return empty string
+    # Mock the tenant-scoped SI URL reader to return empty string
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = ""
+    mock_config_manager.return_value = ""
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock logger to capture warning message
@@ -571,9 +572,9 @@ async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
         MagicMock(side_effect=Exception("API connection failed"))
     )
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager",
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url",
         mock_config_manager,
     )
 
@@ -659,11 +660,11 @@ async def test_sync_datamate_knowledge_bases_with_none_datamate_url(monkeypatch)
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://tenant-configured.example.com"
+    mock_config_manager.return_value = "http://tenant-configured.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function
@@ -726,11 +727,11 @@ async def test_sync_datamate_knowledge_bases_with_empty_datamate_url(monkeypatch
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://fallback-url.example.com"
+    mock_config_manager.return_value = "http://fallback-url.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function
@@ -855,11 +856,11 @@ async def test_check_datamate_connection_success(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function
@@ -926,11 +927,11 @@ async def test_check_datamate_connection_url_not_configured(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return None (no DataMate URL configured)
+    # Mock the tenant-scoped SI URL reader to return None (no DataMate URL configured)
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = None
+    mock_config_manager.return_value = None
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock logger to capture warning message
@@ -960,11 +961,11 @@ async def test_check_datamate_connection_empty_url(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return empty string
+    # Mock the tenant-scoped SI URL reader to return empty string
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = ""
+    mock_config_manager.return_value = ""
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock logger to capture warning message
@@ -992,11 +993,11 @@ async def test_check_datamate_connection_api_error(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function to raise an exception
@@ -1082,11 +1083,11 @@ async def test_check_datamate_connection_with_none_url(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://tenant-configured.example.com"
+    mock_config_manager.return_value = "http://tenant-configured.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function
@@ -1180,11 +1181,11 @@ async def test_check_datamate_connection_configuration_error(monkeypatch):
         "management.services.knowledge_base.providers.datamate.MODEL_ENGINE_ENABLED", "true"
     )
 
-    # Mock tenant_config_manager to return a configured URL
+    # Mock the tenant-scoped SI URL reader to return a configured URL
     mock_config_manager = MagicMock()
-    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    mock_config_manager.return_value = "http://datamate.example.com"
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.tenant_config_manager", mock_config_manager
+        "management.services.knowledge_base.providers.datamate.datamate_configuration_url", mock_config_manager
     )
 
     # Mock the _get_datamate_core function to raise ValueError (configuration error)
