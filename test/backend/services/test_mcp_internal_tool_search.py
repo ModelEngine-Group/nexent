@@ -567,38 +567,14 @@ async def test_save_agent_draft_fields_rejects_missing_id_and_forbidden_fields(
 
 
 @pytest.mark.asyncio
-async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_http_request",
-        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
-    )
-    mocker.patch.object(
-        nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    mocker.patch.object(
-        nl2agent_service,
-        "save_agent_draft_fields_impl",
-        side_effect=nl2agent_service.Nl2AgentDraftSaveError(
-            "draft_save_failed",
-            retryable=True,
-        ),
-    )
-
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(1042, {"prompt": "Research"})
-    ).split("\n", 1)
-
-    assert json.loads(result_json)["code"] == "draft_save_failed"
-    assert json.loads(
-        state_wrapper.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
-    ) == {
-        "event": "prompt_generation_failed",
-        "agent_id": 1042,
-        "failed_fields": ["prompt"],
-    }
+async def test_save_agent_draft_fields_rejects_prompt_without_run_context(mocker):
+    mocker.patch.object(nl2agent_mcp_tools_module, "get_http_request",
+                        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}))
+    mocker.patch.object(nl2agent_mcp_tools_module, "get_current_user_id", return_value=("user-a", "tenant-a"))
+    save = mocker.patch.object(nl2agent_service, "save_agent_draft_fields_impl")
+    result = json.loads(await save_agent_draft_fields(1042, {"prompt": "Research"}))
+    assert result == {"status": "error", "code": "invalid_prompt_context", "retryable": False}
+    save.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -641,7 +617,7 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     first = await save_agent_draft_fields(1042, {"description": "Updated"})
     second = await save_agent_draft_fields(
         1042,
-        {"prompt": "Verify sources"},
+        {"name": "research_assistant"},
     )
 
     assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
@@ -657,7 +633,7 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     ) == {
         "event": "agent_draft_fields_saved",
         "agent_id": 1042,
-        "updated_fields": ["prompt"],
+        "updated_fields": ["name"],
     }
     validate_complete.assert_not_awaited()
 

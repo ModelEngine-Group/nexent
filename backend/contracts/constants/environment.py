@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, parse_similarity_threshold, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -26,9 +26,7 @@ ES_PASSWORD = os.getenv('ELASTIC_PASSWORD')
 ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 NL2AGENT_ES_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_SEARCH_CONCURRENCY', 8)
 NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY', 8)
-NL2AGENT_EMBEDDING_MIN_SIMILARITY = parse_positive_float(os.getenv('NL2AGENT_EMBEDDING_MIN_SIMILARITY'), 'NL2AGENT_EMBEDDING_MIN_SIMILARITY', 0.5)
-if NL2AGENT_EMBEDDING_MIN_SIMILARITY > 1:
-    raise ValueError('NL2AGENT_EMBEDDING_MIN_SIMILARITY must be at most 1')
+NL2AGENT_EMBEDDING_MIN_SIMILARITY = parse_similarity_threshold(os.getenv('NL2AGENT_EMBEDDING_MIN_SIMILARITY'), 'NL2AGENT_EMBEDDING_MIN_SIMILARITY', 0.5)
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')

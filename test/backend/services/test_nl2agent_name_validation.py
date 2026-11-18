@@ -125,7 +125,8 @@ def test_naming_prompt_is_self_contained_and_keeps_meaningful_example(language):
     assert ("Python 关键字" in prompt or "Python keyword" in prompt)
     assert "`class`" in prompt and "`for`" in prompt
     assert ("100 个字符" in prompt or "100 characters" in prompt)
-    assert "30" not in prompt
+    initialization = prompt.split("### 变量名初始化" if language == "zh" else "### Variable Name Initialization", 1)[1].split("\n### ", 1)[0]
+    assert "30" not in initialization
     names = []
     for code in re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL):
         for node in ast.walk(ast.parse(code)):

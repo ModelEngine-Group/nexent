@@ -11,6 +11,12 @@ BACKEND = ROOT / "backend"
 
 def test_flat_service_exclusions_match_remaining_scope():
     assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {
+        "nl2agent_configuration.py",
+        "nl2agent_prompt_service.py",
+        "nl2agent_resource_flow.py",
+        "nl2agent_retrieval_progress.py",
+        "nl2agent_semantic_retrieval.py",
+        "nl2agent_state_service.py",
         "__init__.py", "nl2skill_service.py", "skill_repository_service.py",
         "nl2agent_service.py", "northbound_service.py", "workspace_cleanup_service.py",
     }
@@ -36,6 +42,12 @@ def test_production_imports_use_canonical_owners():
                 if name.startswith("utils.") or (
                     name.startswith("services.")
                     and name not in {
+                        "services.nl2agent_configuration",
+                        "services.nl2agent_prompt_service",
+                        "services.nl2agent_resource_flow",
+                        "services.nl2agent_retrieval_progress",
+                        "services.nl2agent_semantic_retrieval",
+                        "services.nl2agent_state_service",
                         "services.nl2skill_service", "services.skill_repository_service",
                         "services.nl2agent_service", "services.northbound_service",
                         "services.workspace_cleanup_service",

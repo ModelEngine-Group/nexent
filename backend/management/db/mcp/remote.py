@@ -12,7 +12,6 @@ from management.db.client import get_db_session
 from management.db.models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")
-_MCP_SERVICE_LIMIT = MAX_MCP_SERVICES_PER_TENANT if isinstance(MAX_MCP_SERVICES_PER_TENANT, int) else 1_000
 
 
 def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) -> int:
