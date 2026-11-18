@@ -30,6 +30,14 @@ import {
   type SheetGrid,
 } from "@/lib/spreadsheetGrid";
 import log from "@/lib/logger";
+import LegacySpreadsheetPreview from "./LegacySpreadsheetPreview";
+import DocumentPages from "./DocumentPages";
+import PresentationSurface from "./PresentationSurface";
+import PreviewControls from "./PreviewControls";
+import readerStyles from "./DocumentPreview.module.css";
+import OriginalFilePreview, {
+  ORIGINAL_READER_EXTENSIONS,
+} from "./OriginalFilePreview";
 
 const PdfViewer = dynamic(
   () =>
@@ -64,6 +72,10 @@ interface StreamPayload {
 export interface RawStreamPreviewViewerProps {
   /** URL that streams the document without a server-side format guarantee. */
   url: string;
+  loadOriginal?: () => Promise<Response>;
+  pdfRenderer?: import("react").ComponentType<
+    import("@/types/file").PdfViewerProps
+  >;
   /** Uploaded file name, used until the response reports the served name. */
   fileName: string;
   /** Uploaded format hint (AIDP reports a bare extension, not a MIME type). */
@@ -211,10 +223,16 @@ const renderPptxElement = (
  * its `X-File-Name` header decides. Each renderer is imported on demand so the
  * parsers stay out of the initial bundle.
  */
-export function RawStreamPreviewViewer(
+function DocumentStreamPreviewViewer(
   props: Readonly<RawStreamPreviewViewerProps>
 ) {
-  const { url, fileName, fileType, onAccessError } = props;
+  const {
+    url,
+    fileName,
+    fileType,
+    onAccessError,
+    pdfRenderer: DocumentPdfViewer = PdfViewer,
+  } = props;
   const { t } = useTranslation("common");
 
   const [status, setStatus] = useState<PreviewStatus>("loading");
@@ -222,6 +240,7 @@ export function RawStreamPreviewViewer(
   const [mediaUrl, setMediaUrl] = useState("");
   const [textContent, setTextContent] = useState("");
   const [sheets, setSheets] = useState<SheetGrid[]>([]);
+  const [sheetZoom, setSheetZoom] = useState(1);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const [presentation, setPresentation] = useState<PptxPresentation | null>(
     null
@@ -231,7 +250,9 @@ export function RawStreamPreviewViewer(
   const docxStyleRef = useRef<HTMLDivElement | null>(null);
   const mediaUrlRef = useRef("");
   const onAccessErrorRef = useRef(onAccessError);
-  onAccessErrorRef.current = onAccessError;
+  useEffect(() => {
+    onAccessErrorRef.current = onAccessError;
+  }, [onAccessError]);
 
   const releaseMediaUrl = () => {
     if (mediaUrlRef.current) {
@@ -252,15 +273,6 @@ export function RawStreamPreviewViewer(
     let cancelled = false;
     const controller = new AbortController();
     const { signal } = controller;
-
-    setStatus("loading");
-    setPayload(null);
-    setSheets([]);
-    setActiveSheetIndex(0);
-    setPresentation(null);
-    setTextContent("");
-    setMediaUrl("");
-    releaseMediaUrl();
 
     const load = async () => {
       const {
@@ -286,22 +298,36 @@ export function RawStreamPreviewViewer(
       });
     };
 
-    load().catch((error: unknown) => {
-      if (ignoreAbortError(error) || cancelled) {
-        return;
-      }
-      if (
-        error instanceof PreviewAccessError &&
-        onAccessErrorRef.current?.(error.reason)
-      ) {
-        setStatus("error");
-        return;
-      }
-      log.error("Failed to load document stream:", error);
-      if (!cancelled) {
-        setStatus("error");
-      }
-    });
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return;
+        setStatus("loading");
+        setPayload(null);
+        setSheets([]);
+        setActiveSheetIndex(0);
+        setPresentation(null);
+        setTextContent("");
+        setMediaUrl("");
+        releaseMediaUrl();
+
+        return load();
+      })
+      .catch((error: unknown) => {
+        if (ignoreAbortError(error) || cancelled) {
+          return;
+        }
+        if (
+          error instanceof PreviewAccessError &&
+          onAccessErrorRef.current?.(error.reason)
+        ) {
+          setStatus("error");
+          return;
+        }
+        log.error("Failed to load document stream:", error);
+        if (!cancelled) {
+          setStatus("error");
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -317,7 +343,6 @@ export function RawStreamPreviewViewer(
     }
 
     let cancelled = false;
-    setStatus("loading");
 
     const render = async () => {
       const { kind, blob, servedFileName } = payload;
@@ -343,14 +368,44 @@ export function RawStreamPreviewViewer(
           return;
         }
         body.innerHTML = "";
+        const documentBytes = await blob.arrayBuffer();
+        let hasExplicitPageBreaks = false;
+        try {
+          const { default: JSZip } = await import("jszip");
+          const archive = await JSZip.loadAsync(documentBytes);
+          const xml = await archive.file("word/document.xml")?.async("string");
+          if (xml) {
+            const parsed = new DOMParser().parseFromString(
+              xml,
+              "application/xml"
+            );
+            const namespace =
+              "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            hasExplicitPageBreaks =
+              Array.from(
+                parsed.getElementsByTagNameNS(namespace, "pageBreakBefore")
+              ).some(
+                (node) =>
+                  !["0", "false", "off"].includes(
+                    node.getAttributeNS(namespace, "val") ?? "1"
+                  )
+              ) ||
+              Array.from(parsed.getElementsByTagNameNS(namespace, "br")).some(
+                (node) => node.getAttributeNS(namespace, "type") === "page"
+              );
+          }
+        } catch {
+          // The renderer owns validation; optional page hints must not mask its error.
+        }
         await renderAsync(
-          await blob.arrayBuffer(),
+          documentBytes,
           body,
           docxStyleRef.current ?? undefined,
           {
             inWrapper: false,
             breakPages: true,
-            ignoreLastRenderedPageBreak: true,
+            // Avoid counting both an explicit break and its saved layout hint.
+            ignoreLastRenderedPageBreak: hasExplicitPageBreaks,
             renderHeaders: true,
             renderFooters: true,
             // An altChunk embeds raw HTML in the document, and docx-preview
@@ -395,12 +450,18 @@ export function RawStreamPreviewViewer(
       }
     };
 
-    render().catch((error: unknown) => {
-      log.error("Failed to render document preview:", error);
-      if (!cancelled) {
-        setStatus("error");
-      }
-    });
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return;
+        setStatus("loading");
+        return render();
+      })
+      .catch((error: unknown) => {
+        log.error("Failed to render document preview:", error);
+        if (!cancelled) {
+          setStatus("error");
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -431,10 +492,10 @@ export function RawStreamPreviewViewer(
             : renderMessage(t("filePreview.previewFailed"))}
         </div>
       )}
-      <div className="h-full overflow-auto bg-gray-200 p-4">
+      <DocumentPages>
         <div ref={docxStyleRef} />
-        <div ref={docxBodyRef} className="mx-auto max-w-[900px]" />
-      </div>
+        <div ref={docxBodyRef} />
+      </DocumentPages>
     </div>
   );
 
@@ -446,16 +507,18 @@ export function RawStreamPreviewViewer(
     const columnCount = sheet.rows[0]?.length ?? 0;
 
     return (
-      <div className="flex h-full flex-col bg-white">
+      <div className={readerStyles.reader}>
         {/* Excel-like sheet tab strip: the active tab sits on the sheet, which
             is what tells the reader which worksheet these cells belong to. */}
         {sheets.length > 1 && (
-          <div className="flex flex-shrink-0 flex-wrap items-end gap-1 border-b border-gray-200 bg-gray-50 px-3 pt-1.5">
+          <div className={readerStyles.sheetTabs}>
             {sheets.map((item, index) => (
               <button
                 key={`${index}-${item.name}`}
                 type="button"
                 onClick={() => setActiveSheetIndex(index)}
+                role="tab"
+                aria-selected={index === activeSheetIndex}
                 className={
                   index === activeSheetIndex
                     ? "-mb-px rounded-t border border-b-0 border-gray-200 bg-white px-3 py-1 text-xs font-medium text-blue-600"
@@ -474,11 +537,25 @@ export function RawStreamPreviewViewer(
             })}
           </p>
         )}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className={readerStyles.sheetViewport}>
           {/* A spreadsheet is read as a grid: column letters and row numbers
               give every cell an address, and a sticky header keeps them visible
               while scrolling. */}
-          <table className="w-full border-collapse text-xs">
+          <table
+            className={readerStyles.grid}
+            style={{ fontSize: 14 * sheetZoom }}
+          >
+            <colgroup>
+              <col style={{ width: 42 }} />
+              {Array.from({ length: columnCount }, (_, index) => (
+                <col
+                  key={index}
+                  style={{
+                    width: (sheet.columnWidths?.[index] ?? 120) * sheetZoom,
+                  }}
+                />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 <th className="sticky left-0 top-0 z-20 w-12 border border-gray-200 bg-gray-50 px-2 py-1" />
@@ -494,17 +571,25 @@ export function RawStreamPreviewViewer(
             </thead>
             <tbody>
               {sheet.rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="hover:bg-amber-50/60">
-                  <th className="sticky left-0 z-10 w-12 border border-gray-200 bg-gray-50 px-2 py-1 text-right font-normal text-gray-500">
-                    {rowIndex + 1}
-                  </th>
+                <tr
+                  key={rowIndex}
+                  className="hover:bg-amber-50/60"
+                  style={{
+                    height: (sheet.rowHeights?.[rowIndex] ?? 30) * sheetZoom,
+                  }}
+                >
+                  <td>{rowIndex + 1}</td>
                   {row.map((cell, columnIndex) =>
                     cell === null ? null : (
                       <td
                         key={columnIndex}
                         rowSpan={cell.rowSpan}
                         colSpan={cell.colSpan}
-                        className="max-w-[360px] whitespace-pre-wrap break-words border border-gray-200 px-2 py-1 align-top"
+                        style={{
+                          ...cell.style,
+                          fontSize: (cell.style?.fontSize ?? 14) * sheetZoom,
+                        }}
+                        className="whitespace-pre-wrap break-words align-top"
                       >
                         {cell.text}
                       </td>
@@ -515,6 +600,11 @@ export function RawStreamPreviewViewer(
             </tbody>
           </table>
         </div>
+        <PreviewControls
+          zoom={sheetZoom}
+          onZoom={setSheetZoom}
+          onFit={() => setSheetZoom(1)}
+        />
       </div>
     );
   };
@@ -530,30 +620,21 @@ export function RawStreamPreviewViewer(
       return renderMessage(t("filePreview.previewFailed"));
     }
     return (
-      <div className="h-full space-y-4 overflow-auto bg-gray-200 p-4">
-        {presentation.slides.map((slide, slideIndex) => (
-          <div key={slideIndex} className="mx-auto w-full max-w-[1440px]">
-            <p className="pb-1 text-xs text-gray-500">
-              {t("filePreview.office.slide", { index: slideIndex + 1 })}
-            </p>
-            <div
-              className="relative w-full overflow-hidden border border-gray-300 shadow-sm"
-              style={{
-                aspectRatio: `${presentation.size.width} / ${presentation.size.height}`,
-                ...fillStyle(slide.fill),
-              }}
-            >
-              {slide.elements.map((element, elementIndex) =>
-                renderPptxElement(
-                  element,
-                  presentation.size,
-                  `${slideIndex}-${elementIndex}`
-                )
-              )}
-            </div>
-          </div>
+      <PresentationSurface
+        size={presentation.size}
+        slides={presentation.slides.map((slide, slideIndex) => (
+          <Fragment key={slideIndex}>
+            <div className="absolute inset-0" style={fillStyle(slide.fill)} />
+            {slide.elements.map((element, elementIndex) =>
+              renderPptxElement(
+                element,
+                presentation.size,
+                `${slideIndex}-${elementIndex}`
+              )
+            )}
+          </Fragment>
         ))}
-      </div>
+      />
     );
   };
 
@@ -566,7 +647,7 @@ export function RawStreamPreviewViewer(
     return (
       // A document page is narrower than the full-screen surface, so fitting the
       // width uses the viewport instead of leaving a small page in a sea of gray.
-      <PdfViewer
+      <DocumentPdfViewer
         url={mediaUrl}
         fileName={payload?.servedFileName ?? fileName}
         initialScaleMode="fit-width"
@@ -622,4 +703,26 @@ export function RawStreamPreviewViewer(
     default:
       return renderMessage(t("filePreview.office.streamUnsupported"));
   }
+}
+
+export function RawStreamPreviewViewer(
+  props: Readonly<RawStreamPreviewViewerProps>
+) {
+  const extension = props.fileName.split(".").pop()?.toLowerCase() ?? "";
+  if (props.loadOriginal && extension === "xls")
+    return (
+      <LegacySpreadsheetPreview
+        key={props.url + props.fileName}
+        loadOriginal={props.loadOriginal}
+      />
+    );
+  return props.loadOriginal && ORIGINAL_READER_EXTENSIONS.has(extension) ? (
+    <OriginalFilePreview
+      key={props.url + props.fileName}
+      fileName={props.fileName}
+      loadOriginal={props.loadOriginal}
+    />
+  ) : (
+    <DocumentStreamPreviewViewer key={props.url + props.fileName} {...props} />
+  );
 }

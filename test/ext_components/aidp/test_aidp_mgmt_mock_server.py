@@ -484,3 +484,367 @@ def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
         assert "error_code" not in doc
         parsed = json.loads(doc["extraction_failure_reason"])
         assert parsed["error_code"] and parsed["msg"]
+
+
+def test_preview_uses_explicit_pdf_fixture_for_converted_document(mock_aidp_server, tmp_path):
+    server = mock_aidp_server
+    server._PREVIEW_FIXTURE_DIR = tmp_path
+    file_uuid = "a2fc91f8-d2cc-4912-9c2b-435ac4b0aa14"
+    expected = server._synthetic_pdf("Actual demo content")
+    (tmp_path / f"{file_uuid}.pdf").write_bytes(expected)
+
+    content, name = server._preview_payload({"file_uuid": file_uuid, "file_name": "demo.html"})
+
+    assert content == expected
+    assert name == "demo.pdf"
+
+
+@pytest.mark.parametrize("file_uuid", ["missing", "../outside", "a2fc91f8-d2cc-4912-9c2b-435ac4b0aa14"])
+def test_missing_or_invalid_fixture_keeps_default_mock_preview(mock_aidp_server, tmp_path, file_uuid):
+    server = mock_aidp_server
+    server._PREVIEW_FIXTURE_DIR = tmp_path
+
+    content, name = server._preview_payload({"file_uuid": file_uuid, "file_name": "demo.md"})
+
+    assert b"AIDP conversion of demo.md" in content
+    assert name == "demo.pdf"
+
+
+def test_preview_rejects_non_pdf_fixture(mock_aidp_server, tmp_path):
+    server = mock_aidp_server
+    server._PREVIEW_FIXTURE_DIR = tmp_path
+    file_uuid = "a2fc91f8-d2cc-4912-9c2b-435ac4b0aa14"
+    (tmp_path / f"{file_uuid}.pdf").write_bytes(b"not a PDF")
+
+    with pytest.raises(ValueError, match="Preview fixture is not a PDF"):
+        server._preview_payload({"file_uuid": file_uuid, "file_name": "demo.html"})
+
+
+def test_native_preview_and_download_restore_original_fixture(mock_aidp_server, tmp_path):
+    server = mock_aidp_server
+    server._DOCUMENT_FIXTURE_DIR = tmp_path
+    file_uuid = "a2fc91f8-d2cc-4912-9c2b-435ac4b0aa14"
+    expected = b"%PDF-1.4 original uploaded PDF"
+    (tmp_path / f"{file_uuid}.bin").write_bytes(expected)
+    document = {"file_uuid": file_uuid, "file_name": "demo.pdf"}
+
+    assert server._document_content(document) == expected
+    assert server._preview_payload(document) == (expected, "demo.pdf")
+    server._DOCUMENT_PAYLOADS[file_uuid] = b"new upload"
+    assert server._document_content(document) == b"new upload"
+
+
+def test_original_fixture_cannot_escape_directory(mock_aidp_server, tmp_path):
+    server = mock_aidp_server
+    server._DOCUMENT_FIXTURE_DIR = tmp_path / "fixtures"
+    (tmp_path / "outside.bin").write_bytes(b"private")
+
+    assert server._document_content({"file_uuid": "../outside", "file_name": "demo.txt"}) == b"Mock AIDP content for demo.txt\n"
+
+
+# ---------------------------------------------------------------------------
+# Document chunk contract (2026-11-05): query list, DELETE body/204, TEXT edit
+# ---------------------------------------------------------------------------
+
+_CHUNK_KB = "kb-chunks"
+_CHUNK_FILE = "3f8dbd1f-d5f9-43f7-89b9-b70809531647"
+
+
+def _chunk_client(server):
+    server._KNOWLEDGE_BASES[_CHUNK_KB] = {"kds_name": "切片知识库"}
+    server._DOCUMENTS_BY_KB[_CHUNK_KB] = [
+        {
+            "file_uuid": _CHUNK_FILE,
+            "file_name": "切片样例.pdf",
+            "status": 1,
+            "first_upload_time": time.time(),
+        }
+    ]
+    return TestClient(server.app)
+
+
+def test_chunk_list_uses_query_and_null_next_link_on_last_page(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    first = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 2},
+        headers=auth,
+    )
+    assert first.status_code == 200
+    body = first.json()
+    assert body["total_count"] == 5
+    assert body["next_link"] is not None
+    assert [item["chunk_type"] for item in body["value"]] == ["TEXT", "TEXT"]
+    assert all(isinstance(item["chunk_id"], int) for item in body["value"])
+    assert body["value"][0]["page_ids"] == [1]
+
+    last = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 3, "page_size": 2},
+        headers=auth,
+    )
+    assert last.status_code == 200
+    assert last.json()["next_link"] is None
+    assert [item["chunk_type"] for item in last.json()["value"]] == ["IMAGE"]
+
+
+def test_chunk_create_returns_string_id_and_appends_to_the_end(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    # Generate the file's five seed chunks first so the new id is deterministic.
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+    created = client.put(
+        path,
+        headers=auth,
+        json={"file_uuid": _CHUNK_FILE, "chunk_text": "新增切片"},
+    )
+    assert created.status_code == 200
+    assert created.json() == {"chunk_id": "6"}
+
+    page = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 100},
+        headers=auth,
+    ).json()
+    assert page["total_count"] == 6
+    assert page["value"][-1]["chunk_id"] == 6
+    assert page["value"][-1]["chunk_text"] == "新增切片"
+    assert page["value"][-1]["chunk_type"] == "TEXT"
+
+
+def test_chunk_update_returns_the_full_chunk_object(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+
+    # Generate the seed chunks, then edit chunk 1 (TEXT).
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+    updated = client.patch(f"{path}/1", headers=auth, json={"chunk_text": "改后文本"})
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["chunk_id"] == 1
+    assert body["chunk_text"] == "改后文本"
+    assert body["chunk_type"] == "TEXT"
+    assert body["page_ids"] == [1]
+    assert body["metadata"]["section"] == "part-1"
+
+
+def test_chunk_delete_requires_json_body_and_answers_204(mock_aidp_server):
+    client = _chunk_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
+    client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
+
+    removed = client.request(
+        "DELETE",
+        path,
+        headers=auth,
+        json={"chunk_ids": [1, 2]},
+    )
+    assert removed.status_code == 204
+    assert removed.content == b""
+
+    page = client.get(
+        path,
+        params={"file_uuid": _CHUNK_FILE, "page": 1, "page_size": 100},
+        headers=auth,
+    ).json()
+    assert page["total_count"] == 3
+    assert [item["chunk_id"] for item in page["value"]] == [3, 4, 5]
+
+    # The old upstream path is gone from this contract.
+    legacy = client.post(
+        f"{path}/Remove",
+        headers=auth,
+        json={"chunk_ids": [3]},
+    )
+    assert legacy.status_code in (404, 405)
+
+
+# ---------------------------------------------------------------------------
+# File summary contract
+# ---------------------------------------------------------------------------
+
+_SUMMARY_KB = "kb-summary"
+_SUMMARY_FILE = "acc57fdc-45cc-4f16-bcfa-633bc28e2256"
+
+
+def _summary_client(server, *, enabled=True, preview=True):
+    server._KNOWLEDGE_BASES[_SUMMARY_KB] = {
+        "kds_name": "摘要知识库",
+        "summary_enable": enabled,
+        "summary_model": "qwen3",
+        "summary_preview": preview,
+    }
+    server._DOCUMENTS_BY_KB[_SUMMARY_KB] = [
+        {
+            "file_uuid": _SUMMARY_FILE,
+            "file_name": "年度报告.pdf",
+            "status": 1,
+            "first_upload_time": time.time(),
+        }
+    ]
+    return TestClient(server.app)
+
+
+def test_summary_returns_empty_result_when_preview_disabled(mock_aidp_server):
+    client = _summary_client(mock_aidp_server, enabled=True, preview=False)
+    response = client.get(
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
+        f"/KnowledgeFiles/{_SUMMARY_FILE}/Summary",
+        headers={"Authorization": "Bearer mock-aidp-key"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"result": {}}
+
+
+def test_summary_state_success_failed_and_retry_round_trip(mock_aidp_server):
+    client = _summary_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    path = (
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
+        f"/KnowledgeFiles/{_SUMMARY_FILE}/Summary"
+    )
+
+    success = client.get(path, headers=auth).json()["result"]
+    assert success["summary_status"] == "success"
+    assert success["summary_model"] == "qwen3"
+    assert "年度报告.pdf" in success["summary_text"]
+
+    failed = client.post(
+        "/_mock/summary-status",
+        json={
+            "kds_id": _SUMMARY_KB,
+            "file_uuid": _SUMMARY_FILE,
+            "status": "failed",
+        },
+    )
+    assert failed.status_code == 200
+    failed_result = client.get(path, headers=auth).json()["result"]
+    assert failed_result["summary_status"] == "failed"
+    assert "summary_text" not in failed_result
+
+    retried = client.post(
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
+        "/KnowledgeFiles/RetrySummary",
+        headers=auth,
+        json={"file_uuids": [_SUMMARY_FILE]},
+    )
+    assert retried.status_code == 200
+    body = retried.json()
+    assert body["partial_success_list"] == [{"file_uuid": _SUMMARY_FILE}]
+    assert body["failed_list"] == []
+    assert client.get(path, headers=auth).json()["result"]["summary_status"] == "pending"
+
+    # Retrying a non-failed file reports it as failed, not silently successful.
+    again = client.post(
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
+        "/KnowledgeFiles/RetrySummary",
+        headers=auth,
+        json={"file_uuids": [_SUMMARY_FILE]},
+    ).json()
+    assert again["partial_success_list"] == []
+    assert again["failed_list"][0]["err_code"] == 409
+
+
+def test_summary_config_is_echoed_on_create(mock_aidp_server):
+    client = TestClient(mock_aidp_server.app)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    created = client.put(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases",
+        headers=auth,
+        json={
+            "name": "摘要开关库",
+            "description": "summary config",
+            "embedding_model": "bge-m3",
+            "summary_enable": True,
+            "summary_model": "qwen3",
+            "summary_preview": True,
+        },
+    )
+    assert created.status_code == 200
+    kds_id = created.json()["kds_id"]
+
+    detail = client.get(
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{kds_id}", headers=auth
+    ).json()
+    assert detail["summary_enable"] is True
+    assert detail["summary_model"] == "qwen3"
+    assert detail["summary_preview"] is True
+    config = json.loads(detail["kms_config_str"])
+    assert config["summary_enable"] is True
+    assert config["summary_preview"] is True
+
+
+def test_summary_retry_reports_partial_success_and_failures_together(mock_aidp_server):
+    client = _summary_client(mock_aidp_server)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    second = "19b675cd-fdb7-4412-9c6a-4fddf3b3f295"
+    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB].append({
+        "file_uuid": second,
+        "file_name": "第二份.pdf",
+        "status": 1,
+        "first_upload_time": time.time(),
+        "_summary_status": "success",
+        "_summary_text": "已生成",
+    })
+    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB][0]["_summary_status"] = "failed"
+    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB][0]["_summary_text"] = ""
+
+    response = client.post(
+        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
+        "/KnowledgeFiles/RetrySummary",
+        headers=auth,
+        json={"file_uuids": [_SUMMARY_FILE, second]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["partial_success_list"] == [{"file_uuid": _SUMMARY_FILE}]
+    assert body["failed_list"][0]["file_uuid"] == second
+    assert body["failed_list"][0]["err_code"] == 409
+
+
+def test_summary_config_can_be_changed_via_kb_patch(mock_aidp_server):
+    client = TestClient(mock_aidp_server.app)
+    auth = {"Authorization": "Bearer mock-aidp-key"}
+    created = client.put(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases",
+        headers=auth,
+        json={
+            "name": "摘要可编辑库",
+            "description": "summary patch",
+            "embedding_model": "bge-m3",
+            "summary_enable": True,
+            "summary_model": "qwen3",
+            "summary_preview": True,
+        },
+    ).json()
+    kds_id = created["kds_id"]
+    path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{kds_id}"
+
+    off = client.patch(
+        path,
+        headers=auth,
+        json={"summary_enable": False, "summary_preview": False},
+    )
+    assert off.status_code == 200
+    detail = client.get(path, headers=auth).json()
+    assert detail["summary_enable"] is False
+    assert detail["summary_preview"] is False
+    assert detail["summary_model"] == ""
+
+    on = client.patch(
+        path,
+        headers=auth,
+        json={"summary_enable": True, "summary_model": "qwen2.5", "summary_preview": False},
+    )
+    assert on.status_code == 200
+    detail = client.get(path, headers=auth).json()
+    assert detail["summary_enable"] is True
+    assert detail["summary_model"] == "qwen2.5"
+    assert detail["summary_preview"] is False

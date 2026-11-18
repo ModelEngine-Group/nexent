@@ -173,9 +173,13 @@ type RemoteFilePreviewSource = {
    * AIDP serves the original bytes for docx/xlsx/pptx/pdf/txt and a PDF
    * conversion for every other format, and reports the name it served in the
    * `X-File-Name` header. The preview therefore resolves the renderer from that
-   * response instead of from the uploaded name, and offers no download.
+   * response instead of from the uploaded name. An explicit original-file
+   * loader can opt content-native formats into their own readers.
    */
   rawStream?: boolean;
+  /** Authenticated original-file loader for content-native reading modes. */
+  loadOriginal?: () => Promise<Response>;
+  pdfRenderer?: import("react").ComponentType<import("./file").PdfViewerProps>;
 };
 
 type LocalFilePreviewSource = {
@@ -194,8 +198,10 @@ export type FilePreviewProps = {
    * - `"drawer"` (default): a side drawer over the current page.
    * - `"fullscreen"`: a full-viewport surface with a back arrow, used where a
    *   document is the whole task (AIDP knowledge base documents).
+   * - `"inline"`: just the preview surface, filling its parent. Used where the
+   *   document shares the viewport with another panel (AIDP file detail).
    */
-  presentation?: "drawer" | "fullscreen";
+  presentation?: "drawer" | "fullscreen" | "inline";
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type

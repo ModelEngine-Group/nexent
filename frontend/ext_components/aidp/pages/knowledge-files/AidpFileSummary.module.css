@@ -1,0 +1,65 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+/*
+ * File summary tab. Reuses the verified file-detail typography: body text is
+ * 14px / 22px #191919, secondary information 12px / 20px #595959, and the
+ * primary action colour is the AIDP blue used across the detail page.
+ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.title {
+  margin: 0;
+  color: #191919;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.meta {
+  color: #595959;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.text {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.state {
+  display: flex;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #595959;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: center;
+}
+
+.retryActions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}

@@ -442,6 +442,23 @@ export const API_ENDPOINTS = {
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+    /** Semantic chunks of one ingested file: list, add, read, edit, remove. */
+    kbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** FusionSearch-backed chunk content search scoped to one file. */
+    kbChunkSearch: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/search`,
+    kbChunkDetail: (id: string, chunkId: number | string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/${encodeURIComponent(String(chunkId))}`,
+    /** DELETE with a `chunk_ids` JSON body; AIDP answers 204 No Content. */
+    removeKbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** One file's AIDP summary (READ). */
+    kbFileSummary: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/summary`,
+    /** Retry summary generation for a non-empty file UUID list (EDIT). */
+    retryKbFileSummaries: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/retry-summary`,
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,

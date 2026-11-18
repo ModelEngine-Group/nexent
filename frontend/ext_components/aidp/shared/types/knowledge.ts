@@ -13,6 +13,10 @@ export interface AidpKnowledgeBaseItem extends Omit<
   created_by?: string | null;
   creator_name?: string | null;
   creator_cas_username?: string | null;
+  /** File summary configuration returned by the KB detail endpoint. */
+  summary_enable?: boolean;
+  summary_model?: string;
+  summary_preview?: boolean;
 }
 
 export interface AidpKnowledgeBaseListResponse extends Omit<

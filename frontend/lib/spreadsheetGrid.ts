@@ -10,12 +10,23 @@ export interface SheetCell {
   text: string;
   colSpan: number;
   rowSpan: number;
+  style?: {
+    fontFamily?: string;
+    fontSize?: number;
+    fontWeight?: number;
+    fontStyle?: string;
+    color?: string;
+    backgroundColor?: string;
+    textAlign?: "left" | "center" | "right";
+  };
 }
 
 export interface SheetGrid {
   name: string;
   rows: (SheetCell | null)[][];
   truncated: boolean;
+  columnWidths?: number[];
+  rowHeights?: number[];
 }
 
 const columnIndexFromLetters = (letters: string): number => {
@@ -133,9 +144,45 @@ export const buildSheetGrid = (worksheet: Worksheet): SheetGrid => {
     }
   }
 
+  for (let row = 0; row < rowCount; row += 1) {
+    for (let column = 0; column < columnCount; column += 1) {
+      const target = rows[row][column];
+      if (!target) continue;
+      const cell = worksheet.getCell(row + 1, column + 1);
+      const style: NonNullable<SheetCell["style"]> = {};
+      if (cell.font?.name)
+        style.fontFamily = `${JSON.stringify(cell.font.name)}, "Microsoft YaHei", sans-serif`;
+      if (cell.font?.size) style.fontSize = (cell.font.size * 4) / 3;
+      if (cell.font?.bold) style.fontWeight = 600;
+      if (cell.font?.italic) style.fontStyle = "italic";
+      if (cell.font?.color?.argb)
+        style.color = `#${cell.font.color.argb.slice(-6)}`;
+      if (
+        cell.fill?.type === "pattern" &&
+        cell.fill.pattern === "solid" &&
+        cell.fill.fgColor?.argb
+      ) {
+        style.backgroundColor = `#${cell.fill.fgColor.argb.slice(-6)}`;
+      }
+      if (
+        ["left", "center", "right"].includes(cell.alignment?.horizontal ?? "")
+      ) {
+        style.textAlign = cell.alignment.horizontal as
+          "left" | "center" | "right";
+      }
+      if (Object.keys(style).length) target.style = style;
+    }
+  }
+
   return {
     name: worksheet.name,
     rows,
     truncated: lastRowNumber > rowCount || lastColumnNumber > columnCount,
+    columnWidths: Array.from({ length: columnCount }, (_, index) =>
+      Math.max(80, (worksheet.getColumn(index + 1).width ?? 16) * 7 + 5)
+    ),
+    rowHeights: Array.from({ length: rowCount }, (_, index) =>
+      Math.max(30, ((worksheet.getRow(index + 1).height ?? 22.5) * 4) / 3)
+    ),
   };
 };
