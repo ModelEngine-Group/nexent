@@ -237,6 +237,8 @@ export async function installArchiveBrowser(page, payload) {
     await route.fulfill({ json: { code: 0, message: "success", data } });
   });
   const upload = async (replacement = false) => {
+    if (!new URL(page.url()).pathname.endsWith("/observability/imports"))
+      await page.getByRole("link", { name: "导入列表", exact: true }).click();
     await page.locator('input[type="file"]').setInputFiles({
       name: replacement ? "replacement.zip" : "trajectory.zip",
       mimeType: "application/zip",

@@ -6899,6 +6899,7 @@
   "trajectory.nextChunk": "Read next chunk",
   "trajectory.firstChunk": "Back to first chunk",
   "trajectory.bodyUnavailable": "Content unavailable",
+  "trajectory.manualCleanup": "Manual cleanup",
   "trajectory.cleanup": "Clean up traces",
   "trajectory.confirmCleanup": "Confirm cleanup",
   "trajectory.cleanupScope": "All users, agents and conversations of the current tenant",

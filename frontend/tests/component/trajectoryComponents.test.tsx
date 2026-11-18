@@ -90,6 +90,18 @@ beforeEach(() => {
   api.facets.mockResolvedValue({ items: [], next_cursor: null });
 });
 
+async function openCleanup(kind: "manual" | "schedule") {
+  fireEvent.click(screen.getByRole("button", { name: "trajectory.cleanup" }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", {
+      name:
+        kind === "manual"
+          ? "trajectory.manualCleanup"
+          : "trajectory.scheduledCleanup",
+    })
+  );
+}
+
 describe("observability role gate", () => {
   it("allows the operations administrator to configure their own cleanup policy", async () => {
     api.cleanupSchedule.mockResolvedValue({
@@ -105,9 +117,13 @@ describe("observability role gate", () => {
       />,
       { wrapper }
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
-    );
+    expect(
+      screen.queryByRole("button", { name: "trajectory.import" })
+    ).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "trajectory.importedList" })
+    ).toBeVisible();
+    await openCleanup("schedule");
     expect(await screen.findByRole("spinbutton")).toHaveValue("30");
     expect(api.cleanupSchedule).toHaveBeenCalledWith(
       "tenant",
@@ -131,9 +147,7 @@ describe("observability role gate", () => {
       />,
       { wrapper }
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "trajectory.scheduledCleanup" })
-    );
+    await openCleanup("schedule");
     await screen.findByRole("spinbutton");
     expect(api.cleanupSchedule).toHaveBeenCalledWith(
       undefined,
@@ -845,7 +859,7 @@ describe("administrator page and cleanup confirmation", () => {
     render(<ObservabilityCenter user={{ ...admin, role: USER_ROLES.SU }} />, {
       wrapper,
     });
-    fireEvent.click(screen.getByRole("button", { name: "trajectory.cleanup" }));
+    await openCleanup("manual");
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByRole("button", { name: "trajectory.confirmCleanup" })
@@ -904,9 +918,7 @@ describe("administrator page and cleanup confirmation", () => {
         );
       render(<ObservabilityCenter user={admin} />, { wrapper });
       await waitFor(() => expect(api.records).toHaveBeenCalledOnce());
-      fireEvent.click(
-        screen.getByRole("button", { name: "trajectory.cleanup" })
-      );
+      await openCleanup("manual");
       const dialog = await screen.findByRole("dialog");
       fireEvent.click(
         within(dialog).getByRole("button", {

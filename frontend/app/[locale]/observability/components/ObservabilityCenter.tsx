@@ -1,9 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   DatePicker,
+  Dropdown,
   Popover,
   Tag,
   Tooltip,
@@ -14,13 +15,13 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
+  ChevronDown,
   ChevronRight,
   Clock3,
   Filter,
   RefreshCw,
   Search,
   Trash2,
-  Upload,
 } from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
@@ -35,7 +36,6 @@ import type {
   TrajectoryFilters,
   TrajectoryRecord,
 } from "@/types/trajectory";
-import { useTrajectoryArchive } from "@/hooks/trajectory/useTrajectoryArchive";
 import { useTrajectoryRecords } from "@/hooks/trajectory/useTrajectoryRecords";
 import {
   formatMetric,
@@ -73,10 +73,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [cleaning, setCleaning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
-  const archive = useTrajectoryArchive(scope, true);
-  const fileInput = useRef<HTMLInputElement>(null);
   const select = (row: TrajectoryRecord | null) => {
-    archive.clear();
     setSelected(row);
   };
   const records = useTrajectoryRecords(scope, {
@@ -380,66 +377,49 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            aria-label={t("trajectory.import")}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) {
-                setSelected(null);
-                void archive.open(file);
-              }
-            }}
-          />
-          <Button
-            icon={<Upload size={14} />}
-            loading={archive.loading}
-            onClick={() => fileInput.current?.click()}
-          >
-            {t("trajectory.import")}
-          </Button>
           <Link
             href={`/${i18n?.language?.startsWith("en") ? "en" : "zh"}/observability/imports`}
           >
             <Button>{t("trajectory.importedList")}</Button>
           </Link>
-          <Button
-            aria-label={t("common.refresh")}
-            icon={<RefreshCw size={14} />}
-            loading={records.isFetching}
-            disabled={records.isFetching}
-            onClick={refresh}
-          >
-            {t("common.refresh")}
-          </Button>
-          <Tooltip
-            title={
-              isSuperAdmin || tenant ? "" : t("trajectory.scheduleSelectTenant")
-            }
-          >
-            <span>
-              <Button
-                icon={<Clock3 size={14} />}
-                disabled={!isSuperAdmin && !tenant}
-                onClick={() => setScheduling(true)}
-              >
-                {t("trajectory.scheduledCleanup")}
-              </Button>
-            </span>
-          </Tooltip>
           <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
             <span>
-              <Button
-                icon={<Trash2 size={14} />}
-                disabled={!canCleanup}
-                onClick={() => setCleaning(true)}
+              <Dropdown
+                trigger={["click"]}
+                menu={{
+                  items: [
+                    {
+                      key: "manual",
+                      label: t("trajectory.manualCleanup"),
+                      icon: <Trash2 size={14} />,
+                      disabled: !canCleanup,
+                      title: canCleanup
+                        ? undefined
+                        : t("trajectory.cleanupContext"),
+                    },
+                    {
+                      key: "schedule",
+                      label: t("trajectory.scheduledCleanup"),
+                      icon: <Clock3 size={14} />,
+                      disabled: !isSuperAdmin && !tenant,
+                      title:
+                        isSuperAdmin || tenant
+                          ? undefined
+                          : t("trajectory.scheduleSelectTenant"),
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === "manual" && canCleanup) setCleaning(true);
+                    if (key === "schedule" && (isSuperAdmin || tenant))
+                      setScheduling(true);
+                  },
+                }}
               >
-                {t("trajectory.cleanup")}
-              </Button>
+                <Button icon={<Trash2 size={14} />} disabled={!canCleanup}>
+                  {t("trajectory.cleanup")}
+                  <ChevronDown size={14} />
+                </Button>
+              </Dropdown>
             </span>
           </Tooltip>
         </div>
@@ -562,7 +542,22 @@ export function ObservabilityCenter({ user }: { user: User }) {
             </Tag>
           ))}
       </div>
-      <TrajectorySummary summary={records.data?.summary} />
+      <TrajectorySummary
+        summary={records.data?.summary}
+        action={
+          <Tooltip title={t("common.refresh")}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("common.refresh")}
+              icon={<RefreshCw size={14} />}
+              loading={records.isFetching}
+              disabled={records.isFetching}
+              onClick={refresh}
+            />
+          </Tooltip>
+        }
+      />
       {records.isError && (
         <TrajectoryError error={records.error} retry={refresh} />
       )}
@@ -623,19 +618,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
           />
         </div>
       </section>
-      {archive.error != null && (
-        <TrajectoryError
-          error={archive.error}
-          retry={() => fileInput.current?.click()}
-        />
-      )}
-      {archive.data && (
-        <TrajectoryDrawer
-          row={archive.data.row}
-          imported={archive.data}
-          onClose={archive.clear}
-        />
-      )}
       {selected && (
         <TrajectoryDrawer
           key={recordKey(selected)}

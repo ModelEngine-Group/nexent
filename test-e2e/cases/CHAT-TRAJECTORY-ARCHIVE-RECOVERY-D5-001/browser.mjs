@@ -24,6 +24,7 @@ test("CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001 lifecycle and late responses", asy
     try {
       await page.goto(`${base}/zh/observability`);
       await page.getByRole("heading", { name: "可观测中心" }).waitFor();
+      await page.getByRole("link", { name: "导入列表", exact: true }).click();
       state.delayImport = true;
       const response = new Promise((resolve) => page.once("request", resolve));
       await page
@@ -46,12 +47,12 @@ test("CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001 lifecycle and late responses", asy
       await close();
       await upload();
       await page.reload();
-      await page.getByRole("heading", { name: "可观测中心" }).waitFor();
+      await page.getByRole("heading", { name: "导入列表" }).waitFor();
       assert.equal(await page.getByRole("dialog").count(), 0);
       await upload();
       await page.goto(`${base}/zh`);
       await page.goBack();
-      await page.getByRole("heading", { name: "可观测中心" }).waitFor();
+      await page.getByRole("heading", { name: "导入列表" }).waitFor();
       assert.equal(await page.getByRole("dialog").count(), 0);
       await upload();
       await page.evaluate(() => window.dispatchEvent(new Event("auth:logout")));

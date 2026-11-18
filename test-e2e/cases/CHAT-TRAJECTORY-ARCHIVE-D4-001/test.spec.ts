@@ -68,6 +68,8 @@ journey("CHAT-TRAJECTORY-ARCHIVE-D4-001", async ({ page, contract }) => {
   });
   const originalReads = state.reads;
   await contract.step(steps[1], async () => {
+    await expect(page.getByRole("button", { name: "导入", exact: true })).toHaveCount(0);
+    await page.getByRole("link", { name: "导入列表", exact: true }).click();
     const button = page
       .locator(".trajectory-page-actions")
       .getByRole("button", { name: "导入", exact: true });
@@ -137,9 +139,10 @@ journey("CHAT-TRAJECTORY-ARCHIVE-D4-001", async ({ page, contract }) => {
       page.getByRole("treeitem", { name: /Replacement 2/ }),
     ).toBeVisible();
     expect(state.reads).toBe(originalReads);
-    await expect(page.locator(".trajectory-table-panel tbody tr.ant-table-row")).toHaveCount(
-      1,
-    );
+    await close();
+    await page.getByRole("link", { name: "返回轨迹列表" }).click();
+    await expect(page.locator(".trajectory-table-panel tbody tr.ant-table-row")).toHaveCount(1);
+    await page.getByRole("link", { name: "导入列表", exact: true }).click();
   });
   await contract.step(steps[3], async () => {
     await page.reload();
@@ -148,7 +151,7 @@ journey("CHAT-TRAJECTORY-ARCHIVE-D4-001", async ({ page, contract }) => {
     await page.goto(`${base}/zh`);
     await page.goBack();
     await expect(
-      page.getByRole("heading", { name: "可观测中心" }),
+      page.getByRole("heading", { name: "导入列表" }),
     ).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await upload();

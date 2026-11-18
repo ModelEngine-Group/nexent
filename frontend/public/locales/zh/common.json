@@ -6896,6 +6896,7 @@
   "trajectory.nextChunk": "读取下一块",
   "trajectory.firstChunk": "返回首块",
   "trajectory.bodyUnavailable": "正文不可用",
+  "trajectory.manualCleanup": "手动清理",
   "trajectory.cleanup": "清理轨迹",
   "trajectory.confirmCleanup": "确认清理",
   "trajectory.cleanupScope": "清理当前租户的全部用户、智能体和会话",

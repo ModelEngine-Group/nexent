@@ -31,14 +31,17 @@ journey("CHAT-TRAJECTORY-SAVED-IMPORT-D4-001", async ({ page, contract }) => {
   const steps = contract.expectedIds("steps");
   const rows = () => page.locator("tbody tr.ant-table-row");
   await contract.step(steps[0], async () => {
+    await expect(
+      page.getByRole("button", { name: "导入", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("link", { name: "导入列表", exact: true }).click();
+    await expect(page).toHaveURL(/\/observability\/imports$/);
+    await expect(page.getByRole("heading", { name: "导入列表" })).toBeVisible();
     await upload();
     await expect(
       page.getByRole("treeitem", { name: /Archive 2/ }),
     ).toBeVisible();
     await close();
-    await page.getByRole("link", { name: "导入列表", exact: true }).click();
-    await expect(page).toHaveURL(/\/observability\/imports$/);
-    await expect(page.getByRole("heading", { name: "导入列表" })).toBeVisible();
     await expect(
       page.getByText("trajectory.zip", { exact: true }),
     ).toBeVisible();
