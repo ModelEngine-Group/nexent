@@ -4,6 +4,7 @@
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
 from contracts.agentos_knowledge import (
     KnowledgeBaseInspect,
+    KnowledgeChunks,
     KnowledgeFileDelete,
     KnowledgeFileUpload,
     KnowledgeJobLookup,
@@ -65,6 +66,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.SAMPLE.value, include_in_schema=False)
     async def sample(request: Request):
         return await dispatch(request, KnowledgeSample, service.sample, 200)
+
+    @router.post(KnowledgeOperation.CHUNKS.value, include_in_schema=False)
+    async def chunks(request: Request):
+        return await dispatch(request, KnowledgeChunks, service.chunks, 200)
 
     @router.post(KnowledgeOperation.INSPECT_BASE.value, include_in_schema=False)
     async def inspect_base(request: Request):

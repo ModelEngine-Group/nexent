@@ -343,6 +343,40 @@ class KnowledgeSampleResult(Contract):
     documents: list[KnowledgeSampleDocument] = Field(max_length=200)
 
 
+class KnowledgeChunks(Contract):
+    knowledge_id: int = Field(gt=0)
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_data_revision: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    file_refs: list[KnowledgeFileReference] | None = Field(default=None, max_length=1000)
+    offset: int = Field(default=0, ge=0, le=2**31-1)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+    @model_validator(mode='after')
+    def exact_file_scope(self):
+        if self.file_refs is not None:
+            refs = {(ref.file_id, ref.file_version) for ref in self.file_refs}
+            if len(refs) != len(self.file_refs) or any(ref.knowledge_id != self.knowledge_id for ref in self.file_refs):
+                raise ValueError('Expected unique exact files from the selected knowledge base')
+        return self
+
+
+class KnowledgeChunk(KnowledgeFileReference):
+    chunk_index: int = Field(ge=0)
+    filename: str = Field(max_length=1024)
+    content: str
+    location: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class KnowledgeChunksResult(Contract):
+    knowledge_id: int = Field(gt=0)
+    knowledge_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    data_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    embedding_model: ModelVersion
+    total: int = Field(ge=0)
+    chunks: list[KnowledgeChunk] = Field(max_length=1000)
+    next_offset: int | None = Field(default=None, ge=0)
+
+
 class FileCleanseRequest(Contract):
     run_id: str = Field(pattern=r"^(debug-)?[0-9a-f]{32}$")
     source: ObjectReference
@@ -403,3 +437,4 @@ class KnowledgeOperation(str, Enum):
     DELETE = "/internal/agentos/v1/knowledge/files/delete"
     SEARCH = "/internal/agentos/v1/knowledge/search"
     SAMPLE = "/internal/agentos/v1/knowledge/sample"
+    CHUNKS = "/internal/agentos/v1/knowledge/chunks"

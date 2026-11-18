@@ -25,13 +25,11 @@ from nexent.storage.models import (
     Junction,
     OperationContext,
     PageRequest,
-    RecordQuery,
-    Sort,
 )
+from runtime.knowledge_base.publication import published_files, published_job
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_search_ports
-from infrastructure.rdb.knowledge_jobs import FILES, JOBS
 
 logger = logging.getLogger(__name__)
 
@@ -39,46 +37,21 @@ logger = logging.getLogger(__name__)
 def _snapshot(records, knowledge_id, limit, *, context):
     """Hash every visible manifest and reservoir-sample files with bounded memory."""
     digest = hashlib.sha256(str(knowledge_id).encode())
-    selected, count, after = [], 0, None
-    while True:
-        terms = [Comparison('knowledge_id', 'eq', knowledge_id)]
-        if after is not None:
-            terms.append(Comparison('record_id', 'gt', after))
-        page = records.query(FILES, RecordQuery(where=Junction('and', tuple(terms)),
-            order_by=(Sort('record_id'),)), PageRequest(limit=500), context=context)
-        for row in page.items:
-            if row['knowledge_id'] != knowledge_id:
-                raise ScopeDenied()
-            key = row['record_id']
-            if after is not None and key <= after:
-                raise Conflict()
-            after = key
-            version = row['visible_version']
-            if version is None or version <= row['tombstone_version']:
-                continue
-            if not row['visible_generation'] or not row['visible_job_id']:
-                raise Conflict()
-            digest.update(json.dumps([row['file_id'], version, row['visible_generation'],
-                                      row['visible_job_id']], separators=(',', ':')).encode())
-            count += 1
-            if len(selected) < limit:
-                selected.append(row)
-            elif limit:
-                index = random.randrange(count)
-                if index < limit:
-                    selected[index] = row
-        if len(page.items) < 500:
-            return digest.hexdigest(), selected
+    selected = []
+    for count, row in enumerate(published_files(records, knowledge_id, context=context), start=1):
+        digest.update(json.dumps([row['file_id'], row['visible_version'], row['visible_generation'],
+                                  row['visible_job_id']], separators=(',', ':')).encode())
+        if len(selected) < limit:
+            selected.append(row)
+        elif limit:
+            index = random.randrange(count)
+            if index < limit: selected[index] = row
+    return digest.hexdigest(), selected
+
 
 
 def _document(records, vectors, resource, manifest, model, *, context):
-    job = records.get(JOBS, manifest['visible_job_id'], context=context)
-    if (job is None or job['operation'] != 'upload' or job['status'] != 'completed'
-        or job['knowledge_id'] != resource.knowledge_id or job['file_id'] != manifest['file_id']
-        or job['file_version'] != manifest['visible_version'] or not job['writer_ended']
-        or job['reconcile_required'] or job['attempt_id'] != manifest['visible_generation']
-        or type(job['chunk_count']) is not int or job['chunk_count'] < 0):
-        raise Conflict()
+    job = published_job(records, resource, manifest, context=context)
     reference = KnowledgeFileReference(knowledge_id=resource.knowledge_id, file_id=manifest['file_id'],
                                        file_version=manifest['visible_version'])
     where = Junction('and', tuple(Comparison(name, 'eq', value) for name, value in reference.model_dump().items()))
@@ -114,7 +87,9 @@ def _document(records, vectors, resource, manifest, model, *, context):
                                    chunks=[chunks[i] for i in range(len(chunks))])
 
 
-class KnowledgeSampleService:
+class PublishedKnowledgeReader:
+    operation_name = 'knowledge-sample'
+
     def __init__(self, authorization_client, models, *, ports=knowledge_search_ports, operation_seconds=180):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
             raise InvalidInput()
@@ -129,15 +104,17 @@ class KnowledgeSampleService:
             raise Conflict()
         return grant
 
-    @staticmethod
-    async def _blocking(method, *args, context):
+    @classmethod
+    async def _blocking(cls, method, *args, context):
         def execute():
             context.remaining()
             result = method(*args, context=context)
             context.remaining()
             return result
-        return await run_blocking('knowledge-sample', execute, lane='control-io', owner='runtime.knowledge_base')
+        return await run_blocking(cls.operation_name, execute, lane='control-io', owner='runtime.knowledge_base')
 
+
+class KnowledgeSampleService(PublishedKnowledgeReader):
     async def sample(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeSample):
             raise InvalidInput()

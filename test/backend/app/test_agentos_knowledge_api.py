@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from contracts.agentos_knowledge import (
+    KnowledgeChunks,
+    KnowledgeChunksResult,
     KnowledgeFileDelete,
     KnowledgeJobLookup,
     KnowledgeJobState,
@@ -100,6 +102,21 @@ async def test_sample_uses_signed_reader_and_rejects_tampering(setup):
     tampered = await send(app, KnowledgeOperation.SAMPLE, request, tamper=True)
     assert tampered.status_code == 401
     service.sample.assert_awaited_once()
+
+
+async def test_chunks_uses_signed_reader_and_rejects_tampering(setup):
+    app, service, _ = setup
+    request = KnowledgeChunks(knowledge_id=1, expected_revision='a' * 64)
+    service.chunks = AsyncMock(return_value=KnowledgeChunksResult(
+        knowledge_id=1, knowledge_revision='a' * 64, data_revision='b' * 64,
+        embedding_model={'model_id': 2, 'revision': 'v1'}, total=0, chunks=[]))
+    response = await send(app, KnowledgeOperation.CHUNKS, request)
+    assert response.status_code == 200 and response.json()['total'] == 0
+    assert response.json()['chunks'] == [] and response.json()['next_offset'] is None
+    service.chunks.assert_awaited_once_with(request, ServicePrincipal('user', 'tenant'))
+    tampered = await send(app, KnowledgeOperation.CHUNKS, request, tamper=True)
+    assert tampered.status_code == 401
+    service.chunks.assert_awaited_once()
 
 
 async def test_deletion_reports_accepted_without_claiming_physical_completion(setup):

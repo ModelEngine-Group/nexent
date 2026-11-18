@@ -118,3 +118,21 @@ async def test_sample_total_deadline_cancels_and_closes_without_retry(monkeypatc
         await AgentOSClient('http://runtime', create).sample_knowledge(
             KnowledgeSample(knowledge_id=1, expected_revision='a' * 64), 'user', 'tenant')
     assert len(clients) == len(calls) == 1 and clients[0].is_closed and cancelled == [True]
+
+
+async def test_chunks_use_standard_signature_and_close_transport(monkeypatch):
+    from contracts.agentos_knowledge import KnowledgeChunks, KnowledgeOperation
+
+    monkeypatch.setattr(environment,'JWT_SECRET','synthetic-chunks-client-key')
+    clients=[]
+    async def reply(message):
+        assert message.url.path=='/api'+KnowledgeOperation.CHUNKS.value
+        token=message.headers['Authorization'].removeprefix('Bearer ')
+        assert verify_call(token,KnowledgeOperation.CHUNKS,message.content)==ServicePrincipal('reader','tenant')
+        return httpx.Response(200,json={'knowledge_id':1,'knowledge_revision':'a'*64,'data_revision':'b'*64,
+            'embedding_model':{'model_id':2,'revision':'v1'},'total':0,'chunks':[],'next_offset':None})
+    def create(**kwargs):
+        client=httpx.AsyncClient(transport=httpx.MockTransport(reply),**kwargs);clients.append(client);return client
+    result=await AgentOSClient('http://runtime',create).knowledge_chunks(
+        KnowledgeChunks(knowledge_id=1,expected_revision='a'*64),'reader','tenant')
+    assert result.total==0 and len(clients)==1 and clients[0].is_closed
