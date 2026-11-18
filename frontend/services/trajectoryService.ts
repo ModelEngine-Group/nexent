@@ -2,6 +2,7 @@
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
+  ImportedTrajectory,
   CleanupResult,
   CleanupSchedule,
   ConversationPage,
@@ -33,6 +34,36 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
+  async exportArchive(
+    row: TrajectoryRecord,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const response = await fetchWithErrorHandling(
+      queryUrl(API_ENDPOINTS.trajectory.exportArchive(row.conversation_id), {
+        tenant_id: row.tenant_id,
+        target_user_id: row.user_id,
+      }),
+      { method: "POST", signal, cache: "no-store" }
+    );
+    return response.blob();
+  },
+  async importArchive(
+    file: File,
+    signal?: AbortSignal
+  ): Promise<ImportedTrajectory> {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.importArchive,
+      {
+        method: "POST",
+        body,
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as ImportedTrajectory;
+  },
   cleanupSchedule: (
     tenantId?: string,
     signal?: AbortSignal,

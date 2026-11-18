@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bounded historical trajectory APIs; all blocking work uses managed workers."""
 
+import asyncio
 import logging
 from typing import Annotated
 
@@ -9,14 +10,20 @@ from contracts.roles import has_any_role
 from contracts.trajectory import CleanupRequest, CleanupScheduleRequest, RecordsQuery
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from gateway.authentication.auth import get_current_user_context
 from nexent.core.concurrency import ManagedTaskSpec
+from ops.api.trajectory_upload import read_archive_form
 from ops.services.trajectory.access import Actor
 from ops.services.trajectory.cleanup import cleanup
 from ops.services.trajectory.cleanup_schedule import read_schedule, save_schedule
 from ops.services.trajectory.collection import facets, records
+from ops.services.trajectory.exchange import (
+    configured_limits,
+    export_conversation,
+    import_archive,
+)
 from ops.services.trajectory.primitives import CURRENT_CANCEL, QueryError
 from ops.services.trajectory.runtime import get_service
 from pydantic import ValidationError
@@ -35,7 +42,9 @@ class PrivateRoute(APIRoute):
             try:
                 response = await handler(request)
             except RequestValidationError:
-                response = JSONResponse(status_code=422, content={"detail": {"code": "invalid_parameters"}})
+                response = JSONResponse(
+                    status_code=422, content={"detail": {"code": "invalid_parameters"}}
+                )
             except HTTPException as error:
                 response = JSONResponse(
                     status_code=error.status_code,
@@ -51,7 +60,15 @@ class PrivateRoute(APIRoute):
 router = APIRouter(prefix="/trajectory", route_class=PrivateRoute)
 
 
-async def dispatch(request, authorization, operation, *, lane="trajectory-read", needs_service=True):
+async def dispatch(
+    request,
+    authorization,
+    operation,
+    *,
+    lane="trajectory-read",
+    needs_service=True,
+    request_owned=False,
+):
     def work(cancel_event):
         user, tenant, roles = get_current_user_context(authorization)
         if not user:
@@ -67,12 +84,44 @@ async def dispatch(request, authorization, operation, *, lane="trajectory-read",
 
     try:
         manager = request.app.state.thread_manager
-        result = await manager.run(
-            lane,
-            ManagedTaskSpec(task_name="trajectory-query", owner=__name__, pass_cancel_event=True),
-            work,
+
+        async def execute():
+            return await manager.run(
+                lane,
+                ManagedTaskSpec(
+                    task_name="trajectory-query", owner=__name__, pass_cancel_event=True
+                ),
+                work,
+            )
+
+        if request_owned:
+
+            async def disconnected():
+                while True:
+                    if (await request.receive())["type"] == "http.disconnect":
+                        return
+
+            task = asyncio.create_task(execute())
+            watcher = asyncio.create_task(disconnected())
+            try:
+                done, _ = await asyncio.wait(
+                    {task, watcher}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if task not in done:
+                    task.cancel()
+                result = await task
+            finally:
+                task.cancel()
+                watcher.cancel()
+                await asyncio.gather(task, watcher, return_exceptions=True)
+        else:
+            result = await execute()
+        if isinstance(result, Response):
+            result.headers.update(PRIVATE)
+            return result
+        return JSONResponse(
+            content={"code": 0, "message": "success", "data": result}, headers=PRIVATE
         )
-        return JSONResponse(content={"code": 0, "message": "success", "data": result}, headers=PRIVATE)
     except UnauthorizedError:
         return JSONResponse(
             status_code=401,
@@ -149,22 +198,34 @@ async def list_records(request: Request, authorization: str | None = Header(None
 
 @router.get("/cleanup/schedule")
 async def get_cleanup_schedule(
-    request: Request, authorization: str | None = Header(None),
+    request: Request,
+    authorization: str | None = Header(None),
     tenant_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
     all_tenants: bool = False,
 ):
     return await dispatch(
-        request, authorization, lambda service, actor: read_schedule(actor, tenant_id, all_tenants), needs_service=False,
+        request,
+        authorization,
+        lambda service, actor: read_schedule(actor, tenant_id, all_tenants),
+        needs_service=False,
     )
 
 
 @router.put("/cleanup/schedule")
 async def put_cleanup_schedule(
-    request: Request, body: CleanupScheduleRequest, authorization: str | None = Header(None),
+    request: Request,
+    body: CleanupScheduleRequest,
+    authorization: str | None = Header(None),
 ):
     return await dispatch(
-        request, authorization, lambda service, actor: save_schedule(
-            actor, body.enabled, body.retention_days, body.tenant_id, body.all_tenants,
+        request,
+        authorization,
+        lambda service, actor: save_schedule(
+            actor,
+            body.enabled,
+            body.retention_days,
+            body.tenant_id,
+            body.all_tenants,
         ),
         needs_service=False,
     )
@@ -244,15 +305,80 @@ async def get_content(
     return await dispatch(
         request,
         authorization,
-        lambda service, actor: service.content(actor, conversation_id, content_id, offset=offset, limit=limit),
+        lambda service, actor: service.content(
+            actor, conversation_id, content_id, offset=offset, limit=limit
+        ),
     )
 
 
 @router.post("/cleanup")
-async def cleanup_trajectories(request: Request, body: CleanupRequest, authorization: str | None = Header(None)):
+async def cleanup_trajectories(
+    request: Request, body: CleanupRequest, authorization: str | None = Header(None)
+):
     return await dispatch(
         request,
         authorization,
-        lambda service, actor: cleanup(service, actor, body.before_days, body.cursor, body.tenant_id),
+        lambda service, actor: cleanup(
+            service, actor, body.before_days, body.cursor, body.tenant_id
+        ),
         lane="trajectory-cleanup",
     )
+
+
+@router.post("/conversations/{conversation_id}/export")
+async def export_trajectory(
+    request: Request,
+    conversation_id: str,
+    authorization: str | None = Header(None),
+    tenant_id: str | None = None,
+    target_user_id: str | None = None,
+):
+    def operation(service, actor):
+        content = export_conversation(
+            service,
+            actor,
+            conversation_id,
+            tenant_id,
+            target_user_id,
+            limits=configured_limits(),
+        )
+        return Response(
+            content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="trajectory-{conversation_id}.zip"',
+            },
+        )
+
+    return await dispatch(request, authorization, operation, request_owned=True)
+
+
+@router.post("/import")
+async def import_trajectory(request: Request, authorization: str | None = Header(None)):
+    # Authenticate before reading or spooling user-controlled input; recheck at parsing time.
+    gate = await dispatch(
+        request, authorization, lambda _, actor: None, needs_service=False
+    )
+    if gate.status_code != 200:
+        return gate
+    limits = configured_limits()
+    try:
+        form, upload = await read_archive_form(
+            request, limits.compressed_bytes, limits.seconds
+        )
+    except QueryError as error:
+        return JSONResponse(
+            status_code=error.status,
+            content={"detail": {"code": error.code}},
+            headers=PRIVATE,
+        )
+    try:
+        return await dispatch(
+            request,
+            authorization,
+            lambda _, actor: import_archive(upload.file, limits=limits),
+            needs_service=False,
+            request_owned=True,
+        )
+    finally:
+        await form.close()

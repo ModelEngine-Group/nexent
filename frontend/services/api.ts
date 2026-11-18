@@ -21,6 +21,9 @@ export const API_BASE_URL = withBasePath("/api");
 export const API_ENDPOINTS = {
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
+    importArchive: `${API_BASE_URL}/trajectory/import`,
+    exportArchive: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/export`,
     conversation: (id: string) =>
       `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
     snapshot: (id: string) =>

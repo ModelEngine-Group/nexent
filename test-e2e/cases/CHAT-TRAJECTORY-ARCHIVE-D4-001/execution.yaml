@@ -1,0 +1,28 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-ARCHIVE-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: CHAT-TRAJECTORY-ARCHIVE-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained owned temporary native archives and FastAPI/TestClient services.
+  Only identity and PG catalog boundaries are controlled; product authorization, writer,
+  managed workers, ZIP and OTLP parsing remain real. All files and workers close in
+  finally; source file hashes remain unchanged. Browser tests use the configured product
+  frontend, real exchange-generated input, controlled auth/catalog HTTP fixtures and
+  exclusive contexts; route handlers, downloads, cookies and browser contexts are
+  released in finally. No shared preparation family or model/provider is required.
+  This is controlled local runtime proof, not deployed PostgreSQL or multi-Pod evidence.
+acceptance_bindings:
+  AC-01:
+  - CHAT-TRAJECTORY-ARCHIVE-D4-001
+  AC-02:
+  - CHAT-TRAJECTORY-ARCHIVE-D4-001
+  AC-03:
+  - CHAT-TRAJECTORY-ARCHIVE-D4-001
+  AC-04:
+  - CHAT-TRAJECTORY-ARCHIVE-D4-001

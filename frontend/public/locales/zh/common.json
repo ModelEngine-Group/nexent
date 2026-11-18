@@ -6799,6 +6799,13 @@
     "failedHint": "此模型出口未能完成迁移，请管理员检查并处理配置异常。"
   },
   "modelProfile.selectionCheckFailed": "检测失败",
+  "trajectory.export": "导出",
+  "trajectory.import": "导入",
+  "trajectory.exportFailed": "轨迹导出失败",
+  "trajectory.errors.archive_too_large": "ZIP 或解压内容超过大小限制",
+  "trajectory.errors.invalid_archive": "轨迹 ZIP 无效、格式不支持或内容缺失",
+  "trajectory.errors.nothing_to_export": "没有可导出的已归档轨迹",
+  "trajectory.errors.archive_upload_timeout": "上传超时，请重试",
   "trajectory.title": "可观测中心",
   "trajectory.subtitle": "按会话查看多轮执行，追踪每轮的调用耗时、指标与完整输入输出。",
   "trajectory.forbidden": "仅运维管理员和超级管理员可访问可观测中心",

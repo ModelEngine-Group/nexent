@@ -213,3 +213,13 @@ export interface ConversationPage {
   availability: string;
   active_execution_count: number;
 }
+
+export interface ImportedTrajectory {
+  row: TrajectoryRecord;
+  coverage: Coverage;
+  pages: {
+    run: TrajectoryExecution;
+    snapshot: SnapshotPage | null;
+    directory?: never;
+  }[];
+}

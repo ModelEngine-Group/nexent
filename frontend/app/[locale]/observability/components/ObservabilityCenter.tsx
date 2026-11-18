@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   DatePicker,
   Popover,
@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
@@ -33,6 +34,7 @@ import type {
   TrajectoryFilters,
   TrajectoryRecord,
 } from "@/types/trajectory";
+import { useTrajectoryArchive } from "@/hooks/trajectory/useTrajectoryArchive";
 import { useTrajectoryRecords } from "@/hooks/trajectory/useTrajectoryRecords";
 import {
   formatMetric,
@@ -70,6 +72,12 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [cleaning, setCleaning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
+  const archive = useTrajectoryArchive(scope);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const select = (row: TrajectoryRecord | null) => {
+    archive.clear();
+    setSelected(row);
+  };
   const records = useTrajectoryRecords(scope, {
     view: "conversation",
     ...filters,
@@ -79,7 +87,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const change = (next: TrajectoryFilters) => {
     setFilters(next);
     setPaging((value) => ({ ...value, page: 1 }));
-    setSelected(null);
+    select(null);
   };
   const directoryChange = (field: DirectoryField, option?: DirectoryOption) => {
     let next = resetFilters(filters, field, option?.id);
@@ -119,7 +127,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
     setScheduling(false);
   };
   const refresh = () => {
-    setSelected(null);
+    select(null);
     setPaging((value) => ({ ...value, page: 1 }));
     records.refresh();
   };
@@ -162,7 +170,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
       width: 250,
       render: (_, row) => (
         <div className="trajectory-record-agent">
-          <button className="trajectory-link" onClick={() => setSelected(row)}>
+          <button className="trajectory-link" onClick={() => select(row)}>
             {(row.root_agent_name && row.root_agent_name !== row.root_agent_id
               ? row.root_agent_name
               : null) || t("trajectory.unknownAgent")}
@@ -371,6 +379,28 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            aria-label={t("trajectory.import")}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) {
+                setSelected(null);
+                void archive.open(file);
+              }
+            }}
+          />
+          <Button
+            icon={<Upload size={14} />}
+            loading={archive.loading}
+            onClick={() => fileInput.current?.click()}
+          >
+            {t("trajectory.import")}
+          </Button>
           <Button
             aria-label={t("common.refresh")}
             icon={<RefreshCw size={14} />}
@@ -546,12 +576,12 @@ export function ObservabilityCenter({ user }: { user: User }) {
               : t("trajectory.empty"),
           }}
           onRow={(row) => ({
-            onClick: () => setSelected(row),
+            onClick: () => select(row),
             className: "cursor-pointer",
             tabIndex: 0,
             onKeyDown: (event) => {
               if (event.key === "Enter" && event.target === event.currentTarget)
-                setSelected(row);
+                select(row);
             },
           })}
           onChange={(_pagination, tableFilters, sorter, extra) => {
@@ -587,6 +617,19 @@ export function ObservabilityCenter({ user }: { user: User }) {
           />
         </div>
       </section>
+      {archive.error != null && (
+        <TrajectoryError
+          error={archive.error}
+          retry={() => fileInput.current?.click()}
+        />
+      )}
+      {archive.data && (
+        <TrajectoryDrawer
+          row={archive.data.row}
+          imported={archive.data}
+          onClose={archive.clear}
+        />
+      )}
       {selected && (
         <TrajectoryDrawer
           key={recordKey(selected)}

@@ -44,9 +44,9 @@ feature:
       user withdrew execution-recovery preparation on 2026-11-05. Retirement evidence:
       nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json'
   - rule_id: TRJ-RULE-010
-    description: 设计新增：会话轨迹详情右上角直接导出ZIP，后端收集全部可读已归档轮次及完整展示正文，名称/历史版本/指标和缺失状态保持，不受浏览器加载页数限制。
+    description: 设计新增：会话轨迹详情右上角直接导出ZIP，按原会话目录打包meta.json与可读已归档的OTLP JSONL，完整正文保持内嵌，名称/历史版本/指标和缺失状态保持，不受浏览器加载页数限制。
   - rule_id: TRJ-RULE-011
-    description: 设计新增：轨迹列表右上角选择ZIP，在浏览器当前页面内存中校验并复用查看器临时查看；不上传后端，不建持久档案/列表/去重记录；刷新、离开页面、关闭临时详情和退出登录清空数据及Worker/缓存，重新查看需重新选择文件。
+    description: 设计新增：轨迹列表右上角选择ZIP，由本地服务在单次上传请求中临时校验解析meta/OTLP，返回当前页面内存供原查看器查看，请求结束清理暂存；不建持久档案/列表/去重记录；刷新、离开页面、关闭临时详情和退出登录清空数据及请求/缓存，重新查看需重新选择文件。
   required_test_stages:
   - D2
   - D3

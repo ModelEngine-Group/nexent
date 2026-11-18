@@ -6802,6 +6802,13 @@
     "failedHint": "This outlet could not be migrated. An administrator must review and resolve its configuration."
   },
   "modelProfile.selectionCheckFailed": "Check failed",
+  "trajectory.export": "Export",
+  "trajectory.import": "Import",
+  "trajectory.exportFailed": "Failed to export trajectory",
+  "trajectory.errors.archive_too_large": "The ZIP or its contents exceed the size limit",
+  "trajectory.errors.invalid_archive": "Invalid trajectory ZIP, unsupported format, or missing contents",
+  "trajectory.errors.nothing_to_export": "No readable archived trajectory to export",
+  "trajectory.errors.archive_upload_timeout": "Upload timed out. Please try again.",
   "trajectory.title": "Observability center",
   "trajectory.subtitle": "Review conversation runs, call timings, metrics, and complete inputs and outputs.",
   "trajectory.forbidden": "Operations or super administrator access required",

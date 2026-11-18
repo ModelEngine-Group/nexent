@@ -207,7 +207,8 @@ class TrajectoryFileStore:
             return self._locate(root, identity)
         return matches[0] if matches else None
 
-    def _validate_manifest(self, meta, identity, tenant, agent):
+    @staticmethod
+    def _validate_manifest(meta, identity, tenant, agent):
         if not isinstance(meta, dict):
             raise TrajectoryCorrupt("Trajectory manifest must be an object")
         if (meta.get("tenant_id"), meta.get("owner_user_id"), meta.get("conversation_id")) != (
