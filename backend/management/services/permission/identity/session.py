@@ -88,7 +88,10 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
     Resolve the effective tenant_id from a user_tenant_t record.
 
     ASSET_OWNER users may have an empty legacy tenant_id; map them to the
-    virtual ASSET_OWNER tenant. Fall back to DEFAULT_TENANT_ID when unset.
+    virtual ASSET_OWNER tenant. When the stored tenant_id is empty (e.g. the
+    legacy suadmin bootstrap left tenant_id='' for 64 days in production),
+    fall back to the first active tenant in the database so every downstream
+    API (monitoring, model list, agent list, ...) still sees real data.
     """
     tenant_id = user_tenant.get("tenant_id")
     if tenant_id:
@@ -98,7 +101,58 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
     if has_any_role(user_role, {ASSET_OWNER_ROLE}):
         return ASSET_OWNER_TENANT_ID
 
+    # Runtime guard for historical empty-string/null tenant_id rows.
+    # Prefer the first active tenant over DEFAULT_TENANT_ID (the literal
+    # string "tenant_id") so scoped queries return real data instead of zero.
+    first_active = _lookup_first_active_tenant()
+    if first_active:
+        logger.warning(
+            "user_tenant record for user_id=%s has empty tenant_id; "
+            "falling back to first active tenant %s to preserve scoped queries",
+            user_tenant.get("user_id"), first_active,
+        )
+        return first_active
+
     return DEFAULT_TENANT_ID
+
+
+def _lookup_first_active_tenant() -> Optional[str]:
+    """Return the tenant_id of the first active tenant in DB, or None.
+
+    Filters out sentinel values (empty string, DEFAULT_TENANT_ID,
+    ASSET_OWNER_TENANT_ID) so historical placeholder rows inserted by
+    bootstrap scripts never masquerade as real tenants. Mirror the
+    guard used by management.db.configuration.tenant._count_real_tenants.
+    """
+    try:
+        from contracts.constants.constants import (
+            ASSET_OWNER_TENANT_ID as _AO,
+            DEFAULT_TENANT_ID as _DF,
+            TENANT_ID as _TK,
+        )
+        from management.db.client import get_db_session as _gds
+        from management.db.models import TenantConfig
+        from sqlalchemy import select as _sel
+
+        with _gds() as session:
+            return (
+                session.execute(
+                    _sel(TenantConfig.tenant_id)
+                    .where(
+                        TenantConfig.config_key == _TK,
+                        TenantConfig.delete_flag == "N",
+                        TenantConfig.tenant_id.isnot(None),
+                        TenantConfig.tenant_id != "",
+                        TenantConfig.tenant_id.notin_(
+                            (_DF, _AO),
+                        ),
+                    )
+                    .limit(1)
+                )
+                .scalar_one_or_none()
+            )
+    except Exception:
+        return None
 
 
 def get_jwt_expiry_seconds(token: str) -> int:
