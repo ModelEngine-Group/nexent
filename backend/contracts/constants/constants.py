@@ -260,12 +260,17 @@ _CATALOG_UNAVAILABLE_MESSAGE = 'catalog unavailable'
 MODEL_CONFIG_MAPPING = {'llm': 'LLM_ID', 'embedding': 'EMBEDDING_ID', 'multiEmbedding': 'MULTI_EMBEDDING_ID', 'rerank': 'RERANK_ID', 'vlm': 'VLM_ID', 'vlm2': 'VLM2_ID', 'vlm3': 'VLM3_ID', 'vlm4': 'VLM4_ID', 'stt': 'STT_ID', 'tts': 'TTS_ID'}
 
 # Notification
-# Resource types (drive frontend deep-link target)
+# Notification link targets: repository listings and unified review records.
 RESOURCE_TYPE_AGENT_REPOSITORY = 'agent_repository'
 RESOURCE_TYPE_SKILL_REPOSITORY = 'skill_repository'
 RESOURCE_TYPE_MCP_REPOSITORY = 'mcp_repository'
 RESOURCE_TYPE_RESOURCE_REVIEW = 'resource_review'
-VALID_RESOURCE_TYPES = frozenset({RESOURCE_TYPE_AGENT_REPOSITORY, RESOURCE_TYPE_SKILL_REPOSITORY, RESOURCE_TYPE_MCP_REPOSITORY, RESOURCE_TYPE_RESOURCE_REVIEW})
+VALID_NOTIFICATION_RESOURCE_TYPES = frozenset({
+    RESOURCE_TYPE_AGENT_REPOSITORY,
+    RESOURCE_TYPE_SKILL_REPOSITORY,
+    RESOURCE_TYPE_MCP_REPOSITORY,
+    RESOURCE_TYPE_RESOURCE_REVIEW,
+})
 # Event types (drive title copy / icon)
 EVENT_TYPE_REPOSITORY_REVIEW_APPROVED = 'repository_review_approved'
 EVENT_TYPE_REPOSITORY_REVIEW_REJECTED = 'repository_review_rejected'

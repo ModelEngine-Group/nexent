@@ -23,7 +23,7 @@ from contracts.constants.constants import (
     TENANT_USER_ROLES,
     VALID_EVENT_TYPES,
     VALID_NOTIFICATION_SCOPES,
-    VALID_RESOURCE_TYPES,
+    VALID_NOTIFICATION_RESOURCE_TYPES,
 )
 from management.db.client import get_db_session
 from management.db.models import Notification, NotificationReceiver, UserTenant
@@ -95,7 +95,7 @@ def create_notification(
     """
     if event_type not in VALID_EVENT_TYPES:
         raise ValueError(f"Invalid event_type: {event_type}")
-    if resource_type not in VALID_RESOURCE_TYPES:
+    if resource_type not in VALID_NOTIFICATION_RESOURCE_TYPES:
         raise ValueError(f"Invalid resource_type: {resource_type}")
     if scope not in VALID_NOTIFICATION_SCOPES:
         raise ValueError(f"Invalid notification scope: {scope}")
