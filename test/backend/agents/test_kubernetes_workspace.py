@@ -13,7 +13,7 @@ from nexent.core.agents.sandbox_contracts import SandboxOwner
 def workspace(tmp_path, monkeypatch):
     if os.name == 'posix':
         monkeypatch.setattr('runtime.sandbox_workspace.os.geteuid', lambda: 0)
-        monkeypatch.setattr('runtime.sandbox_workspace.os.chown', lambda *args, **kwargs: None)
+        monkeypatch.setattr('runtime.sandbox_workspace.os.fchown', lambda *args, **kwargs: None)
     owner = SandboxOwner('release', 'namespace', 'runtime', 'uid-a', '10.0.0.1', 'epoch')
     return KubernetesWorkspace(tmp_path, owner, execution_gid=1000)
 
@@ -46,6 +46,20 @@ def test_prepare_does_not_widen_or_follow_output_symlinks(workspace, tmp_path):
         pytest.skip('Windows symlink creation is unavailable')
     workspace.prepare_run('tenant', 'user', 'a' * 32)
     assert (outside / 'sentinel').read_text() == 'keep'
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX file descriptor permissions')
+def test_prepare_does_not_require_path_chmod_nofollow(workspace, monkeypatch):
+    chmod = Path.chmod
+
+    def limited_chmod(path, mode, *, follow_symlinks=True):
+        if not follow_symlinks:
+            raise NotImplementedError('chmod: follow_symlinks unavailable on this platform')
+        return chmod(path, mode)
+
+    monkeypatch.setattr(Path, 'chmod', limited_chmod)
+    run = workspace.prepare_run('tenant', 'user', 'a' * 32)
+    assert (run / 'outputs').stat().st_mode & 0o2777 == 0o2770
 
 
 def test_existing_symlink_run_root_is_rejected(workspace, tmp_path):

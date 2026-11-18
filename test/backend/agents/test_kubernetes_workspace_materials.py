@@ -14,7 +14,7 @@ from nexent.core.agents.sandbox_contracts import SandboxOwner
 def trusted_runtime_identity(monkeypatch):
     if os.name == 'posix':
         monkeypatch.setattr('runtime.sandbox_workspace.os.geteuid', lambda: 0)
-        monkeypatch.setattr('runtime.sandbox_workspace.os.chown', lambda *args, **kwargs: None)
+        monkeypatch.setattr('runtime.sandbox_workspace.os.fchown', lambda *args, **kwargs: None)
 
 
 @pytest.fixture

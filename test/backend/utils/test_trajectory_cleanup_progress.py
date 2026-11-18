@@ -42,10 +42,20 @@ def populate(store, identity, count):
         store._save_manifest(directory, meta)
 
 
-@pytest.mark.parametrize("count", [100, 101, 1000, 1001])
-def test_delete_limit_continuation_never_skips_a_file(store, identity, count):
+@pytest.mark.parametrize(
+    "count, expired_count, first_next_turn",
+    [
+        (100, 100, None),
+        (101, 101, 100),
+        # Leave an expired run on each side of the scan limit in the 1001 case.
+        (1000, 2, None),
+        (1001, 2, 1000),
+    ],
+)
+def test_delete_limit_continuation_never_skips_a_file(
+    store, identity, count, expired_count, first_next_turn,
+):
     populate(store, identity, count)
-    expired_count = min(count, 101)
     if count > expired_count:
         from infrastructure.observability.trajectory_store import timestamp
 
@@ -58,11 +68,13 @@ def test_delete_limit_continuation_never_skips_a_file(store, identity, count):
                 )
             store._save_manifest(directory, meta)
     after, deleted = 0, 0
-    for _ in range(count // 100 + 2):
+    for page in range(count // 100 + 2):
         result = store.cleanup(
             identity, after_turn=after, now=fixtures.NOW + timedelta(days=30)
         )
         assert result["deleted_runs"] <= 100 and result["scanned_runs"] <= 1000
+        if page == 0:
+            assert result["next_turn"] == first_next_turn
         deleted += result["deleted_runs"]
         if result["next_turn"] is None:
             break

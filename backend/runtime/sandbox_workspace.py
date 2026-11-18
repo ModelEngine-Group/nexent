@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import threading
 from pathlib import Path
 
@@ -51,6 +52,19 @@ class KubernetesWorkspace:
         _no_symlinks(mount)
         return self.owner_root.relative_to(mount).as_posix()
 
+    def _set_permissions(self, path: Path, mode: int) -> None:
+        # Use one descriptor for ownership and mode, even where path chmod
+        # cannot disable symlink following.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            file_mode = os.fstat(fd).st_mode
+            if not (stat.S_ISDIR(file_mode) or stat.S_ISREG(file_mode)):
+                raise ValueError('Workspace permissions require a regular file or directory')
+            os.fchown(fd, 0, self.execution_gid)
+            os.fchmod(fd, mode)
+        finally:
+            os.close(fd)
+
     def _directory(self, path: Path, mode: int) -> None:
         _no_symlinks(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -61,8 +75,7 @@ class KubernetesWorkspace:
         if os.name == 'posix':
             if os.geteuid() != 0:
                 raise RuntimeError('Kubernetes workspace preparation requires a trusted root Runtime')
-            os.chown(path, 0, self.execution_gid, follow_symlinks=False)
-            path.chmod(mode, follow_symlinks=False)
+            self._set_permissions(path, mode)
 
     def prepare_run(self, tenant_id: str, user_id: str, run_id: str) -> Path:
         run = self.run_path(tenant_id, user_id, run_id)
@@ -92,8 +105,7 @@ class KubernetesWorkspace:
             for path in (material, *material.rglob('*')):
                 _no_symlinks(path)
                 if os.name == 'posix':
-                    os.chown(path, 0, self.execution_gid, follow_symlinks=False)
-                    path.chmod(0o550 if path.is_dir() else 0o440, follow_symlinks=False)
+                    self._set_permissions(path, 0o550 if path.is_dir() else 0o440)
 
     def stage_skill(self, source: str, run: str, invocation: str) -> Path:
         """Copy original materials through the trusted Runtime, never root exec."""
@@ -130,8 +142,7 @@ class KubernetesWorkspace:
                 if path.is_file() and path.suffix.lower() == '.sh':
                     path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n'))
                 if os.name == 'posix':
-                    os.chown(path, 0, self.execution_gid, follow_symlinks=False)
-                    path.chmod(0o550 if path.is_dir() or executable else 0o440, follow_symlinks=False)
+                    self._set_permissions(path, 0o550 if path.is_dir() or executable else 0o440)
         return target
 
     def cleanup_skills(self, run: str, invocation: str) -> None:
