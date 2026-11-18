@@ -111,6 +111,10 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
         with self._boundary_lock:
             return self._boundary_reached
 
+    @property
+    def turn_complete(self) -> bool:
+        return self.boundary_reached
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         if not agent_name and process_type == ProcessType.FINAL_ANSWER:
             return
@@ -131,7 +135,6 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
                 if self._boundary_reached:
                     return
                 self._boundary_reached = True
-            self._boundary_stop_event.set()
 
 
 def prepare_agent_creator_run(payload: PreparedAgentCreatorRun, actor: ServicePrincipal) -> AgentRunInfo:

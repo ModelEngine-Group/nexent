@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from test.common.creator_runtime_boundary import isolate_creator_runtime
+
 from contracts.agent import NL2SkillRunRequest
 from management.api.skill import creation
 from management.services.conversation import creator_execution, model_preferences
@@ -35,7 +37,7 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     prepare_history = Mock(return_value=(11, 0))
     monkeypatch.setattr(creation, "prepare_nl2skill_snapshot", prepare_snapshot)
     monkeypatch.setattr(creator_execution, "prepare_creation_history", prepare_history)
-    monkeypatch.setattr(creator_execution, "persist_creation_stream", lambda value, **kwargs: value)
+    runtime = isolate_creator_runtime(monkeypatch, creator_execution)
 
     async def events():
         yield 'data: {"type": "done", "content": ""}\n\n'
@@ -56,3 +58,6 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     assert prepare_history.call_args.kwargs["selected_model_id"] == effective.model_id
     assert prepare_history.call_args.kwargs.get("model_parameter_preferences", {}) == {}
     assert response.headers["conversation_id"] == "11"
+    runtime.control.admit.assert_awaited_once()
+    runtime.checkpoint.assert_called_once()
+    runtime.launch.assert_awaited_once()

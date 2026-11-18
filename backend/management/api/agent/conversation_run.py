@@ -67,7 +67,10 @@ async def run_conversation(
 
 
 @router.get("/stop/{run_id}")
-async def stop_conversation(run_id: str, response: Response, authorization: Annotated[str | None, Header()] = None):
+async def stop_conversation(
+    run_id: str, response: Response, authorization: Annotated[str | None, Header()] = None,
+    generation: Annotated[str | None, Query(pattern=RUN_ID_PATTERN)] = None,
+):
     response.headers["Cache-Control"] = "no-store"
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -83,6 +86,16 @@ async def stop_conversation(run_id: str, response: Response, authorization: Anno
             if not re.fullmatch(r"[0-9]{1,10}", run_id) or not 0 < int(run_id) <= 2147483647:
                 raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
             conversation_id = int(run_id)
+            from management.services.conversation.creator_runtime import stop_creator
+
+            creator_stopped = await stop_creator(conversation_id, user_id, generation)
+            if creator_stopped is not None or generation is not None:
+                return {
+                    "status": "success",
+                    "message": "Run cancellation requested" if creator_stopped else "No active run found",
+                    "cancellation_requested": bool(creator_stopped),
+                    "already_stopped": not creator_stopped,
+                }
             run_id = await forward_active_run(conversation_id, user_id, tenant_id)
             if run_id is None:
                 return {"status": "success", "message": "No active run found", "already_stopped": True}

@@ -64,7 +64,9 @@ from management.api.memory.memory_dreaming import router as memory_dreaming_rout
 from management.api.memory.memory_provider import router as memory_provider_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.environment import (
+    AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+)
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
@@ -133,6 +135,7 @@ async def automation_lifespan():
 @asynccontextmanager
 async def config_lifespan(_app):
     from management.services.agent.prepared_turn import prepared_turn_lifespan
+    from management.services.conversation.creator_runtime import shutdown_creator_streams
 
     # One Management manager owns ordinary and Northbound requests and recovery.
     async with northbound_lifespan(_app):
@@ -150,13 +153,20 @@ async def config_lifespan(_app):
                 yield
         finally:
             try:
-                if dreaming_started:
-                    await stop_dreaming_scheduler()
+                await shutdown_creator_streams(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
             finally:
-                if maintenance_started:
-                    from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+                await _stop_config_maintenance(dreaming_started, maintenance_started)
 
-                    stop_eval_maintenance()
+
+async def _stop_config_maintenance(dreaming_started, maintenance_started):
+    try:
+        if dreaming_started:
+            await stop_dreaming_scheduler()
+    finally:
+        if maintenance_started:
+            from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+
+            stop_eval_maintenance()
 
 
 app = create_app(

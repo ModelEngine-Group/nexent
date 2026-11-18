@@ -185,6 +185,12 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     application = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(application)
 
+    shutdown_order = MagicMock()
+    shutdown_order.attach_mock(shutdown_streams, "agents")
+    shutdown_order.attach_mock(trajectory_processor.shutdown, "trajectory")
+    shutdown_order.attach_mock(stop_configuration, "configuration")
+    shutdown_order.attach_mock(manager.shutdown, "thread_manager")
+
     async def exercise():
         async with application.runtime_lifespan(None):
             pass
@@ -212,4 +218,7 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
+    assert [call[0] for call in shutdown_order.mock_calls] == [
+        "agents", "trajectory", "configuration", "thread_manager",
+    ]
     clear_default.assert_called_once_with(manager)

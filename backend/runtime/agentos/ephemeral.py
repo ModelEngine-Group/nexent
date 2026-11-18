@@ -46,6 +46,7 @@ async def _watch_debug_stop(run_id, owner, info):
 
 
 async def _observer_stream(info, execution, deferred, *, creator_mode=None, announce_ready=False):
+    boundary_delivered = False
     try:
         if announce_ready:
             yield b": agentos-ready\n\n"
@@ -54,10 +55,9 @@ async def _observer_stream(info, execution, deferred, *, creator_mode=None, anno
         )) as events:
             async for chunk in events:
                 event = json.loads(chunk)
-                if isinstance(event, dict) and event.get("type") != "skill_artifact":
+                if isinstance(event, dict) and event.get("type") != "skill_artifact" and not boundary_delivered:
                     yield _sse(event)
-                    if creator_mode == "nl2agent" and event.get("type") == "nl2a":
-                        return
+                    boundary_delivered = creator_mode == "nl2agent" and event.get("type") == "nl2a"
         if creator_mode:
             # The SDK drains observer messages and consumes worker exceptions without re-raising.
             execution.future.result()
@@ -66,8 +66,8 @@ async def _observer_stream(info, execution, deferred, *, creator_mode=None, anno
         # Explicit cancellation ends the stream. Preserve ASGI task cancellation on disconnect.
         if not info.stop_event.is_set() or asyncio.current_task().cancelling():
             raise
-        if creator_mode == "nl2agent" and info.observer.boundary_reached:
-            # A card can set the stop event before the SDK drains its observer queue.
+        if creator_mode == "nl2agent" and not boundary_delivered and info.observer.boundary_reached:
+            # A stop request can arrive before the SDK drains the queued card.
             for chunk in info.observer.get_cached_message():
                 event = json.loads(chunk)
                 yield _sse(event)

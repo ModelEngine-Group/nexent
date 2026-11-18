@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agent import NL2AgentRunRequest
 from contracts.agentos import AgentVersionReference
-from contracts.errors.exceptions import WorkbenchError
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, WorkbenchError
 from management.services.conversation.creator_execution import start_creation_turn
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.exceptions import AgentDraftEditError, RunModelControlsError, UnauthorizedError
@@ -35,6 +35,7 @@ async def nl2agent_run_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_agent_create_permission),
+    resume: bool = False,
 ):
     """Run NL2Agent through its shared creator history and AgentOS execution."""
     if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
@@ -51,14 +52,18 @@ async def nl2agent_run_api(
                 )})
             return create_nl2agent_stream(payload, actor)
 
-        if nl2agent_request.persist_history:
+        if nl2agent_request.persist_history or resume:
             stream, conversation_id = await start_creation_turn(
                 nl2agent_request, kind="agent", user_id=user_id, tenant_id=tenant_id,
-                stream_factory=prepare_stream,
+                stream_factory=prepare_stream, resume=resume,
             )
-            return StreamingResponse(stream, media_type="text/event-stream",
-                                     headers={"conversation_id": str(conversation_id)})
+            headers = {"conversation_id": str(conversation_id)}
+            if generation := getattr(nl2agent_request, "_creator_generation", None):
+                headers["run_id"] = generation
+            return StreamingResponse(stream, media_type="text/event-stream", headers=headers)
         return StreamingResponse(await prepare_stream(nl2agent_request), media_type="text/event-stream")
+    except AgentRunAlreadyActiveError as exc:
+        raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
     except UnauthorizedError as exc:

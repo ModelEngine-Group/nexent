@@ -19,6 +19,7 @@ def child_run_info(parent, config, scope):
         models = [model for model in models if model.cite_name != config.model_name]
         models.append(binding.model_copy(deep=True))
     return parent.model_copy(update={
+        "run_role": "subagent",
         "agent_config": config, "model_config_list": models, "query": "",
         "stop_event": scope.stop_event, "cancellation_scope": scope,
         "user_context": deepcopy(parent.user_context), "runtime_metadata": deepcopy(parent.runtime_metadata),
@@ -35,6 +36,7 @@ def invoke_child(info, task):
     if not isinstance(task, str) or not task.strip():
         raise ValueError("Child task must be a non-empty string")
     info.query = task
+    info.run_role = "subagent"
     return execute_adapter(info)
 
 

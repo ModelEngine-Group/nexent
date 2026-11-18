@@ -51,7 +51,7 @@ monitoring_manager = get_monitoring_manager()
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
                   status: str = 'completed', *, message_source: MessageSource = MessageSource.CHAT,
-                  execution_identity=None) -> int:
+                  execution_identity=None, streaming_owner: str | None = None) -> int:
     """
     Insert only the ConversationMessage row for a new message.
 
@@ -105,6 +105,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     if message_data.get('clarification_response') is not None:
         message_data_copy['clarification_response'] = message_data['clarification_response']
     options = {"execution_identity": execution_identity} if execution_identity is not None else {}
+    if streaming_owner is not None:
+        options["streaming_owner"] = streaming_owner
     if message_data.get('annotations') is not None:
         message_data_copy['annotations'] = message_data['annotations']
     return create_conversation_message(

@@ -970,7 +970,11 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-          errorDetails = errorDetail.details;
+          errorDetails =
+            errorDetail.details ??
+            (typeof errorDetail.field === "string"
+              ? { field: errorDetail.field }
+              : undefined);
         } else if (Array.isArray(errorData?.detail)) {
           errorMessage = "Validation failed";
           errorDetails = {

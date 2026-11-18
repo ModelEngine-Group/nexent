@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from test.common.creator_runtime_boundary import isolate_creator_runtime
+
 from contracts.agent import NL2AgentRunRequest
 from infrastructure.agentos_identity import ServicePrincipal
 from management.api.agent import creator
@@ -37,7 +39,7 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     prepare_history = Mock(return_value=(11, 0))
     monkeypatch.setattr(creator, "prepare_nl2agent_snapshot", prepare_snapshot)
     monkeypatch.setattr(creator_execution, "prepare_creation_history", prepare_history)
-    monkeypatch.setattr(creator_execution, "persist_creation_stream", lambda value, **kwargs: value)
+    runtime = isolate_creator_runtime(monkeypatch, creator_execution)
 
     async def events():
         yield 'data: {"type": "done", "content": ""}\n\n'
@@ -61,3 +63,6 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     assert prepare_history.call_args.kwargs["selected_model_id"] == effective.model_id
     assert prepare_history.call_args.kwargs.get("model_parameter_preferences", {}) == {}
     assert response.headers["conversation_id"] == "11"
+    runtime.control.admit.assert_awaited_once()
+    runtime.checkpoint.assert_called_once()
+    runtime.launch.assert_awaited_once()

@@ -9,7 +9,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agent import NL2SkillRunRequest
 from contracts.agentos import AgentVersionReference
-from contracts.errors.exceptions import WorkbenchError
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, WorkbenchError
 from management.services.conversation.creator_execution import start_creation_turn
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.exceptions import RunModelControlsError
@@ -35,6 +35,7 @@ async def nl2skill_run_api(
     request: NL2SkillRunRequest,
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_skill_create_permission),
+    resume: bool = False,
 ):
     """Run the shared NL2Skill using the common creator history path."""
     if request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
@@ -56,13 +57,17 @@ async def nl2skill_run_api(
                 )})
             return create_nl2skill_stream(payload, user_id, tenant_id)
 
-        if request.persist_history:
+        if request.persist_history or resume:
             stream, conversation_id = await start_creation_turn(
-                request, kind="skill", user_id=user_id, tenant_id=tenant_id, stream_factory=prepare_stream,
+                request, kind="skill", user_id=user_id, tenant_id=tenant_id, stream_factory=prepare_stream, resume=resume,
             )
-            return StreamingResponse(stream, media_type="text/event-stream",
-                                     headers={"conversation_id": str(conversation_id)})
+            headers = {"conversation_id": str(conversation_id)}
+            if generation := getattr(request, "_creator_generation", None):
+                headers["run_id"] = generation
+            return StreamingResponse(stream, media_type="text/event-stream", headers=headers)
         return StreamingResponse(await prepare_stream(request), media_type="text/event-stream")
+    except AgentRunAlreadyActiveError as exc:
+        raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except WorkbenchError as exc:

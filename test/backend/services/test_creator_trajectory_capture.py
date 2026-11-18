@@ -2,6 +2,7 @@
 """Creation runs bind saved identities without leaking context to stream consumers."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -27,6 +28,9 @@ def creator(mocker):
     mocker.patch.object(execution, "authorize_target", side_effect=lambda target, *_: target)
     mocker.patch.object(creation_history, "create_new_conversation", return_value={"conversation_id": 9})
     save = mocker.patch.object(creation_history, "save_message", side_effect=range(10, 50))
+    mocker.patch.object(execution, "save_message", save)
+    checkpoints = mocker.patch("management.services.conversation.creator_checkpoints.checkpoint_creator_message")
+    save.checkpoints = checkpoints
     mocker.patch.object(creation_history, "save_message_unit")
     history = {
         "agent_id": 77, "target": {"type": "agent", "id": 201},
@@ -95,8 +99,7 @@ async def test_saved_creation_identity_and_receipt_reach_runtime(
             request, kind=kind, tenant_id="tenant", user_id="owner", stream_factory=factory,
         )
         assert get_agent_monitoring_context() is outer
-        assert raw.contexts == []
-        assert [event async for event in stream] == [EVENT]
+        assert [json.loads(event[6:])["content"] async for event in stream] == ["answer"]
         assert get_agent_monitoring_context() is outer
     metadata = raw.contexts[0]
     assert metadata is not outer
@@ -130,23 +133,22 @@ async def test_runtime_failure_and_cancellation_restore_context_and_close(creato
         user_id="owner", stream_factory=AsyncMock(return_value=raw),
     )
     before = get_agent_monitoring_context()
-    with pytest.raises(type(failure)):
-        await anext(stream)
+    events = [json.loads(event[6:]) async for event in stream]
+    if isinstance(failure, RuntimeError):
+        assert events[-1]["type"] == "error"
     assert get_agent_monitoring_context() is before
     assert len(raw.closed) == 1
     assert raw.closed[0].conversation_id == 9
-    assert save.call_args.kwargs["status"] == "stopped"
+    assert save.checkpoints.call_args.args[-1] == (
+        "stopped" if isinstance(failure, asyncio.CancelledError) else "failed"
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("started", [False, True])
-async def test_explicit_close_releases_once_even_before_first_event(creator, started):
-    save, _ = creator
+async def test_runtime_context_close_releases_once_even_before_first_event(creator, started):
     raw = RuntimeStream()
-    stream, _ = await execution.start_creation_turn(
-        NL2AgentRunRequest(query="build", agent_id=201), kind="agent", tenant_id="tenant",
-        user_id="owner", stream_factory=AsyncMock(return_value=raw),
-    )
+    stream = execution._CreationStream(raw, AgentRunMetadata(conversation_id=9))
     before = get_agent_monitoring_context()
     if started:
         assert await anext(stream) == EVENT
@@ -156,10 +158,6 @@ async def test_explicit_close_releases_once_even_before_first_event(creator, sta
     assert get_agent_monitoring_context() is before
     assert len(raw.closed) == 1
     assert raw.closed[0].conversation_id == 9
-    if started:
-        assert save.call_args.kwargs["status"] == "stopped"
-    else:
-        assert save.call_count == 1
     with pytest.raises(StopAsyncIteration):
         await anext(stream)
 
@@ -211,10 +209,7 @@ async def test_invalid_retry_never_runs_or_claims_saved_message(creator):
 @pytest.mark.asyncio
 async def test_response_iterator_close_releases_runtime(creator):
     raw = RuntimeStream()
-    stream, _ = await execution.start_creation_turn(
-        NL2AgentRunRequest(query="build", agent_id=201), kind="agent", tenant_id="tenant",
-        user_id="owner", stream_factory=AsyncMock(return_value=raw),
-    )
+    stream = execution._CreationStream(raw, AgentRunMetadata(conversation_id=9))
     iterator = aiter(stream)
     before = get_agent_monitoring_context()
     assert await anext(iterator) == EVENT
@@ -233,7 +228,7 @@ async def test_invalid_saved_message_id_cannot_claim_completeness(creator, inval
         NL2AgentRunRequest(query="build", agent_id=201), kind="agent", tenant_id="tenant",
         user_id="owner", stream_factory=AsyncMock(return_value=raw),
     )
-    assert [item async for item in stream] == [EVENT]
+    assert [json.loads(item[6:])["content"] async for item in stream] == ["answer"]
     assert "trajectory_source_message_id" not in raw.contexts[0].extra_metadata
 
 
@@ -241,6 +236,7 @@ async def test_invalid_saved_message_id_cannot_claim_completeness(creator, inval
 async def test_managed_worker_receives_creation_context_for_file_capture(creator, tmp_path):
     import json
 
+    pytest.importorskip("fcntl")
     from infrastructure.trace.trajectory_processor import (
         LocalTrajectoryProcessor,
     )
@@ -284,7 +280,7 @@ async def test_managed_worker_receives_creation_context_for_file_capture(creator
             NL2AgentRunRequest(query="build", agent_id=201), kind="agent", tenant_id="tenant",
             user_id="owner", stream_factory=AsyncMock(return_value=raw()),
         )
-        assert [item async for item in stream] == [EVENT]
+        assert [json.loads(item[6:])["content"] async for item in stream] == ["answer"]
         assert (seen[0].tenant_id, seen[0].user_id, seen[0].agent_id, seen[0].conversation_id) == (
             "tenant", "owner", 77, 9,
         )
@@ -306,17 +302,20 @@ async def test_managed_worker_receives_creation_context_for_file_capture(creator
 
 
 @pytest.mark.asyncio
-async def test_cancel_during_pending_runtime_read_restores_consumer_context(creator):
+async def test_cancel_subscription_preserves_runtime_capture_and_consumer_context(creator):
     entered = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
     closed = []
 
     async def raw():
         try:
             entered.set()
-            await asyncio.Event().wait()
+            await release.wait()
             yield EVENT
         finally:
             closed.append(get_agent_monitoring_context())
+            finished.set()
 
     stream, _ = await execution.start_creation_turn(
         NL2AgentRunRequest(query="build", agent_id=201), kind="agent", tenant_id="tenant",
@@ -336,6 +335,9 @@ async def test_cancel_during_pending_runtime_read_restores_consumer_context(crea
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert len(closed) == 1 and closed[0].conversation_id == 9
+    assert closed == []
     await stream.aclose()
-    assert len(closed) == 1
+    assert closed == []
+    release.set()
+    await asyncio.wait_for(finished.wait(), timeout=3)
+    assert len(closed) == 1 and closed[0].conversation_id == 9
