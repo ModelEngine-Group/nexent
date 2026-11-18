@@ -83,14 +83,15 @@ export default function ModelList({
   const monitoringMap = useMemo(() => {
     const map = new Map<string, ModelMonitoringItem>();
     for (const m of monitoringModels) {
-      map.set(m.display_name, m);
+      if (m.display_name) map.set(m.display_name, m);
+      if (m.model_name) map.set(m.model_name, m);
     }
     return map;
   }, [monitoringModels]);
 
   const unifiedData: UnifiedModelRow[] = useMemo(() => {
     return models.map((m) => {
-      const mon = monitoringMap.get(m.displayName);
+      const mon = monitoringMap.get(m.displayName) ?? monitoringMap.get(m.name);
       return {
         ...m,
         request_count: mon?.request_count,
