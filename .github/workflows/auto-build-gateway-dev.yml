@@ -1,0 +1,56 @@
+name: Docker Build Gateway Images
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-build-gateway-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'backend/gateway/**'
+      - 'backend/gateway_service.py'
+      - 'backend/infrastructure/__init__.py'
+      - 'backend/infrastructure/database/**'
+      - 'deploy/images/dockerfiles/gateway/**'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-gateway-dev.yml'
+  push:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'backend/gateway/**'
+      - 'backend/gateway_service.py'
+      - 'backend/infrastructure/__init__.py'
+      - 'backend/infrastructure/database/**'
+      - 'deploy/images/dockerfiles/gateway/**'
+      - '.dockerignore'
+      - '.github/workflows/auto-build-gateway-dev.yml'
+
+jobs:
+  build-gateway:
+    name: Build Gateway (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      GATEWAY_IMAGE: nexent/nexent-gateway:dev-${{ matrix.arch }}
+      GATEWAY_PLATFORM: linux/${{ matrix.arch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build Gateway image
+        run: docker build --platform "$GATEWAY_PLATFORM" -t "$GATEWAY_IMAGE" -f deploy/images/dockerfiles/gateway/Dockerfile .
+      - name: Verify launcher and identity repository imports
+        run: |
+          docker run --rm --network none --entrypoint python "$GATEWAY_IMAGE" \
+            -c 'import gateway_service; from infrastructure.database.identity import IdentityRepository'
