@@ -2,7 +2,8 @@
 
 "use client";
 
-import { useId } from "react";
+import { useEffect, useId } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   Checkbox,
@@ -14,10 +15,15 @@ import {
   Typography,
 } from "antd";
 
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useTenantMemorySettings } from "@/hooks/memory/useTenantMemorySettings";
+import {
+  loadMemoryConfig,
+  subscribeMemorySwitch,
+} from "@/services/memoryService";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
 import ContextManagerSetting from "./context-manager-setting";
@@ -67,13 +73,42 @@ export default function AgentRunPolicy({
     useTenantMemorySettings();
   const memoryDisabled =
     isReadOnly || tenantMemory?.enabled !== true || tenantMemoryError;
+  const { user } = useAuthorizationContext();
+  const canReadPersonalMemory = Boolean(
+    user?.tenantId &&
+    user?.id &&
+    tenantMemory?.enabled === true &&
+    !tenantMemoryError
+  );
+  const {
+    data: personalMemoryEnabled,
+    isSuccess: personalMemoryKnown,
+    refetch: refreshPersonalMemory,
+  } = useQuery({
+    queryKey: ["personal-memory-enabled", user?.tenantId, user?.id],
+    queryFn: async () =>
+      (await loadMemoryConfig({ throwOnError: true })).memoryEnabled,
+    enabled: canReadPersonalMemory,
+  });
+
+  useEffect(() => {
+    if (!canReadPersonalMemory) return;
+    return subscribeMemorySwitch(() => {
+      void refreshPersonalMemory();
+    });
+  }, [canReadPersonalMemory, refreshPersonalMemory]);
+
   const memoryStatusId = useId();
   const memoryStatus =
     tenantMemory?.enabled === false
       ? t("memory.manager.tenantMemoryDisabledHint")
       : tenantMemoryError
         ? t("memory.manager.tenantMemoryLoadError")
-        : undefined;
+        : canReadPersonalMemory &&
+            personalMemoryKnown &&
+            personalMemoryEnabled === false
+          ? t("memory.manager.personalMemoryDisabledHint")
+          : undefined;
   const memoryDescription = memoryStatus && (
     <Typography.Text id={memoryStatusId} type="secondary">
       {memoryStatus}

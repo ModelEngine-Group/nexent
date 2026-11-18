@@ -6825,6 +6825,7 @@
   "memory.manager.agentAutomaticMemoryHint": "This setting applies to the saved Agent version. Tenant and personal settings also apply.",
   "memory.manager.tenantAutomaticMemory": "Tenant automatic memory",
   "memory.manager.tenantAutomaticMemoryHint": "Controls automatic memory for all conversations in this tenant.",
+  "memory.manager.personalMemoryDisabledHint": "The current user has turned off personal memory. Their conversations will not use automatic memory.",
   "memory.manager.tenantMemoryDisabledHint": "Automatic memory is disabled for this tenant. Contact your tenant administrator to enable it.",
   "memory.manager.tenantMemoryLoadError": "Could not load the tenant memory setting.",
   "dreaming.reason.memory_disabled": "Automatic memory is off."
