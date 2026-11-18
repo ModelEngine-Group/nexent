@@ -59,7 +59,7 @@ deployment_render_helm_chart_values
     values = yaml.safe_load(result.stdout)
     settings = values["nexent-ops"]
     assert (
-        values["nexent-web"]["config"]["opsHttpBackend"] == f"http://nexent-ops:{port}"
+        values["nexent-gateway"]["opsUrl"] == f"http://nexent-ops:{port}"
     )
     assert settings["enabled"] is (component == "application")
     assert settings["images"]["backend"] == {
@@ -146,6 +146,6 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
         services = yaml.safe_load((directory / filename).read_text())["services"]
         assert archive_mount in services["nexent-runtime"]["volumes"]
         assert (
-            "OPS_HTTP_BACKEND=http://nexent-ops:${OPS_PORT:-5016}"
-            in services["nexent-web"]["environment"]
+            services["nexent-gateway"]["environment"]["GATEWAY_OPS_URL"]
+            == "http://nexent-ops:${OPS_PORT:-5016}"
         )

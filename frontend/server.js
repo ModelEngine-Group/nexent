@@ -66,8 +66,6 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
-const OPS_HTTP_BACKEND =
-  process.env.OPS_HTTP_BACKEND || "http://localhost:5016";
 // Reuse the existing northbound service address, which conventionally ends with /api.
 const NORTHBOUND_HTTP_BACKEND = (
   process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
@@ -821,17 +819,6 @@ function handleAllApiProxy(pathname, req, res) {
     return true;
   }
 
-  // Historical trajectory queries are owned by the operations service.
-  if (isTrajectoryOpsRequest(pathname, req.url)) {
-    proxy.web(req, res, {
-      target: OPS_HTTP_BACKEND,
-      changeOrigin: true,
-      proxyTimeout: PROXY_TIMEOUT_MS,
-      timeout: PROXY_TIMEOUT_MS,
-    });
-    return true;
-  }
-
   // 2. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
@@ -1001,16 +988,4 @@ function getRuntimeProxyConfig(timeout) {
     proxyTimeout: timeout,
     timeout: timeout,
   };
-}
-
-/** Route only trajectory directories to ops; ordinary history stays on Runtime. */
-function isTrajectoryOpsRequest(pathname, requestUrl) {
-  if (pathname.startsWith("/api/trajectory/")) return true;
-  const directory =
-    /^\/api\/conversation\/agent_groups(?:\/[^/]+\/conversations)?\/?$/;
-  return (
-    directory.test(pathname) &&
-    new URL(requestUrl, "http://localhost").searchParams.get("view") ===
-      "trajectory"
-  );
 }

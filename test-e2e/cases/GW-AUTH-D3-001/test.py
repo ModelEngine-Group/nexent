@@ -66,9 +66,10 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     secret = "local-gateway-auth-d3-fixture-not-a-deployment-secret"
     monkeypatch.setattr(environment, "JWT_SECRET", secret)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
-    monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
-    accounts = {user: {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test"}
-                for user in ("u1", "u2", "su")}
+    accounts = {
+        user: {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test", "user_roles": [role]}
+        for user, role in (("u1", "USER"), ("u2", "USER"), ("su", "SU"))
+    }
     key_record = {"user_id": "u1", "token_id": 7, "delete_flag": "N"}
     membership_queries = []
     empty_tenant_users = set()

@@ -198,6 +198,7 @@ services:
       DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
+      GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
     entrypoint: ["python", "-m", "backend.http.gateway_service"]
     healthcheck:
@@ -231,7 +232,6 @@ services:
       - HTTP_BACKEND=http://nexent-gateway:5013
       - WS_BACKEND=ws://nexent-gateway:5013
       - RUNTIME_HTTP_BACKEND=http://nexent-gateway:5013
-      - OPS_HTTP_BACKEND=http://nexent-ops:${OPS_PORT:-5016}
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}
