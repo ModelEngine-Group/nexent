@@ -18,6 +18,7 @@ import httpx
 from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from nexent.monitor.mcp_fact import observe_mcp_tool_call, resolve_mcp_server_identity
 
 
 logger = logging.getLogger("managed_mcp")
@@ -150,7 +151,8 @@ class ManagedMCPToolCollection:
                 connections.append(connection)
 
             tools = []
-            for session, mcp_tools in connections:
+            # Connections mirror server_parameters order: exactly one per entry.
+            for parameters, (session, mcp_tools) in zip(self.server_parameters, connections):
                 for mcp_tool in mcp_tools:
 
                     def call_tool(
@@ -160,7 +162,11 @@ class ManagedMCPToolCollection:
                     ):
                         return self._call_tool(__session, __name, arguments)
 
-                    tools.append(adapter.adapt(call_tool, mcp_tool))
+                    adapted = adapter.adapt(call_tool, mcp_tool)
+                    # Non-invasive binding: managed_forward resolves the monitoring
+                    # server identity from this URL at invocation time.
+                    adapted._nexent_mcp_server_url = parameters.get("url")
+                    tools.append(adapted)
 
             close_event = asyncio.Event()
             with self._lock:
@@ -182,41 +188,47 @@ class ManagedMCPToolCollection:
                 __forward=original_forward,
                 __task_name=task_name,
                 __tool_name=getattr(tool, "name", "unknown"),
+                __server_url=getattr(tool, "_nexent_mcp_server_url", None),
                 **kwargs,
             ):
                 if self.cancellation_scope.cancelled:
                     raise RuntimeError("MCP tool call cancelled")
-                execution = self.manager.submit(
-                    "model-tool-io",
-                    ManagedTaskSpec(
-                        task_name=__task_name,
-                        owner="nexent.core.agents.resources.mcp",
-                        close_hook=self.request_close,
-                    ),
-                    __forward,
-                    *args,
-                    **kwargs,
-                )
-                try:
-                    return execution.future.result(timeout=self.tool_timeout_seconds)
-                except FutureTimeoutError as exc:
-                    logger.warning(
-                        "event=mcp_tool_timeout tool_name=%s timeout_seconds=%.3f execution_id=%s error_type=%s",
-                        __tool_name,
-                        self.tool_timeout_seconds,
-                        execution.execution_id,
-                        "TimeoutError",
+                # Caller-observed monitoring window: one fact per invocation,
+                # spanning the queue wait and the deadline-capped result wait.
+                with observe_mcp_tool_call(
+                    resolve_mcp_server_identity(__server_url, __tool_name), __tool_name
+                ):
+                    execution = self.manager.submit(
+                        "model-tool-io",
+                        ManagedTaskSpec(
+                            task_name=__task_name,
+                            owner="nexent.core.agents.resources.mcp",
+                            close_hook=self.request_close,
+                        ),
+                        __forward,
+                        *args,
+                        **kwargs,
                     )
-                    self.request_close()
-                    self.manager.cancel(
-                        execution.execution_id,
-                        reason="MCP tool deadline exceeded",
-                        wait_timeout=self.close_timeout_seconds,
-                        mark_stuck_on_timeout=True,
-                    )
-                    raise MCPToolTimeoutError(
-                        f"MCP tool request timed out after {self.tool_timeout_seconds:g} seconds"
-                    ) from exc
+                    try:
+                        return execution.future.result(timeout=self.tool_timeout_seconds)
+                    except FutureTimeoutError as exc:
+                        logger.warning(
+                            "event=mcp_tool_timeout tool_name=%s timeout_seconds=%.3f execution_id=%s error_type=%s",
+                            __tool_name,
+                            self.tool_timeout_seconds,
+                            execution.execution_id,
+                            "TimeoutError",
+                        )
+                        self.request_close()
+                        self.manager.cancel(
+                            execution.execution_id,
+                            reason="MCP tool deadline exceeded",
+                            wait_timeout=self.close_timeout_seconds,
+                            mark_stuck_on_timeout=True,
+                        )
+                        raise MCPToolTimeoutError(
+                            f"MCP tool request timed out after {self.tool_timeout_seconds:g} seconds"
+                        ) from exc
 
             tool.forward = managed_forward
         return tools

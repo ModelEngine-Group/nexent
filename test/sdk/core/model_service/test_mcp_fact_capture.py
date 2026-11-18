@@ -3,14 +3,17 @@
 
 import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from nexent.consts.mcp_errors import MCPToolTimeoutError
 from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.monitor import mcp_fact
 from nexent.monitor.facts import set_fact_sink
 from nexent.monitor.mcp_fact import (
     McpToolCallObservation,
     observe_mcp_tool_call,
+    resolve_mcp_server_identity,
     suppress_mcp_tool_calls,
 )
 from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
@@ -283,3 +286,23 @@ def test_server_identity_defaults_to_unknown():
     assert observation.payload["mcp_server_type"] == "unknown"
     assert observation.payload["mcp_server_id"] is None
     assert observation.payload["mcp_server_name"] is None
+
+
+def test_server_identity_lookup_without_catalog_returns_none():
+    assert resolve_mcp_server_identity("http://mcp.invalid/mcp", "search") is None
+    with agent_monitoring_context(_metadata()):
+        assert resolve_mcp_server_identity("http://mcp.invalid/mcp", "search") is None
+
+
+def test_server_identity_lookup_matches_catalog_entry_by_url(monkeypatch):
+    catalog = [{
+        "url": "http://docs.invalid/mcp",
+        "mcp_server_id": 3,
+        "mcp_server_name": "docs",
+        "mcp_server_type": "container",
+    }]
+    monkeypatch.setattr(mcp_fact, "get_agent_monitoring_context",
+                        lambda: SimpleNamespace(monitoring_mcp_servers=catalog))
+    identity = resolve_mcp_server_identity("http://docs.invalid/mcp", "search")
+    assert identity == {"mcp_server_id": 3, "mcp_server_name": "docs", "mcp_server_type": "container"}
+    assert resolve_mcp_server_identity("http://other.invalid/mcp", "search") is None

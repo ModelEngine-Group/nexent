@@ -19,6 +19,8 @@ from nexent.core.concurrency import (
     ThreadManager,
 )
 from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.monitor.facts import set_fact_sink
+from nexent.monitor.monitoring import AgentRunMetadata, agent_monitoring_context
 
 
 @pytest.mark.asyncio
@@ -117,3 +119,32 @@ async def test_skill_root_and_name_must_both_belong_to_the_same_authorized_snaps
     else:
         with pytest.raises(PermissionError):
             await rail._read_skill_text(path)
+
+
+@pytest.mark.asyncio
+async def test_mcp_native_call_emits_one_caller_observed_fact():
+    facts = []
+    set_fact_sink(facts.append)
+    manager = ThreadManager("jiuwen-mcp-fact", {"model-tool-io": LanePolicy("model-tool-io", 1, 1)})
+    manager.start()
+    metadata = AgentRunMetadata(tenant_id="tenant-1", agent_id=7, monitoring_run_id="run-1",
+                                monitoring_root_run_id="root-1", monitoring_group_ids=(1, 2), is_debug=False)
+    try:
+        owner = JiuwenMCPCollection(authorized_tools=[], observe=Mock(), manager=manager,
+            server_parameters=[], cancellation_scope=RunCancellationScope(),
+            tool_timeout_seconds=1, close_timeout_seconds=1)
+        owner._call_tool = Mock(return_value=20)
+        client = _ManagedNativeClient(owner, "session", "multiply", [], None, server_url="http://mcp.invalid/mcp")
+        with agent_monitoring_context(metadata):
+            result = await client.call_tool("multiply", {"a": 5})
+    finally:
+        set_fact_sink(None)
+        assert not (await manager.shutdown(timeout=2)).stuck_execution_ids
+
+    assert result == 20
+    assert [fact["record_revision"] for fact in facts] == [1, 2]
+    assert [fact["outcome"] for fact in facts] == ["started", "succeeded"]
+    assert facts[0]["tool_name"] == "multiply"
+    assert facts[0]["agent_run_id"] == "run-1"
+    assert facts[0]["agent_id"] == 7
+    assert facts[1]["fact_id"] == facts[0]["fact_id"]

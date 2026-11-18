@@ -17,6 +17,7 @@ from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutEr
 from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
 from nexent.core.concurrency import ManagedTaskSpec
+from nexent.monitor.mcp_fact import observe_mcp_tool_call, resolve_mcp_server_identity
 
 
 logger = logging.getLogger(__name__)
@@ -65,17 +66,18 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                 for card in await client.list_tools(timeout=self.connect_timeout_seconds):
                     # The public saved name may be normalized; the proxy keeps the raw wire name.
                     for name in {card.name, _registered_tool_name(card.name)} - {""}:
-                        available[name] = None if name in available else (client, card)
+                        available[name] = None if name in available else (client, card, parameters["url"])
 
             tools = []
             for tool_config in self.authorized_tools:
                 match = available.get(tool_config.class_name)
                 if match is None:
                     raise ValueError(f"Authorized MCP tool missing or ambiguous: {tool_config.class_name}")
-                client, remote_card = match
+                client, remote_card, server_url = match
                 properties = remote_card.input_params.get("properties", {})
                 hidden = [name for name in USER_CONTEXT_FIELDS if name in properties]
-                proxy = _ManagedNativeClient(self, client, remote_card.name, hidden, tool_config.params)
+                proxy = _ManagedNativeClient(self, client, remote_card.name, hidden, tool_config.params,
+                                             server_url=server_url)
                 card = remote_card.model_copy(deep=True)
                 for name in hidden:
                     card.input_params["properties"].pop(name, None)
@@ -98,10 +100,12 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
 
 
 class _ManagedNativeClient:
-    def __init__(self, owner, client, remote_name, hidden_fields=(), configured_arguments=None):
+    def __init__(self, owner, client, remote_name, hidden_fields=(), configured_arguments=None, server_url=None):
         self.owner, self.client, self.remote_name = owner, client, remote_name
         self.hidden_fields = hidden_fields
         self.configured_arguments = deepcopy(dict(configured_arguments or {}))
+        # Server URL bound at construction; monitoring identity resolved per call.
+        self.server_url = server_url
 
     async def call_tool(self, tool_name, arguments):
         owner = self.owner
@@ -110,24 +114,27 @@ class _ManagedNativeClient:
         arguments = {**arguments, **deepcopy(self.configured_arguments)}
         for name in self.hidden_fields:
             arguments[name] = owner.user_context.get(name)
-        execution = owner.manager.submit(
-            "model-tool-io",
-            ManagedTaskSpec(task_name="jiuwen-mcp-tool", owner=__name__, close_hook=owner.request_close),
-            owner._call_tool, self.client, self.remote_name, arguments,
-        )
-        try:
-            return await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
-        except asyncio.TimeoutError as exc:
-            logger.warning("event=mcp_tool_timeout tool_name=%s timeout_seconds=%s phase=execution",
-                           tool_name, owner.tool_timeout_seconds)
-            owner.terminal_error = MCPToolTimeoutError("Jiuwen MCP tool deadline exceeded")
-            owner.request_close()
-            owner.manager.cancel(execution.execution_id, reason="MCP tool deadline exceeded", wait_timeout=0,
-                                 mark_stuck_on_timeout=False)
-            raise owner.terminal_error from exc
-        except asyncio.CancelledError:
-            owner.request_close()
-            raise
+        # Caller-observed monitoring window: one fact per invocation, spanning
+        # the lane submission and the deadline-capped await.
+        with observe_mcp_tool_call(resolve_mcp_server_identity(self.server_url, tool_name), tool_name):
+            execution = owner.manager.submit(
+                "model-tool-io",
+                ManagedTaskSpec(task_name="jiuwen-mcp-tool", owner=__name__, close_hook=owner.request_close),
+                owner._call_tool, self.client, self.remote_name, arguments,
+            )
+            try:
+                return await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
+            except asyncio.TimeoutError as exc:
+                logger.warning("event=mcp_tool_timeout tool_name=%s timeout_seconds=%s phase=execution",
+                               tool_name, owner.tool_timeout_seconds)
+                owner.terminal_error = MCPToolTimeoutError("Jiuwen MCP tool deadline exceeded")
+                owner.request_close()
+                owner.manager.cancel(execution.execution_id, reason="MCP tool deadline exceeded", wait_timeout=0,
+                                     mark_stuck_on_timeout=False)
+                raise owner.terminal_error from exc
+            except asyncio.CancelledError:
+                owner.request_close()
+                raise
 
 
 class _ObservedMCPTool(MCPTool):
