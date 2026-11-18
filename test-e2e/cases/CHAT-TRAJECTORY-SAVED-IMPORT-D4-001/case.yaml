@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  business_rule_ids:
+  - TRJ-RULE-012
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-saved-imports/proposal.md
+    acceptance_criteria:
+    - AC-SI-001
+    - AC-SI-002
+    - AC-SI-003
+    - AC-SI-004
+    - AC-SI-005
+    - AC-SI-006
+  title: 两个页面导入并在刷新后从独立列表查看和删除
+  objective: 两个页面导入并在刷新后从独立列表查看和删除
+  preconditions:
+  - 独占临时存储根、受控管理员身份和可执行产品；runtime责任域，不依赖生产源会话或模型服务。
+  - 资源由Case持有，测试结束关闭ThreadManager、文件及浏览器，删除独占测试文件。
+  test_data:
+    profile: mock
+    corpus:
+    - 原生多轮Unicode ZIP
+    - 相同ZIP重复上传、两名同租户用户及跨租户SU
+    - 非法包与受控存储故障
+  steps:
+  - order: 1
+    action: 从原轨迹列表上传ZIP，再进入右上角导入列表入口。
+    expected: 直接展示原查看器，独立页显示文件名、智能体、会话、轮次、大小及导入时间。
+  - order: 2
+    action: 刷新并查看已有记录，从新页面再次上传相同ZIP。
+    expected: 不需重新上传即可查看；同文件新增记录，长Unicode正文可复制。
+  - order: 3
+    action: 取消删除后再次确认删除，刷新列表并返回原轨迹页。
+    expected: 取消不删除，确认仅删除选中记录，空状态可导入，原列表与统计不增加导入数据。
+  expected_results:
+  - 直接展示原查看器，独立页显示文件名、智能体、会话、轮次、大小及导入时间。
+  - 不需重新上传即可查看；同文件新增记录，长Unicode正文可复制。
+  - 取消不删除，确认仅删除选中记录，空状态可导入，原列表与统计不增加导入数据。
+  forbidden_side_effects:
+  - 不得访问其他用户导入记录、修改原采集数据、数据库业务记录或调用模型工具。
+  - 不得在浏览器持久存储轨迹正文，包内脚本和外链不得执行或自动加载。
+  actor: 可观测中心授权OPS/SU管理员，另有普通身份拒绝变体。
+  journey:
+  - 从原轨迹列表上传ZIP，再进入右上角导入列表入口。
+  - 刷新并查看已有记录，从新页面再次上传相同ZIP。
+  - 取消删除后再次确认删除，刷新列表并返回原轨迹页。
+  final_business_result:
+  - 导入记录持久保存、列表恢复与手动删除。
+  failure_evidence:
+  - 固定Playwright断言、下载hash、网络/浏览器存储检查和脱敏trace，不能以截图替代交互。
+  acceptance:
+  - id: AC-01
+    description: 直接展示原查看器，独立页显示文件名、智能体、会话、轮次、大小及导入时间。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 不需重新上传即可查看；同文件新增记录，长Unicode正文可复制。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 取消不删除，确认仅删除选中记录，空状态可导入，原列表与统计不增加导入数据。
+    steps:
+    - 3
+    expected_results:
+    - 3

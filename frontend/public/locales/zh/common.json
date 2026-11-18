@@ -7053,5 +7053,19 @@
   "ops.noPermission": "暂无访问权限",
   "ops.loadError": "加载失败，请重试",
   "ops.empty": "暂无数据",
-  "ops.readOnly": "当前为只读模式"
+  "ops.readOnly": "当前为只读模式",
+  "trajectory.importedList": "导入列表",
+  "trajectory.importedListHint": "仅展示你导入的轨迹，保留至手动删除。",
+  "trajectory.importFilename": "文件名",
+  "trajectory.importSize": "文件大小",
+  "trajectory.importedAt": "导入时间",
+  "trajectory.importActions": "操作",
+  "trajectory.viewImport": "查看",
+  "trajectory.deleteImport": "删除",
+  "trajectory.deleteImportConfirm": "删除后将无法从导入列表查看此轨迹。是否继续？",
+  "trajectory.backToTraces": "返回轨迹列表",
+  "trajectory.noImports": "暂无导入轨迹",
+  "trajectory.errors.import_not_found": "导入记录不存在或无权访问",
+  "trajectory.errors.invalid_saved_import": "保存的轨迹文件已损坏，请删除后重新导入",
+  "trajectory.errors.import_store_busy": "导入存储繁忙，请稍后重试"
 }

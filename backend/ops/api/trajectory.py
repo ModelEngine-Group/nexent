@@ -26,6 +26,7 @@ from ops.services.trajectory.exchange import (
 )
 from ops.services.trajectory.primitives import CURRENT_CANCEL, QueryError
 from ops.services.trajectory.runtime import get_service
+from ops.services.trajectory.saved_imports import configured_store
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class PrivateRoute(APIRoute):
 
 
 router = APIRouter(prefix="/trajectory", route_class=PrivateRoute)
+imports_router = APIRouter(route_class=PrivateRoute)
 
 
 async def dispatch(
@@ -382,3 +384,79 @@ async def import_trajectory(request: Request, authorization: str | None = Header
         )
     finally:
         await form.close()
+
+
+@imports_router.post("/imports")
+async def save_import(request: Request, authorization: str | None = Header(None)):
+    gate = await dispatch(
+        request, authorization, lambda _, actor: None, needs_service=False
+    )
+    if gate.status_code != 200:
+        return gate
+    limits = configured_limits()
+    try:
+        form, upload = await read_archive_form(
+            request, limits.compressed_bytes, limits.seconds
+        )
+    except QueryError as error:
+        return JSONResponse(
+            status_code=error.status,
+            content={"detail": {"code": error.code}},
+            headers=PRIVATE,
+        )
+    try:
+        return await dispatch(
+            request,
+            authorization,
+            lambda _, actor: configured_store().create(
+                actor, upload.file, upload.filename
+            ),
+            needs_service=False,
+            request_owned=True,
+        )
+    finally:
+        await form.close()
+
+
+@imports_router.get("/imports")
+async def list_imports(
+    request: Request,
+    authorization: str | None = Header(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    return await dispatch(
+        request,
+        authorization,
+        lambda _, actor: configured_store().list(actor, page, page_size),
+        needs_service=False,
+    )
+
+
+@imports_router.get("/imports/{import_id}")
+async def read_import(
+    request: Request, import_id: str, authorization: str | None = Header(None)
+):
+    return await dispatch(
+        request,
+        authorization,
+        lambda _, actor: configured_store().read(actor, import_id),
+        needs_service=False,
+        request_owned=True,
+    )
+
+
+@imports_router.delete("/imports/{import_id}")
+async def delete_import(
+    request: Request, import_id: str, authorization: str | None = Header(None)
+):
+    return await dispatch(
+        request,
+        authorization,
+        lambda _, actor: configured_store().delete(actor, import_id),
+        needs_service=False,
+        request_owned=True,
+    )
+
+
+router.include_router(imports_router)

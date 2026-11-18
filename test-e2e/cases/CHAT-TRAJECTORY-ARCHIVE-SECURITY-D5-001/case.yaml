@@ -6,9 +6,11 @@ case:
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
   - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
   business_rule_ids:
   - TRJ-RULE-010
   - TRJ-RULE-011
+  - TRJ-RULE-012
   type: SECURITY
   priority: P0
   status: active
@@ -46,7 +48,7 @@ case:
   - 脚本执行、自动外部请求、额外上传、权限变化和持久存储写入均为0；内容安全展示与复制，不请求包内来源资源。
   - 普通角色无入口且导出被拒绝；数据不能从持久存储或恢复URL重新打开，目标会话/用量不变，本Case资源清理完成。
   forbidden_side_effects:
-  - 不得新增持久导入记录、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 旧临时接口不得新增持久记录；新POST /trajectory/imports仅保存本地导入者记录，不得新增源业务数据库记录或业务用量，不得请求来源资源或调用模型工具。
   - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
   risk_type: SECURITY
   risk: 不可信压缩包导致解压资源失控、脚本执行、自动请求或持久数据泄漏。

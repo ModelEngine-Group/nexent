@@ -46,7 +46,9 @@ feature:
   - rule_id: TRJ-RULE-010
     description: 设计新增：会话轨迹详情右上角直接导出ZIP，按原会话目录打包meta.json与可读已归档的OTLP JSONL，完整正文保持内嵌，名称/历史版本/指标和缺失状态保持，不受浏览器加载页数限制。
   - rule_id: TRJ-RULE-011
-    description: 设计新增：轨迹列表右上角选择ZIP，由本地服务在单次上传请求中临时校验解析meta/OTLP，返回当前页面内存供原查看器查看，请求结束清理暂存；不建持久档案/列表/去重记录；刷新、离开页面、关闭临时详情和退出登录清空数据及请求/缓存，重新查看需重新选择文件。
+    description: 旧POST /trajectory/import保持单次请求临时解析，无持久记录；页面内存和未完成请求在关闭、刷新、离开及退出时释放，不在浏览器持久保存正文。页面上传行为由TRJ-RULE-012定义。
+  - rule_id: TRJ-RULE-012
+    description: 管理员导入ZIP到本地服务持久目录，每次上传新增记录，仅可信当前租户的导入者可访问和删除；独立导入列表分页倒序展示，刷新、重登、服务重启后可重新查看，保存至手动删除，不参与原采集清理与统计。
   required_test_stages:
   - D2
   - D3
@@ -54,6 +56,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
     - CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
     - CHAT-TRAJECTORY-BODY-WRAP-20261117
     - CHAT-TRAJECTORY-CODE-DISPLAY-20261117
@@ -73,7 +76,9 @@ feature:
     - CHAT-TRAJECTORY-REFRESH-20261116
     - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
-    notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
-      historical provenance for retired Cases. Unit contracts stay in UT; preserve
-      existing D1. Proposed archive extension; TRJ-RULE-010/011; see changes/ops-trajectory-import-export.
-      No product implementation or acceptance execution yet.
+    notes: Current rules include TRJ-RULE-001 through TRJ-RULE-012. Preserve existing
+      D1 and the retired TRJ-RULE-009 provenance. Native archive exchange is implemented;
+      POST /trajectory/import remains temporary, while current UI uploads use persistent
+      imports with private owner-scoped lists. See changes/ops-trajectory-saved-imports
+      for implementation and separate local verification evidence; global suite readiness
+      is not implied by fixed-script passes.

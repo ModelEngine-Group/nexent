@@ -12,7 +12,7 @@ from ops.lifespan import ops_lifespan, trajectory_enabled
 def create_app() -> FastAPI:
     """Create an operations application and its process-local state."""
     application = FastAPI(
-        title='Nexent Operations API',
+        title="Nexent Operations API",
         version=APP_VERSION,
         lifespan=ops_lifespan,
         root_path="/api",
@@ -27,6 +27,10 @@ def create_app() -> FastAPI:
 
         application.include_router(trajectory_router)
         application.include_router(directory_router)
+    else:
+        from ops.api.trajectory import imports_router
+
+        application.include_router(imports_router, prefix="/trajectory")
     return application
 
 

@@ -7056,5 +7056,19 @@
   "ops.noPermission": "Access denied",
   "ops.loadError": "Failed to load. Please retry.",
   "ops.empty": "No data yet",
-  "ops.readOnly": "Read-only mode"
+  "ops.readOnly": "Read-only mode",
+  "trajectory.importedList": "Imported trajectories",
+  "trajectory.importedListHint": "Only your imports appear here. They remain until you delete them.",
+  "trajectory.importFilename": "File name",
+  "trajectory.importSize": "File size",
+  "trajectory.importedAt": "Imported at",
+  "trajectory.importActions": "Actions",
+  "trajectory.viewImport": "View",
+  "trajectory.deleteImport": "Delete",
+  "trajectory.deleteImportConfirm": "You will no longer be able to view this trajectory from the import list. Continue?",
+  "trajectory.backToTraces": "Back to trajectories",
+  "trajectory.noImports": "No imported trajectories",
+  "trajectory.errors.import_not_found": "Import not found or access denied",
+  "trajectory.errors.invalid_saved_import": "The saved archive is damaged. Delete it and import it again.",
+  "trajectory.errors.import_store_busy": "Import storage is busy. Please retry shortly."
 }

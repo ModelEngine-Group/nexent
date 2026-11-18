@@ -223,3 +223,23 @@ export interface ImportedTrajectory {
     directory?: never;
   }[];
 }
+
+export interface SavedTrajectoryRecord {
+  import_id: string;
+  filename: string;
+  imported_at: string;
+  size_bytes: number;
+  row: TrajectoryRecord;
+}
+
+export interface SavedTrajectory {
+  item: SavedTrajectoryRecord;
+  trajectory: ImportedTrajectory;
+}
+
+export interface SavedTrajectoriesPage {
+  items: SavedTrajectoryRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}

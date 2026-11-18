@@ -29,7 +29,10 @@ def test_health_follows_application_lifetime():
         assert client.get('/health/live').status_code == 200
         assert client.get('/health/ready').status_code == 200
         assert client.get('/health/ready').json() == {'status': 'ready'}
-        assert set(client.get('/openapi.json').json()['paths']) == {'/ops/authorization', '/ops/resources', '/ops/scope'}
+        assert set(client.get('/openapi.json').json()['paths']) == {
+            '/ops/authorization', '/ops/resources', '/ops/scope',
+            '/trajectory/imports', '/trajectory/imports/{import_id}',
+        }
         assert client.get('/ops/authorization').status_code == 401
         assert client.get('/docs').status_code == 200
 

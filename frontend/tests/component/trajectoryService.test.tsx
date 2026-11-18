@@ -158,3 +158,30 @@ it("serializes global schedule scope and an explicit manual cleanup tenant", asy
     tenant_id: "other",
   });
 });
+
+it("uploads saved ZIPs and uses private, cancellable list and detail requests", async () => {
+  request.mockImplementation(
+    async () => new Response(JSON.stringify({ code: 0, data: {} }))
+  );
+  const signal = new AbortController().signal;
+  const file = new File(["original"], "trace.zip");
+  await trajectoryService.saveImport(file, signal);
+  const [url, options] = request.mock.calls[0];
+  expect(String(url)).toMatch(/\/trajectory\/imports$/);
+  expect(options).toMatchObject({ method: "POST", signal, cache: "no-store" });
+  expect((options?.body as FormData).get("file")).toBe(file);
+  await trajectoryService.savedImports(2, 20, signal);
+  const query = new URL(String(request.mock.calls[1][0]), "http://localhost");
+  expect(Object.fromEntries(query.searchParams)).toEqual({
+    page: "2",
+    page_size: "20",
+  });
+  expect(query.searchParams.has("tenant_id")).toBe(false);
+  await trajectoryService.savedImport("signed/+?", signal);
+  expect(String(request.mock.calls[2][0])).toContain("signed%2F%2B%3F");
+  await trajectoryService.deleteImport("one");
+  expect(request.mock.calls[3][1]).toMatchObject({
+    method: "DELETE",
+    cache: "no-store",
+  });
+});

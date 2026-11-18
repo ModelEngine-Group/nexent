@@ -3,6 +3,8 @@
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
   ImportedTrajectory,
+  SavedTrajectory,
+  SavedTrajectoriesPage,
   CleanupResult,
   CleanupSchedule,
   ConversationPage,
@@ -34,6 +36,37 @@ async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const trajectoryService = {
+  savedImports: (page: number, pageSize: number, signal?: AbortSignal) =>
+    read<SavedTrajectoriesPage>(
+      queryUrl(API_ENDPOINTS.trajectory.imports, { page, page_size: pageSize }),
+      signal
+    ),
+  savedImport: (id: string, signal?: AbortSignal) =>
+    read<SavedTrajectory>(API_ENDPOINTS.trajectory.savedImport(id), signal),
+  async saveImport(file: File, signal?: AbortSignal): Promise<SavedTrajectory> {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.imports,
+      {
+        method: "POST",
+        body,
+        signal,
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as SavedTrajectory;
+  },
+  async deleteImport(id: string): Promise<{ deleted: boolean }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.trajectory.savedImport(id),
+      {
+        method: "DELETE",
+        cache: "no-store",
+      }
+    );
+    return (await response.json()).data as { deleted: boolean };
+  },
   async exportArchive(
     row: TrajectoryRecord,
     signal?: AbortSignal

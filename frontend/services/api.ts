@@ -22,6 +22,9 @@ export const API_ENDPOINTS = {
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     importArchive: `${API_BASE_URL}/trajectory/import`,
+    imports: `${API_BASE_URL}/trajectory/imports`,
+    savedImport: (id: string) =>
+      `${API_BASE_URL}/trajectory/imports/${encodeURIComponent(id)}`,
     exportArchive: (id: string) =>
       `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/export`,
     conversation: (id: string) =>

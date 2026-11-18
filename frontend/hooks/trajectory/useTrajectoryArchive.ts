@@ -7,7 +7,7 @@ import { trajectoryService } from "@/services/trajectoryService";
 import type { ImportedTrajectory } from "@/types/trajectory";
 
 /** The page instance owns all imported data and outstanding uploads. */
-export function useTrajectoryArchive(scope: string) {
+export function useTrajectoryArchive(scope: string, persistent = false) {
   const request = useRef<AbortController | null>(null);
   const [state, setState] = useState<{
     scope: string;
@@ -33,16 +33,20 @@ export function useTrajectoryArchive(scope: string) {
     };
   }, [scope, clear]);
   const open = useCallback(
-    async (file: File) => {
+    async (input: File | string) => {
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
       setState({ scope, data: null, loading: true, error: null });
       try {
-        const data = await trajectoryService.importArchive(
-          file,
-          controller.signal
-        );
+        const data =
+          typeof input === "string"
+            ? (await trajectoryService.savedImport(input, controller.signal))
+                .trajectory
+            : persistent
+              ? (await trajectoryService.saveImport(input, controller.signal))
+                  .trajectory
+              : await trajectoryService.importArchive(input, controller.signal);
         if (!controller.signal.aborted && request.current === controller)
           setState({ scope, data, loading: false, error: null });
       } catch (error) {
@@ -52,7 +56,7 @@ export function useTrajectoryArchive(scope: string) {
         if (request.current === controller) request.current = null;
       }
     },
-    [scope]
+    [scope, persistent]
   );
   const current = state?.scope === scope ? state : null;
   return {

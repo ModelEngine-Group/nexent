@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 /** Generate browser inputs through real product HTTP exchange, then release source resources. */
@@ -64,6 +65,7 @@ export async function installArchiveBrowser(page, payload) {
     delayImport: false,
     release: null,
     external: [],
+    saved: [],
   };
   const user = () => ({
     user_id: "archive-admin",
@@ -148,7 +150,41 @@ export async function installArchiveBrowser(page, payload) {
         headers: { "cache-control": "private,no-store" },
       });
       return;
-    } else if (path.endsWith("/trajectory/import")) {
+    } else if (
+      path.endsWith("/trajectory/imports") &&
+      request.method() === "GET"
+    ) {
+      const query = new URL(request.url()).searchParams;
+      const current = Number(query.get("page") || 1);
+      const size = Number(query.get("page_size") || 20);
+      data = {
+        items: state.saved
+          .slice((current - 1) * size, current * size)
+          .map((entry) => entry.item),
+        total: state.saved.length,
+        page: current,
+        page_size: size,
+      };
+    } else if (/\/trajectory\/imports\/[^/]+$/.test(path)) {
+      const id = path.split("/").at(-1);
+      const entry = state.saved.find((entry) => entry.item.import_id === id);
+      if (request.method() === "DELETE") {
+        state.saved = state.saved.filter(
+          (entry) => entry.item.import_id !== id,
+        );
+        data = { deleted: true };
+      } else if (entry) data = entry;
+      else {
+        await route.fulfill({
+          status: 404,
+          json: { detail: { code: "import_not_found" } },
+        });
+        return;
+      }
+    } else if (
+      path.endsWith("/trajectory/import") ||
+      path.endsWith("/trajectory/imports")
+    ) {
       state.imports++;
       const body = request.postDataBuffer();
       const replacement = body?.includes(otherRaw);
@@ -166,6 +202,19 @@ export async function installArchiveBrowser(page, payload) {
         return;
       }
       data = replacement ? payload.other_data : payload.data;
+      if (path.endsWith("/trajectory/imports")) {
+        data = {
+          item: {
+            import_id: randomUUID(),
+            filename: replacement ? "replacement.zip" : "trajectory.zip",
+            imported_at: new Date().toISOString(),
+            size_bytes: replacement ? otherRaw.length : raw.length,
+            row: data.row,
+          },
+          trajectory: data,
+        };
+        state.saved.unshift(data);
+      }
     } else if (path.endsWith("/snapshot")) {
       state.reads++;
       data = payload.data.pages[0].snapshot;
@@ -193,7 +242,11 @@ export async function installArchiveBrowser(page, payload) {
       mimeType: "application/zip",
       buffer: replacement ? otherRaw : raw,
     });
-    await page.getByRole("treeitem", { name: replacement ? /Replacement 0/ : /Archive 0/ }).waitFor();
+    await page
+      .getByRole("treeitem", {
+        name: replacement ? /Replacement 0/ : /Archive 0/,
+      })
+      .waitFor();
   };
   const close = async () => {
     await page

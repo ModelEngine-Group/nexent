@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import {
   DatePicker,
   Popover,
@@ -55,7 +56,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 export function ObservabilityCenter({ user }: { user: User }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isSuperAdmin = hasRole(user, "SU");
   const initial = (): TrajectoryFilters =>
     isSuperAdmin ? {} : { tenant_id: user.tenantId };
@@ -72,7 +73,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [cleaning, setCleaning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
-  const archive = useTrajectoryArchive(scope);
+  const archive = useTrajectoryArchive(scope, true);
   const fileInput = useRef<HTMLInputElement>(null);
   const select = (row: TrajectoryRecord | null) => {
     archive.clear();
@@ -401,6 +402,11 @@ export function ObservabilityCenter({ user }: { user: User }) {
           >
             {t("trajectory.import")}
           </Button>
+          <Link
+            href={`/${i18n?.language?.startsWith("en") ? "en" : "zh"}/observability/imports`}
+          >
+            <Button>{t("trajectory.importedList")}</Button>
+          </Link>
           <Button
             aria-label={t("common.refresh")}
             icon={<RefreshCw size={14} />}
