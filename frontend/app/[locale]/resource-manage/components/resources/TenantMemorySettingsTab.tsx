@@ -6,6 +6,7 @@ import { Alert, App, Card, Flex, Switch, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
+import { tenantMemorySettingsKey } from "@/hooks/memory/useTenantMemorySettings";
 import {
   loadTenantMemorySettings,
   setTenantMemoryEnabled,
@@ -21,7 +22,7 @@ export default function TenantMemorySettingsTab({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const queryKey = ["tenant-memory-settings", tenantId, userId];
+  const queryKey = tenantMemorySettingsKey(tenantId, userId);
   const { data, isPending, isError } = useQuery({
     queryKey,
     queryFn: loadTenantMemorySettings,

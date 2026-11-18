@@ -9,6 +9,9 @@ import AgentRunPolicy from "../../app/[locale]/agents/[agentId]/components/agent
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   readOnly: false,
+  savedMemory: true,
+  tenantMemory: { enabled: true } as { enabled: boolean } | undefined,
+  tenantMemoryError: false,
   translations: {} as Record<string, string>,
 }));
 
@@ -19,10 +22,19 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("@/stores/agentStore", () => ({
   useAgentStore: (selector: (state: unknown) => unknown) =>
-    selector({ editedAgent: {}, updateAgentConfig: mocks.update }),
+    selector({
+      editedAgent: { enable_memory: mocks.savedMemory },
+      updateAgentConfig: mocks.update,
+    }),
 }));
 vi.mock("@/hooks/agent/useAgentReadOnly", () => ({
   useAgentReadOnly: () => mocks.readOnly,
+}));
+vi.mock("@/hooks/memory/useTenantMemorySettings", () => ({
+  useTenantMemorySettings: () => ({
+    data: mocks.tenantMemory,
+    isError: mocks.tenantMemoryError,
+  }),
 }));
 vi.mock("@/hooks/group/useGroupList", () => ({ useGroupList: vi.fn() }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -36,6 +48,10 @@ const options = [
     "agent.runPolicy.protocolRepairRetry",
     "agent.runPolicy.protocolRepairRetryHint",
   ],
+  [
+    "memory.manager.agentAutomaticMemory",
+    "memory.manager.agentAutomaticMemoryHint",
+  ],
   ["agent.highFidelity.mainAgent", "agent.deployment.isMainAgentTooltip"],
   ["agent.highFidelity.a2a", "agent.deployment.a2aEnabledTooltip"],
 ];
@@ -44,6 +60,9 @@ describe("Advanced configuration help buttons", () => {
   beforeEach(() => {
     mocks.update.mockReset();
     mocks.readOnly = false;
+    mocks.savedMemory = true;
+    mocks.tenantMemory = { enabled: true };
+    mocks.tenantMemoryError = false;
     mocks.translations = Object.fromEntries(
       Object.entries(en).map(([key, value]) => [key, String(value)])
     );
@@ -82,6 +101,54 @@ describe("Advanced configuration help buttons", () => {
       expect(mocks.update).not.toHaveBeenCalled();
     }
   );
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "keeps the saved memory value when the tenant closes it (high fidelity: %s, saved: %s)",
+    (highFidelity, saved) => {
+      mocks.savedMemory = saved;
+      mocks.tenantMemory = { enabled: false };
+      const label = en["memory.manager.agentAutomaticMemory"];
+      const role = highFidelity ? "checkbox" : "switch";
+      const view = render(<AgentRunPolicy highFidelity={highFidelity} />);
+      const control = screen.getByRole(role, { name: label });
+      expect(control).toBeDisabled();
+      expect(control).toHaveAccessibleDescription(
+        en["memory.manager.tenantMemoryDisabledHint"]
+      );
+      expect(control.matches(":checked, [aria-checked=true]")).toBe(saved);
+      fireEvent.click(control);
+      expect(mocks.update).not.toHaveBeenCalled();
+
+      mocks.tenantMemory = { enabled: true };
+      view.rerender(<AgentRunPolicy highFidelity={highFidelity} />);
+      const restored = screen.getByRole(role, { name: label });
+      expect(restored).toBeEnabled();
+      expect(restored.matches(":checked, [aria-checked=true]")).toBe(saved);
+      fireEvent.click(restored);
+      expect(mocks.update).toHaveBeenCalledWith({ enable_memory: !saved });
+    }
+  );
+
+  it("keeps the memory setting disabled when the tenant status is unknown", () => {
+    mocks.tenantMemory = undefined;
+    const view = render(<AgentRunPolicy highFidelity />);
+    const control = screen.getByRole("checkbox", {
+      name: en["memory.manager.agentAutomaticMemory"],
+    });
+    expect(control).toBeDisabled();
+    expect(control).not.toHaveAccessibleDescription();
+    mocks.tenantMemoryError = true;
+    view.rerender(<AgentRunPolicy highFidelity />);
+    expect(control).toBeDisabled();
+    expect(control).toHaveAccessibleDescription(
+      en["memory.manager.tenantMemoryLoadError"]
+    );
+  });
 
   it("keeps help available in read-only mode and preserves checkbox updates", async () => {
     const view = render(<AgentRunPolicy highFidelity />);

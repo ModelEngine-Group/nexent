@@ -6822,6 +6822,7 @@
   "memory.manager.agentAutomaticMemoryHint": "设置对保存的智能体版本生效，同时受租户和个人设置约束。",
   "memory.manager.tenantAutomaticMemory": "租户自动记忆",
   "memory.manager.tenantAutomaticMemoryHint": "控制此租户所有会话的自动记忆。",
+  "memory.manager.tenantMemoryDisabledHint": "租户已关闭自动记忆，请联系租户管理员开启。",
   "memory.manager.tenantMemoryLoadError": "无法加载租户记忆设置。",
   "dreaming.reason.memory_disabled": "自动记忆已关闭。"
 }
