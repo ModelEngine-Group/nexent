@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _identity(hit):
-    return hit.knowledge_id, hit.file_id, hit.file_version, hit.chunk_id
+    return hit.knowledge_id, hit.file_id or "", hit.file_version if hit.file_version is not None else -1, hit.chunk_id
 
 
 class KnowledgeToolSearch:

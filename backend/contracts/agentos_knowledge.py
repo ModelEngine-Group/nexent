@@ -256,15 +256,24 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
         return values
 
 
-class KnowledgeSearchHit(KnowledgeFileReference):
+class KnowledgeSearchHit(Contract):
+    knowledge_id: int = Field(gt=0)
+    file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    file_version: int | None = Field(default=None, ge=0)
     chunk_id: str = Field(min_length=1, max_length=1024)
     content: str
-    filename: str = Field(default="", max_length=1024)
+    filename: str | None = ""
     score: float
     score_kind: str = Field(min_length=1, max_length=64)
     location: dict[str, JsonValue] = Field(default_factory=dict)
     score_details: dict[str, JsonValue] = Field(default_factory=dict)
     image_ref: ObjectReference | None = None
+
+    @model_validator(mode="after")
+    def complete_file_reference(self):
+        if (self.file_id is None) != (self.file_version is None):
+            raise ValueError("File identity and version must be present or absent together")
+        return self
 
 
 class KnowledgeSearchResult(Contract):

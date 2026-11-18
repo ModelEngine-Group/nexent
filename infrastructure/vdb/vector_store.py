@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from contextlib import contextmanager
+from dataclasses import replace
 
 from elastic_transport import TransportError
 from elasticsearch import ApiError
@@ -181,9 +182,14 @@ class ElasticsearchVectorStore:
         with self._client(context) as client:
             result = self._call(client, "indices.get_mapping", context, index=binding.index)
         mapping = result.get(binding.index, {}).get("mappings", {})
-        if not matches_mapping(expected, mapping):
-            raise Conflict(operation_id=context.operation_id)
         dimensions = binding.dimensions
+        if not matches_mapping(expected, mapping):
+            if (not binding.allow_unembedded or not isinstance(mapping, dict)
+                or not isinstance(mapping.get("properties"), dict)
+                or "embedding" in mapping.get("properties", {})
+                or not matches_mapping(replace(binding, dimensions=None).mapping(), mapping)):
+                raise Conflict(operation_id=context.operation_id)
+            dimensions = None
         if dimensions is None:
             properties = mapping.get("properties", {})
             embedding = properties.get("embedding")
@@ -472,9 +478,9 @@ class ElasticsearchVectorStore:
         return DeleteReceipt(context.operation_id, True)
 
     def search(self, collection, query, *, context):
-        binding = self._binding(collection)
         if not isinstance(query, SearchQuery):
             raise InvalidInput()
+        binding = self._binding(collection, maintenance=query.mode in {"text", "weighted_text"})
         if (
             type(query.limit) is not int
             or not 1 <= query.limit <= 1000

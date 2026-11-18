@@ -78,7 +78,7 @@ def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True, reso
     scope = StorageScope("runtime", tenant, actor.user_id, {collection})
     return ElasticsearchVectorStore(
         scope,
-        (vector_binding(tenant, collection, dimensions, writable=writable, allow_unembedded=writable and dimensions is not None),),
+        (vector_binding(tenant, collection, dimensions, writable=writable, allow_unembedded=not writable or dimensions is not None),),
         _configured_client,
     )
 

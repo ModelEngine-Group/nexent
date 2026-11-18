@@ -177,6 +177,24 @@ class ChunkReadView:
             raise Conflict()
         return history.delta
 
+    def allows_candidate(self, record, *, context):
+        """Apply confirmed per-key changes after the caller checks current file visibility."""
+        data = record.payload
+        if data.get("knowledge_id") != self.knowledge_id:
+            raise ScopeDenied()
+        if record.generation is None:
+            return False
+        if data.get("file_id") is None:
+            if any(data.get(name) is not None for name in ("file_version", "chunk_index")):
+                raise ScopeDenied()
+            history = self._history(context=context)
+            state = history.states.get(record.key.key)
+            return bool(state and state.alive and state.creation == record.generation.value)
+        history = self._history({"file_id": data["file_id"], "visible_version": data["file_version"],
+                                 "visible_generation": record.generation.value}, context=context)
+        state = history.states.get(record.key.key)
+        return state is None or state.alive and state.latest["chunk_index"] == data.get("chunk_index")
+
     @staticmethod
     def _scan(vectors, resource, where, *, context):
         cursor, seen = None, set()

@@ -25,6 +25,7 @@ from nexent.storage.errors import (
     ScopeDenied,
 )
 from nexent.storage.models import Comparison, Junction, OperationContext, SearchQuery
+from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.ingestion import embedding_vectors
 from runtime.knowledge_base.jobs import KnowledgeJobs
 
@@ -127,7 +128,8 @@ class KnowledgeSearchService:
             if hit.payload.get("location", {}).get("kind") == "image" else None,
         )
 
-    def _visible(self, records, grant, request, hits, *, context):
+    def _visible(self, records, grant, request, hits, views, require_embedding, *, context):
+        self._stable_views(views, context=context)
         policy = KnowledgeJobs(records, authorize=lambda *a, **kw: None)
         allowed = {g.collection: g.knowledge_id for g in grant.knowledge_bases}
         result = []
@@ -139,13 +141,26 @@ class KnowledgeSearchService:
                 raise ScopeDenied()
             if request.file_versions and request.file_versions[reference.file_id] != reference.file_version:
                 raise ScopeDenied()
-            if (hit.payload.get("embedding_model_id") != request.embedding_model.model_id
+            if require_embedding and (hit.payload.get("embedding_model_id") != request.embedding_model.model_id
                 or normalize_model_revision(hit.payload.get("embedding_revision"))
                 != normalize_model_revision(request.embedding_model.revision)):
                 continue
-            if hit.generation and policy.is_visible(reference, hit.generation.value, context=context):
+            if (hit.generation
+                and (reference.file_id is None or policy.is_visible(reference, hit.generation.value, context=context))
+                and views[reference.knowledge_id].allows_candidate(hit, context=context)):
                 result.append(hit)
+        self._stable_views(views, context=context)
         return result
+
+    @staticmethod
+    def _views(records, grant, *, context):
+        return {resource.knowledge_id: ChunkReadView(records, resource.knowledge_id, context=context)
+                for resource in grant.knowledge_bases}
+
+    @staticmethod
+    def _stable_views(views, *, context):
+        for view in views.values():
+            view.stable(context=context)
 
     @staticmethod
     def _collect(vectors, grant, request, query_vector, limit, *, context):
@@ -153,11 +168,12 @@ class KnowledgeSearchService:
         for resource in grant.knowledge_bases:
             port = vectors[resource.collection]
             try:
-                port.describe_collection(resource.collection, context=context)
+                info = port.describe_collection(resource.collection, context=context)
             except NotFound:
                 continue
-            terms = [Comparison("knowledge_id", "eq", resource.knowledge_id),
-                     Comparison("embedding_model_id", "eq", request.embedding_model.model_id)]
+            if query_vector is not None and info.dimensions is not None and info.dimensions != len(query_vector):
+                raise Conflict()
+            terms = [Comparison("knowledge_id", "eq", resource.knowledge_id)]
             if request.file_ids:
                 terms.append(Comparison("file_id", "in", request.file_ids))
             if request.file_versions:
@@ -167,8 +183,9 @@ class KnowledgeSearchService:
             where = Junction("and", tuple(terms))
             if request.search_mode in {"accurate", "hybrid"}:
                 lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="weighted_text", where=where, limit=limit), context=context))
-            if request.search_mode in {"semantic", "hybrid"}:
-                semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=where, limit=limit), context=context))
+            if request.search_mode in {"semantic", "hybrid"} and info.dimensions is not None:
+                semantic_where = Junction("and", (terms[0], Comparison("embedding_model_id", "eq", request.embedding_model.model_id), *terms[1:]))
+                semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=semantic_where, limit=limit), context=context))
         return lexical, semantic
 
     @staticmethod
@@ -184,7 +201,7 @@ class KnowledgeSearchService:
         try:
             async with asyncio.timeout(threshold):
                 grant = await self._grant(request, actor)
-                dimensions = await self.models.embedding_dimensions(request.embedding_model, actor)
+                dimensions = None if request.search_mode == "accurate" else await self.models.embedding_dimensions(request.embedding_model, actor)
                 if request.rerank_model:
                     binding = request.rerank_model
                     model = await self.models.get(binding.model_id, actor)
@@ -199,9 +216,10 @@ class KnowledgeSearchService:
                     query_vector = embedding_vectors(output, 1, dimensions)[0]
                 limit = request.top_k * (RERANK_OVERSEARCH_MULTIPLIER if request.rerank_model else 1)
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
+                    views = await self._blocking(self._views, records, grant, context=context)
                     lexical, semantic = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
-                    lexical = await self._blocking(self._visible, records, grant, request, lexical, context=context)
-                    semantic = await self._blocking(self._visible, records, grant, request, semantic, context=context)
+                    lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)
+                    semantic = await self._blocking(self._visible, records, grant, request, semantic, views, True, context=context)
                     candidates = rank_candidates(lexical, semantic, request.search_mode, request.query)[:limit]
                     if request.rerank_model and candidates:
                         output = await self._invoke(RerankInvocation(
@@ -211,7 +229,7 @@ class KnowledgeSearchService:
                         candidates = self._reranked(output, candidates)
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
-                    candidates = await self._blocking(self._visible, records, grant, request, candidates, context=context)
+                    candidates = await self._blocking(self._visible, records, grant, request, candidates, views, False, context=context)
                     return KnowledgeSearchResult(hits=[self._dto(h) for h in candidates[:request.top_k]],
                                                  embedding_model=request.embedding_model, rerank_model=request.rerank_model)
         except (TimeoutError, DeadlineExceeded) as error:

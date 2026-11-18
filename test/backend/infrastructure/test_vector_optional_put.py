@@ -13,12 +13,53 @@ from nexent.storage.errors import (
     OutcomeUnknown,
     ScopeDenied,
 )
-from nexent.storage.models import Revision, StorageScope, VectorKey, VectorRecord
+from nexent.storage.models import (
+    Revision,
+    SearchQuery,
+    StorageScope,
+    VectorKey,
+    VectorRecord,
+)
 
 from infrastructure.storage.catalog import FieldDefinition
 from infrastructure.vdb.vector_schema import VectorBinding
 from infrastructure.vdb.vector_store import ElasticsearchVectorStore
 from test.backend.infrastructure.test_vector_payload_patch import api_error, context
+
+
+@pytest.mark.parametrize('mode', ['text', 'weighted_text'])
+def test_readonly_plaintext_mapping_supports_lexical_without_dense_or_write(optional, mode):
+    _, client, factory, binding, row = optional
+    port = ElasticsearchVectorStore(optional[0].scope, (replace(binding, writable=False),), factory)
+    client.search.return_value = {'hits': {'hits': []}}
+    assert port.describe_collection('kb', context=context()).dimensions is None
+    assert port.search('kb', SearchQuery(mode=mode, text='hello'), context=context()) == ()
+    assert 'knn' not in client.search.call_args.kwargs
+    factory.reset_mock()
+    with pytest.raises(CapabilityUnsupported):
+        port.search('kb', SearchQuery(vector=(1., 0.)), context=context())
+    with pytest.raises(ScopeDenied):
+        port.put(row, expected_generation=None, context=context())
+    factory.assert_not_called()
+
+
+def test_configured_readonly_unbounded_mapping_is_describable_without_creation_rights():
+    from infrastructure.agentos_identity import ServicePrincipal
+    from infrastructure.knowledge_vectors import bind_knowledge_vectors
+
+    port = bind_knowledge_vectors(ServicePrincipal('user', 'tenant'), 'kb', None, writable=False)
+    try:
+        binding = port._bindings['kb']
+        assert binding.mapping()['properties']['payload']['type'] == 'object'
+        assert binding.writable is False
+    finally:
+        port.close()
+
+
+def test_known_query_dimensions_can_describe_an_explicit_plaintext_collection(optional):
+    original, _, factory, binding, _ = optional
+    port = ElasticsearchVectorStore(original.scope, (replace(binding, dimensions=3, writable=False),), factory)
+    assert port.describe_collection('kb', context=context()).dimensions is None
 
 
 @pytest.fixture

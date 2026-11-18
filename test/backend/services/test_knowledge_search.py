@@ -15,7 +15,13 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchGrant,
 )
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
-from nexent.storage.models import OperationContext, Revision, SearchHit, VectorKey
+from nexent.storage.models import (
+    OperationContext,
+    Revision,
+    SearchHit,
+    VectorCollectionInfo,
+    VectorKey,
+)
 from runtime.knowledge_base.search import KnowledgeSearchService
 
 from infrastructure.rdb.knowledge_jobs import JOBS
@@ -35,6 +41,7 @@ async def search(setup):
     row = await s.db(s.records.get, JOBS, s.state.job_id, context=s.context)
     s.closed.clear()
     s.models.invoke.reset_mock()
+    s.models.embedding_dimensions.reset_mock()
     request = KnowledgeSearch(knowledge_ids=[1], query="worker", embedding_model={"model_id": 2, "revision": "v1"})
     grant = KnowledgeSearchGrant(knowledge_bases=[{"knowledge_id": 1, "collection": "kb", "embedding_model_id": 2, "revision": "a" * 64}])
     s.client.authorize_knowledge_search = AsyncMock(return_value=grant)
@@ -43,6 +50,7 @@ async def search(setup):
         "embedding_model_id": 2, "embedding_revision": "v1", "filename": "source.txt", "location": {},
     }, Revision(row["attempt_id"]))
     s.vectors.search.return_value = (hit,)
+    s.vectors.describe_collection.return_value = VectorCollectionInfo('kb', 2, 'cosine')
 
     async def invoke(payload, actor):
         assert actor == s.actor
