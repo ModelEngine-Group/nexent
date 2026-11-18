@@ -71,12 +71,14 @@ async def create_nl2agent_stream(payload: PreparedAgentCreatorRun, actor: Servic
                 if frame == b"event: agentos_execution_complete\ndata: {}":
                     return
                 if frame.startswith(b"event: agentos_execution_error\ndata: "):
-                    yield frame.split(b"\n", 1)[1].decode() + "\n\n"
+                    if not boundary_delivered:
+                        yield frame.split(b"\n", 1)[1].decode() + "\n\n"
                     return
                 if frame.startswith(b"data: ") and not boundary_delivered:
                     yield frame.decode() + "\n\n"
                     boundary_delivered = json.loads(frame[6:]).get("type") == "nl2a"
-            raise RuntimeError("NL2Agent stream ended before the Runtime terminal")
+            if not boundary_delivered:
+                raise RuntimeError("NL2Agent stream ended before the Runtime terminal")
     except Exception:
         logger.exception("NL2Agent AgentOS dispatch failed")
         yield 'data: {"type":"error","content":"NL2Agent execution failed."}\n\n'

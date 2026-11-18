@@ -331,6 +331,10 @@ class TestConfigAppRouterConfiguration:
         monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
             prepared_turn_lifespan=prepared_lifespan,
         ))
+        shutdown_creators = AsyncMock()
+        monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
+            shutdown_creator_streams=shutdown_creators,
+        ))
 
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
@@ -376,6 +380,7 @@ class TestConfigAppRouterConfiguration:
         ):
             asyncio.run(exercise_lifespan())
 
+        shutdown_creators.assert_awaited_once_with(timeout=1)
         assert config_app.app.lifespan is config_app.config_lifespan
         assert prepared_events == ["start", "stop"]
         migration.migrate_legacy_outlets.assert_called_once_with()

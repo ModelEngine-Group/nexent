@@ -101,7 +101,7 @@ async def test_card_blocks_next_model_prepare_and_tool_dispatch():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["run_terminal", "error"])
-async def test_creator_stream_closes_at_first_interaction_card(monkeypatch, ending):
+async def test_creator_stream_hides_output_after_first_card_and_drains_worker(monkeypatch, ending):
     from runtime.agentos import ephemeral
 
     adapter, _observer, _stop = setup_adapter()
@@ -121,8 +121,9 @@ async def test_creator_stream_closes_at_first_interaction_card(monkeypatch, endi
 
     monkeypatch.setattr(ephemeral, "agent_run", run)
     stream = ephemeral._observer_stream(adapter.run_info, Mock(), Mock(), creator_mode="nl2agent")
-    output = [json.loads(item.removeprefix("data: ")) async for item in stream]
-    assert output == [events[0]]
+    output = [item async for item in stream]
+    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [events[0]]
+    assert output[-1] == "event: agentos_execution_complete\ndata: {}\n\n"
     closed.assert_called_once_with()
 
 

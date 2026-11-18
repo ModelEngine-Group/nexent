@@ -7,7 +7,7 @@ from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 from contracts import skill as skill_app_management_skill_skill_skill
 # Resolve ownership exceptions before this endpoint suite replaces environment modules.
-from management.services.agent.lifecycle import AgentRunAlreadyActiveError  # noqa: F401
+from contracts.errors.exceptions import AgentRunAlreadyActiveError  # noqa: F401
 import sys
 import os
 import io

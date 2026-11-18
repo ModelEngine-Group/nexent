@@ -73,10 +73,10 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         "get_http_request",
         return_value=SimpleNamespace(headers={"Authorization": "Bearer tenant-token"}),
     )
-    get_current_user_id = mocker.patch.object(
+    authenticate_identity = mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     query_all_tools = mocker.patch.object(
         nl2agent_service,
@@ -148,7 +148,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         [" Weather ", "forecast", "WEATHER"]
     )
 
-    get_current_user_id.assert_called_once_with("Bearer tenant-token")
+    authenticate_identity.assert_called_once_with("Bearer tenant-token")
     query_all_tools.assert_called_once_with(tenant_id="tenant-a")
     assert {
         call.args[0]
@@ -225,8 +225,8 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -495,8 +495,8 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     save_impl = mocker.patch.object(
         nl2agent_service,
@@ -571,8 +571,8 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -612,8 +612,8 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
 
     def save_impl(*, agent_id, fields, tenant_id, user_id):
@@ -707,8 +707,8 @@ async def test_clarification_wrapper_keeps_trusted_agent_id(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -822,8 +822,8 @@ async def test_uninstalled_search_returns_stable_permission_and_runtime_errors(m
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -870,8 +870,8 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
     )
     get_user = mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     search_output = MagicMock()
     search_output.model_dump.return_value = {
@@ -987,8 +987,8 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     require_edit = mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1055,8 +1055,8 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1116,8 +1116,8 @@ async def test_resource_wrapper_validates_results_sources_and_empty_binding(mock
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch(
         "management.services.agent.authorization.require_agent_draft_edit"
@@ -1196,8 +1196,8 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     save_impl = mocker.patch.object(
         nl2agent_service,
@@ -1288,8 +1288,8 @@ async def test_completion_validation_uses_persisted_state_for_prompt_saves(
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1345,8 +1345,8 @@ async def test_partial_prompt_save_remains_saved_when_database_is_incomplete(
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1394,8 +1394,8 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1456,8 +1456,8 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
@@ -1484,7 +1484,7 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     assert invalid_result["code"] == "invalid_agent_fields"
     assert invalid_result["retryable"] is False
 
-    nl2agent_mcp_tools_module.get_current_user_id.side_effect = PermissionError(
+    nl2agent_mcp_tools_module.authenticate_identity.side_effect = PermissionError(
         "private authorization details"
     )
     unauthorized_result = json.loads(
@@ -1493,7 +1493,7 @@ async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocke
     assert unauthorized_result["code"] == "unauthorized"
     assert "private authorization details" not in json.dumps(unauthorized_result)
 
-    nl2agent_mcp_tools_module.get_current_user_id.side_effect = RuntimeError(
+    nl2agent_mcp_tools_module.authenticate_identity.side_effect = RuntimeError(
         "private database details"
     )
     failed_result = json.loads(
@@ -1552,8 +1552,8 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
     )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
-        "get_current_user_id",
-        return_value=("user-a", "tenant-a"),
+        "authenticate_identity",
+        return_value=SimpleNamespace(user_id="user-a", tenant_id="tenant-a"),
     )
     mocker.patch.object(
         nl2agent_service,
