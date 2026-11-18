@@ -526,7 +526,8 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         kdsId={knowledgeBase.kds_id}
         file={detailFile}
         canEdit={canEdit}
-
+        summaryEnabled={detail.summary_enable === true}
+        summaryPreview={detail.summary_preview === true}
         onBack={() => {
           setDetailFile(null);
           // The list paused polling while the detail was open; refresh once on

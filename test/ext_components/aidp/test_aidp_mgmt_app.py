@@ -3397,3 +3397,295 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+
+
+class TestFileSummaryEndpoints:
+    """Summary config on KB creation and the file summary/retry proxies."""
+
+    FILE_UUID = "fdde6c86-39b2-4ed5-9490-45a22d3931bc"
+
+    def _create_kb(self, payload: dict):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        body = {
+            "name": "摘要知识库",
+            "description": "summary",
+            "embedding_model": "bge-m3",
+            "ingroup_permission": "PRIVATE",
+            **payload,
+        }
+        with patch.object(aidp_mgmt_app, "create_aidp_kb_impl",
+                          return_value={"kds_id": "kb-summary"}) as create_kb, \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1), \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = _client().post(
+                "/aidp-mgmt/knowledge-bases", headers=_bearer(), json=body
+            )
+        return response, create_kb
+
+    def test_create_requires_model_when_summary_enabled(self):
+        response, create_kb = self._create_kb({"summary_enable": True})
+        assert response.status_code == 422
+        create_kb.assert_not_called()
+
+    def test_create_forces_preview_and_trims_summary_model(self):
+        response, create_kb = self._create_kb({
+            "summary_enable": True,
+            "summary_model": "  qwen3  ",
+            "summary_preview": False,
+        })
+        assert response.status_code == HTTPStatus.OK
+        payload = create_kb.call_args.args[2]
+        assert payload["summary_enable"] is True
+        assert payload["summary_preview"] is True
+        assert payload["summary_model"] == "qwen3"
+
+    def test_create_sends_explicit_false_summary_fields_when_disabled(self):
+        response, create_kb = self._create_kb({
+            "summary_enable": False,
+            "summary_model": "qwen3",
+        })
+        assert response.status_code == HTTPStatus.OK
+        payload = create_kb.call_args.args[2]
+        assert payload["summary_enable"] is False
+        assert payload["summary_preview"] is False
+        assert "summary_model" not in payload
+
+    def test_detail_normalizes_summary_fields_and_old_kbs(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        old = aidp_mgmt_app._normalize_kb_config_fields({})
+        assert old["summary_enable"] is False
+        assert old["summary_model"] == ""
+        assert old["summary_preview"] is False
+
+        enabled = aidp_mgmt_app._normalize_kb_config_fields({
+            "kms_config_str": json.dumps({
+                "summary_enable": "true",
+                "summary_model": "qwen3",
+                "summary_preview": "false",
+            }),
+        })
+        assert enabled["summary_enable"] is True
+        assert enabled["summary_model"] == "qwen3"
+        assert enabled["summary_preview"] is False
+
+    def test_summary_read_requires_read_and_forwards_file(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        payload = {"result": {"summary_status": "pending"}}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_mgmt_app, "get_aidp_file_summary_impl",
+                          return_value=payload) as get_summary:
+            response = _client().get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == payload
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        get_summary.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_UUID
+        )
+
+    def test_summary_retry_requires_edit_and_sends_uuid_array(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        result = {
+            "partial_success_list": [{"file_uuid": self.FILE_UUID}],
+            "failed_list": [],
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
+             patch.object(aidp_mgmt_app, "retry_aidp_file_summaries_impl",
+                          return_value=result) as retry_summary:
+            response = _client().post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
+                headers=_bearer(),
+                json={"file_uuids": [self.FILE_UUID]},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == result
+        assert mock_perm.call_args.kwargs["required"] == "EDIT"
+        retry_summary.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", [self.FILE_UUID]
+        )
+
+    def test_summary_retry_rejects_empty_and_invalid_uuid_lists(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        for payload in ({"file_uuids": []}, {"file_uuids": ["not-a-uuid"]}):
+            with patch.object(aidp_permission_service, "require_permission",
+                              return_value=MagicMock(permission="EDIT")), \
+                 patch.object(aidp_mgmt_app,
+                              "retry_aidp_file_summaries_impl") as retry_summary:
+                response = _client().post(
+                    "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
+                    headers=_bearer(),
+                    json=payload,
+                )
+            assert response.status_code == 422
+            retry_summary.assert_not_called()
+
+    def test_summary_read_denied_does_not_call_aidp(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          side_effect=aidp_mgmt_app.HTTPException(
+                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
+             patch.object(aidp_mgmt_app, "get_aidp_file_summary_impl") as get_summary:
+            response = _client().get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        get_summary.assert_not_called()
+
+    def test_summary_retry_denied_does_not_call_aidp(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          side_effect=aidp_mgmt_app.HTTPException(
+                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
+             patch.object(aidp_mgmt_app,
+                          "retry_aidp_file_summaries_impl") as retry_summary:
+            response = _client().post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
+                headers=_bearer(),
+                json={"file_uuids": [self.FILE_UUID]},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        retry_summary.assert_not_called()
+
+    def test_summary_edit_via_permission_save_forwards_three_fields(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        result = {"success": True, "permissions_saved": True, "metadata_status": "updated"}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings",
+                          return_value=result) as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={
+                    "ingroup_permission": "PRIVATE",
+                    "group_ids": [],
+                    "summary_enable": True,
+                    "summary_model": "  qwen3  ",
+                    "summary_preview": False,
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        metadata = save_settings.call_args.kwargs["metadata"]
+        assert metadata == {
+            "summary_enable": True,
+            "summary_model": "qwen3",
+            "summary_preview": True,
+        }
+
+    def test_summary_edit_requires_model_when_enabled(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings") as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_enable": True},
+            )
+
+        assert response.status_code == 422
+        save_settings.assert_not_called()
+
+    def test_summary_edit_rejects_summary_fields_without_switch(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings") as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == 422
+        save_settings.assert_not_called()
+
+    def test_summary_edit_disable_sends_explicit_false(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings",
+                          return_value={"success": True, "permissions_saved": True,
+                                        "metadata_status": "updated"}) as save_settings:
+            response = _client().patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "summary_enable": False,
+                      "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        metadata = save_settings.call_args.kwargs["metadata"]
+        assert metadata["summary_enable"] is False
+        assert metadata["summary_preview"] is False
+        assert "summary_model" not in metadata
+
+    def test_summary_edit_via_kb_patch_uses_same_fields(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"summary_enable": True}) as update_kb, \
+             patch.object(aidp_permission_service, "update_permission"):
+            response = _client().put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"summary_enable": True, "summary_model": "qwen3"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        payload = update_kb.call_args.args[3]
+        assert payload["summary_enable"] is True
+        assert payload["summary_model"] == "qwen3"
+        assert payload["summary_preview"] is True
+
+    def test_summary_edit_via_kb_patch_requires_model(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl") as update_kb:
+            response = _client().put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"summary_enable": True},
+            )
+
+        assert response.status_code == 422
+        update_kb.assert_not_called()

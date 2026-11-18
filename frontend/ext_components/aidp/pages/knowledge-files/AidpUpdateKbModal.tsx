@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 
-import { Alert, Modal, Form, Input, message } from "antd";
+import { Alert, Modal, Form, Input, Select, Switch, message } from "antd";
 
 import log from "@/lib/logger";
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
+import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
+import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { useSaveAidpKnowledgeSettings } from "./hooks/useAidpKnowledgeDetail";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
@@ -50,6 +53,25 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     groupsError,
   } = useAidpGroupOptions();
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
+  const summaryEnabled = Form.useWatch("summary_enable", form) === true;
+  const scope = useAidpQueryScope();
+  const modelsQuery = useQuery({
+    queryKey: [...scope.key, "models", "KnowledgeBase"],
+    queryFn: () => aidpKnowledgeService.listModels("", "KnowledgeBase"),
+    enabled: scope.enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const llmModelOptions = useMemo(
+    () =>
+      (modelsQuery.data?.models ?? [])
+        .filter((model) => model.model_type === "llm" && model.model_name)
+        .map((model) => ({
+          value: model.model_name,
+          label: model.display_name || model.model_name,
+        })),
+    [modelsQuery.data]
+  );
 
   // Pre-fill form when opening. ``group_ids`` may be null/undefined on rows
   // that predate the column — normalize to an empty array so the Select
@@ -68,6 +90,8 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         : Array.isArray(knowledgeBase.group_ids)
           ? knowledgeBase.group_ids
           : [],
+      summary_enable: knowledgeBase.summary_enable === true,
+      summary_model: knowledgeBase.summary_model || undefined,
     });
   }, [open, knowledgeBase, form, isUser]);
 
@@ -113,6 +137,17 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         : [];
       const normalizedNewGroupIds =
         newPermission === "PRIVATE" ? [] : newGroupIds;
+      const originalSummaryEnabled = knowledgeBase.summary_enable === true;
+      const originalSummaryModel = knowledgeBase.summary_model || "";
+      const nextSummaryEnabled = values.summary_enable === true;
+      const nextSummaryModel = nextSummaryEnabled
+        ? (values.summary_model || "").trim()
+        : "";
+      const summaryChanged =
+        mode === "metadata" &&
+        (nextSummaryEnabled !== originalSummaryEnabled ||
+          (nextSummaryEnabled && nextSummaryModel !== originalSummaryModel));
+
       const permissionChanged =
         newPermission !== originalPermission ||
         normalizedNewGroupIds.length !== originalGroupIds.length ||
@@ -122,7 +157,12 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
 
-      if (!nameChanged && !descriptionChanged && !permissionChanged) {
+      if (
+        !nameChanged &&
+        !descriptionChanged &&
+        !permissionChanged &&
+        !summaryChanged
+      ) {
         form.resetFields();
         onSuccess(knowledgeBase);
         return;
@@ -137,6 +177,15 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           group_ids: normalizedNewGroupIds,
           ...(nameChanged ? { name } : {}),
           ...(descriptionChanged ? { description } : {}),
+          ...(summaryChanged
+            ? {
+                summary_enable: nextSummaryEnabled,
+                summary_model: nextSummaryEnabled
+                  ? nextSummaryModel
+                  : undefined,
+                summary_preview: nextSummaryEnabled,
+              }
+            : {}),
         },
       });
       const metadataFailed = result.metadata_status === "failed";
@@ -159,6 +208,13 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             : knowledgeBase.description,
         ingroup_permission: newPermission,
         group_ids: normalizedNewGroupIds,
+        ...(summaryChanged && !metadataFailed
+          ? {
+              summary_enable: updated?.summary_enable ?? nextSummaryEnabled,
+              summary_model: updated?.summary_model ?? nextSummaryModel,
+              summary_preview: updated?.summary_preview ?? nextSummaryEnabled,
+            }
+          : {}),
         resource_status:
           result.metadata_status === "updated"
             ? "ACTIVE"
@@ -235,6 +291,37 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           style={{ padding: "20px 24px 8px" }}
         >
           {mode === "metadata" && <AidpKnowledgeBaseBasicFields t={t} />}
+          {mode === "metadata" && (
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+              <Form.Item
+                name="summary_enable"
+                label={t("aidpKnowledge.createSummaryEnable")}
+                valuePropName="checked"
+              >
+                <Switch aria-label={t("aidpKnowledge.createSummaryEnable")} />
+              </Form.Item>
+              <Form.Item
+                name="summary_model"
+                label={t("aidpKnowledge.createSummaryModel")}
+                rules={[
+                  {
+                    required: summaryEnabled,
+                    message: t("aidpKnowledge.createSummaryModelRequired"),
+                  },
+                ]}
+              >
+                <Select
+                  showSearch
+                  allowClear
+                  disabled={!summaryEnabled}
+                  loading={modelsQuery.isLoading}
+                  options={llmModelOptions}
+                  placeholder={t("aidpKnowledge.createModelSearch")}
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </div>
+          )}
           {canConfigureGroupPermissions &&
             (groupsError || (!canReadGroups && !groupsLoading)) && (
               <Alert

@@ -1908,6 +1908,7 @@ def _request_aidp_json(
     *,
     params: Dict[str, Any] | None = None,
     json_body: Dict[str, Any] | None = None,
+    retry: bool = False,
 ) -> Any:
     """Issue one AIDP JSON request and return the decoded body.
 
@@ -1936,10 +1937,15 @@ def _request_aidp_json(
             request_kwargs["json"] = json_body
         if method == "DELETE":
             # The convenience method does not accept a JSON body.
-            response = client.request(method, url, **request_kwargs)
+            request_fn = lambda: client.request(method, url, **request_kwargs)
         else:
             method_fn = getattr(client, method.lower())
-            response = method_fn(url, **request_kwargs)
+            request_fn = lambda: method_fn(url, **request_kwargs)
+        response = (
+            _request_with_retry(request_fn, context=f"{operation}:{path}")
+            if retry
+            else request_fn()
+        )
         response.raise_for_status()
         if not response.content:
             return {}
@@ -2096,6 +2102,108 @@ def remove_aidp_chunks_impl(
         _get_chunks_path(kds_id),
         "remove-chunks",
         json_body={"chunk_ids": list(chunk_ids)},
+    )
+    return result if isinstance(result, dict) else {}
+
+
+# ==================== File summaries ====================
+
+
+def _get_file_summary_path(kds_id: str, file_uuid: str, tenant_id: str | None = None) -> str:
+    """Build the file-scoped summary read path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/KnowledgeFiles/{file_uuid}/Summary"
+    )
+
+
+def _get_retry_summary_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-base scoped summary retry path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/KnowledgeFiles/RetrySummary"
+    )
+
+
+def _normalize_summary_result(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize the fields AIDP documents for one file summary.
+
+    The contract spells the payload as ``result.summary_text``,
+    ``result.summary_status`` and ``result.summary_model``; status is compared
+    case-insensitively by the page, so it is lower-cased here. Unknown extra
+    fields are preserved rather than dropped.
+    """
+    out = dict(raw)
+    status = out.get("summary_status")
+    if isinstance(status, str):
+        out["summary_status"] = status.strip().lower()
+    for key in ("summary_text", "summary_model"):
+        value = out.get(key)
+        if value is not None and not isinstance(value, str):
+            out[key] = str(value)
+    return out
+
+
+def get_aidp_file_summary_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> Dict[str, Any]:
+    """Read one file's summary.
+
+    AIDP wraps the payload in ``result``; when a deployment answers the summary
+    fields at the top level instead, those fields are lifted into the same
+    ``result`` shape so the page has one contract to consume. An empty
+    ``result`` is preserved: whether it means "not previewable" or "not
+    generated yet" depends on the knowledge base configuration.
+    """
+    result = _request_aidp_json(
+        server_url,
+        api_key,
+        "GET",
+        _get_file_summary_path(kds_id, file_uuid),
+        "get-file-summary",
+        retry=True,
+    )
+    if not isinstance(result, dict):
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            "Unexpected AIDP file summary response format",
+        )
+    inner = result.get("result")
+    if isinstance(inner, dict):
+        return {"result": _normalize_summary_result(inner)}
+    direct = {
+        key: result[key]
+        for key in ("summary_text", "summary_status", "summary_model")
+        if key in result
+    }
+    if direct:
+        return {"result": _normalize_summary_result(direct)}
+    return {"result": _normalize_summary_result(result)}
+
+
+def retry_aidp_file_summaries_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Ask AIDP to regenerate summaries for the requested files.
+
+    The contract always takes a non-empty ``file_uuids`` array, including for a
+    single file. Per-file success/failure lists are passed through unchanged so
+    the caller never turns a partial success into a total success.
+    """
+    result = _request_aidp_json(
+        server_url,
+        api_key,
+        "POST",
+        _get_retry_summary_path(kds_id),
+        "retry-file-summaries",
+        retry=True,
+        json_body={"file_uuids": list(file_uuids)},
     )
     return result if isinstance(result, dict) else {}
 

@@ -81,11 +81,35 @@
 }
 
 .tab {
-  margin: 0;
-  color: var(--aidp-detail-primary);
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--aidp-detail-muted);
+  font-family: "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 16px;
-  line-height: 24px;
   font-weight: 400;
+  line-height: 24px;
+  cursor: pointer;
+}
+
+.tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tabActive,
+.tabActive:disabled {
+  border-bottom-color: var(--aidp-detail-primary);
+  color: var(--aidp-detail-primary);
+  opacity: 1;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--aidp-detail-primary);
+  outline-offset: 2px;
 }
 
 .readerHeader {

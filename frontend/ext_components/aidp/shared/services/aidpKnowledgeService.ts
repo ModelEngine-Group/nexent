@@ -40,6 +40,11 @@ import type {
   AidpChunkListResponse,
   AidpChunkUpdatePayload,
 } from "../types/chunks";
+import type {
+  AidpFileSummaryResponse,
+  AidpSummaryRetryResponse,
+} from "../types/summary";
+
 function buildUrl(
   base: string,
   params: Record<string, string | number | undefined>
@@ -405,7 +410,7 @@ class AidpKnowledgeService {
 
   /**
    * Remove multiple documents from an AIDP knowledge base in one request.
-   * AIDP reports per-file outcomes via summary/success_list/failed_list.
+   * AIDP reports per-file outcomes via partial_success_list/failed_list.
    */
   async removeDocs(
     id: string,
@@ -555,7 +560,7 @@ class AidpKnowledgeService {
    * the response is deliberately not parsed.
    */
   async removeChunks(id: string, chunkIds: number[]): Promise<void> {
-    await fetchWithErrorHandling(API_ENDPOINTS.aidpMgmt.kbChunks(id), {
+    await fetchWithErrorHandling(API_ENDPOINTS.aidpMgmt.removeKbChunks(id), {
       method: "DELETE",
       headers: {
         ...getAuthHeaders(),
@@ -563,6 +568,49 @@ class AidpKnowledgeService {
       },
       body: JSON.stringify({ chunk_ids: chunkIds }),
     });
+  }
+
+  /** Read one file's AIDP summary (READ permission). */
+  async getFileSummary(
+    id: string,
+    fileUuid: string,
+    signal?: AbortSignal
+  ): Promise<AidpFileSummaryResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbFileSummary(id, fileUuid),
+      { method: "GET", headers: getAuthHeaders(), signal }
+    );
+    const result = await response.json();
+    return {
+      result:
+        result && typeof result.result === "object" && result.result !== null
+          ? result.result
+          : {},
+    };
+  }
+
+  /**
+   * Retry summary generation for the requested files.
+   *
+   * AIDP always expects a non-empty `file_uuids` array, including a single
+   * file retry; per-file success/failure lists are returned unchanged.
+   */
+  async retryFileSummaries(
+    id: string,
+    fileUuids: string[]
+  ): Promise<AidpSummaryRetryResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.retryKbFileSummaries(id),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ file_uuids: fileUuids }),
+      }
+    );
+    return (await response.json()) as AidpSummaryRetryResponse;
   }
 
   /**

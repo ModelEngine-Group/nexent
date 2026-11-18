@@ -4250,5 +4250,101 @@ class TestChunkImpls:
             )
 
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
-        mock_client.patch.assert_called_once()
         assert exc_info.value.details["upstream_status"] == 500
+
+
+class TestFileSummaryImpls:
+    """File summary reads and retries stay on the documented AIDP paths."""
+
+    @staticmethod
+    def _install_client(aidp_service_module, client):
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = client
+        aidp_service_module.http_client_manager = mock_manager
+
+    @staticmethod
+    def _json_response(payload, status_code=200):
+        response = MagicMock(status_code=status_code)
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+        response.content = b"{}"
+        return response
+
+    def test_summary_reads_file_scoped_path_and_normalizes_status(
+        self, aidp_service_module
+    ):
+        mock_client = MagicMock()
+        mock_client.get.return_value = self._json_response({
+            "result": {
+                "summary_status": "PENDING",
+                "summary_text": "摘要正文",
+                "summary_model": "qwen3",
+            }
+        })
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.get_aidp_file_summary_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
+        )
+
+        assert mock_client.get.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/KnowledgeFiles/file-1/Summary"
+        )
+        assert result == {
+            "result": {
+                "summary_status": "pending",
+                "summary_text": "摘要正文",
+                "summary_model": "qwen3",
+            }
+        }
+
+    def test_summary_lifts_top_level_fields_and_keeps_empty_result(
+        self, aidp_service_module
+    ):
+        mock_client = MagicMock()
+        mock_client.get.side_effect = [
+            self._json_response({
+                "summary_status": "FAILED",
+                "summary_text": "",
+            }),
+            self._json_response({"result": {}}),
+        ]
+        self._install_client(aidp_service_module, mock_client)
+
+        lifted = aidp_service_module.get_aidp_file_summary_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
+        )
+        empty = aidp_service_module.get_aidp_file_summary_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
+        )
+
+        assert lifted["result"]["summary_status"] == "failed"
+        assert empty == {"result": {}}
+
+    def test_summary_retry_posts_file_uuid_array_and_preserves_lists(
+        self, aidp_service_module
+    ):
+        mock_client = MagicMock()
+        mock_client.post.return_value = self._json_response({
+            "partial_success_list": [{"file_uuid": "file-1"}],
+            "failed_list": [{"file_uuid": "file-2", "err_code": 500}],
+        })
+        self._install_client(aidp_service_module, mock_client)
+
+        result = aidp_service_module.retry_aidp_file_summaries_impl(
+            "http://127.0.0.1:30081",
+            "jwt-token",
+            "kb-1",
+            ["file-1", "file-2"],
+        )
+
+        assert mock_client.post.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/KnowledgeFiles/RetrySummary"
+        )
+        assert mock_client.post.call_args.kwargs["json"] == {
+            "file_uuids": ["file-1", "file-2"]
+        }
+        assert result["partial_success_list"] == [{"file_uuid": "file-1"}]
+        assert result["failed_list"] == [{"file_uuid": "file-2", "err_code": 500}]

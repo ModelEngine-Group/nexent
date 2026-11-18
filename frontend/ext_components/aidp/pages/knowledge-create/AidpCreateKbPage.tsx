@@ -67,6 +67,7 @@ const AIDP_CREATE_DEFAULTS = {
   topk: AIDP_DEFAULT_TOPK,
   similarity: AIDP_DEFAULT_SIMILARITY,
   caption_enable: 0,
+  summary_enable: false,
   is_exist_graph: false,
   graph_domain: "常规" as const,
   graph_hop: 2,
@@ -209,6 +210,7 @@ const AidpCreateKbPage: React.FC = () => {
       topk: AIDP_CREATE_DEFAULTS.topk,
       similarity: AIDP_CREATE_DEFAULTS.similarity,
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable === 1,
+      summary_enable: AIDP_CREATE_DEFAULTS.summary_enable,
       is_exist_graph: AIDP_CREATE_DEFAULTS.is_exist_graph,
       graph_domain: AIDP_CREATE_DEFAULTS.graph_domain,
       graph_hop: AIDP_CREATE_DEFAULTS.graph_hop,
@@ -286,6 +288,11 @@ const AidpCreateKbPage: React.FC = () => {
         is_personal: AIDP_CREATE_DEFAULTS.is_personal,
         caption_enable: values.caption_enable ? 1 : 0,
         vlm_model: values.caption_enable ? values.vlm_model || "" : "",
+        summary_enable: values.summary_enable === true,
+        summary_preview: values.summary_enable === true,
+        summary_model: values.summary_enable
+          ? values.summary_model || undefined
+          : undefined,
         is_exist_graph: !!values.is_exist_graph,
         graph_config: graphConfig,
         ingroup_permission: permission,

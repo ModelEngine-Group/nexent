@@ -2,7 +2,8 @@
 
 "use client";
 
-import React, { useState } from "react";
+import dynamic from "next/dynamic";
+import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, ConfigProvider, Tooltip } from "antd";
 import {
@@ -18,30 +19,56 @@ import { getAidpDownloadFilename } from "@/ext_components/aidp/shared/utils/aidp
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import log from "@/lib/logger";
 import AidpSemanticChunksPanel from "./AidpSemanticChunksPanel";
+import AidpFileSummaryPanel from "./AidpFileSummaryPanel";
 import styles from "./AidpFileDetail.module.css";
+
+const AidpPdfViewer = dynamic(
+  () => import("./AidpPdfViewer").then((module) => module.AidpPdfViewer),
+  { ssr: false }
+);
 
 interface AidpFileDetailViewProps {
   kdsId: string;
   file: AidpDocumentItem;
   canEdit: boolean;
+  /** KB summary_enable; when false the summary tab is hidden and never queried. */
+  summaryEnabled?: boolean;
+  /** KB summary_preview; an explicit false shows the not-previewable state. */
+  summaryPreview?: boolean;
   onBack: () => void;
 }
 
 /**
  * File detail for one ingested AIDP document.
  *
- * The left pane reuses the existing preview stream; the right pane hosts the semantic chunks.
+ * The left pane reuses the existing preview stream; the right pane hosts the
+ * file tabs. Only the summary and semantic chunk tabs are implemented in this
+ * phase; OCR parsing is outside the current version's scope.
  */
 const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
   kdsId,
   file,
   canEdit,
+  summaryEnabled = false,
+  summaryPreview = false,
   onBack,
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [downloading, setDownloading] = useState(false);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  // A KB with summaries enabled opens on the summary tab (UCD's first tab);
+  // without summaries the chunk tab is the only implemented content tab.
+  const [requestedTab, setRequestedTab] = useState<"summary" | "chunks">(
+    "summary"
+  );
+  const activeTab = summaryEnabled ? requestedTab : "chunks";
+
+  const loadOriginal = useCallback(
+    () => aidpKnowledgeService.downloadDoc(kdsId, file.file_uuid),
+    [kdsId, file.file_uuid]
+  );
+
   const previewUrl = aidpKnowledgeService.getPreviewUrl(kdsId, file.file_uuid);
 
   const handleDownload = async () => {
@@ -129,6 +156,8 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
                 fileType={file.file_type}
                 fileSize={file.file_size}
                 previewUrl={previewUrl}
+                loadOriginal={loadOriginal}
+                pdfRenderer={AidpPdfViewer}
                 rawStream
                 presentation="inline"
                 previewContext="knowledgeBase"
@@ -137,15 +166,47 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
             </div>
           </div>
           <div className={styles.panelPane}>
-            <div className={styles.tabRow}>
-              <h2 className={styles.tab}>{t("aidpKnowledge.chunksTab")}</h2>
+            <div className={styles.tabRow} role="tablist">
+              {summaryEnabled && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "summary"}
+                  className={`${styles.tab} ${
+                    activeTab === "summary" ? styles.tabActive : ""
+                  }`}
+                  onClick={() => setRequestedTab("summary")}
+                >
+                  {t("aidpKnowledge.chunksTabSummary")}
+                </button>
+              )}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "chunks"}
+                className={`${styles.tab} ${
+                  activeTab === "chunks" ? styles.tabActive : ""
+                }`}
+                onClick={() => setRequestedTab("chunks")}
+              >
+                {t("aidpKnowledge.chunksTab")}
+              </button>
             </div>
-            <AidpSemanticChunksPanel
-              kdsId={kdsId}
-              fileUuid={file.file_uuid}
-              fileName={file.file_name}
-              canEdit={canEdit}
-            />
+            {activeTab === "summary" ? (
+              <AidpFileSummaryPanel
+                kdsId={kdsId}
+                fileUuid={file.file_uuid}
+                canEdit={canEdit}
+                previewEnabled={summaryPreview}
+              />
+            ) : (
+              <AidpSemanticChunksPanel
+                kdsId={kdsId}
+                fileUuid={file.file_uuid}
+                fileName={file.file_name}
+                canEdit={canEdit}
+              />
+            )}
           </div>
         </div>
 
@@ -158,6 +219,8 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
             fileType={file.file_type}
             fileSize={file.file_size}
             previewUrl={previewUrl}
+            loadOriginal={loadOriginal}
+            pdfRenderer={AidpPdfViewer}
             rawStream
             presentation="fullscreen"
             previewContext="knowledgeBase"
