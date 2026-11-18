@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Browse immutable published chunk windows without inference or legacy-index reads."""
+"""Browse published and confirmed manual chunk windows without inference."""
 
 import asyncio
 import logging
@@ -7,20 +7,18 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.agentos_knowledge import (
-    KnowledgeChunk,
     KnowledgeChunks,
     KnowledgeChunksAuthorization,
     KnowledgeChunksResult,
-    ModelVersion,
 )
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
-from nexent.storage.models import Comparison, Junction, OperationContext, PageRequest
+from nexent.storage.models import OperationContext
+from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.publication import published_files, published_job
 from runtime.knowledge_base.sample import PublishedKnowledgeReader, _snapshot
 
-from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_chunks_ports
 
 logger = logging.getLogger(__name__)
@@ -34,37 +32,30 @@ def _scope(port, actor, resource):
 
 
 def _window(records, vectors, request, resource, *, context):
+    view = ChunkReadView(records, request.knowledge_id, context=context)
     total, result = 0, []
     refs = None if request.file_ids is None else set(request.file_ids)
     for manifest in published_files(records, request.knowledge_id, context=context):
-        if refs is not None and manifest['file_id'] not in refs: continue
+        if refs is not None and manifest['file_id'] not in refs:
+            continue
         job = published_job(records, resource, manifest, context=context)
-        model = ModelVersion.model_validate(job['request_payload']['embedding_model'])
-        start, end = max(0, request.offset-total), min(job['chunk_count'], request.offset+request.limit-total)
-        total += job['chunk_count']
-        if start >= end: continue
-        reference = {'knowledge_id': request.knowledge_id, 'file_id': manifest['file_id'], 'file_version': manifest['visible_version']}
-        where = Junction('and', tuple(Comparison(key, 'eq', value) for key, value in reference.items()) + (
-            Comparison('chunk_index', 'gte', start), Comparison('chunk_index', 'lt', end)))
-        selected, cursor, seen = {}, None, set()
-        while True:
-            page = vectors.scan(resource.collection, where, PageRequest(limit=min(request.limit,500), cursor=cursor), context=context, include_vector=False)
-            for record in page.items:
-                data = record.payload
-                if record.key.collection != resource.collection or any(data.get(key) != value for key, value in reference.items()):
-                    raise ScopeDenied()
-                if record.generation is None or record.generation.value != manifest['visible_generation']: continue
-                index = data.get('chunk_index')
-                if (type(index) is not int or not start <= index < end or index in selected
-                    or data.get('embedding_model_id') != model.model_id
-                    or normalize_model_revision(data.get('embedding_revision')) != normalize_model_revision(model.revision)): raise Conflict()
-                selected[index] = KnowledgeChunk(**reference, chunk_id=record.key.key, chunk_index=index, filename=data.get('filename',''),
-                    content=data['content'], location=data.get('location',{}))
-            if page.next_cursor is None: break
-            if page.next_cursor in seen: raise Conflict()
-            seen.add(page.next_cursor); cursor = page.next_cursor
-        if len(selected) != end-start: raise Conflict()
-        result.extend(selected[index] for index in range(start,end))
+        count = view.file_count(manifest, job, context=context)
+        start, end = max(0, request.offset-total), min(count, request.offset+request.limit-total)
+        total += count
+        if start < end:
+            result.extend(view.file_window(vectors, resource, manifest, job, start, end, context=context))
+    if refs is None or request.standalone_path is not None:
+        count = view.standalone_count(context=context)
+        filtered = None
+        if request.standalone_path is not None:
+            rows = view.standalone_window(vectors, resource, 0, count, context=context) if count else []
+            filtered = [row for row in rows if row.location.get('path_or_url', '') == request.standalone_path]
+            count = len(filtered)
+        start, end = max(0, request.offset-total), min(count, request.offset+request.limit-total)
+        total += count
+        if start < end:
+            result.extend(filtered[start:end] if filtered is not None else view.standalone_window(vectors, resource, start, end, context=context))
+    view.stable(context=context)
     return total, result
 
 

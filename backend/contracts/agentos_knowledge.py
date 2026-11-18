@@ -358,6 +358,7 @@ class KnowledgeChunks(KnowledgeChunksAuthorization):
     expected_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     expected_data_revision: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     file_ids: list[str] | None = Field(default=None, max_length=1000)
+    standalone_path: str | None = None
     offset: int = Field(default=0, ge=0, le=2**31-1)
     limit: int = Field(default=100, ge=1, le=1000)
 
@@ -371,12 +372,22 @@ class KnowledgeChunks(KnowledgeChunksAuthorization):
         return values
 
 
-class KnowledgeChunk(KnowledgeFileReference):
+class KnowledgeChunk(Contract):
+    knowledge_id: int = Field(gt=0)
+    file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    file_version: int | None = Field(default=None, ge=0)
     chunk_id: str = Field(min_length=1, max_length=1024)
-    chunk_index: int = Field(ge=0)
-    filename: str = Field(max_length=1024)
+    chunk_index: int | None = Field(default=None, ge=0)
+    filename: str | None = None
     content: str
     location: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def complete_file_reference(self):
+        missing = sum(value is None for value in (self.file_id, self.file_version, self.chunk_index))
+        if missing not in {0, 3}:
+            raise ValueError("File identity and position must all be present or absent")
+        return self
 
 
 class KnowledgeChunksResult(Contract):

@@ -43,6 +43,20 @@ async def test_all_chunks_keep_public_fields_and_actual_identity(browser):
     assert s.service._snapshot.await_count == 2
 
 
+async def test_standalone_public_chunk_keeps_null_filename_and_original_path(browser):
+    s = browser
+    s.client.knowledge_chunks.return_value = KnowledgeChunksResult(knowledge_id=1,
+        knowledge_revision=s.grant.revision, data_revision='b'*64, total=1, chunks=[{
+            'knowledge_id': 1, 'chunk_id': 'manual', 'content': 'plain', 'filename': None,
+            'location': {'path_or_url': 'manual/source', 'create_time': 'original-time'},
+        }])
+    result = await s.service.browse('kb', s.actor, path_or_url='manual/source')
+    assert result['chunks'] == [{'id': 'manual', 'content': 'plain', 'filename': None,
+        'path_or_url': 'manual/source', 'create_time': 'original-time'}]
+    request = s.client.knowledge_chunks.call_args.args[0]
+    assert request.file_ids == [] and request.standalone_path == 'manual/source'
+
+
 async def test_public_pagination_keeps_original_page_values_and_clamps_query(browser):
     s = browser
     s.client.knowledge_chunks.return_value = s.page(0, 1, 2, 1)
@@ -71,7 +85,7 @@ async def test_path_filter_uses_source_identity_and_missing_path_is_empty(browse
     assert s.client.knowledge_chunks.call_args.args[0].file_ids == []
 
 
-@pytest.mark.parametrize('change', ['revision', 'files', 'foreign_file', 'incomplete'])
+@pytest.mark.parametrize('change', ['revision', 'files', 'foreign_file', 'foreign_standalone', 'incomplete'])
 async def test_inconsistent_content_or_authority_never_returns_partial_success(browser, change):
     s = browser
     if change == 'revision':
@@ -80,6 +94,9 @@ async def test_inconsistent_content_or_authority_never_returns_partial_success(b
         s.service._snapshot.side_effect = [(s.grant, s.files), (s.grant, [])]
     elif change == 'foreign_file':
         s.client.knowledge_chunks.return_value.chunks[0].file_id = 'd' * 32
+    elif change == 'foreign_standalone':
+        s.client.knowledge_chunks.return_value.chunks[0] = s.client.knowledge_chunks.return_value.chunks[0].model_copy(
+            update={'knowledge_id': 2, 'file_id': None, 'file_version': None, 'chunk_index': None})
     else:
         s.client.knowledge_chunks.return_value.chunks.pop()
     with pytest.raises((Conflict, ScopeDenied)):

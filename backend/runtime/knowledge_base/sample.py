@@ -26,6 +26,7 @@ from nexent.storage.models import (
     OperationContext,
     PageRequest,
 )
+from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.publication import published_files, published_job
 
 from infrastructure.agent_model_config import normalize_model_revision
@@ -36,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 def _snapshot(records, knowledge_id, limit, *, context):
     """Hash every visible manifest and reservoir-sample files with bounded memory."""
-    digest = hashlib.sha256(str(knowledge_id).encode())
+    view = ChunkReadView(records, knowledge_id, context=context)
+    digest = hashlib.sha256(json.dumps([knowledge_id, view.version], separators=(",", ":")).encode())
     selected = []
     for count, row in enumerate(published_files(records, knowledge_id, context=context), start=1):
         digest.update(json.dumps([row['file_id'], row['visible_version'], row['visible_generation'],
@@ -46,6 +48,7 @@ def _snapshot(records, knowledge_id, limit, *, context):
         elif limit:
             index = random.randrange(count)
             if index < limit: selected[index] = row
+    view.stable(context=context)
     return digest.hexdigest(), selected
 
 

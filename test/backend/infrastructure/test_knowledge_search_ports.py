@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Search receives no file catalog grant and closes all readonly vector handles."""
 
-from contextlib import contextmanager
 from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -42,23 +41,19 @@ def test_search_resource_scope_has_no_file_or_job_namespace(mocker):
 
 def test_partial_vector_assembly_closes_first_readonly_handle_and_records(mocker):
     record, vector = Mock(), Mock()
-    exited = []
-
-    @contextmanager
-    def ports(*args, **kwargs):
-        try:
-            yield record
-        finally:
-            exited.append(True)
-
-    mocker.patch.object(knowledge_runtime, "knowledge_runtime_ports", ports)
+    engine = Mock()
+    mocker.patch.object(knowledge_runtime, "record_engine", return_value=engine)
+    bind_records = mocker.patch.object(knowledge_runtime, "bind_knowledge_lifecycle", return_value=record)
     bind = mocker.patch.object(knowledge_runtime, "bind_knowledge_vectors", side_effect=[vector, ValueError("controlled")])
-    grant = SimpleNamespace(knowledge_bases=[SimpleNamespace(collection="one"), SimpleNamespace(collection="two")])
+    grant = SimpleNamespace(knowledge_bases=[SimpleNamespace(collection="one", knowledge_id=1), SimpleNamespace(collection="two", knowledge_id=2)])
     with pytest.raises(ValueError), knowledge_runtime.knowledge_search_ports(ServicePrincipal("user", "tenant"), grant, 2, context=context()):
         raise AssertionError("Incomplete port assembly must not yield")
     assert all(c.kwargs["writable"] is False for c in bind.call_args_list)
     vector.close.assert_called_once()
-    assert exited == [True]
+    assert bind_records.call_args.kwargs == {"mode": "read", "knowledge_ids": (1, 2)}
+    assert bind_records.call_args.args[0].actor_id == "user"
+    record.close.assert_called_once()
+    engine.dispose.assert_called_once()
 
 
 def test_real_resource_binding_accepts_only_its_explicit_subset(resources):

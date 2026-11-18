@@ -47,12 +47,12 @@ class KnowledgeChunkBrowser:
     @staticmethod
     def _chunk(chunk, files):
         file = files.get(chunk.file_id)
-        if file is None or file['knowledge_id'] != chunk.knowledge_id:
+        if chunk.file_id is not None and (file is None or file['knowledge_id'] != chunk.knowledge_id):
             raise ScopeDenied()
         result = {key: chunk.location[key] for key in ('title', 'language', 'author', 'date', 'create_time') if key in chunk.location}
         result.update(id=chunk.chunk_id, content=chunk.content, filename=chunk.filename,
-                      path_or_url=file['object_name'] or file['local_source_path'] or '')
-        if 'create_time' not in result and file['create_time'] is not None:
+                      path_or_url=(file['object_name'] or file['local_source_path'] or '') if file is not None else chunk.location.get('path_or_url',''))
+        if 'create_time' not in result and file is not None and file['create_time'] is not None:
             result['create_time'] = file['create_time']
         return result
 
@@ -72,7 +72,7 @@ class KnowledgeChunkBrowser:
                 while True:
                     limit = 1000 if wanted is None else min(wanted-len(chunks), 1000)
                     request = KnowledgeChunks(knowledge_id=resource.knowledge_id, expected_revision=resource.revision,
-                        expected_data_revision=revision, offset=offset, limit=limit, file_ids=selected)
+                        expected_data_revision=revision, offset=offset, limit=limit, file_ids=selected, standalone_path=path_or_url or None)
                     result = await self.client.knowledge_chunks(request, actor.user_id, actor.tenant_id)
                     if not isinstance(result, KnowledgeChunksResult) or result.knowledge_id != resource.knowledge_id:
                         raise ScopeDenied()
@@ -85,7 +85,11 @@ class KnowledgeChunkBrowser:
                     if len(result.chunks) != expected or result.next_offset != next_offset:
                         raise Conflict()
                     for chunk in result.chunks:
-                        if chunk.chunk_id in seen or selected is not None and chunk.file_id not in selected:
+                        if chunk.knowledge_id != resource.knowledge_id:
+                            raise ScopeDenied()
+                        if (chunk.chunk_id in seen
+                            or selected is not None and chunk.file_id is not None and chunk.file_id not in selected
+                            or path_or_url and chunk.file_id is None and chunk.location.get('path_or_url', '') != path_or_url):
                             raise Conflict()
                         seen.add(chunk.chunk_id)
                         chunks.append(self._chunk(chunk, mapping))

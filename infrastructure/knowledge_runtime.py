@@ -18,6 +18,7 @@ from infrastructure.rdb.knowledge_jobs import (
     bind_knowledge_jobs,
     bind_knowledge_manifest,
 )
+from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
 
 
 @contextmanager
@@ -84,13 +85,16 @@ def knowledge_deletion_ports(actor, grant, *, context):
 @contextmanager
 def knowledge_search_ports(actor, grant, dimensions, *, context):
     vectors = {}
+    engine, records = record_engine(context), None
     try:
-        with knowledge_runtime_ports(actor, context=context) as records:
-            for resource in grant.knowledge_bases:
-                vectors[resource.collection] = bind_knowledge_vectors(actor, resource.collection, dimensions, writable=False)
-            yield records, vectors
+        scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {FILES, JOBS})
+        records = bind_knowledge_lifecycle(scope, engine, mode="read",
+            knowledge_ids=tuple(resource.knowledge_id for resource in grant.knowledge_bases))
+        for resource in grant.knowledge_bases:
+            vectors[resource.collection] = bind_knowledge_vectors(actor, resource.collection, dimensions, writable=False)
+        yield records, vectors
     finally:
-        close_owned(context, [port.close for port in vectors.values()])
+        close_owned(context, [port.close for port in vectors.values()] + ([records.close] if records else []) + [engine.dispose])
 
 
 @contextmanager
@@ -100,7 +104,7 @@ def knowledge_chunks_ports(actor, grant, *, context):
     engine, records, vectors = record_engine(context), None, None
     try:
         scope = StorageScope('runtime', grant.resource_tenant_id, actor.user_id, {FILES, JOBS})
-        records = bind_knowledge_jobs(scope, engine, knowledge_id=grant.knowledge_id, writable=False)
+        records = bind_knowledge_lifecycle(scope, engine, mode="read", knowledge_ids=(grant.knowledge_id,))
         vectors = bind_knowledge_vectors(actor, grant.collection, None, writable=False, resource_tenant_id=grant.resource_tenant_id)
         yield records, vectors
     finally:

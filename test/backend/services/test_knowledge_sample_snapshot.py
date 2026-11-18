@@ -4,11 +4,20 @@
 from unittest.mock import Mock
 
 import pytest
+from contracts.knowledge_chunk_mutation import CHANGES, STATES
 from nexent.storage.errors import ScopeDenied
-from nexent.storage.models import Page
+from nexent.storage.models import Page, StorageScope
 from runtime.knowledge_base.sample import _snapshot
 
 from test.backend.infrastructure.test_vector_store import context
+
+
+def record_port():
+    records = Mock()
+    records.scope = StorageScope(tenant_id='tenant', actor_id='reader', service_role='runtime',
+                                 namespaces=frozenset({CHANGES, STATES}))
+    records.get.return_value = None
+    return records
 
 
 def manifest(number):
@@ -18,8 +27,7 @@ def manifest(number):
 
 def test_snapshot_hashes_all_pages_and_keeps_at_most_requested_documents(monkeypatch):
     rows = [manifest(n) for n in range(501)]
-    records = Mock()
-    records.scope.tenant_id = "tenant"
+    records = record_port()
     records.query.side_effect = [Page(tuple(rows[:500])), Page(tuple(rows[500:]))]
     monkeypatch.setattr('runtime.knowledge_base.sample.random.randrange', lambda n: n - 1)
     digest, chosen = _snapshot(records, 1, 2, context=context())
@@ -34,8 +42,7 @@ def test_snapshot_hashes_all_pages_and_keeps_at_most_requested_documents(monkeyp
 
 
 def test_tombstoned_and_unpublished_manifests_do_not_enter_sample_or_revision():
-    records = Mock()
-    records.scope.tenant_id = "tenant"
+    records = record_port()
     records.query.return_value = Page((manifest(1),))
     original, _ = _snapshot(records, 1, 1, context=context())
     records.query.return_value = Page((manifest(1), {**manifest(2), 'visible_version': None},
@@ -46,8 +53,7 @@ def test_tombstoned_and_unpublished_manifests_do_not_enter_sample_or_revision():
 
 @pytest.mark.parametrize("foreign", [{"knowledge_id": 2}, {"tenant_id": "other-tenant"}])
 def test_foreign_manifest_is_refused_even_if_driver_violates_scope(foreign):
-    records = Mock()
-    records.scope.tenant_id = "tenant"
+    records = record_port()
     records.query.return_value = Page(({**manifest(1), **foreign},))
     with pytest.raises(ScopeDenied):
         _snapshot(records, 1, 1, context=context())

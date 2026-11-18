@@ -20,7 +20,7 @@ from infrastructure.storage.catalog import (
 )
 
 
-def bind_knowledge_lifecycle(scope, engine, *, mode):
+def bind_knowledge_lifecycle(scope, engine, *, mode, knowledge_ids=None):
     tables = {
         FILES: files,
         JOBS: jobs,
@@ -32,6 +32,7 @@ def bind_knowledge_lifecycle(scope, engine, *, mode):
         "jobs": {FILES, JOBS, STATES},
         "mutation": {CHANGES, STATES, FILES},
         "deletion": {BASE, STATES},
+        "read": set(),
     }
     if mode not in writes:
         raise InvalidInput()
@@ -42,6 +43,13 @@ def bind_knowledge_lifecycle(scope, engine, *, mode):
         or not scope.namespaces <= tables.keys()
     ):
         raise ScopeDenied()
+    if mode == "read":
+        if (not isinstance(knowledge_ids, tuple) or not 0 < len(knowledge_ids) <= 1000
+            or any(type(value) is not int or value <= 0 for value in knowledge_ids)
+            or len(set(knowledge_ids)) != len(knowledge_ids)):
+            raise InvalidInput()
+    elif knowledge_ids is not None:
+        raise InvalidInput()
     scope = replace(scope, namespaces=frozenset(tables))
     definitions, audits = [], {}
     for name, table in tables.items():
@@ -80,7 +88,8 @@ def bind_knowledge_lifecycle(scope, engine, *, mode):
     return SQLRecordStore(
         scope,
         DatasetCatalog(tuple(definitions)),
-        tables,
+        {name: sa.select(table).where(table.c.knowledge_id.in_(knowledge_ids)).subquery(name) for name, table in tables.items()}
+        if mode == "read" else tables,
         engine,
         revision_fields={name: "revision" for name in writes[mode]},
         audit_mappings=audits,
