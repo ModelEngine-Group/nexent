@@ -6107,6 +6107,7 @@
   "modelParams.topP": "Top P",
   "modelParams.temperatureInvalid": "温度必须在 0 到 2 之间，并符合模型的取值限制。请清空或输入合法值。",
   "modelParams.rangeWithoutZero": "{{range}}，不可为 0",
+  "modelParams.samplingInheritanceHint": "留空时沿用智能体或模型的默认值。",
   "modelParams.topPInvalid": "Top P 必须大于 0 且不超过 1，并符合模型的取值限制。请清空或输入合法值。",
   "modelParams.topPInfo": "核采样概率阈值，取值须大于 0 且不超过 1。模型从累积概率达到该阈值的候选词中采样；值越低，候选范围越小。通常建议只调整温度或 Top P 中的一个参数。",
   "resourcePicker.tags": "标签",

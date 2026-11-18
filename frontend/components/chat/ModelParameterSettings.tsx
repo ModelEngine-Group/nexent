@@ -39,20 +39,6 @@ function ParameterLevel({
   onClear: () => void;
   onChange: (value: number) => void;
 }) {
-  const { t } = useTranslation();
-  const minimum = Math.max(
-    0,
-    typeof schema?.minimum === "number" ? schema.minimum : 0
-  );
-  const maximum = Math.min(
-    field === "temperature" ? 2 : 1,
-    typeof schema?.maximum === "number" ? schema.maximum : Infinity
-  );
-  const range = `${minimum}–${maximum}`;
-  const placeholder =
-    field === "top_p" && minimum === 0
-      ? t("modelParams.rangeWithoutZero", { range })
-      : range;
   const displayValue = value ?? inheritedValue;
   const [draft, setDraft] = useState(displayValue ?? null);
   const [previousValue, setPreviousValue] = useState(displayValue);
@@ -77,7 +63,7 @@ function ParameterLevel({
         value={draft}
         schema={schema}
         disabled={disabled}
-        placeholder={placeholder}
+        showAllowedRange
         onChange={setDraft}
         onCommit={commit}
       />
@@ -234,6 +220,9 @@ export function ModelSamplingFields(
         disabled={control.disabled || control.disabledFields?.includes("top_p")}
         onChange={(top_p) => control.onChange({ ...control.value, top_p })}
       />
+      <p className="text-xs text-muted-foreground">
+        {t("modelParams.samplingInheritanceHint")}
+      </p>
       <Button
         size="small"
         htmlType="button"

@@ -129,6 +129,7 @@ export function ModelParameterField({
         }
         schema={rule.schema}
         disabled={disabled}
+        showAllowedRange={scope === "outlet"}
         onChange={(next) => {
           if (next !== null || optionalSampling) onChange(rule.key, next);
           else onReset(rule.key);

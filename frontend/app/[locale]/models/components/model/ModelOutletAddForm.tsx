@@ -973,6 +973,9 @@ export function ModelOutletAddForm({
             sampling={
               <div className="grid grid-cols-2 gap-x-3">
                 {samplingRules.map(field)}
+                <p className="col-span-2 text-xs text-muted-foreground">
+                  {t("modelProfile.serviceSamplingDefault")}
+                </p>
                 {(view?.field_specs ?? [])
                   .filter(
                     (rule) =>

@@ -28,7 +28,7 @@ export function SamplingInput({
   schema = {},
   disabled,
   className,
-  placeholder,
+  showAllowedRange = false,
   onChange,
   onCommit,
 }: {
@@ -39,7 +39,7 @@ export function SamplingInput({
   schema?: Record<string, unknown>;
   disabled?: boolean;
   className?: string;
-  placeholder?: string;
+  showAllowedRange?: boolean;
   onChange: (value: number | null) => void;
   onCommit?: (value: number | null) => void;
 }) {
@@ -52,13 +52,19 @@ export function SamplingInput({
     field === "top_p" ? 1 : 2,
     typeof schema.maximum === "number" ? schema.maximum : Infinity
   );
+  const minimum = Math.max(
+    0,
+    typeof schema.minimum === "number" ? schema.minimum : 0
+  );
   const min = Math.min(
     max,
-    Math.max(
-      field === "top_p" ? TOP_P_STEP : 0,
-      typeof schema.minimum === "number" ? schema.minimum : 0
-    )
+    field === "top_p" ? Math.max(TOP_P_STEP, minimum) : minimum
   );
+  const range = `${minimum}–${max}`;
+  const rangeHint =
+    field === "top_p" && minimum === 0
+      ? t("modelParams.rangeWithoutZero", { range })
+      : range;
 
   const commit = () => {
     if (!edited.current) return;
@@ -83,7 +89,9 @@ export function SamplingInput({
           placeholder={
             typeof inherited === "number"
               ? String(inherited)
-              : (placeholder ?? t("modelProfile.serviceSamplingDefault"))
+              : showAllowedRange
+                ? rangeHint
+                : t("modelProfile.serviceSamplingDefault")
           }
           disabled={disabled}
           status={invalid ? "error" : undefined}
