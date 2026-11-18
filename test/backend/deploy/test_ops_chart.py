@@ -138,13 +138,15 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
         "services"
     ]["nexent-ops"]
     assert ops["env_file"] == ["../../env/.env", "../../env/monitoring.env"]
-    archive_mount = (
-        "${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}"
-    )
+    archive_mount = "${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory"
     assert archive_mount in ops["volumes"]
-    for filename in ("docker-compose.yml", "docker-compose.prod.yml"):
+    runtime_mounts = {
+        "docker-compose.yml": archive_mount,
+        "docker-compose.prod.yml": "${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}",
+    }
+    for filename, expected_mount in runtime_mounts.items():
         services = yaml.safe_load((directory / filename).read_text())["services"]
-        assert archive_mount in services["nexent-runtime"]["volumes"]
+        assert expected_mount in services["nexent-runtime"]["volumes"]
         assert (
             "OPS_HTTP_BACKEND=http://nexent-ops:${OPS_PORT:-5016}"
             in services["nexent-web"]["environment"]
