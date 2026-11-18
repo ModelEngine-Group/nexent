@@ -169,9 +169,10 @@ emit_fact(finished)
 ```
 
 The fixed case `OPS-AGENT-FACTS-D3-001` sends these revisions in separate
-batches and reads back the same ES document after each write. Agent is
-registered for source facts. Its daily publisher activates when an Agent
-reducer is configured.
+batches and reads back the same ES document after each write. The shared
+publisher groups Agent executions by start day, tenant, initiating groups
+and Agent ID. It writes the execution count, exact duration sum and number of
+ended executions with a measured duration. A measured zero is a valid sample.
 
 ## Storage and process resources
 

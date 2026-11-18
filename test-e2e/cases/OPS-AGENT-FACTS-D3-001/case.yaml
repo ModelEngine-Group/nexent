@@ -4,14 +4,14 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
   status: active
   automation: automated
-  objective: Prove sample revisions and real main Agent capture through the shared producer, Ops PostgreSQL and Elasticsearch.
+  objective: Prove sample revisions, real main Agent capture and daily publication through the shared producer, Ops PostgreSQL and Elasticsearch.
   integration_boundary: [Real Agent worker and model HTTP transport, SSE recovery, Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch]
   observations: [Confirmed batches, Elasticsearch document identity and source fields]
   cleanup: [Stop the model fixture and managed worker, Close producer and clients, Remove sample tenant rows and test-owned Elasticsearch indices and templates]
@@ -33,14 +33,30 @@ case:
   - order: 5
     action: Resume the SSE stream of that execution and read back its replayed final answer.
     expected: The replay returns the original answer and leaves the provider request count, Agent observations and ES document unchanged.
+  - order: 6
+    action: Apply and publish the start observation for a run crossing midnight.
+    expected: The published start day contains one execution and no measured duration samples.
+  - order: 7
+    action: Apply the later terminal revision, interrupt the next publication before switching its pointer, then retry.
+    expected: After the failure readers still see the original version. The retry publishes one execution with a 350 ms duration and one sample on the start day.
+  - order: 8
+    action: Replay the terminal revision and run the normal Ops tick.
+    expected: The published version, confirmed source revision and aggregate counters are unchanged.
+  - order: 9
+    action: Run the normal Ops tick on the real worker fact.
+    expected: One published execution and one duration sample match the recorded worker fact.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
   - A real root execution emits both revisions with telemetry disabled and has one searchable terminal document.
   - SSE recovery returns the original answer and preserves monitoring counts.
+  - The current Agent day points to one exact daily row with the valid duration sample.
+  - Publication failure and same-revision replay preserve the correct published pointer.
+  - The real worker fact is reflected in its published daily row.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
+  - An Agent aggregate on the end day or a premature switch to an unconfirmed publication.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -52,3 +68,8 @@ case:
     steps: [4, 5]
     expected_results: [3, 4]
     forbidden_side_effects: [2]
+  - id: AC-03
+    description: Agent daily publication preserves the start day and switches versions only after successful writes.
+    steps: [6, 7, 8, 9]
+    expected_results: [5, 6, 7]
+    forbidden_side_effects: [3]

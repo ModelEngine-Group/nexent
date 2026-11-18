@@ -1,14 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Agent execution facts for the shared monitoring writer."""
+"""Agent execution facts and daily metrics for the shared monitoring pipeline."""
 
+from collections.abc import Iterable
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from ops.monitoring.contracts import Fact, MonitoringKind, Outcome
+from ops.monitoring.contracts import Fact, MonitoringKind, Outcome, stable_key
 
 
 RunId = Annotated[str, Field(min_length=1, max_length=128)]
+DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
+              "initiator_group_ids", "agent_id")
+COUNTERS = ("execution_count", "duration_sum_ms", "duration_sample_count")
 
 
 class AgentFact(Fact):
@@ -33,7 +37,26 @@ class AgentFact(Fact):
         return self
 
 
+def accumulate_agent(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
+    """Count executions and sum measured durations by Agent and starting scope."""
+    groups: dict[str, dict] = {}
+    for fact in documents:
+        dimensions = {field: fact[field] for field in DIMENSIONS}
+        key = stable_key(*dimensions.values())
+        if key not in groups:
+            groups[key] = {**dimensions, **dict.fromkeys(COUNTERS, 0)}
+        row = groups[key]
+        row["execution_count"] += 1
+        duration = fact.get("duration_ms")
+        if fact.get("ended_at") is not None and duration is not None:
+            row["duration_sum_ms"] += duration
+            row["duration_sample_count"] += 1
+    return groups.items()
+
+
 AGENT_MONITORING = MonitoringKind(
     fact_model=AgentFact,
+    aggregate=accumulate_agent,
     fact_fields={"is_root": "boolean", "parent_run_id": "keyword", "agent_version_no": "integer"},
+    daily_fields=dict.fromkeys(COUNTERS, "long"),
 )

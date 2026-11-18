@@ -4,6 +4,7 @@
 import asyncio
 import json
 import os
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -27,7 +28,7 @@ from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
 from ops.monitoring import runtime
 from ops.monitoring.contracts import stable_key
-from ops.monitoring.search import DAILY, FACTS, install_templates
+from ops.monitoring.search import DAILY, FACTS, filters, install_templates
 from ops.monitoring.service import Monitoring
 from ops.monitoring.store import BATCH, DAY
 
@@ -96,9 +97,7 @@ async def _apply_and_read(service, tenant):
     return hits["hits"][0]
 
 
-@pytest.mark.asyncio
-async def test_agent_start_finish_and_replay(isolated_monitoring):
-    service, tenant = isolated_monitoring
+def _run_across_midnight(tenant):
     run_id = str(uuid4())
     started = {
         "tenant_id": tenant, "fact_kind": "agent", "fact_id": run_id, "call_context_id": run_id,
@@ -109,6 +108,14 @@ async def test_agent_start_finish_and_replay(isolated_monitoring):
     finished = dict(
         started, record_revision=2, outcome="succeeded", ended_at="2026-11-01T00:00:00.150Z", duration_ms=350
     )
+    return started, finished
+
+
+@pytest.mark.asyncio
+async def test_agent_start_finish_and_replay(isolated_monitoring):
+    service, tenant = isolated_monitoring
+    started, finished = _run_across_midnight(tenant)
+    run_id = started["fact_id"]
     async with runtime.producer_lifespan():
         first = await _submit_and_read(service, tenant, started)
         terminal = await _submit_and_read(service, tenant, finished)
@@ -135,6 +142,64 @@ async def test_agent_start_finish_and_replay(isolated_monitoring):
             {"tenant": tenant},
         ).all()
     assert batch_states == ["confirmed", "confirmed", "confirmed"]
+
+
+def _published_agent_day(service, tenant, day):
+    with service.publication_snapshot(tenant, "agent", day, day) as (states, point):
+        state, = states
+        publish_id = str(state["publish_id"])
+        row, = point.documents(filters(
+            tenant_id=tenant, fact_kind="agent", statistic_date=day.isoformat(), publish_id=publish_id,
+        ))
+    return state, row
+
+
+@pytest.mark.asyncio
+async def test_agent_daily_publication_switches_only_after_success(isolated_monitoring, monkeypatch):
+    service, tenant = isolated_monitoring
+    started, finished = _run_across_midnight(tenant)
+    day = date(2026, 10, 31)
+
+    def interrupt_publication(*_):
+        raise RuntimeError("Interrupt publication before the pointer switch")
+
+    async with runtime.producer_lifespan():
+        await _submit_and_read(service, tenant, started)
+        service.publish(tenant, "agent")
+        original, initial = _published_agent_day(service, tenant, day)
+        assert original["source_revision"] == original["published_source_revision"] > 0
+        assert initial["execution_count"] == 1
+        assert initial["duration_sum_ms"] == initial["duration_sample_count"] == 0
+
+        await _submit_and_read(service, tenant, finished)
+        with monkeypatch.context() as patch:
+            patch.setattr(service.store, "publish", interrupt_publication)
+            with pytest.raises(RuntimeError, match="before the pointer switch"):
+                service.publish(tenant, "agent")
+        candidates = service.es.count(
+            index=f"{DAILY}-*", query=filters(tenant_id=tenant, fact_kind="agent", statistic_date=day.isoformat()),
+        )["count"]
+        assert candidates == 2
+        pending, retained = _published_agent_day(service, tenant, day)
+        assert pending["source_revision"] > original["source_revision"]
+        assert pending["published_source_revision"] == original["published_source_revision"]
+        assert pending["publish_id"] == original["publish_id"] and retained == initial
+
+        service.tick()
+        published, current = _published_agent_day(service, tenant, day)
+        assert published["publish_id"] != original["publish_id"]
+        assert published["published_source_revision"] == pending["source_revision"]
+        assert current["statistic_date"] == day.isoformat()
+        assert current["agent_id"] == started["agent_id"] and current["initiator_group_ids"] == [12, 13]
+        assert current["execution_count"] == 1
+        assert current["duration_sample_count"] == 1 and current["duration_sum_ms"] == 350
+        assert service.es.count(index=f"{DAILY}-*", query=filters(
+            tenant_id=tenant, fact_kind="agent", statistic_date="2026-11-01",
+        ))["count"] == 0
+
+        await _submit_and_read(service, tenant, finished)
+        service.tick()
+        assert _published_agent_day(service, tenant, day) == (published, current)
 
 
 @pytest.fixture
@@ -292,6 +357,13 @@ async def test_real_root_agent_capture_survives_sse_reconnect(isolated_monitorin
             assert terminal["_source"]["duration_ms"] == finished["duration_ms"] > 0
             assert terminal["_source"]["ended_at"] >= terminal["_source"]["started_at"]
             assert not service.apply_batch(tenant, "agent")
+
+            day = date.fromisoformat(terminal["_source"]["statistic_date"])
+            service.tick()
+            state, daily = _published_agent_day(service, tenant, day)
+            assert state["source_revision"] == state["published_source_revision"]
+            assert daily["execution_count"] == daily["duration_sample_count"] == 1
+            assert daily["duration_sum_ms"] == finished["duration_ms"]
         finally:
             release.set()
             worker.cancel()
