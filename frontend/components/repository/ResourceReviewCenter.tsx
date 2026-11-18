@@ -171,7 +171,7 @@ export default function ResourceReviewCenter({
           className="!h-auto !p-0"
           onClick={() => open(row)}
         >
-          {t("resourceCenter.opinion")}
+          {t("resourceCenter.viewDetail")}
         </Button>
       )}
       {row.allowed_actions.map((value) => (
