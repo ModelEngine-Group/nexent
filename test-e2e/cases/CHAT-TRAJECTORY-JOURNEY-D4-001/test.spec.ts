@@ -114,7 +114,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       )
       .toBe("query-snapshot");
     await expect(statisticsTime).toHaveText(originalStatisticsTime);
-    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.getByRole("button", { name: "刷新数据", exact: true }).click();
     await expect
       .poll(() =>
         state.records

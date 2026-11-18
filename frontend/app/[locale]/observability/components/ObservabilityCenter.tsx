@@ -542,26 +542,37 @@ export function ObservabilityCenter({ user }: { user: User }) {
             </Tag>
           ))}
       </div>
-      <TrajectorySummary
-        summary={records.data?.summary}
-        action={
-          <Tooltip title={t("common.refresh")}>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t("common.refresh")}
-              icon={<RefreshCw size={14} />}
-              loading={records.isFetching}
-              disabled={records.isFetching}
-              onClick={refresh}
-            />
-          </Tooltip>
-        }
-      />
+      <TrajectorySummary summary={records.data?.summary} />
       {records.isError && (
         <TrajectoryError error={records.error} retry={refresh} />
       )}
       <section className="trajectory-table-panel min-h-0 flex-1">
+        <div
+          role="toolbar"
+          aria-label={t("trajectory.recordList")}
+          className="mb-3 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium">
+              {t("trajectory.recordList")}
+            </h2>
+            {records.data && (
+              <span className="text-xs text-[var(--color-text-secondary)]">
+                {t("trajectory.recordTotal", { count: records.data.total })}
+              </span>
+            )}
+          </div>
+          <Button
+            color="primary"
+            variant="outlined"
+            icon={<RefreshCw size={14} />}
+            loading={records.isFetching}
+            disabled={records.isFetching}
+            onClick={refresh}
+          >
+            {t("trajectory.refreshData")}
+          </Button>
+        </div>
         <Table<TrajectoryRecord>
           className="trajectory-table [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
           size="middle"

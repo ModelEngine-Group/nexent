@@ -1,6 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { formatMetric } from "@/lib/trajectory";
 import { nodeDuration } from "./TrajectoryPresentation";
@@ -9,13 +8,7 @@ import type {
   TrajectorySummary as Summary,
 } from "@/types/trajectory";
 
-export function TrajectorySummary({
-  summary,
-  action,
-}: {
-  summary?: Summary;
-  action?: ReactNode;
-}) {
+export function TrajectorySummary({ summary }: { summary?: Summary }) {
   const { t } = useTranslation();
   const valid = summary?.complete ? summary : undefined;
   const samples = (count?: number) =>
@@ -38,30 +31,25 @@ export function TrajectorySummary({
   );
   return (
     <>
-      {(summary?.scope_type || action) && (
-        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1">
-          {summary?.scope_type && (
-            <div
-              className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]"
-              role="status"
-            >
-              <span>
-                {t(
-                  summary.scope_type === "global"
-                    ? "trajectory.statisticsGlobal"
-                    : "trajectory.statisticsTenant"
-                )}
-              </span>
-              <span>
-                {summary.computed_at
-                  ? t("trajectory.statisticsComputedAt", {
-                      time: new Date(summary.computed_at).toLocaleString(),
-                    })
-                  : t("trajectory.statisticsPreparing")}
-              </span>
-            </div>
-          )}
-          {action}
+      {summary?.scope_type && (
+        <div
+          className="mb-2 flex shrink-0 flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]"
+          role="status"
+        >
+          <span>
+            {t(
+              summary.scope_type === "global"
+                ? "trajectory.statisticsGlobal"
+                : "trajectory.statisticsTenant"
+            )}
+          </span>
+          <span>
+            {summary.computed_at
+              ? t("trajectory.statisticsComputedAt", {
+                  time: new Date(summary.computed_at).toLocaleString(),
+                })
+              : t("trajectory.statisticsPreparing")}
+          </span>
         </div>
       )}
       <div className="trajectory-summary">
