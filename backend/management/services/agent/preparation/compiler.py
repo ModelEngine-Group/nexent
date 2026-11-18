@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
@@ -221,12 +221,13 @@ async def create_agent_config(
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
+    parallel_timeout = get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        _build_parallel_executor_tool_config(parallel_timeout)
     )
 
     if (

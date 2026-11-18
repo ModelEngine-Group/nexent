@@ -431,6 +431,17 @@ from management.services.skill import params as skill_params
 def isolate_skill_yaml_writer(mocker):
     mocker.patch.object(skill_params, "params_dict_to_roundtrip_yaml_text", return_value="params: {}")
 
+
+@pytest.fixture(autouse=True)
+def default_system_configuration(mocker):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    mocker.patch.object(
+        skill_service,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
+
 from management.services.skill.service import (
     SkillService,
     _normalize_zip_entry_path,
@@ -1160,24 +1171,32 @@ class TestSkillServiceCreateSkillFromFile:
     def test_upload_rejects_content_over_configured_limit(self, monkeypatch):
         """Skill uploads larger than the configured byte limit fail before parsing."""
         service = SkillService(tenant_id="tenant1")
+        from test.backend.configuration.helpers import system_config_snapshot
+
         monkeypatch.setattr(
-            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+            skill_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_SKILL_UPLOAD_SIZE_MB=1),
         )
         with pytest.raises(AppException, match="Skill upload exceeds") as exc_info:
-            service.create_skill_from_file(b"12345678901", file_type="md")
+            service.create_skill_from_file(b"x" * (1024 * 1024 + 1), file_type="md")
 
         assert exc_info.value.details == {
             "resource": "skill_upload",
-            "limit_mb": consts_const_mock.MAX_SKILL_UPLOAD_SIZE_MB,
-            "limit_bytes": 10,
-            "actual_bytes": 11,
+            "limit_mb": 1,
+            "limit_bytes": 1024 * 1024,
+            "actual_bytes": 1024 * 1024 + 1,
         }
 
     def test_upload_accepts_content_at_configured_limit(self, monkeypatch):
         """The exact configured byte limit remains valid."""
         service = SkillService(tenant_id="tenant1")
+        from test.backend.configuration.helpers import system_config_snapshot
+
         monkeypatch.setattr(
-            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+            skill_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_SKILL_UPLOAD_SIZE_MB=1),
         )
         monkeypatch.setattr(
             skill_service, "SkillLoader",
@@ -1195,7 +1214,7 @@ class TestSkillServiceCreateSkillFromFile:
         )
         service.skill_manager = MagicMock()
 
-        result = service.create_skill_from_file(b"1234567890", file_type="md")
+        result = service.create_skill_from_file(b"x" * (1024 * 1024), file_type="md")
 
         assert result["name"] == "boundary_skill"
 

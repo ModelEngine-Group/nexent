@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, SkillFact, stable_key
+from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, stable_key
 
 
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
@@ -90,30 +90,4 @@ MODEL_MONITORING = MonitoringKind(
                  **dict.fromkeys((*TOKEN_FIELDS, "ttft_ms"), "long"), "generation_rate": "double"},
     daily_fields={"model_id": "integer", "model_type": "keyword", "has_agent_run": "boolean",
                   **dict.fromkeys(COUNTERS, "long"), "generation_rate_sum": "double"},
-)
-
-
-def accumulate_skill(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
-    """Count one unique fact document per Skill/run identity."""
-    groups: dict[str, dict] = {}
-    dimensions_fields = (
-        "tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
-        "initiator_group_ids", "skill_id", "skill_name", "agent_id",
-    )
-    for fact in documents:
-        dimensions = {field: fact.get(field) for field in dimensions_fields if field in fact}
-        key = stable_key(*(dimensions.get(field) for field in dimensions_fields))
-        if key not in groups:
-            groups[key] = {**dimensions, "usage_count": 0}
-        groups[key]["usage_count"] += 1
-    return groups.items()
-
-
-SKILL_MONITORING = MonitoringKind(
-    fact_model=SkillFact,
-    aggregate=accumulate_skill,
-    fact_fields={"skill_id": "keyword", "skill_name": "keyword", "triggered_at": "date",
-                 "trigger_kind": "keyword"},
-    daily_fields={"skill_id": "keyword", "skill_name": "keyword", "agent_id": "integer",
-                  "usage_count": "long"},
 )

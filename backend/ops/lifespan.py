@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 
 from contracts.constants import environment as config
+from management.configuration.database import configuration_database
 from ops.concurrency import create_thread_manager
 
 
@@ -19,17 +20,17 @@ def create_trajectory_workers():
 
     return TrajectoryWorkers()
 
+
 @asynccontextmanager
 async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Keep readiness aligned with all enabled operations resources."""
-    manager = None
+    """Own readiness, managed I/O and all enabled operations resources."""
+    manager = create_thread_manager()
     workers = None
+    app.state.thread_manager = manager
     async with AsyncExitStack() as stack:
         try:
+            manager.start()
             if trajectory_enabled():
-                manager = create_thread_manager()
-                app.state.thread_manager = manager
-                manager.start()
                 workers = create_trajectory_workers()
                 workers.start(manager)
             if config.OPS_MONITORING_ENABLED:
@@ -44,12 +45,11 @@ async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
                 if workers is not None:
                     await workers.stop(manager)
             finally:
-                if manager is not None:
-                    try:
-                        await manager.shutdown(
-                            timeout=config.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-                        )
-                    finally:
+                try:
+                    await manager.shutdown(timeout=config.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+                finally:
+                    if trajectory_enabled():
                         from ops.services.trajectory.runtime import reset_service
 
                         reset_service()
+                    configuration_database.dispose()

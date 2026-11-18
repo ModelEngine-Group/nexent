@@ -67,6 +67,11 @@ def runtime(mocker):
     )
     mocker.patch.object(
         service,
+        "get_config_snapshot",
+        return_value={"MCP_REQUEST_TIMEOUT_SECONDS": 10},
+    )
+    mocker.patch.object(
+        service,
         "_build_verified_bound_resources_context",
         new_callable=AsyncMock,
         side_effect=lambda **kwargs: ContextItemInput(

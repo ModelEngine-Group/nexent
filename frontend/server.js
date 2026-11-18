@@ -815,6 +815,20 @@ function handleNorthboundProxy(pathname, req, res) {
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
 
+  if (
+    pathname === "/api/system_configurations" ||
+    pathname.startsWith("/api/system_configurations/")
+  ) {
+    req.url = req.url.replace(/^\/api(?=\/system_configurations)/, "");
+    proxy.web(req, res, {
+      target: OPS_HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+    return true;
+  }
+
   // 1. 认证接口单独处理
   if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
     forwardAuthRequest(req, res, HTTP_BACKEND);
