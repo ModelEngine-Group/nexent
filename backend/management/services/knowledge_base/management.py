@@ -22,7 +22,7 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIV
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation.repository import remove_conversation_knowledge_bindings
 from management.db.file.attachment import get_file_stream
 from management.db.identity.group import query_group_ids_by_user

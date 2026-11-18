@@ -12,7 +12,7 @@ from management.db.agent.system import (
     load_system_agent, lock_system_agent_release, write_system_agent_release,
     latest_workbench_release, next_workbench_version, select_workbench_snapshot,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.services.agent.system import SystemAgentProvider
 
 

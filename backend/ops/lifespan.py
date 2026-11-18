@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from contracts.constants import environment as config
 from fastapi import FastAPI
+from management.configuration.database import configuration_database
 from ops.concurrency import create_thread_manager
 
 
@@ -21,7 +22,7 @@ def create_trajectory_workers():
 
 @asynccontextmanager
 async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Keep readiness aligned with all enabled operations resources."""
+    """Own readiness, managed I/O and all enabled operations resources."""
     manager = create_thread_manager()
     workers = None
     app.state.thread_manager = manager
@@ -47,3 +48,4 @@ async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
                     from ops.services.trajectory.runtime import reset_service
 
                     reset_service()
+                configuration_database.dispose()

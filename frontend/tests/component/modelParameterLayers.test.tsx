@@ -129,12 +129,18 @@ it("clearing an Agent override removes the field instead of copying the outlet d
   );
 });
 
-it("session displays Agent values above outlet defaults but saves only the explicit session change", async () => {
+it("session uses server-normalized Agent defaults and saves only the explicit session change", async () => {
+  api.getConversationModelPreferences.mockResolvedValue({
+    parameter_values: {},
+    defaults: { temperature: 0.4 },
+    field_specs: [rule("temperature")],
+    issues: [],
+  });
   setup(
     <ConversationModelParameters
       conversationId={11}
       modelId={42}
-      agentDefaults={{ temperature: 0.4 }}
+      agentDefaults={{ temperature: 0.9 }}
     />
   );
   const advanced = await screen.findByRole("button", {

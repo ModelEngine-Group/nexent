@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.parametrize("fault", [None, "missing", "owner", "turn", "expiry"])
 def test_backfill_verifies_identity_turn_and_expired_status(mocker, fault):
-    from infrastructure.observability.trajectory_store import CaptureIdentity
+    from infrastructure.trace.trajectory_store import CaptureIdentity
     from ops.scripts import backfill_trajectory_summaries as script
 
     identity = CaptureIdentity("t", "u", "123", "7")

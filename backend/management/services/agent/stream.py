@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from infrastructure.runtime_output import is_runtime_event
+from management.services.conversation.runtime_output import is_runtime_event
 
 try:
     from contracts.constants.constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE

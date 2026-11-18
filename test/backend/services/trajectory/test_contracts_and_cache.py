@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 from contracts.trajectory import CleanupRequest, RecordsQuery
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
@@ -139,7 +139,7 @@ def test_read_configuration_is_independent_and_shared_per_process(
     tmp_path, monkeypatch
 ):
     from contracts.constants import environment
-    from infrastructure.observability.trajectory_store import TrajectoryFileStore
+    from infrastructure.trace.trajectory_store import TrajectoryFileStore
     from ops.services.trajectory import runtime
     from ops.services.trajectory.primitives import QueryError
 

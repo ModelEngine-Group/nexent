@@ -101,19 +101,21 @@ sa_mod.update = _create_update_mock()
 sys.modules["sqlalchemy"] = sa_mod
 
 
-# Stub management.db.client
-client_mod = types.ModuleType("management.db.client")
+# Stub infrastructure.rdb.client
+client_mod = types.ModuleType("infrastructure.rdb.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.db_client = MagicMock(name="db_client")
-sys.modules["management.db.client"] = client_mod
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # Stub db_models with attributes referenced by the module
@@ -234,6 +236,12 @@ sys.modules["management.db.identity.user_tenant"] = MagicMock()
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, fail_streaming_assistant_messages, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
+
+
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
 
 
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
@@ -778,7 +786,8 @@ def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_sessio
     session, ctx = mock_session_ctx
     session.scalar.return_value = 1
     monkeypatch.setattr(
-        "management.db.conversation.repository.MAX_CONVERSATIONS_PER_USER", 1
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATIONS_PER_USER=1),
     )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -974,7 +983,10 @@ def test_create_conversation_message_rejects_turn_limit(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.conversation.repository.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATION_TURNS=1),
+    )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
@@ -3751,6 +3763,10 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
 
 
 @pytest.fixture(autouse=True)

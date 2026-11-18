@@ -3,6 +3,8 @@
 """Core-neutral behavior policies and business context selection."""
 
 from nexent.core.agents.context.models import ContextItemInput, ContextItemType
+from nexent.core.agents.contracts.identity import root_clarification_allowed
+from nexent.core.agents.prompt.clarification import child_information_policy
 from nexent.core.prompts import load_prompt
 
 
@@ -41,31 +43,36 @@ CORE_PROTOCOL_SYSTEM_IDS = frozenset({
 })
 
 
-def common_behavior_guidance(language="en", *, skills_available=False):
+def common_behavior_guidance(language="en", *, skills_available=False, is_subagent=None):
     """Render the same behavior and user-facing result rules for every Core."""
     language = language if isinstance(language, str) and language in {"zh", "en"} else "en"
+    is_subagent = not root_clarification_allowed() if is_subagent is None else is_subagent
     return (COMMON_BEHAVIOR_GUIDANCE + ("\n\n" + SKILL_GUIDANCE if skills_available else "")
+            + ("\n\n" + child_information_policy(language) if is_subagent else "")
             + "\n\n" + load_prompt(language, "agent/response_style")["policy"])
 
 
-def with_common_behavior(items, language="en"):
+def with_common_behavior(items, language="en", *, is_subagent=None):
     """Insert one authoritative shared behavior item without mutating saved inputs."""
     items = tuple(items)
+    is_subagent = not root_clarification_allowed() if is_subagent is None else is_subagent
     skills_available = any(item.type == ContextItemType.SKILL for item in items)
     return [
-        *(item for item in items if item.id != "system:common_behavior"),
+        *(item for item in items if item.id != "system:common_behavior"
+          and not (is_subagent and item.id == "system:clarification_protocol")),
         ContextItemInput(
             id="system:common_behavior", type=ContextItemType.SYSTEM,
-            content={"text": common_behavior_guidance(language, skills_available=skills_available)},
+            content={"text": common_behavior_guidance(
+                language, skills_available=skills_available, is_subagent=is_subagent)},
             source=("platform:common_behavior",), priority=99,
             metadata={"authority": "platform", "layout_order": 36},
         ),
     ]
 
 
-def business_system_instructions(instructions, items, language="en"):
+def business_system_instructions(instructions, items, language="en", *, is_subagent=None):
     """Project shared authorized business/system sections without executable Core syntax."""
     return [instructions or "", *(
-        item.content.get("text", "") for item in with_common_behavior(items, language)
+        item.content.get("text", "") for item in with_common_behavior(items, language, is_subagent=is_subagent)
         if item.type == ContextItemType.SYSTEM and item.id not in CORE_PROTOCOL_SYSTEM_IDS
     )]

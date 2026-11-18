@@ -15,16 +15,16 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
-from infrastructure.observability.trajectory_reader import (
+from infrastructure.trace.trajectory_reader import (
     JSONReader,
     Text,
     TrajectoryReadBudgetExceeded,
 )
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
     component,

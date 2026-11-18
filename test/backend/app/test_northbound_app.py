@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for gateway.api.northbound module."""
+"""Unit tests for management.api.northbound module."""
 import sys
 import os
 from http import HTTPStatus
@@ -18,7 +18,7 @@ from io import BytesIO
 # Agent management is outside the HTTP boundary exercised in this module.
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
-    from gateway.api.northbound import _role_for_context, router
+    from management.api.northbound import _role_for_context, router
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
 from contracts.errors.codes import ErrorCode
 
@@ -57,7 +57,7 @@ def test_health_check():
 
 
 def test_role_for_context_preserves_all_database_roles():
-    with patch("gateway.api.northbound.get_user_role_by_tenant", return_value=("DEV", "OPS")) as mock_role:
+    with patch("management.api.northbound.get_user_role_by_tenant", return_value=("DEV", "OPS")) as mock_role:
         assert _role_for_context("user-1", "tenant-1") == ("DEV", "OPS")
 
     mock_role.assert_called_once_with("user-1", "tenant-1")
@@ -73,7 +73,7 @@ def test_role_for_context_preserves_all_database_roles():
     ],
 )
 def test_raise_api_key_http_exception_maps_expected_errors(exception, expected_status):
-    from gateway.api.northbound import _raise_api_key_http_exception
+    from management.api.northbound import _raise_api_key_http_exception
 
     with pytest.raises(Exception) as raised:
         _raise_api_key_http_exception(exception)
@@ -82,7 +82,7 @@ def test_raise_api_key_http_exception_maps_expected_errors(exception, expected_s
 
 
 def test_raise_api_key_http_exception_reraises_unexpected_error():
-    from gateway.api.northbound import _raise_api_key_http_exception
+    from management.api.northbound import _raise_api_key_http_exception
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         _raise_api_key_http_exception(RuntimeError("database unavailable"))
@@ -90,7 +90,7 @@ def test_raise_api_key_http_exception_reraises_unexpected_error():
 
 def test_get_northbound_context_logs_non_service_request_usage():
     from starlette.requests import Request
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
     request = Request({
         "type": "http",
@@ -103,11 +103,11 @@ def test_get_northbound_context_logs_non_service_request_usage():
         "server": ("testserver", 80),
         "client": ("testclient", 50000),
     })
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
-            patch("gateway.authentication.northbound_auth.get_user_and_tenant_by_access_key", return_value={
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("management.services.permission.identity.northbound.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
             }), \
-            patch("gateway.authentication.northbound_auth.log_token_usage") as mock_log:
+            patch("management.services.permission.identity.northbound.log_token_usage") as mock_log:
         context = __import__("asyncio").run(_get_northbound_context(request))
 
     assert context.request_id == "req-1"
@@ -123,7 +123,7 @@ def test_get_northbound_context_logs_non_service_request_usage():
 
 def test_get_northbound_context_skips_usage_log_for_service_logged_paths():
     from starlette.requests import Request
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
     request = Request({
         "type": "http",
@@ -136,11 +136,11 @@ def test_get_northbound_context_skips_usage_log_for_service_logged_paths():
         "server": ("testserver", 80),
         "client": ("testclient", 50000),
     })
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
-            patch("gateway.authentication.northbound_auth.get_user_and_tenant_by_access_key", return_value={
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("management.services.permission.identity.northbound.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
             }), \
-            patch("gateway.authentication.northbound_auth.log_token_usage") as mock_log:
+            patch("management.services.permission.identity.northbound.log_token_usage") as mock_log:
         __import__("asyncio").run(_get_northbound_context(request))
 
     mock_log.assert_not_called()
@@ -155,9 +155,9 @@ def test_create_api_users_batch_endpoint_is_exposed_by_northbound_router():
         "group_name": "Default",
         "api_key": "nexent-complete-key",
     }]
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound._role_for_context', return_value="ADMIN"), \
-            patch('gateway.api.northbound.create_api_users_batch', return_value=created) as mock_create:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound._role_for_context', return_value="ADMIN"), \
+            patch('management.api.northbound.create_api_users_batch', return_value=created) as mock_create:
         mock_ctx.return_value = ctx
 
         response = client.post(
@@ -187,9 +187,9 @@ def test_create_api_users_batch_returns_tenant_limit_error():
         limit=10000,
         current_count=10000,
     )
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch("gateway.api.northbound._role_for_context", return_value="ADMIN"), \
-            patch("gateway.api.northbound.create_api_users_batch", side_effect=limit_error):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("management.api.northbound._role_for_context", return_value="ADMIN"), \
+            patch("management.api.northbound.create_api_users_batch", side_effect=limit_error):
         mock_ctx.return_value = ctx
 
         response = client.post(
@@ -213,9 +213,9 @@ def test_create_api_users_batch_returns_tenant_limit_error():
 
 def test_create_api_users_batch_endpoint_maps_validation_error():
     ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch("gateway.api.northbound._role_for_context", return_value="ADMIN"), \
-            patch("gateway.api.northbound.create_api_users_batch", side_effect=ValidationError("invalid group")):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("management.api.northbound._role_for_context", return_value="ADMIN"), \
+            patch("management.api.northbound.create_api_users_batch", side_effect=ValidationError("invalid group")):
         mock_ctx.return_value = ctx
         response = client.post(
             "/nb/v1/api-users/batch",
@@ -235,9 +235,9 @@ def test_refresh_api_key_endpoint_is_exposed_by_northbound_router():
         "api_key": "nexent-new-key",
         "revoked_count": 1,
     }
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound._role_for_context', return_value="SU"), \
-            patch('gateway.api.northbound.refresh_user_api_key', return_value=refreshed):
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound._role_for_context', return_value="SU"), \
+            patch('management.api.northbound.refresh_user_api_key', return_value=refreshed):
         mock_ctx.return_value = ctx
 
         response = client.post(
@@ -252,9 +252,9 @@ def test_refresh_api_key_endpoint_is_exposed_by_northbound_router():
 
 def test_refresh_api_key_endpoint_returns_mapped_forbidden_error():
     ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch("gateway.api.northbound._role_for_context", return_value="ADMIN"), \
-            patch("gateway.api.northbound.refresh_user_api_key", side_effect=ForbiddenError("not allowed")):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("management.api.northbound._role_for_context", return_value="ADMIN"), \
+            patch("management.api.northbound.refresh_user_api_key", side_effect=ForbiddenError("not allowed")):
         mock_ctx.return_value = ctx
         response = client.post(
             "/nb/v1/api-keys/refresh",
@@ -268,9 +268,9 @@ def test_refresh_api_key_endpoint_returns_mapped_forbidden_error():
 
 def test_revoke_api_key_endpoint_forwards_email_target():
     ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch("gateway.api.northbound._role_for_context", return_value="ADMIN"), \
-            patch("gateway.api.northbound.revoke_user_api_keys", return_value={"revoked_count": 1}) as mock_revoke:
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("management.api.northbound._role_for_context", return_value="ADMIN"), \
+            patch("management.api.northbound.revoke_user_api_keys", return_value={"revoked_count": 1}) as mock_revoke:
         mock_ctx.return_value = ctx
         response = client.delete(
             "/nb/v1/api-keys?email=api.user@example.com",
@@ -290,7 +290,7 @@ def test_revoke_api_key_endpoint_forwards_email_target():
 
 def test_revoke_api_key_endpoint_rejects_missing_target():
     ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
         mock_ctx.return_value = ctx
         response = client.delete("/nb/v1/api-keys", headers=_build_headers())
 
@@ -303,8 +303,8 @@ def test_revoke_api_key_endpoint_rejects_missing_target():
 
 def test_upload_chat_attachments_success():
     """Test successful chat attachment upload."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
 
         mock_ctx.return_value = MagicMock()
         mock_upload.return_value = {
@@ -330,8 +330,8 @@ def test_upload_chat_attachments_success():
 
 def test_upload_chat_attachments_limit_exceeded():
     """Test upload returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
 
         mock_ctx.return_value = MagicMock()
         mock_upload.side_effect = LimitExceededError("Upload limit exceeded")
@@ -350,8 +350,8 @@ def test_upload_chat_attachments_limit_exceeded():
 
 def test_upload_chat_attachments_internal_error():
     """Test upload returns 500 when internal error occurs."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
 
         mock_ctx.return_value = MagicMock()
         mock_upload.side_effect = Exception("Unknown error")
@@ -374,8 +374,8 @@ def test_upload_chat_attachments_internal_error():
 
 def test_run_chat_success():
     """Test successful chat run initiation."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = {
@@ -398,8 +398,8 @@ def test_run_chat_success():
 
 def test_run_chat_limit_exceeded():
     """Test run chat returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.side_effect = LimitExceededError("Rate limit exceeded")
@@ -418,7 +418,7 @@ def test_run_chat_limit_exceeded():
 
 def test_run_chat_unauthorized():
     """Test run chat returns 500 on unauthorized (broad exception handling)."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
         mock_ctx.side_effect = UnauthorizedError("Invalid token")
 
         resp = client.post(
@@ -443,10 +443,10 @@ def test_run_chat_unauthorized():
 )
 def test_run_chat_maps_runtime_transport_errors(error, expected_status):
     with patch(
-        "gateway.api.northbound._get_northbound_context",
+        "management.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
     ) as mock_ctx, patch(
-        "gateway.api.northbound.start_streaming_chat",
+        "management.api.northbound.start_streaming_chat",
         new_callable=AsyncMock,
         side_effect=error,
     ):
@@ -468,10 +468,10 @@ def test_run_chat_propagates_app_exception_to_the_global_handler():
         details={"reason": "MCP_HEADER_KEY_FORBIDDEN"},
     )
     with patch(
-        "gateway.api.northbound._get_northbound_context",
+        "management.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
     ) as mock_ctx, patch(
-        "gateway.api.northbound.start_streaming_chat",
+        "management.api.northbound.start_streaming_chat",
         new_callable=AsyncMock,
         side_effect=error,
     ):
@@ -493,8 +493,8 @@ def test_run_chat_propagates_app_exception_to_the_global_handler():
 
 def test_stop_chat_success():
     """Test successful chat stop."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
 
         mock_ctx.return_value = MagicMock()
         mock_stop.return_value = True
@@ -514,10 +514,10 @@ def test_stop_chat_preserves_runtime_error_response():
         headers={"content-type": "application/json"},
     )
     with patch(
-        "gateway.api.northbound._get_northbound_context",
+        "management.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
     ) as mock_ctx, patch(
-        "gateway.api.northbound.stop_chat",
+        "management.api.northbound.stop_chat",
         new_callable=AsyncMock,
         side_effect=upstream_error,
     ):
@@ -541,10 +541,10 @@ def test_stop_chat_preserves_runtime_error_response():
 )
 def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
     with patch(
-        "gateway.api.northbound._get_northbound_context",
+        "management.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
     ) as mock_ctx, patch(
-        "gateway.api.northbound.stop_chat",
+        "management.api.northbound.stop_chat",
         new_callable=AsyncMock,
         side_effect=error,
     ):
@@ -564,8 +564,8 @@ def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
 
 def test_get_conversation_success():
     """Test successful retrieval of conversation."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.return_value = {
@@ -593,8 +593,8 @@ def test_get_conversation_success():
 
 def test_list_agents_success():
     """Test successful retrieval of agent list."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.return_value = {
@@ -616,8 +616,8 @@ def test_list_agents_success():
 
 def test_get_agent_by_name_success():
     """Test successful retrieval of one published agent by name."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.return_value = {
@@ -638,8 +638,8 @@ def test_get_agent_by_name_success():
 
 def test_get_agent_by_name_not_found():
     """Test missing published agent returns 404."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LookupError("Published agent not found: missing-agent")
@@ -655,8 +655,8 @@ def test_get_agent_by_name_not_found():
 
 def test_get_agent_by_name_limit_exceeded():
     """Test get agent by name returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LimitExceededError("Rate limit exceeded")
@@ -671,8 +671,8 @@ def test_get_agent_by_name_limit_exceeded():
 
 def test_get_agent_by_name_internal_error():
     """Test get agent by name returns 500 on unexpected internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = Exception("Unexpected internal error")
@@ -687,8 +687,8 @@ def test_get_agent_by_name_internal_error():
 
 def test_get_agent_knowledge_bases_success():
     """Test user-visible knowledge bases are returned for a published agent."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.return_value = {
             "message": "success",
@@ -713,8 +713,8 @@ def test_get_agent_knowledge_bases_success():
 
 def test_get_agent_knowledge_bases_source_conflict():
     """Test agents with both knowledge sources return a configuration conflict."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = ValueError(
             "The agent enables both local and AIDP knowledge retrieval."
@@ -734,8 +734,8 @@ def test_get_agent_knowledge_bases_source_conflict():
 
 def test_list_conversations_success():
     """Test successful retrieval of conversation list."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
 
         mock_ctx.return_value = MagicMock()
         mock_list.return_value = {
@@ -761,8 +761,8 @@ def test_list_conversations_success():
 
 def test_update_conversation_title_success():
     """Test successful update of conversation title."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -783,8 +783,8 @@ def test_update_conversation_title_success():
 def test_list_configured_models_success():
     ctx = MagicMock(tenant_id="tenant-1", request_id="req-123")
     models = [{"model_id": 7, "display_name": "Main model"}]
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.list_configured_models', new_callable=AsyncMock) as mock_list:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.list_configured_models', new_callable=AsyncMock) as mock_list:
         mock_ctx.return_value = ctx
         mock_list.return_value = {
             "message": "success",
@@ -801,9 +801,9 @@ def test_list_configured_models_success():
 
 def test_generate_title_success():
     ctx = MagicMock(user_id="user-1", tenant_id="tenant-1", request_id="req-123")
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_user_language', return_value="en"), \
-            patch('gateway.api.northbound.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_user_language', return_value="en"), \
+            patch('management.api.northbound.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
         mock_ctx.return_value = ctx
         mock_generate.return_value = {
             "message": "success",
@@ -829,8 +829,8 @@ def test_generate_title_success():
 
 
 def test_generate_title_validation_error():
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
         mock_ctx.return_value = MagicMock()
         mock_generate.side_effect = ValidationError("Selected model is unavailable")
 
@@ -864,7 +864,7 @@ def test_file_fetch_missing_url():
 
 def test_invalid_request_body():
     """Test that invalid request body returns 422."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
         mock_ctx.return_value = MagicMock()
 
         resp = client.post(
@@ -879,8 +879,8 @@ def test_invalid_request_body():
 
 def test_run_chat_with_conversation_id():
     """Test run chat with existing conversation ID."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = {
@@ -904,8 +904,8 @@ def test_run_chat_with_conversation_id():
 
 def test_run_chat_with_attachments():
     """Test run chat with file attachments."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = {
@@ -929,8 +929,8 @@ def test_run_chat_with_attachments():
 
 def test_run_chat_with_tool_params():
     """Test run chat with tool parameter overrides."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = {
@@ -964,8 +964,8 @@ def test_run_chat_with_tool_params():
 
 def test_run_chat_with_model_id():
     """Test run chat with a custom model_id to override the agent's default model."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -988,8 +988,8 @@ def test_run_chat_with_model_id():
 
 def test_run_chat_with_model_id_and_attachments():
     """Test run chat with both model_id override and file attachments."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -1014,8 +1014,8 @@ def test_run_chat_with_model_id_and_attachments():
 
 def test_run_chat_with_model_id_and_tool_params():
     """Test run chat with model_id override combined with tool parameter overrides."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -1050,8 +1050,8 @@ def test_run_chat_with_model_id_and_tool_params():
 
 def test_run_chat_with_model_id_and_conversation_id():
     """Test run chat with model_id override and existing conversation."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -1076,8 +1076,8 @@ def test_run_chat_with_model_id_and_conversation_id():
 
 def test_run_chat_model_id_null_uses_agent_default():
     """Test that omitting model_id (null) preserves the agent's default model behavior."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -1099,8 +1099,8 @@ def test_run_chat_model_id_null_uses_agent_default():
 
 def test_run_chat_permission_error():
     """Test run chat returns 403 when permission denied."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.side_effect = PermissionError("Access denied")
@@ -1119,8 +1119,8 @@ def test_run_chat_permission_error():
 
 def test_run_chat_internal_error():
     """Test run chat returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.side_effect = Exception("Unexpected error")
@@ -1139,8 +1139,8 @@ def test_run_chat_internal_error():
 
 def test_run_chat_value_error():
     """Test run chat returns 400 on value error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.start_streaming_chat', new_callable=AsyncMock) as mock_run:
 
         mock_ctx.return_value = MagicMock()
         mock_run.side_effect = ValueError("Invalid agent name")
@@ -1163,8 +1163,8 @@ def test_run_chat_value_error():
 
 def test_stop_chat_limit_exceeded():
     """Test stop chat returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
 
         mock_ctx.return_value = MagicMock()
         mock_stop.side_effect = LimitExceededError("Rate limit exceeded")
@@ -1179,8 +1179,8 @@ def test_stop_chat_limit_exceeded():
 
 def test_stop_chat_internal_error():
     """Test stop chat returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.stop_chat', new_callable=AsyncMock) as mock_stop:
 
         mock_ctx.return_value = MagicMock()
         mock_stop.side_effect = Exception("Unexpected error")
@@ -1199,8 +1199,8 @@ def test_stop_chat_internal_error():
 
 def test_get_conversation_limit_exceeded():
     """Test get conversation returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LimitExceededError("Rate limit exceeded")
@@ -1215,8 +1215,8 @@ def test_get_conversation_limit_exceeded():
 
 def test_get_conversation_internal_error():
     """Test get conversation returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_conversation_history', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = Exception("Unexpected error")
@@ -1235,8 +1235,8 @@ def test_get_conversation_internal_error():
 
 def test_list_agents_limit_exceeded():
     """Test list agents returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LimitExceededError("Rate limit exceeded")
@@ -1251,8 +1251,8 @@ def test_list_agents_limit_exceeded():
 
 def test_list_agents_internal_error():
     """Test list agents returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_info_list', new_callable=AsyncMock) as mock_get:
 
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = Exception("Unexpected error")
@@ -1271,8 +1271,8 @@ def test_list_agents_internal_error():
 
 def test_list_conversations_limit_exceeded():
     """Test list conversations returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
 
         mock_ctx.return_value = MagicMock()
         mock_list.side_effect = LimitExceededError("Rate limit exceeded")
@@ -1287,8 +1287,8 @@ def test_list_conversations_limit_exceeded():
 
 def test_list_conversations_internal_error():
     """Test list conversations returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.list_conversations', new_callable=AsyncMock) as mock_list:
 
         mock_ctx.return_value = MagicMock()
         mock_list.side_effect = Exception("Unexpected error")
@@ -1307,8 +1307,8 @@ def test_list_conversations_internal_error():
 
 def test_update_conversation_title_limit_exceeded():
     """Test update conversation title returns 429 when limit exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -1326,8 +1326,8 @@ def test_update_conversation_title_not_found():
     """Test update conversation title returns 404 when conversation not found."""
     from contracts.errors.exceptions import ConversationNotFoundError
 
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -1343,8 +1343,8 @@ def test_update_conversation_title_not_found():
 
 def test_update_conversation_title_internal_error():
     """Test update conversation title returns 500 on internal error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -1360,8 +1360,8 @@ def test_update_conversation_title_internal_error():
 
 def test_update_conversation_title_with_meta_data():
     """Test update conversation title with metadata."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -1377,8 +1377,8 @@ def test_update_conversation_title_with_meta_data():
 
 def test_update_conversation_title_with_idempotency_key():
     """Test update conversation title with idempotency key."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.update_conversation_title', new_callable=AsyncMock) as mock_update:
 
         mock_ctx.return_value = MagicMock()
         mock_ctx.return_value.request_id = "req-123"
@@ -1398,8 +1398,8 @@ def test_update_conversation_title_with_idempotency_key():
 
 def test_upload_chat_attachments_value_error():
     """Test upload returns 400 on value error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
 
         mock_ctx.return_value = MagicMock()
         mock_upload.side_effect = ValueError("Invalid file")
@@ -1418,8 +1418,8 @@ def test_upload_chat_attachments_value_error():
 
 def test_upload_chat_attachments_permission_error():
     """Test upload returns 403 on permission error."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.upload_files_for_northbound', new_callable=AsyncMock) as mock_upload:
 
         mock_ctx.return_value = MagicMock()
         mock_upload.side_effect = PermissionError("Access denied")
@@ -1471,10 +1471,10 @@ def _request(path="/nb/v1/agents", method="GET", headers=None):
 def test_get_northbound_context_rejects_invalid_identity(
     token_result, lookup_result, expected_status, detail
 ):
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", return_value=token_result), \
-            patch("gateway.authentication.northbound_auth.get_user_and_tenant_by_access_key", return_value=lookup_result):
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", return_value=token_result), \
+            patch("management.services.permission.identity.northbound.get_user_and_tenant_by_access_key", return_value=lookup_result):
         with pytest.raises(Exception) as raised:
             __import__("asyncio").run(_get_northbound_context(_request()))
 
@@ -1487,9 +1487,9 @@ def test_get_northbound_context_rejects_invalid_identity(
     [LimitExceededError("limited"), UnauthorizedError("unauthorized"), RuntimeError("broken")],
 )
 def test_get_northbound_context_maps_authentication_errors(error):
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", side_effect=error):
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", side_effect=error):
         with pytest.raises(Exception) as raised:
             __import__("asyncio").run(_get_northbound_context(_request()))
 
@@ -1497,12 +1497,12 @@ def test_get_northbound_context_maps_authentication_errors(error):
 
 
 def test_get_northbound_context_generates_request_id_and_survives_usage_log_failure():
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", return_value=(True, {"sub": "user"})), \
-            patch("gateway.authentication.northbound_auth.get_user_and_tenant_by_access_key", return_value={
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("management.services.permission.identity.northbound.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user", "tenant_id": "tenant", "token_id": 2,
-            }), patch("gateway.authentication.northbound_auth.log_token_usage", side_effect=RuntimeError("db")):
+            }), patch("management.services.permission.identity.northbound.log_token_usage", side_effect=RuntimeError("db")):
         context = __import__("asyncio").run(_get_northbound_context(_request()))
 
     assert context.request_id
@@ -1510,12 +1510,12 @@ def test_get_northbound_context_generates_request_id_and_survives_usage_log_fail
 
 
 def test_get_northbound_context_does_not_log_non_positive_token_id():
-    from gateway.api.northbound import _get_northbound_context
+    from management.api.northbound import _get_northbound_context
 
-    with patch("gateway.authentication.northbound_auth.validate_bearer_token", return_value=(True, {"sub": "user"})), \
-            patch("gateway.authentication.northbound_auth.get_user_and_tenant_by_access_key", return_value={
+    with patch("management.services.permission.identity.northbound.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("management.services.permission.identity.northbound.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user", "tenant_id": "tenant", "token_id": 0,
-            }), patch("gateway.authentication.northbound_auth.log_token_usage") as mock_log:
+            }), patch("management.services.permission.identity.northbound.log_token_usage") as mock_log:
         __import__("asyncio").run(_get_northbound_context(_request()))
 
     mock_log.assert_not_called()
@@ -1532,9 +1532,9 @@ def test_get_northbound_context_does_not_log_non_positive_token_id():
 def test_simple_northbound_endpoints_map_errors(endpoint, service_name, error, expected_status):
     payload = {"conversation_id": 1, "question": "question"} if "generate_title" in endpoint else None
     request_method = client.post if payload else client.get
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch(f"gateway.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error), \
-            patch("gateway.api.northbound.get_user_language", return_value="en"):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"management.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error), \
+            patch("management.api.northbound.get_user_language", return_value="en"):
         mock_ctx.return_value = MagicMock()
         response = request_method(endpoint, headers=_build_headers(), json=payload) if payload else request_method(
             endpoint, headers=_build_headers()
@@ -1565,8 +1565,8 @@ def test_northbound_endpoint_error_mappings(service_name, error, expected_status
         "get_agent_info_by_name_for_northbound": "/nb/v1/agents/agent",
         "list_conversations": "/nb/v1/conversations",
     }
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch(f"gateway.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"management.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error):
         mock_ctx.return_value = MagicMock()
         response = client.get(path_by_service[service_name], headers=_build_headers())
 
@@ -1574,8 +1574,8 @@ def test_northbound_endpoint_error_mappings(service_name, error, expected_status
 
 
 def test_update_conversation_title_ignores_invalid_metadata_and_sets_headers():
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch("gateway.api.northbound.update_conversation_title", new_callable=AsyncMock) as mock_update:
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("management.api.northbound.update_conversation_title", new_callable=AsyncMock) as mock_update:
         mock_ctx.return_value = MagicMock(request_id="req-1")
         mock_update.return_value = {"idempotency_key": "generated", "title": "New"}
         response = client.put(
@@ -1600,9 +1600,9 @@ def test_models_and_title_preserve_expected_http_errors(service_name, error, exp
     from fastapi import HTTPException
 
     path = "/nb/v1/models" if service_name == "list_configured_models" else "/nb/v1/generate_title"
-    with patch("gateway.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
-            patch(f"gateway.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error), \
-            patch("gateway.api.northbound.get_user_language", return_value="en"):
+    with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"management.api.northbound.{service_name}", new_callable=AsyncMock, side_effect=error), \
+            patch("management.api.northbound.get_user_language", return_value="en"):
         mock_ctx.return_value = MagicMock()
         response = client.get(path, headers=_build_headers()) if path.endswith("models") else client.post(
             path, headers=_build_headers(), json={"conversation_id": 1, "question": "q"}
@@ -1623,7 +1623,7 @@ def test_file_fetch_rejects_invalid_urls(url, expected_status):
 def test_file_fetch_returns_bad_gateway_for_storage_status():
     response = MagicMock(status_code=404)
     response.headers = {}
-    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)
@@ -1634,7 +1634,7 @@ def test_file_fetch_returns_bad_gateway_for_storage_status():
 
 @pytest.mark.parametrize("error", [httpx.TimeoutException("timeout"), httpx.RequestError("request failed")])
 def test_file_fetch_maps_http_client_errors(error):
-    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(side_effect=error)
@@ -1653,7 +1653,7 @@ def test_file_fetch_streams_content_and_uses_content_disposition_filename():
         "Content-Disposition": 'attachment; filename="report.txt"',
     }
     response.aiter_bytes = chunks
-    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)
@@ -1674,7 +1674,7 @@ if __name__ == "__main__":
 
 def test_resolve_proxy_download_filename_with_rfc598_filename():
     """Test filename resolution with RFC 598 filename."""
-    from gateway.api.northbound import _resolve_proxy_download_filename
+    from management.api.northbound import _resolve_proxy_download_filename
 
     result = _resolve_proxy_download_filename(
         "https://example.com/path/file.pdf",
@@ -1685,7 +1685,7 @@ def test_resolve_proxy_download_filename_with_rfc598_filename():
 
 def test_resolve_proxy_download_filename_with_rfc598_star_filename():
     """Test filename resolution with RFC 598 star filename."""
-    from gateway.api.northbound import _resolve_proxy_download_filename
+    from management.api.northbound import _resolve_proxy_download_filename
 
     result = _resolve_proxy_download_filename(
         "https://example.com/path/file.pdf",
@@ -1696,7 +1696,7 @@ def test_resolve_proxy_download_filename_with_rfc598_star_filename():
 
 def test_resolve_proxy_download_filename_from_url():
     """Test filename resolution from URL when no content-disposition."""
-    from gateway.api.northbound import _resolve_proxy_download_filename
+    from management.api.northbound import _resolve_proxy_download_filename
 
     result = _resolve_proxy_download_filename(
         "https://example.com/path/to/document.pdf",
@@ -1707,7 +1707,7 @@ def test_resolve_proxy_download_filename_from_url():
 
 def test_resolve_proxy_download_filename_no_filename_in_url():
     """Test filename resolution returns 'download' when no filename in URL."""
-    from gateway.api.northbound import _resolve_proxy_download_filename
+    from management.api.northbound import _resolve_proxy_download_filename
 
     result = _resolve_proxy_download_filename(
         "https://example.com/path/",
@@ -1718,7 +1718,7 @@ def test_resolve_proxy_download_filename_no_filename_in_url():
 
 def test_resolve_proxy_download_filename_empty_content_disposition():
     """Test filename resolution with empty content-disposition."""
-    from gateway.api.northbound import _resolve_proxy_download_filename
+    from management.api.northbound import _resolve_proxy_download_filename
 
     result = _resolve_proxy_download_filename(
         "https://example.com/path/file.pdf",
@@ -1728,8 +1728,8 @@ def test_resolve_proxy_download_filename_empty_content_disposition():
 
 def test_get_agent_knowledge_bases_not_found():
     """Test 404 when the target agent cannot be found."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LookupError("agent not found")
 
@@ -1744,8 +1744,8 @@ def test_get_agent_knowledge_bases_not_found():
 
 def test_get_agent_knowledge_bases_limit_exceeded():
     """Test 429 when the northbound quota is exceeded."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = LimitExceededError("Rate limit exceeded")
 
@@ -1759,8 +1759,8 @@ def test_get_agent_knowledge_bases_limit_exceeded():
 
 def test_get_agent_knowledge_bases_internal_error():
     """Test 500 when an unexpected error occurs."""
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
-            patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = RuntimeError("boom")
 
@@ -1776,7 +1776,7 @@ def test_get_agent_knowledge_bases_http_exception_passthrough():
     """HTTPException raised earlier in the call chain is re-raised unchanged."""
     from fastapi import HTTPException
 
-    with patch('gateway.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx,             patch('gateway.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+    with patch('management.api.northbound._get_northbound_context', new_callable=AsyncMock) as mock_ctx,             patch('management.api.northbound.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
         mock_ctx.return_value = MagicMock()
         mock_get.side_effect = HTTPException(status_code=403, detail="forbidden")
 
@@ -1794,7 +1794,7 @@ def test_get_agent_knowledge_bases_http_exception_passthrough():
     ("hitl_run_id", "old-run"), ("hitl_after_event", 0),
 ])
 def test_retired_control_fields_rejected_before_northbound_execution(field, value):
-    with patch("gateway.api.northbound.start_streaming_chat", new_callable=AsyncMock) as run:
+    with patch("management.api.northbound.start_streaming_chat", new_callable=AsyncMock) as run:
         response = client.post("/nb/v1/chat/run", headers=_build_headers(), json={
             "query": "Continue", "agent_name": "Analyst", field: value,
         })

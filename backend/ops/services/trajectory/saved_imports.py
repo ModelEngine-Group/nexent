@@ -12,13 +12,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     Directory,
     TrajectoryConflict,
     TrajectoryCorrupt,
     write_all,
 )
-from infrastructure.observability.trajectory_store import component
+from infrastructure.trace.trajectory_store import component
 
 from .archive import storage_error
 from .exchange import CHUNK, ExchangeLimits, import_archive

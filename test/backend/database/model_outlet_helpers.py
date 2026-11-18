@@ -47,7 +47,7 @@ def database(monkeypatch):
     # Keep actual ORM metadata and exceptions; isolate only the DB session boundary.
     from contracts.errors import exceptions
 
-    client = ModuleType("management.db.client")
+    client = ModuleType("infrastructure.rdb.client")
     client.sessions = []
 
     @contextmanager

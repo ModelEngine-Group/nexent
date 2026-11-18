@@ -12,7 +12,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from nexent.core.concurrency import ManagedTaskSpec
 from ops.api.trajectory_upload import read_archive_form
 from ops.services.trajectory.access import Actor

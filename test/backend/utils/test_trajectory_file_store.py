@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryConflict,
     TrajectoryCorrupt,
@@ -22,12 +22,12 @@ NOW = datetime(2026, 11, 9, tzinfo=UTC)
 
 
 def test_importing_trajectory_storage_does_not_require_fcntl():
-    backend = Path(__file__).resolve().parents[3] / "backend"
+    repository = Path(__file__).resolve().parents[3]
     result = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.modules['fcntl'] = None; "
-         "from infrastructure.observability.trajectory_store import TrajectoryFileStore"],
-        cwd=backend, capture_output=True, text=True, timeout=20,
+         "from infrastructure.trace.trajectory_store import TrajectoryFileStore"],
+        cwd=repository, capture_output=True, text=True, timeout=20,
     )
     assert result.returncode == 0, result.stderr
 

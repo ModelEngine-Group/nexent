@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
 
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ConversationShare, ConversationShareAsset
 
 
@@ -66,7 +66,7 @@ def get_active_conversation_share(share_token: str) -> Optional[Dict[str, Any]]:
         if expire_time:
             if isinstance(expire_time, str):
                 expire_time = datetime.fromisoformat(expire_time)
-            # Serialized naive timestamps represent UTC in management.utils.orm.as_dict.
+            # Serialized naive timestamps represent UTC in infrastructure.rdb.orm.as_dict.
             if expire_time.tzinfo is None:
                 expire_time = expire_time.replace(tzinfo=timezone.utc)
             if expire_time < datetime.now(timezone.utc):

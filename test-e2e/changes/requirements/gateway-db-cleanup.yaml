@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: GW-DB-CLEANUP-20261106
+  change_type: requirement
+  requirement_id: GW-DB-CLEANUP
+  title: Use only existing PostgreSQL settings in Gateway
+  description: Remove transitional database overrides, duplicated Helm fields and
+    secrets; directly pass shared PostgreSQL configuration to Gateway.
+  affected_features:
+    existing:
+    - GW-AUTH
+    added: []
+    modified:
+    - GW-AUTH
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-003
+    added: []
+    modified:
+    - GW-AUTH-D3-003
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Shared PostgreSQL settings, defaults, required password and invalid port.
+    - Compose and Helm shared ConfigMap/Secret references and PostgreSQL password
+      rotation.
+    reason: Unit boundary tests complement actual PostgreSQL and real protocol evidence
+      in D3; no duplicate D1.
+    test_selectors:
+    - test/backend/gateway/test_db_configuration_reuse.py
+    - test/backend/deploy/test_gateway_db_reuse.py
+    - test/backend/gateway/test_database_identity.py
+    - test/backend/deploy/test_gateway_image.py

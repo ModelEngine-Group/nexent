@@ -42,10 +42,11 @@ from contracts.tag import (
     TagValueUsageResponse,
     ToolTagAssignmentBatchRequest,
 )
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from management.db.identity.role_permission import check_role_permission
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
+from management.services.permission.identity.session import get_current_user_context
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 

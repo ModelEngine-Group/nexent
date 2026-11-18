@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: GW-DB-REUSE-20261106
+  change_type: requirement
+  requirement_id: GW-DB-REUSE
+  title: Reuse PostgreSQL credentials with optional Gateway overrides
+  description: Default Gateway DB settings to existing PostgreSQL values in environment,
+    Compose and Helm; preserve read-only query behavior and optional dedicated credentials.
+  affected_features:
+    existing:
+    - GW-AUTH
+    added: []
+    modified:
+    - GW-AUTH
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-003
+    added: []
+    modified:
+    - GW-AUTH-D3-003
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - PostgreSQL fallback, nonempty overrides, empty overrides, missing password and
+      invalid port.
+    - Compose interpolation, Helm effective credentials and password rollout checksum.
+    reason: Unit boundary tests complement actual PostgreSQL and real protocol evidence
+      in D3; no duplicate D1.
+    test_selectors:
+    - test/backend/gateway/test_db_configuration_reuse.py
+    - test/backend/deploy/test_gateway_db_reuse.py
+    - test/backend/gateway/test_database_identity.py
+    - test/backend/deploy/test_gateway_image.py

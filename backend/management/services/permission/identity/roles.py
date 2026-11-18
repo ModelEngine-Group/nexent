@@ -5,7 +5,7 @@ import logging
 
 from contracts.errors.exceptions import NotFoundException
 from contracts.roles import ORDINARY_ROLES, roles_from_record
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.membership import (
     api_only_account,
     get_user_tenant_by_user_id,
