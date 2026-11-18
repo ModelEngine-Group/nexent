@@ -42,7 +42,7 @@ logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
 
-def _build_parallel_executor_tool_config(default_timeout_seconds: int) -> ToolConfig:
+def _build_parallel_executor_tool_config(default_timeout_seconds: float) -> ToolConfig:
     return ToolConfig(
         class_name=ParallelExecutorTool.__name__,
         name=ParallelExecutorTool.name,

@@ -65,6 +65,10 @@ from management.api.skill.skill_repository import skill_repository_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.tool.tool_config import router as tool_config_router
 from management.api.voice.voice import voice_config_router as voice_router
+from management.configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from management.recovery import (
     recover_config_tasks,
     schedule_interrupted_upload_cleanup,
@@ -126,7 +130,17 @@ async def config_lifespan(_app):
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
     try:
+        async def run_configuration_io(fn):
+            return await run_blocking(
+                "system-configuration-refresh",
+                fn,
+                lane="control-io",
+                owner="management.configuration.runtime",
+            )
 
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
         logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
         await recover_config_tasks_on_startup()
@@ -140,6 +154,7 @@ async def config_lifespan(_app):
 
         stop_eval_maintenance()
         try:
+            await stop_system_configuration()
             await config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
         finally:
             clear_default_thread_manager(config_thread_manager)

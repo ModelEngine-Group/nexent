@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
     DEFAULT_TOOL_CALL_TIMEOUT,
-    MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -19,9 +18,9 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     NEXENT_MCP_INTERNAL_TOKEN,
 )
+from management.configuration.runtime import get_config_snapshot
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
 from infrastructure.redis import get_redis_client
@@ -599,6 +598,7 @@ async def create_agent_run_info(
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
+    configuration = get_config_snapshot()
     if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
         from management.services.model.runtime_options import compile_bound_model_profile
 
@@ -617,11 +617,11 @@ async def create_agent_run_info(
         # Only surface the kwarg when the caller actually sent metadata, so
         # agents without metadata keep the exact pre-existing payload shape.
         **({"runtime_metadata": metadata} if metadata is not None else {}),
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         collaboration_timeout_seconds=RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
         tool_call_timeout_seconds=DEFAULT_TOOL_CALL_TIMEOUT,
+        mcp_request_timeout_seconds=configuration.get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=converted_history,
-        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_tool_timeout_seconds=configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS"),
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         context_budget_snapshot=getattr(

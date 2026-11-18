@@ -107,6 +107,20 @@ sys.modules['management.utils.serialization'] = utils_str_utils_mock
 from management.db.skill.repository import _params_value_for_db, _build_skill_update_values, _replace_skill_tool_relations, create_or_update_skill_by_skill_info, query_skill_instances_by_agent_id, query_enabled_skill_instances, query_skill_instance_by_id, search_skills_for_agent, delete_skills_by_agent_id, delete_skill_instances_by_skill_id, delete_skill_instances_by_tenant, list_skill_permission_summaries, list_skills, get_skill_by_name, get_skill_by_id, get_skill_by_id_global, create_skill, update_skill, update_skill_by_id, delete_skill, get_tool_names_by_ids, get_tool_ids_by_names, get_tool_names_by_skill_name, get_skill_with_tool_names, list_global_official_skills, check_skill_list_initialized, upsert_scanned_skills, _get_tool_ids, _to_dict
 
 
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.skill.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
+
+
 class MockSkillInstance:
     """Mock SkillInstance model for testing."""
     def __init__(self, **kwargs):
@@ -1322,7 +1336,10 @@ class TestCreateSkill:
         """Creating a Skill at the tenant quota returns structured limit details."""
         session, query = mock_session
         query.filter.return_value.count.return_value = 1
-        monkeypatch.setattr("management.db.skill.repository.MAX_SKILLS_PER_TENANT", 1)
+        monkeypatch.setattr(
+            "management.db.skill.repository.get_config_snapshot",
+            lambda: _system_config_snapshot(MAX_SKILLS_PER_TENANT=1),
+        )
 
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session

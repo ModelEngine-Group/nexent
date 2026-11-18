@@ -108,6 +108,7 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
+  SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
   KSM-CONFIG: sandbox

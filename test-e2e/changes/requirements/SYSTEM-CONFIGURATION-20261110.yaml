@@ -1,0 +1,76 @@
+schema_version: '1.0'
+change:
+  change_id: SYSTEM-CONFIGURATION-20261110
+  change_type: requirement
+  requirement_id: SYSTEM-CONFIGURATION-20261110
+  title: Operations-managed hot system configuration
+  description: Add the frozen system configuration catalog, single-table persistence, ops management API, shared consumer refresh and formal page.
+  affected_features:
+    existing: [OPS-BOOTSTRAP, AUTH-LOCAL]
+    added: [SYSTEM-CONFIGURATION]
+    modified: [OPS-BOOTSTRAP, AUTH-LOCAL]
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, AUTH-LOCAL-D2-001]
+    added: [SYS-CONFIG-MANAGEMENT-D2-001, SYS-CONFIG-HOT-REFRESH-D3-001, SYS-CONFIG-JOURNEY-D4-001]
+    modified: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, AUTH-LOCAL-D2-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/configuration/test_catalog.py
+    - test/backend/configuration/test_repository.py
+    - test/backend/configuration/test_migration.py
+    - test/backend/configuration/test_database.py
+    - test/backend/configuration/test_runtime.py
+    - test/backend/configuration/test_consumers.py
+    - test/backend/app/test_config_app.py
+    - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/app/test_health_app.py
+    - test/backend/database/test_conversation_activity.py
+    - test/backend/database/test_conversation_branch_db.py
+    - test/backend/database/test_conversation_branch_selection.py
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/services/test_native_authentication_flows.py
+    - test/backend/agents/test_jiuwen_current_task.py
+    - test/backend/ops/test_system_configurations.py
+    - test/backend/ops/test_system_configuration_service.py
+    - test/backend/ops/test_bootstrap.py
+    - test/backend/services/test_file_management_service.py
+    - test/backend/app/test_evaluation_set_app.py
+    - test/backend/services/test_skill_service.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_agent_outlet_run_snapshot.py
+    - test/backend/agents/test_create_agent_info_workbench_coverage.py
+    - test/backend/services/test_tool_configuration_service.py
+    - test/backend/services/test_remote_mcp_service.py
+    - test/backend/services/test_role_assignment.py
+    - test/backend/services/test_local_account_cli.py
+    - test/sdk/core/tools/test_parallel_executor.py
+    - test/sdk/core/model_service/test_agent_model_construction.py
+    - test/backend/database/test_group_db.py
+    - test/backend/database/test_user_tenant_db.py
+    - test/backend/database/test_remote_mcp_db.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_shared_creator_runtime.py
+    - test/backend/deploy/test_ops_chart.py
+    - frontend/tests/component/systemConfiguration.test.tsx
+    - frontend/tests/apiProxyRouting.test.mjs
+    behaviors:
+    - Validate exactly nineteen typed positive integer, finite positive number and boolean settings without environment fallback.
+    - Detect missing, duplicate and invalid stored rows; merge and persist changed keys in one locked transaction.
+    - Keep getters network-free, coalesce notifications, serialize refresh, retain the last valid snapshot and close owned resources.
+    - Bound configuration driver connection, SQL statement and lock waits; timeout failures retain the last valid snapshot and permit subsequent retries.
+    - Own an OPS ThreadManager in lifespan and route configuration database/Redis I/O through one bounded control-io entry.
+    - Enforce explicit operations read/update authorization for OPS and SU plus safe 400/401/403/422/503 API responses, including unavailable recommendations.
+    - Preserve drafts across filtering, background queries, notification-degraded saves and edits made during a save.
+    reason: New catalog, transaction, refresh, API and draft behavior require isolated success, boundary and error proof; D2/D3/D4 prove their distinct runtime boundaries.
+  notes: >-
+    Existing OPS-BOOTSTRAP D1/D5 remain active with their original Case IDs. Their contracts are strengthened only for the
+    newly required lazy configuration dependencies, configuration secrets and routes while preserving health and isolation.
+    No new D1 is added: isolated catalog and refresh behavior belongs to traditional UT, while D2 proves the HTTP contract,
+    D3 proves real PostgreSQL/Redis consumer behavior and D4 proves the browser journey. Recommendation resource rules are
+    out of scope because the current catalog has no reliable rule; only the explicit unavailable response is covered.
+    The D3 runtime probe also constructs ParallelExecutorTool from a fractional database timeout, proving the complete
+    snapshot-to-SDK construction path. The direct fixed-script run uses an isolated database and Redis with owned cleanup.

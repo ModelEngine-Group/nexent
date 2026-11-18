@@ -1574,7 +1574,13 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
 @pytest.mark.asyncio
 async def test_public_mcp_scanner_skips_internal_tools(mocker):
     from management.services.tool import discovery as tool_discovery
+    from test.backend.configuration.helpers import system_config_snapshot
 
+    mocker.patch.object(
+        tool_discovery,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.list_tools.return_value = [
