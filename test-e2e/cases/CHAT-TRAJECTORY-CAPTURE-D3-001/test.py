@@ -444,7 +444,7 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
 
 @pytest.mark.parametrize('failed_sink', ['remote', 'local'])
 def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, monkeypatch):
-    from infrastructure.observability.trajectory_store import RunWriter
+    from infrastructure.trace.trajectory_store import RunWriter
 
     runtime.configure('otlp' if failed_sink == 'remote' else 'local_file', telemetry_receiver.endpoint)
     if failed_sink == 'remote':

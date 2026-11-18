@@ -157,6 +157,12 @@ class NexentAgent(AgentResources):
         ):
             raise ValueError("Model configuration does not match its outlet snapshot")
         scope = self.cancellation_scope if self.cancellation_scope is not None else RunCancellationScope(self.stop_event)
+        if model_config.extra_body:
+            from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+
+            profile = LegacyInvocationOptions(
+                {}, custom_overrides=model_config.extra_body
+            ).resolve(profile)
         return LegacyChatModel.from_profile(
             profile, model_config.api_key, http_headers=model_config.http_headers,
             observer=self.observer, cancellation_scope=scope,

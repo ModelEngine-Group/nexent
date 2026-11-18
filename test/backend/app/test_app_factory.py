@@ -20,7 +20,7 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.utils.app_factory import create_app, register_exception_handlers
+from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -515,8 +515,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch('management.utils.app_factory.monitoring_manager', None):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', None):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +532,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -551,8 +551,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch('management.utils.app_factory.monitoring_manager', mock_module.monitoring_manager):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', mock_module.monitoring_manager):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available

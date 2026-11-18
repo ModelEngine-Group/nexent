@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from conftest import Catalog
 from fastapi import FastAPI
-from infrastructure.observability.trajectory_store import TrajectoryFileStore
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from ops.api import trajectory as api
 from ops.services.trajectory.primitives import ReferenceStore

@@ -16,7 +16,7 @@ from shared.postgres import apply_product_postgres_env
 apply_product_postgres_env()
 
 from management.db.automation import messages, repository as runs
-from management.db.client import db_client
+from infrastructure.rdb.client import db_client
 from management.db.conversation import repository as conversations
 from management.db.models import (
     AgentAutomationRun, AgentAutomationTask, ConversationMessage, ConversationMessageUnit,

@@ -2,6 +2,7 @@
 """Unit tests for the Celery-prefork data-process service entrypoint."""
 
 import importlib.util
+import os
 import signal
 import sys
 import types
@@ -28,7 +29,7 @@ def service_module(monkeypatch):
             self.routers.append(router)
 
     fastapi.FastAPI = FakeFastAPI
-    logging_utils = types.ModuleType("infrastructure.logging")
+    logging_utils = types.ModuleType("backend.http.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
     constants = types.ModuleType("contracts.constants.environment")
@@ -49,15 +50,15 @@ def service_module(monkeypatch):
         "uvicorn": uvicorn,
         "dotenv": dotenv,
         "fastapi": fastapi,
-        "infrastructure.logging": logging_utils,
+        "backend.http.logging": logging_utils,
         "contracts.constants.environment": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
-    module_name = "backend.data_process_service"
+    module_name = "backend.http.data_process_service"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        Path(__file__).parents[2] / "backend" / "data_process_service.py",
+        Path(__file__).parents[2] / "backend" / "http" / "data_process_service.py",
     )
     module = importlib.util.module_from_spec(spec)
     with patch.object(signal, "signal"):
@@ -140,12 +141,23 @@ def test_start_workers_launches_parser_with_readiness_barrier(service_module, mo
     manager = service_module.ServiceManager({"start_workers": True})
     monkeypatch.setattr(manager, "_build_worker_configs", lambda _cpus: configs)
     monkeypatch.setattr(manager, "_wait_for_parser_ready", lambda: None)
-    monkeypatch.setattr(service_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    launched = []
+
+    def launch_worker(*args, **kwargs):
+        launched.append(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(service_module.subprocess, "Popen", launch_worker)
     monkeypatch.setattr(service_module.threading, "Thread", lambda *args, **kwargs: types.SimpleNamespace(start=lambda: None))
     service_module.service_processes["workers"].clear()
 
     assert manager.start_workers() is True
     assert service_module.service_processes["workers"][0]["queue"] == "parse_q"
+    backend_dir = Path(__file__).resolve().parents[2] / "backend"
+    assert [Path(options["cwd"]) for options in launched] == [backend_dir]
+    assert launched[0]["env"]["PYTHONPATH"].split(os.pathsep)[:2] == [
+        str(backend_dir.parent), str(backend_dir),
+    ]
     service_module.service_processes["workers"].clear()
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import bindparam, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 # isort: split
-from management.db.client import db_client, get_db_session
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.trajectory.models import TrajectoryStatistics as Statistics
 from management.db.trajectory.repository import scope_uuid
 from ops.db.trajectory.queries import BASE, METRIC_STATUSES, READABLE, _statement

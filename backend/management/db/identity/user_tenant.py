@@ -10,11 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
-from contracts.constants.environment import (
-    MAX_ADMINS_PER_TENANT,
-    MAX_SUPER_ADMIN_COUNT,
-    MAX_USERS_PER_TENANT,
-)
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RoleAssignmentConflict, TenantResourceLimitError
 from contracts.roles import (
     has_any_role,
@@ -22,7 +18,7 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.identity.membership import (
     check_admin_removal,
@@ -37,16 +33,11 @@ from management.db.models import (
     UserOAuthAccount,
     UserTenant,
 )
+from infrastructure.rdb.orm import as_dict
 from management.db.trajectory.repository import detach_owner
-from management.utils.orm import as_dict
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger(__name__)
-
-_USER_LIMIT = MAX_USERS_PER_TENANT if isinstance(MAX_USERS_PER_TENANT, int) else 10_000
-_ADMIN_LIMIT = MAX_ADMINS_PER_TENANT if isinstance(MAX_ADMINS_PER_TENANT, int) else 1_000
-_SUPER_ADMIN_LIMIT = MAX_SUPER_ADMIN_COUNT if isinstance(MAX_SUPER_ADMIN_COUNT, int) else 1
-
 
 def _count_or_zero(value) -> int:
     """Return a database count while keeping lightweight test doubles harmless."""
@@ -65,6 +56,10 @@ def _validate_user_tenant_limit(
     *,
     include_user_count: bool = True,
 ) -> None:
+    snapshot = get_config_snapshot()
+    user_limit = snapshot.get("MAX_USERS_PER_TENANT")
+    admin_limit = snapshot.get("MAX_ADMINS_PER_TENANT")
+    super_admin_limit = snapshot.get("MAX_SUPER_ADMIN_COUNT")
     _lock_resource_limit(session, f"tenant-user-limit:{tenant_id}")
     if include_user_count:
         user_count = _count_or_zero(
@@ -75,11 +70,11 @@ def _validate_user_tenant_limit(
             )
             .count()
         )
-        if user_count >= _USER_LIMIT:
-            error = TenantResourceLimitError(f"Tenant user limit reached: maximum {_USER_LIMIT} users per tenant")
+        if user_count >= user_limit:
+            error = TenantResourceLimitError(f"Tenant user limit reached: maximum {user_limit} users per tenant")
             error.resource = "users"
             error.scope = "tenant"
-            error.limit = _USER_LIMIT
+            error.limit = user_limit
             error.current_count = user_count
             raise error
 
@@ -95,13 +90,13 @@ def _validate_user_tenant_limit(
             )
             .count()
         )
-        if admin_count >= _ADMIN_LIMIT:
+        if admin_count >= admin_limit:
             error = TenantResourceLimitError(
-                f"Tenant administrator limit reached: maximum {_ADMIN_LIMIT} administrators per tenant"
+                f"Tenant administrator limit reached: maximum {admin_limit} administrators per tenant"
             )
             error.resource = "administrators"
             error.scope = "tenant"
-            error.limit = _ADMIN_LIMIT
+            error.limit = admin_limit
             error.current_count = admin_count
             raise error
     elif "SU" in normalized_role:
@@ -114,13 +109,13 @@ def _validate_user_tenant_limit(
             )
             .count()
         )
-        if super_admin_count >= _SUPER_ADMIN_LIMIT:
+        if super_admin_count >= super_admin_limit:
             error = TenantResourceLimitError(
-                f"Super administrator limit reached: maximum {_SUPER_ADMIN_LIMIT} super administrator"
+                f"Super administrator limit reached: maximum {super_admin_limit} super administrator"
             )
             error.resource = "super_admins"
             error.scope = "platform"
-            error.limit = _SUPER_ADMIN_LIMIT
+            error.limit = super_admin_limit
             error.current_count = super_admin_count
             raise error
 

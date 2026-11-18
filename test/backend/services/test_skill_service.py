@@ -295,7 +295,7 @@ sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 # Set up database mocks
 database_mock = types.ModuleType('database')
 database_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/database"))]
-database_client_mock = types.ModuleType('management.db.client')
+database_client_mock = types.ModuleType('infrastructure.rdb.client')
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.as_dict = MagicMock()
 database_client_mock.filter_property = MagicMock()
@@ -398,11 +398,12 @@ database_mock.skill_db = database_skill_db_mock
 database_mock.db_models = database_db_models_mock
 
 sys.modules['database'] = database_mock
-sys.modules['management.db.client'] = database_client_mock
+sys.modules['infrastructure.rdb.client'] = database_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.skill.repository'] = database_skill_db_mock
 sys.modules['management.db.models'] = database_db_models_mock
 sys.modules['management.db.identity.group'] = database_group_db_mock
@@ -430,6 +431,17 @@ from management.services.skill import params as skill_params
 @pytest.fixture(autouse=True)
 def isolate_skill_yaml_writer(mocker):
     mocker.patch.object(skill_params, "params_dict_to_roundtrip_yaml_text", return_value="params: {}")
+
+
+@pytest.fixture(autouse=True)
+def default_system_configuration(mocker):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    mocker.patch.object(
+        skill_service,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
 
 from management.services.skill.service import (
     SkillService,
@@ -1160,24 +1172,32 @@ class TestSkillServiceCreateSkillFromFile:
     def test_upload_rejects_content_over_configured_limit(self, monkeypatch):
         """Skill uploads larger than the configured byte limit fail before parsing."""
         service = SkillService(tenant_id="tenant1")
+        from test.backend.configuration.helpers import system_config_snapshot
+
         monkeypatch.setattr(
-            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+            skill_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_SKILL_UPLOAD_SIZE_MB=1),
         )
         with pytest.raises(AppException, match="Skill upload exceeds") as exc_info:
-            service.create_skill_from_file(b"12345678901", file_type="md")
+            service.create_skill_from_file(b"x" * (1024 * 1024 + 1), file_type="md")
 
         assert exc_info.value.details == {
             "resource": "skill_upload",
-            "limit_mb": consts_const_mock.MAX_SKILL_UPLOAD_SIZE_MB,
-            "limit_bytes": 10,
-            "actual_bytes": 11,
+            "limit_mb": 1,
+            "limit_bytes": 1024 * 1024,
+            "actual_bytes": 1024 * 1024 + 1,
         }
 
     def test_upload_accepts_content_at_configured_limit(self, monkeypatch):
         """The exact configured byte limit remains valid."""
         service = SkillService(tenant_id="tenant1")
+        from test.backend.configuration.helpers import system_config_snapshot
+
         monkeypatch.setattr(
-            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+            skill_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_SKILL_UPLOAD_SIZE_MB=1),
         )
         monkeypatch.setattr(
             skill_service, "SkillLoader",
@@ -1195,7 +1215,7 @@ class TestSkillServiceCreateSkillFromFile:
         )
         service.skill_manager = MagicMock()
 
-        result = service.create_skill_from_file(b"1234567890", file_type="md")
+        result = service.create_skill_from_file(b"x" * (1024 * 1024), file_type="md")
 
         assert result["name"] == "boundary_skill"
 

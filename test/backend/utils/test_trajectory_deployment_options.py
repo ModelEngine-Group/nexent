@@ -22,7 +22,7 @@ def test_trajectory_default_directory_and_removed_configuration(monkeypatch):
 def test_store_initializes_directory_without_root_id_and_preserves_manifest(tmp_path):
     from uuid import uuid4
 
-    from infrastructure.observability.trajectory_store import (
+    from infrastructure.trace.trajectory_store import (
         CaptureIdentity,
         TrajectoryFileStore,
     )

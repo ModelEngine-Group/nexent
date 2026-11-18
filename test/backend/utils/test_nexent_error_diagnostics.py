@@ -5,7 +5,12 @@
 import json
 
 import pytest
-from infrastructure.nexent_output import NexentOutputAdapter, NexentSSEAdapter, normalize_nexent_history
+
+from management.services.conversation.nexent_output import (
+    NexentOutputAdapter,
+    NexentSSEAdapter,
+    normalize_nexent_history,
+)
 
 
 @pytest.mark.parametrize("category", ["MODEL_TIMEOUT", "mcp_auth_failed", "tool_execution_error", "sandbox_timeout"])

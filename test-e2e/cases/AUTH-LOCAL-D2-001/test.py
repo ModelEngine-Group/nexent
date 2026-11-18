@@ -18,12 +18,12 @@ from local_auth_http import native_runtime, runtime, register, bearer, seed_memb
 
 def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from sqlalchemy import select, func
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.token import create_token
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
     from gateway.api import northbound as routes
-    from gateway.authentication import northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
 
     client, auth, helpers, models = runtime
     client.app.include_router(routes.router)
@@ -81,7 +81,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
 
 def test_native_http_identity_password_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
+    from management.services.permission.identity import northbound
     assert client.get("/api/user/service_health").status_code == 200
     data = register(client)
     token = data["session"]["access_token"]
@@ -183,7 +183,7 @@ def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
         ).status_code
         == 401
     )
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
         session.execute(
@@ -206,7 +206,7 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
     client, auth, helpers, models = runtime
     data = register(client)
     user_id = data["user"]["id"]
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
         session.add(
@@ -283,7 +283,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
 
 def test_native_http_revoke_disables_credentials_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
+    from management.services.permission.identity import northbound
     data = register(client)
     token = data["session"]["access_token"]
     issued_key = client.post("/api/user/tokens", headers=bearer(token))
