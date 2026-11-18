@@ -16,7 +16,8 @@ from nexent.core.model_service.profiles.parameter_rules import (
 )
 from nexent.core.model_service.profiles.parameter_schema import json_values_equal
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, inspect, literal_column, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 
 from infrastructure.rdb.client import get_db_session
@@ -368,7 +369,7 @@ def update_model_outlet_connectivity(model_id, tenant_id, expected_revision, sta
 
 
 def migrate_legacy_model_records(builder, *, registered_references, batch_size=100,
-                                 after_model_id=0, dry_run=False, db_session=None):
+                                 after_model_id=0, dry_run=False, db_session=None, include_legacy_snapshot=False):
     """Migrate a locked batch in the caller's transaction; never commit shared sessions."""
     if (type(batch_size) is not int or not 1 <= batch_size <= 1000
             or type(after_model_id) is not int or not 0 <= after_model_id < 2**31):
@@ -381,6 +382,14 @@ def migrate_legacy_model_records(builder, *, registered_references, batch_size=1
         statement = statement.with_for_update()
     report = []
     with get_db_session(db_session) as session:
+        if include_legacy_snapshot:
+            columns = inspect(session.connection()).get_columns(
+                ModelRecord.__tablename__, schema=ModelRecord.__table__.schema,
+            )
+            if any(column["name"] == "runtime_outlet_snapshot" for column in columns):
+                statement = statement.add_columns(literal_column(
+                    "nexent.model_record_t.runtime_outlet_snapshot", type_=JSONB,
+                ).label("_legacy_outlet_snapshot"))
         rows = _execute(session, statement).mappings().all()
         for row in rows:
             result = {"model_id": row["model_id"], "tenant_id": row["tenant_id"]}

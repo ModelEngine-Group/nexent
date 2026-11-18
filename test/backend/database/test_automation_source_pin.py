@@ -20,7 +20,10 @@ def database(mocker):
     metadata.create_all(engine)
 
     @contextmanager
-    def sessions():
+    def sessions(db_session=None):
+        if db_session is not None:
+            yield db_session
+            return
         with Session(engine) as session, session.begin():
             yield session
 
