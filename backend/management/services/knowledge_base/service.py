@@ -33,9 +33,9 @@ from management.services.knowledge_base.common import (
 from management.services.knowledge_base.deletion import (
     KnowledgeBaseDocumentDeletionService,
 )
-from management.services.model.resolver import (
-    get_embedding_model_by_id,
-)
+from management.services.knowledge_base.chunk_embedding import embed_manual_chunk
+from infrastructure.agentos_identity import ServicePrincipal
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.vector_database.base import VectorDatabaseCore
 
 __all__ = (
@@ -272,51 +272,10 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         Automatically generates and stores embedding for semantic search.
         """
         try:
-            # Get knowledge base's embedding model by model_id
-            embedding_model_id = None
-            if tenant_id:
-                try:
-                    knowledge_record = get_knowledge_record(
-                        {"index_name": index_name, "tenant_id": tenant_id}
-                    )
-                    embedding_model_id = (
-                        knowledge_record.get("embedding_model_id")
-                        if knowledge_record
-                        else None
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to get embedding model id for index {index_name}: {e}"
-                    )
-
-            # Generate embedding if we have content and can get embedding model
-            embedding_vector = None
-            if chunk_request.content:
-                try:
-                    embedding_model = (
-                        get_embedding_model_by_id(tenant_id, embedding_model_id)[0]
-                        if tenant_id and embedding_model_id
-                        else None
-                    )
-                    if embedding_model:
-                        embeddings = embedding_model.get_embeddings(
-                            chunk_request.content
-                        )
-                        if embeddings and len(embeddings) > 0:
-                            embedding_vector = embeddings[0]
-                            logger.debug(
-                                f"Generated embedding for chunk in index {index_name}"
-                            )
-                        else:
-                            logger.warning(
-                                f"Failed to generate embedding for chunk in index {index_name}"
-                            )
-                    else:
-                        logger.warning(
-                            f"No embedding model available for index {index_name}"
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to generate embedding for chunk: {e}")
+            embedding_model_id, embedding_vector = None, None
+            if chunk_request.content and user_id and tenant_id:
+                embedding_model_id, embedding_vector = embed_manual_chunk(
+                    index_name, chunk_request.content, ServicePrincipal(user_id, tenant_id))
 
             # Build chunk payload
             chunk_payload = ElasticSearchService._build_chunk_payload(
@@ -345,6 +304,8 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 "message": f"Chunk {result.get('id')} created successfully",
                 "chunk_id": result.get("id"),
             }
+        except (ScopeDenied, DeadlineExceeded):
+            raise
         except Exception as exc:
             logger.error(
                 "Error creating chunk in index %s: %s", index_name, exc, exc_info=True

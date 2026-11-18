@@ -858,6 +858,10 @@ def create_chunk(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except HTTPException:
         raise
+    except ScopeDenied:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="You don't have permission to edit this knowledge base") from None
+    except DeadlineExceeded:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error creating chunk: storage operation timed out") from None
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))

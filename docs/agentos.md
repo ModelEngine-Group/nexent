@@ -292,6 +292,10 @@ Runtime 使用标准 `authorize-chunks` 回调获取 Management 的 `KnowledgeCh
 
 普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。分块 CRUD、旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
 
+手工分块创建的 embedding 前置已改用标准 `Model.invoke`。Management 仅经 SI 查询当前用户有编辑权限的 KB 和模型 ID，Runtime 读取自身模型记录、profile 并分派 embedding 或 multi_embedding 适配器，实际 user_id/tenant_id 保持。准备阶段共用 180 秒预算，模型 HTTP 停滞会取消并关闭客户端。模型未配置、失败或响应无效时沿用原有无向量保存正文行为，不选择其他模型；当前资源授权、删除意图或 SI 元数据读取失败会阻止写入。
+
+手工创建仍使用旧 ES 写入，更新正文也仍沿用原有不重算向量的行为。手工分块可以没有文件引用，不能伪造成已有 `File.upload` 的清洗产物。完整 CRUD 迁移还需统一无文件实体、已发布文件的分块修改、计数/版本、浏览/检索/摘要和删除义务。当前新发布清单浏览不会读取这些旧写入，部署切流仍以退役 SPEC 的业务迁移和验收完成为前提；本批模型调用迁移不证明写链、并发发布围栏或 data-process 退役完成。
+
 ### KnowledgeBase 已登记文件清单
 
 `KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。

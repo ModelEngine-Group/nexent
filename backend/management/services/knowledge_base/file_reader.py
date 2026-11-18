@@ -36,7 +36,7 @@ class KnowledgeFileReader:
         self.ports = ports
 
     @contextmanager
-    def _records(self, index_name, actor, *, context, knowledge_id=None):
+    def _records(self, index_name, actor, *, context, knowledge_id=None, edit=False):
         context.remaining()
         with self.ports(actor, context=context) as (knowledge, identity, scoped_files):
             if any(
@@ -74,7 +74,7 @@ class KnowledgeFileReader:
                 groups,
                 speed_mode=False,
             )[row['index_name']]
-            if permission is None:
+            if permission is None or edit and permission not in {'EDIT', 'CREATOR'}:
                 raise ScopeDenied()
             records = scoped_files(resource_tenant)
             if (
@@ -86,8 +86,8 @@ class KnowledgeFileReader:
                 raise ScopeDenied()
             yield records, row
 
-    def knowledge(self, index_name, actor, *, context, knowledge_id=None):
-        with self._records(index_name, actor, context=context, knowledge_id=knowledge_id) as (_, row):
+    def knowledge(self, index_name, actor, *, context, knowledge_id=None, edit=False):
+        with self._records(index_name, actor, context=context, knowledge_id=knowledge_id, edit=edit) as (_, row):
             return row
 
     def files(self, index_name, actor, *, context):
