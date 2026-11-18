@@ -152,13 +152,16 @@ async def test_preparation_retains_request_settings_and_original_history_boundar
     mocker.patch.object(service, "get_conversation", return_value={"runtime_metadata_version": 0})
     mocker.patch.object(service, "get_current_run_user_message_id", return_value=23)
     compile_run = mocker.patch.object(service, "prepare_conversation_snapshot", return_value=snapshot)
-    request = service.AgentRequest.model_validate({**PAYLOAD.request, "model_id": 11, "reasoning_effort": "high"})
+    request = service.AgentRequest.model_validate({
+        **PAYLOAD.request, "model_id": 11, "requested_output_tokens": 128,
+    })
     prepared, turn = await service._prepare(request, REFERENCE, ACTOR)
     assert prepared is snapshot and turn["query"] == "hello" and turn["memory_agent_id"] == 7
     assert compile_run.await_args.args == (request, REFERENCE, "actor", "tenant")
     assert compile_run.await_args.kwargs["current_user_message_id"] == 23
     assert compile_run.await_args.kwargs["preserve_shared_reasoning"] is True
-    assert request.model_id == 11 and request.reasoning_effort == "high"
+    assert request.model_id == 11
+    assert request.requested_output_tokens == 128
 
 
 @pytest.mark.asyncio

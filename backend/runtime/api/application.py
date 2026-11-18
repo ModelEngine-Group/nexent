@@ -103,33 +103,37 @@ async def runtime_lifespan(_app):
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 
-        pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
-        if pending_stream_tasks:
-            logger.warning(
-                "Agent stream tasks exceeded shutdown grace pending=%s",
-                pending_stream_tasks,
-            )
-        from nexent.core.agents.sandbox.execution import SandboxPoolManager
-
-        sandbox_pool = SandboxPoolManager._instance
-        if sandbox_pool is not None:
-            sandbox_pool.shutdown(logger)
         try:
-            if local_trajectory_processor is not None:
-                local_trajectory_processor.request_stop()
-                await runtime_thread_manager.run(
-                    "control-io",
-                    ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
-                    local_trajectory_processor.shutdown,
+            pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
+            if pending_stream_tasks:
+                logger.warning(
+                    "Agent stream tasks exceeded shutdown grace pending=%s",
+                    pending_stream_tasks,
                 )
         finally:
             try:
-                await stop_system_configuration()
+                from nexent.core.agents.sandbox.execution import SandboxPoolManager
+
+                sandbox_pool = SandboxPoolManager._instance
+                if sandbox_pool is not None:
+                    sandbox_pool.shutdown(logger)
             finally:
                 try:
-                    await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                    if local_trajectory_processor is not None:
+                        local_trajectory_processor.request_stop()
+                        await runtime_thread_manager.run(
+                            "control-io",
+                            ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                            local_trajectory_processor.shutdown,
+                        )
                 finally:
-                    clear_default_thread_manager(runtime_thread_manager)
+                    try:
+                        await stop_system_configuration()
+                    finally:
+                        try:
+                            await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                        finally:
+                            clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(

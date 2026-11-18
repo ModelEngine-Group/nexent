@@ -5,6 +5,7 @@ Unit tests for backend monitoring utilities (OTLP-based).
 Tests the actual functionality and integration of the OTLP monitoring system.
 """
 
+import os
 import sys
 import types
 from unittest.mock import MagicMock
@@ -14,6 +15,9 @@ import pytest
 fake_consts = types.ModuleType("contracts.constants.environment")
 for name, value in {
     "ENABLE_TELEMETRY": False,
+    "ENABLE_MODEL_MONITORING": False,
+    "MODEL_MONITORING_BATCH_SIZE": 100,
+    "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS": 30,
     "MONITORING_PROVIDER": "otlp",
     "TRAJECTORY_READ_ENABLED": False,
     "TRAJECTORY_CLEANUP_ENABLED": False,
@@ -43,7 +47,11 @@ fake_consts_package.const = fake_consts
 sys.modules.setdefault("consts", fake_consts_package)
 sys.modules.setdefault("contracts.constants.environment", fake_consts)
 
-from infrastructure.trace.bootstrap import monitoring_manager
+with pytest.MonkeyPatch.context() as platform:
+    if os.name == "nt":
+        # These tests exercise telemetry configuration without writing trajectory files.
+        platform.setitem(sys.modules, "fcntl", types.ModuleType("fcntl"))
+    from infrastructure.trace.bootstrap import monitoring_manager
 
 
 class TestMonitoringUtilsModule:
@@ -260,9 +268,12 @@ class TestMonitoringUtilsModule:
         backend_consts = types.ModuleType("backend.contracts.constants.environment")
         for name, value in {
             "ENABLE_TELEMETRY": False,
+            "ENABLE_MODEL_MONITORING": False,
+            "MODEL_MONITORING_BATCH_SIZE": 100,
+            "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS": 30,
             "MONITORING_PROVIDER": "otlp",
-    "TRAJECTORY_READ_ENABLED": False,
-    "TRAJECTORY_CLEANUP_ENABLED": False,
+            "TRAJECTORY_READ_ENABLED": False,
+            "TRAJECTORY_CLEANUP_ENABLED": False,
             "MONITORING_PROJECT_NAME": "",
             "OTEL_SERVICE_NAME": "fallback-service",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
@@ -285,11 +296,12 @@ class TestMonitoringUtilsModule:
             setattr(backend_consts, name, value)
 
         monkeypatch.delitem(sys.modules, "consts", raising=False)
-        monkeypatch.delitem(sys.modules, "contracts.constants.environment", raising=False)
+        monkeypatch.setitem(sys.modules, "contracts.constants.environment", None)
         monkeypatch.setitem(sys.modules, "consts", types.ModuleType("consts"))
         monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", backend_consts)
 
         reloaded_module = importlib.reload(monitoring_module)
 
+        assert reloaded_module.environment is backend_consts
         assert reloaded_module.monitoring_manager is not None
         assert reloaded_module.__all__ == ["monitoring_manager"]
