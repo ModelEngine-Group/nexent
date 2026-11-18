@@ -144,6 +144,11 @@ class MessageObserver:
     MAX_TOKEN_BUFFER_SIZE = 10
     MAX_PROTOCOL_LOOKAHEAD_CHARS = 32
 
+    @property
+    def turn_complete(self) -> bool:
+        """Whether a trusted interaction boundary gracefully ends this turn."""
+        return False
+
     def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []

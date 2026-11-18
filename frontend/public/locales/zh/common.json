@@ -392,6 +392,8 @@
   "chat.thread.connecting": "连接中",
   "chat.thread.working": "智能体正在工作",
   "chat.thread.complete": "已完成",
+  "chat.thread.failed": "执行失败",
+  "chat.thread.stopped": "已停止",
   "chat.thread.runStartedAt": "运行开始于 {{time}}",
   "chat.thread.searchResults": "检索结果",
   "chat.thread.sourceCount": "{{count}} 个来源",

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-EXECUTION-RECOVERY-D3-001
+  feature_id: F-055
+  requirement_ids: [WB-EXECUTION-RECOVERY-20261116]
+  business_rule_ids: [F-055-RULE-01]
+  title: Execution replay survives trimmed local and shared stream tails
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove complete ordered checkpoint replay, cursor continuity and real terminal state with channel and shared-state collaboration.
+  preconditions: [Isolated Redis and streaming channels with controlled execution events.]
+  test_data: {profile: mock}
+  steps:
+  - order: 1
+    action: Publish code, tool and metric events followed by enough text deltas to trim count and byte windows.
+    expected: Local and shared resume recover all rendering and metric events from compact checkpoints.
+  - order: 2
+    action: Append newer events across checkpoint reads and reset for a retry while old writes arrive.
+    expected: Replay plus newer events has no gaps or duplicates and old generations cannot overwrite the retry.
+  - order: 3
+    action: End executions as completed, failed and stopped, then release subscribers.
+    expected: Terminal outcomes remain distinct and all owned resources close.
+  expected_results:
+  - Earlier code, tool output, text and timing survive trimming in order.
+  - Cursor handoff is complete and retry generations remain isolated.
+  - Completed, failed and stopped outcomes are preserved.
+  forbidden_side_effects:
+  - No model/tool execution, real persistent user mutation or leaked subscribers.
+  integration_boundary: [StreamingChannel, CompactReplay, RuntimeStateService, Redis]
+  observations: [Ordered compact replay, covered cursor, generation fence, terminal outcome]
+  cleanup: [Close subscribers, remove owned Redis container and clients]
+  acceptance:
+  - id: AC-01
+    description: Complete rendering and timing survive bounded tails.
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: Handoff and generation ownership preserve true terminal outcomes.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]
+  execution:
+    profiles: [{name: mock, required_services: []}]

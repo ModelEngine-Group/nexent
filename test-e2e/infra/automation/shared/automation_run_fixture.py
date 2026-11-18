@@ -19,7 +19,7 @@ from management.db.automation import messages, repository as runs
 from infrastructure.rdb.client import db_client
 from management.db.conversation import repository as conversations
 from management.db.models import (
-    AgentAutomationRun, AgentAutomationTask, ConversationMessage, ConversationMessageUnit,
+    AgentAutomationRun, AgentAutomationTask, AgentInfo, ConversationMessage, ConversationMessageUnit,
     ConversationRecord, ConversationSourceImage, ConversationSourceSearch,
 )
 
@@ -30,7 +30,7 @@ def run_store(monkeypatch):
     engine = db_client.engine.execution_options(schema_translate_map={"nexent": schema})
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
-        for model in (ConversationRecord, ConversationMessage, ConversationMessageUnit,
+        for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
                       ConversationSourceSearch, ConversationSourceImage, AgentAutomationTask, AgentAutomationRun):
             model.__table__.create(connection)
 

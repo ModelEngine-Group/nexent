@@ -2155,7 +2155,12 @@ Additional Args:
             self.current_plan = None
             self.current_step_index = 0
 
-        while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
+        while (
+            not returned_final_answer
+            and self.step_number <= max_steps
+            and not self.stop_event.is_set()
+            and getattr(self.observer, "turn_complete", False) is not True
+        ):
             step_start_time = time.time()
             interrupted = False
 
@@ -2423,7 +2428,11 @@ Additional Args:
                 final_answer_source="user_stop",
             )
 
-        if not returned_final_answer and not self.stop_event.is_set() and self.step_number == max_steps + 1:
+        if (
+            not returned_final_answer and not self.stop_event.is_set()
+            and getattr(self.observer, "turn_complete", False) is not True
+            and self.step_number == max_steps + 1
+        ):
             max_steps_data = json.dumps({
                 "completedSteps": self.step_number - 1,
                 "maxSteps": max_steps,

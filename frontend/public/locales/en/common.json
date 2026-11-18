@@ -394,6 +394,8 @@
   "chat.thread.connecting": "Connecting",
   "chat.thread.working": "Assistant is working",
   "chat.thread.complete": "Complete",
+  "chat.thread.failed": "Execution failed",
+  "chat.thread.stopped": "Stopped",
   "chat.thread.runStartedAt": "Run started at {{time}}",
   "chat.thread.searchResults": "Search results",
   "chat.thread.sourceCount": "{{count}} sources",

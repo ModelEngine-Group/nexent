@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""NB-OTEL-001: real Northbound/Runtime/model/tool trace via Phoenix."""
+"""NB-OTEL-D3-001: real Northbound/Runtime/model/tool trace via Phoenix."""
 
 import json
 import os
@@ -132,7 +132,7 @@ def test_nb_otel_001_unauthorized_trace_without_runtime(config):
                    or '/agent/internal/' in s['attributes'].get('http.route', '') for s in spans)
 
 
-pytestmark = [pytest.mark.case_id('NB-OTEL-001'), pytest.mark.stage('D3')]
+pytestmark = [pytest.mark.case_id('NB-OTEL-D3-001'), pytest.mark.stage('D3')]
 
 
 def test_nb_otel_001_disconnect_ends_http_but_keeps_persisted_run(config):
