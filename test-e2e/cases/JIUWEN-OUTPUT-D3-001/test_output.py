@@ -11,6 +11,80 @@ from jiuwen_resource_runtime import resource_provider,run_resources
 from jiuwen_collaboration_runtime import run_collaboration
 from jiuwen_bridge_runtime import run_worker,stop_infrastructure
 
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+@pytest.mark.parametrize("lang", ["zh", "en"])
+@pytest.mark.parametrize("scenario", ["auth", "tool_recovered", "mcp_timeout", "mcp_auth"])
+def test_failure_diagnostics_roundtrip(monkeypatch, tmp_path, protocol, lang, scenario):
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+    from management.services.conversation.service import get_conversation_history_service
+
+    private = "PRIVATE_EXCEPTION_NOT_FOR_CLIENTS"
+    if scenario == "tool_recovered":
+        original = JiuwenAdapter._business_handler
+
+        def bind(adapter, name, forward, **kwargs):
+            if name == "add":
+                def forward(**arguments):
+                    raise RuntimeError(private)
+            return original(adapter, name, forward, **kwargs)
+
+        monkeypatch.setattr(JiuwenAdapter, "_business_handler", bind)
+
+    with context_database(monkeypatch):
+        if scenario in {"mcp_timeout", "mcp_auth"}:
+            from nexent.core.utils.observer import MessageObserver
+            monkeypatch.setattr("jiuwen_resource_runtime.MessageObserver", lambda **kwargs: MessageObserver(lang=lang))
+            if scenario == "mcp_auth":
+                from jiuwen_bridge_fixture import provider
+
+                async def startup_auth_failure():
+                    async with provider("auth", "native") as (url, _):
+                        with resource_provider(tmp_path) as model_url:
+                            return await run_resources(monkeypatch, tmp_path, model_url, protocol,
+                                                       "startup_auth", mcp_url=url + "/mcp")
+
+                info, _, output, *_ = asyncio.run(startup_auth_failure())
+            else:
+                with resource_provider(tmp_path) as url:
+                    info, _, output, *_ = asyncio.run(run_resources(monkeypatch, tmp_path, url, protocol, "timeout"))
+        else:
+            info, _, output = asyncio.run(run_worker(monkeypatch, protocol,
+                "auth" if scenario == "auth" else "normal",
+                configure_run=lambda run: setattr(run.observer, "lang", lang)))
+        expected = "completed" if scenario == "tool_recovered" else "failed"
+        assert info.run_result.status == expected
+        if scenario != "tool_recovered":
+            code = {"auth": "MODEL_AUTHENTICATION_ERROR", "mcp_auth": "mcp_auth_failed",
+                    "mcp_timeout": "mcp_timeout"}[scenario]
+            assert info.run_result.error.category == code
+            if scenario == "auth":
+                assert ("模型" if lang == "zh" else "model") in info.run_result.error.safe_message.lower()
+            else:
+                assert "MCP" in info.run_result.error.safe_message
+                expected_text = (("鉴权" if lang == "zh" else "authentication") if scenario == "mcp_auth"
+                                 else ("超时" if lang == "zh" else "timed out"))
+                assert expected_text in info.run_result.error.safe_message
+        else:
+            errors = [item for item in output if item["type"] == "tool_result" and item["is_error"]]
+            assert any(item.get("error_code") == "tool_execution_error" for item in errors)
+            assert info.run_result.error is None
+        assistant, saved, wire = asyncio.run(persist_output(monkeypatch, info, output))
+        assert assistant["status"] == expected
+        public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines() if line.startswith("data:")]
+        restored = get_conversation_history_service(info.conversation_id, "owner")[0]
+        history = next(item for item in restored["message"] if item["role"] == "assistant")["message"]
+        assert private not in json.dumps([saved, public, history])
+        if scenario != "tool_recovered":
+            live_error = next(item for item in public if item["type"] == "error")
+            old_error = next(item for item in history if item["type"] == "error")
+            for key in ("content", "error_code", "retryable", "request_id"):
+                assert live_error[key] == old_error[key]
+            assert live_error["error_code"] == code
+            assert not any(item["type"] == "final_answer" for item in public)
+        else:
+            assert not any(item["type"] == "error" for item in public)
+
 @pytest.fixture(scope="module",autouse=True)
 def cleanup():
     yield

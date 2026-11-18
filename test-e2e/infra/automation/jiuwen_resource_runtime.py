@@ -81,7 +81,7 @@ def resource_provider(tmp_path):
             process.wait(timeout=5)
 
 
-async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal", *, docker_sandbox=False):
+async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal", *, docker_sandbox=False, mcp_url=None):
     def forbidden(*args, **kwargs):
         raise AssertionError("Native provider client or CodeAgent constructed")
 
@@ -162,7 +162,7 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
         observer=MessageObserver(lang="en"), stop_event=threading.Event(), thread_manager=manager,
         tenant_id="spike-tenant", user_context={"user_id": "captured-user"},
         sandbox_config=sandbox, workspace_path=str(tmp_path / "run") if docker_sandbox else None,
-        mcp_host=[url + "/mcp"], mcp_request_timeout_seconds=5, mcp_close_timeout_seconds=2,
+        mcp_host=[mcp_url or url + "/mcp"], mcp_request_timeout_seconds=5, mcp_close_timeout_seconds=2,
         mcp_tool_timeout_seconds=.4 if scenario == "timeout" else 10,
         model_config_list=[ModelConfig(cite_name="fixture", model_name=profile.identity.request_model_id,
             url=profile.connection.base_url, api_key="fixture-only", resolved_profile=profile)],
