@@ -42,10 +42,13 @@ def populate(store, identity, count):
         store._save_manifest(directory, meta)
 
 
-@pytest.mark.parametrize("count", [100, 101, 1000, 1001])
-def test_delete_limit_continuation_never_skips_a_file(store, identity, count):
+@pytest.mark.parametrize("count,delete_limit", [(100, 100), (101, 100), (1000, 1), (1001, 1)])
+def test_delete_limit_continuation_never_skips_a_file(store, identity, count, delete_limit):
     populate(store, identity, count)
-    expired_count = min(count, 101)
+    # Exercise the default deletion boundary and the scan boundary independently.
+    # Large manifests need only two expired files to prove deletion continuation;
+    # rewriting them for 101 deletions repeats the same proof at quadratic cost.
+    expired_count = min(count, delete_limit + 1)
     if count > expired_count:
         from infrastructure.observability.trajectory_store import timestamp
 
@@ -60,9 +63,13 @@ def test_delete_limit_continuation_never_skips_a_file(store, identity, count):
     after, deleted = 0, 0
     for _ in range(count // 100 + 2):
         result = store.cleanup(
-            identity, after_turn=after, now=fixtures.NOW + timedelta(days=30)
+            identity, after_turn=after, now=fixtures.NOW + timedelta(days=30),
+            delete_limit=delete_limit,
         )
-        assert result["deleted_runs"] <= 100 and result["scanned_runs"] <= 1000
+        assert result["deleted_runs"] <= delete_limit and result["scanned_runs"] <= 1000
+        if after == 0:
+            assert result["scanned_runs"] == min(count, 1000)
+            assert result["deleted_runs"] == delete_limit
         deleted += result["deleted_runs"]
         if result["next_turn"] is None:
             break

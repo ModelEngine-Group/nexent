@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from contracts.constants import environment
-from contracts.configuration import parse_positive_float
+from contracts.configuration import parse_similarity_threshold
 from contracts.nl2agent_resources import RequirementDiscoveryInput, VerificationCheck
 from services import nl2agent_resource_flow as flow
 
@@ -48,7 +48,7 @@ def test_embedding_threshold_configuration(mocker, value, expected):
               and name in ast.unparse(node.test)]
     assert nodes
     code = compile(ast.Module(body=nodes, type_ignores=[]), environment.__file__, "exec")
-    namespace = {"os": os, "parse_positive_float": parse_positive_float}
+    namespace = {"os": os, "parse_similarity_threshold": parse_similarity_threshold}
     if expected is None:
         with pytest.raises(ValueError):
             exec(code, namespace)
