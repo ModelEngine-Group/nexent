@@ -111,6 +111,15 @@ sys.modules['management.db.identity.user_tenant'] = MagicMock(
 sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
 
+# Stub management.db.models so the lazy import of ``TenantConfig`` inside
+# ``_lookup_first_active_tenant`` does NOT trigger SQLAlchemy metadata
+# registration or a real DB connection attempt.  Everything here is a
+# plain MagicMock — the function under test only uses TenantConfig as a
+# class passed to ``sqlalchemy.select()``; it never needs a real model.
+_management_db_models_mod = types.ModuleType("management.db.models")
+_management_db_models_mod.TenantConfig = MagicMock()
+sys.modules['management.db.models'] = _management_db_models_mod
+
 # Mock contracts.constants.environment but provide real LANGUAGE values for tests.
 # We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
 # ``LimitExceededError`` classes on the mock so tests that catch them can
