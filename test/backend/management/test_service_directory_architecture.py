@@ -195,6 +195,7 @@ MIGRATED_MODULES = {
     'knowledge_base/search_authorization.py',
     'knowledge_base/service.py',
     'knowledge_base/source_deletion.py',
+    'knowledge_base/source_inspection.py',
     'knowledge_base/storage.py',
     'knowledge_base/summary.py',
     'knowledge_base/summary_coordinator.py',
