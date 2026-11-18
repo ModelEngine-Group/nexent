@@ -61,15 +61,16 @@ async def run(args, *, service=None):
                 'actor_id':actor.user_id,'tenant_id':actor.tenant_id,'knowledge_id':args.knowledge_id,'file_id':args.file_id})
             service = service or LegacyMigrationService(cancellation_scope=scope)
             async with asyncio.timeout(context.remaining()):
+                archive = {'task_archive': args.task_archive} if getattr(args, 'task_archive', None) is not None else {}
                 if args.action == 'plan':
-                    plan = await service.plan(args.knowledge_id,args.file_id,actor,legacy_quiesced=args.legacy_quiesced,context=context)
+                    plan = await service.plan(args.knowledge_id,args.file_id,actor,legacy_quiesced=args.legacy_quiesced,context=context,**archive)
                     _emit(stream, {'kind':'migration_plan','plan_hash':plan_hash(plan),'intent':plan.model_dump(mode='json')})
                     state, row = 'planned', None
                 else:
                     plan = load_plan(args.plan)
                     if (plan.user_id != actor.user_id or plan.legacy_snapshot.tenant_id != actor.tenant_id
                         or plan.knowledge_id != args.knowledge_id or plan.file_id != args.file_id): raise ScopeDenied()
-                    row = await getattr(service,args.action)(plan,actor,context=context)
+                    row = await getattr(service,args.action)(plan,actor,context=context,**archive)
                     state = 'restored' if args.action == 'restore' else 'observed'
             context.remaining()
             matches = False
@@ -95,13 +96,15 @@ def main(argv=None):
     parser.add_argument('--tenant-id',required=True);parser.add_argument('--user-id',required=True)
     parser.add_argument('--knowledge-id',required=True,type=int);parser.add_argument('--file-id',required=True)
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--plan',type=Path)
+    parser.add_argument('--task-archive',type=Path,help='Complete private archive-tasks report for original PG task references')
     parser.add_argument('--legacy-quiesced',action='store_true',help='Operator confirms old admission and workers are stopped and drained')
     parser.add_argument('--timeout',type=int,default=300)
     args = parser.parse_args(argv)
     if (args.action != 'inspect' and not args.legacy_quiesced or not 1 <= args.timeout <= 3600 or args.knowledge_id <= 0
         or any(not value.strip() or len(value)>100 for value in (args.user_id,args.tenant_id))
         or len(args.file_id)!=32 or any(c not in '0123456789abcdef' for c in args.file_id)
-        or args.action!='plan' and args.plan is None or args.action=='plan' and args.plan is not None):
+        or args.action!='plan' and args.plan is None or args.action=='plan' and args.plan is not None
+        or args.task_archive is not None and args.action in {'inspect','restore'}):
         parser.error('Select a canonical file, actual actor/tenant, deadline 1..3600 and confirmed legacy quiescence; non-plan actions require --plan')
     try:
         print(json.dumps(asyncio.run(run(args))));return 0

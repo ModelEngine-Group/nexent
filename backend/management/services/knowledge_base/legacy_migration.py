@@ -21,6 +21,10 @@ from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
 from management.services.knowledge_base.ingestion_journal import IngestionJournal
+from management.services.knowledge_base.legacy_task_archive import (
+    task_references,
+    verify_task_archive,
+)
 from management.services.knowledge_base.search_authorization import (
     KnowledgeSearchAuthorizationPolicy,
 )
@@ -33,6 +37,7 @@ from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, Scop
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.knowledge_ingestion import knowledge_ingestion_ports
+from infrastructure.legacy_tasks import legacy_task_records
 
 
 @asynccontextmanager
@@ -43,11 +48,13 @@ async def _deadline(context):
 
 
 class LegacyMigrationService:
-    def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None, cancellation_scope=None):
+    def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None,
+                 cancellation_scope=None, tasks=legacy_task_records):
         self.ports = ports
         self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
         self.sources = sources or KnowledgeSourceInspector(cancellation_scope=cancellation_scope)
         self.parser_version = parser_version or environment.KNOWLEDGE_CLEANSE_PARSER_VERSION
+        self.tasks, self.cancellation_scope = tasks, cancellation_scope
 
     @staticmethod
     async def _blocking(method, *args):
@@ -66,19 +73,28 @@ class LegacyMigrationService:
             return row, resource
 
     @staticmethod
-    def _eligible(row):
+    def _eligible(row, *, archived_tasks=False):
         if (row['ingestion_request'] is not None or row['deletion_request'] is not None
             or row['status'] not in {'UPLOADED', 'COMPLETED', 'FAILED'}
-            or any(row[name] is not None for name in ('process_task_id', 'forward_task_id', 'parent_task_id'))):
+            or task_references(row) and not archived_tasks):
             raise Conflict()
+        if archived_tasks and not task_references(row): raise InvalidInput()
+
+    def _task_evidence(self, row, resource, actor, path, context, expected_hash=None):
+        if path is None:
+            if task_references(row) or expected_hash is not None: raise Conflict()
+            return None
+        return verify_task_archive(path, row, resource, actor, task_records=self.tasks, context=context,
+            cancellation_scope=self.cancellation_scope, expected_hash=expected_hash)
 
     def _source(self, plan, actor, context):
         page = self.sources.page(plan.knowledge_id, actor, file_id=plan.file_id, page_size=1, context=context)
         if (page.knowledge_revision != plan.legacy_snapshot.resource_revision or page.next_cursor is not None or len(page.files) != 1):
             raise Conflict()
         finding = page.files[0]
+        allowed = {'LEGACY_TASK_UNVERIFIED'} if plan.legacy_snapshot.task_archive_sha256 else set()
         if (finding.file_id != plan.file_id or finding.lifecycle_revision != plan.legacy_snapshot.lifecycle_revision
-            or finding.source_generation != plan.file_version or finding.issues or finding.candidate_source != plan.source):
+            or finding.source_generation != plan.file_version or set(finding.issues) - allowed or finding.candidate_source != plan.source):
             raise Conflict()
 
     async def _empty_runtime(self, plan, actor):
@@ -100,17 +116,19 @@ class LegacyMigrationService:
             or model.embedding_dimensions is None): raise Conflict()
         return model
 
-    async def plan(self, knowledge_id, file_id, actor, *, legacy_quiesced, context):
+    async def plan(self, knowledge_id, file_id, actor, *, legacy_quiesced, context, task_archive=None):
         if legacy_quiesced is not True: raise InvalidInput()
         async with _deadline(context):
             row, resource = await self._blocking(self._selected, knowledge_id, file_id, actor, context)
-            self._eligible(row)
+            self._eligible(row, archived_tasks=task_archive is not None)
+            archive_hash = await self._blocking(self._task_evidence, row, resource, actor, task_archive, context)
             metadata = await self._model(resource.embedding_model_id, actor)
             plan = KnowledgeIngestionIntent(knowledge_id=knowledge_id, file_id=file_id, file_version=row['source_generation'],
                 user_id=actor.user_id, attempt=row['processing_attempt']+1, filename=row['original_filename'], parser_version=self.parser_version,
                 source=ObjectReference(space=row['source_space'], key=row['source_key'], version=row['source_revision'], sha256=row['source_sha256']),
                 embedding_model={'model_id': metadata.model_id, 'revision': metadata.revision},
-                legacy_snapshot=LegacyIngestionSnapshot.capture(row, resource_revision=resource.revision, legacy_quiesced=True))
+                legacy_snapshot=LegacyIngestionSnapshot.capture(row, resource_revision=resource.revision,
+                    legacy_quiesced=True, task_archive_sha256=archive_hash))
             await self._blocking(self._source, plan, actor, context)
             await self._empty_runtime(plan, actor)
             final, final_resource = await self._blocking(self._selected, knowledge_id, file_id, actor, context)
@@ -133,6 +151,7 @@ class LegacyMigrationService:
         if not isinstance(plan, KnowledgeIngestionIntent) or plan.legacy_snapshot is None: raise InvalidInput()
         KnowledgeIngestionIntent.model_validate_json(plan.model_dump_json())
         if plan.user_id != actor.user_id or plan.legacy_snapshot.tenant_id != actor.tenant_id: raise ScopeDenied()
+        if bool(plan.legacy_snapshot.task_references) != bool(plan.legacy_snapshot.task_archive_sha256): raise InvalidInput()
         if check_parser and plan.parser_version != self.parser_version: raise Conflict()
 
     async def inspect(self, plan, actor, *, context):
@@ -148,14 +167,15 @@ class LegacyMigrationService:
         async with _deadline(context):
             return await self._blocking(observe)
 
-    async def admit(self, plan, actor, *, context):
+    async def admit(self, plan, actor, *, context, task_archive=None):
         self._plan(plan, actor)
         async with _deadline(context):
             row, resource = await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context)
             if row['ingestion_request'] is not None:
                 return await self._blocking(self._change, plan, actor, context, 'admit_legacy')
-            self._eligible(row)
+            self._eligible(row, archived_tasks=task_archive is not None)
             if resource.revision != plan.legacy_snapshot.resource_revision: raise Conflict()
+            await self._blocking(self._task_evidence, row, resource, actor, task_archive, context, plan.legacy_snapshot.task_archive_sha256)
             model = await self._model(plan.embedding_model.model_id, actor)
             if model.revision != plan.embedding_model.revision: raise Conflict()
             await self._blocking(self._source, plan, actor, context)
@@ -167,9 +187,9 @@ class LegacyMigrationService:
         async with _deadline(context):
             return await self._blocking(self._change, plan, actor, context, 'restore_legacy')
 
-    async def execute(self, plan, actor, *, context, coordinator=None):
+    async def execute(self, plan, actor, *, context, coordinator=None, task_archive=None):
         async with _deadline(context):
-            await self.admit(plan, actor, context=context)
+            await self.admit(plan, actor, context=context, task_archive=task_archive)
             if coordinator is None:
                 from management.services.knowledge_base.ingestion_dispatch import (
                     default_coordinator,

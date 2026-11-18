@@ -174,9 +174,10 @@ python -m management.maintenance.migration execute \
 
 `plan` verifies current edit DAC, the exact PG source/ledger, actual pinned object
 bytes, current model configuration and absence of a Runtime manifest for the file.
-This batch supports canonical IDs, fully pinned sources and no legacy task
-references. Other records remain blocked for explicit archival or identity/source
-review. It never guesses a mapping from a filename or copies legacy vectors.
+Source rebuild supports canonical IDs and fully pinned sources. Files with no
+legacy task references can be admitted directly. Referenced terminal tasks require
+the private archive and live verification described below. Other records remain
+blocked for explicit identity/source review. It never guesses a mapping from a filename or copies legacy vectors.
 
 `admit` writes one immutable ingestion snapshot using the existing lifecycle CAS.
 The snapshot preserves original status, errors, progress, terminal timestamps and
@@ -256,3 +257,45 @@ command never changes TTLs, clears PG task references, deletes keys, invokes
 Celery or replays work. A completed archive alone does not authorize source
 rebuild or prove retirement. Verify the remaining mapping and cutover steps
 before removing any legacy data.
+
+
+## Rebuild files with archived task references
+
+For an otherwise eligible source, pass the same complete private archive when
+planning and first admitting or executing the rebuild:
+
+```sh
+python -m management.maintenance.migration plan \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID --legacy-quiesced \
+  --task-archive /maintenance/kb-123-task-archive.jsonl \
+  --output /maintenance/file-plan.jsonl
+
+python -m management.maintenance.migration execute \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID --legacy-quiesced \
+  --task-archive /maintenance/kb-123-task-archive.jsonl \
+  --plan /maintenance/file-plan.jsonl --output /maintenance/file-execution.jsonl
+```
+
+The archive must belong to the same actual operator, tenant, KB and current
+resource revision, contain a complete finished traversal and identify every PG
+reference without ambiguity. Only SUCCESS, FAILURE and REVOKED tasks qualify.
+The command compares live scoped RecordStore results and auxiliary key bytes
+against the archive. Changed, expired or unknown results stop admission. TTL
+countdown does not change content identity; no TTL is modified. The archive is
+limited to 1 GiB with at most 128 MiB per JSONL line. Use the archive command's
+default page size of one for large task exports. Invalid/oversized reports stop
+without truncation or replay.
+
+One lifecycle CAS persists the archive's exact byte SHA-256 and the three original
+task references, then assigns the standard cleanse task pointer. The existing
+16 KiB intent limit still applies. No local archive path or Redis payload enters
+AgentOS requests. Keep the archive itself in private persistent storage.
+
+Once this plan is admitted, repeated admission observes its existing durable
+receipt without re-reading Redis or the archive. `inspect` and pre-execution
+`restore` do not accept `--task-archive`; they use the persisted plan. `restore`
+also restores the original task references, while old workers remain quiesced.
+It still rejects any reserved child execution. Actual processing and retirement
+completion require the remaining execution, cutover and rollback acceptance.

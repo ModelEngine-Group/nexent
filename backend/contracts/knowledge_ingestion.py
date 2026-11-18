@@ -2,7 +2,7 @@
 """Management-owned immutable ingestion intent; no credentials or provider setup."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from contracts.agentos_knowledge import (
     Contract,
@@ -52,13 +52,25 @@ class LegacyIngestionSnapshot(Contract):
     previous: LegacyFileState
     original_updated_by: str | None = None
     original_update_time: str | None = None
+    task_archive_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    task_references: dict[Literal['process_task_id', 'forward_task_id', 'parent_task_id'],
+                          Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]] = Field(default_factory=dict, max_length=3)
+
+    @model_serializer(mode='wrap')
+    def serialize_snapshot(self, handler):
+        value = handler(self)
+        if self.task_archive_sha256 is None: value.pop('task_archive_sha256', None)
+        if not self.task_references: value.pop('task_references', None)
+        return value
 
     @classmethod
-    def capture(cls, row, *, resource_revision, legacy_quiesced):
+    def capture(cls, row, *, resource_revision, legacy_quiesced, task_archive_sha256=None):
         updated = row.get('update_time')
         return cls(tenant_id=row['tenant_id'], resource_revision=resource_revision, lifecycle_revision=row['version'],
                    legacy_quiesced=legacy_quiesced, previous=LegacyFileState.capture(row), original_updated_by=row.get('updated_by'),
-                   original_update_time=updated.isoformat() if isinstance(updated, datetime) else updated)
+                   original_update_time=updated.isoformat() if isinstance(updated, datetime) else updated,
+                   task_archive_sha256=task_archive_sha256,
+                   task_references={name: row[name] for name in ('process_task_id', 'forward_task_id', 'parent_task_id') if row.get(name) is not None})
 
 
 class KnowledgeIngestionIntent(KnowledgeFileReference):

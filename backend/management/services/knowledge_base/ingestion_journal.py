@@ -154,9 +154,10 @@ class IngestionJournal:
         if row['ingestion_request'] is not None:
             if self.request(row) != intent: raise Conflict()
             return row
-        if (LegacyIngestionSnapshot.capture(row, resource_revision=snapshot.resource_revision, legacy_quiesced=True) != snapshot
+        if (LegacyIngestionSnapshot.capture(row, resource_revision=snapshot.resource_revision, legacy_quiesced=True,
+                task_archive_sha256=snapshot.task_archive_sha256) != snapshot
             or intent.attempt != row['processing_attempt'] + 1
-            or any(row[name] is not None for name in ('process_task_id', 'forward_task_id', 'parent_task_id'))):
+            or bool(snapshot.task_references) != bool(snapshot.task_archive_sha256)):
             raise Conflict()
         return self._accept(intent, row, context)
 
@@ -166,14 +167,15 @@ class IngestionJournal:
         snapshot = intent.legacy_snapshot
         if snapshot.tenant_id != self.records.scope.tenant_id: raise ScopeDenied()
         if row['ingestion_request'] is None:
-            if LegacyFileState.capture(row) != snapshot.previous: raise Conflict()
+            if (LegacyFileState.capture(row) != snapshot.previous or snapshot.task_references != {
+                name: row[name] for name in ('process_task_id', 'forward_task_id', 'parent_task_id') if row.get(name) is not None}): raise Conflict()
             return row
         if (self.request(row) != intent or row['stage'] != 'INGEST_ACCEPTED'
             or row['cleanse_status'] is not None or row['runtime_status'] is not None
             or row['forward_task_id'] is not None or row['parent_task_id'] is not None):
             raise Conflict()
         return self._patch(row, {**snapshot.previous.model_dump(), 'ingestion_request': None,
-            'process_task_id': None, 'forward_task_id': None, 'parent_task_id': None}, context)
+            'process_task_id': None, 'forward_task_id': None, 'parent_task_id': None, **snapshot.task_references}, context)
 
     def _accept(self, intent, row, context):
         return self._patch(

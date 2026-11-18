@@ -88,6 +88,8 @@ def test_absent_archive_preserves_normal_shape_and_never_enters_child_requests(l
     _,plan,_=legacy
     assert 'legacy_snapshot' not in intent().model_dump()
     assert plan.legacy_snapshot.previous.error_message=='original failure details'
+    assert 'task_archive_sha256' not in plan.legacy_snapshot.model_dump()
+    assert 'task_references' not in plan.legacy_snapshot.model_dump()
     for request in (plan.cleanse_request(),plan.runtime_request(plan.source)):
         serialized=request.model_dump_json()
         assert 'legacy_snapshot' not in serialized and 'original failure details' not in serialized

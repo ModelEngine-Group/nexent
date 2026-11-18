@@ -40,6 +40,18 @@ async def test_complete_plan_can_be_loaded_and_applied_explicitly(cli):
     s.service.execute.assert_not_awaited()
 
 
+async def test_archive_path_is_forwarded_only_to_explicit_plan_and_admission(cli):
+    s = cli
+    s.args.task_archive = s.args.output.with_name('private-task-archive.jsonl')
+    await module.run(s.args, service=s.service)
+    assert s.service.plan.call_args.kwargs['task_archive'] == s.args.task_archive
+    s.args.plan = s.args.output
+    s.args.output = s.args.plan.with_name('admission.jsonl')
+    s.args.action = 'admit'
+    await module.run(s.args, service=s.service)
+    assert s.service.admit.call_args.kwargs['task_archive'] == s.args.task_archive
+
+
 async def test_execute_and_restore_distinguish_new_completion_from_old_completed_state(cli):
     s=cli;await module.run(s.args,service=s.service)
     s.args.plan=s.args.output
