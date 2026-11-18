@@ -43,6 +43,7 @@ if #KEYS > 1 then
         redis.call('EXPIRE', KEYS[4], ARGV[7])
         redis.call('EXPIRE', KEYS[5], ARGV[8])
         redis.call('EXPIRE', KEYS[6], ARGV[9])
+        redis.call('EXPIRE', KEYS[7], ARGV[7])
     end
 end
 return 1
@@ -161,7 +162,7 @@ class SandboxRunCoordinator:
     def _state_keys(lease):
         prefix = 'runtime:ksm:state:' + lease.business_key
         run = prefix + ':' + lease.run_id
-        return (prefix + ':current', run, run + ':stream', run + ':done', run + ':cancel')
+        return (prefix + ':current', run, run + ':stream', run + ':done', run + ':cancel', run + ':stream:replay')
 
     def redis_key(self, business_key):
         return 'runtime:ksm:lease:' + business_key
@@ -430,7 +431,7 @@ class SandboxRunCoordinator:
             try:
                 self.client.eval(_RELEASE, 1, self.redis_key(lease.business_key), *self._args(lease))
                 if self._state_ttls is not None:
-                    index, run, stream, done, cancel = self._state_keys(lease)
+                    keys = self._state_keys(lease)
                     self.client.eval("""
                         if redis.call('HGET', KEYS[2], 'generation') ~= ARGV[1] then return 0 end
                         if redis.call('HGET', KEYS[1], 'generation') == ARGV[1] then
@@ -438,7 +439,7 @@ class SandboxRunCoordinator:
                         end
                         for i = 2, #KEYS do redis.call('EXPIRE', KEYS[i], ARGV[2]) end
                         return 1
-                    """, 5, index, run, stream, done, cancel, lease.run_id, self._state_ttls[2])
+                    """, len(keys), *keys, lease.run_id, self._state_ttls[2])
             except Exception:
                 self.lost_coordination.set()
             # Under the current-pointer lock, a proved completed local worker is

@@ -206,10 +206,6 @@ export const API_ENDPOINTS = {
     labels: `${API_BASE_URL}/tool/labels`,
     updateLabels: `${API_BASE_URL}/tool/labels`,
   },
-  prompt: {
-    optimize: `${API_BASE_URL}/prompt/optimize`,
-    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
-  },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
     config: `${API_BASE_URL}/evaluation-sets/config`,
@@ -973,7 +969,11 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-          errorDetails = errorDetail.details;
+          errorDetails =
+            errorDetail.details ??
+            (typeof errorDetail.field === "string"
+              ? { field: errorDetail.field }
+              : undefined);
         } else if (Array.isArray(errorData?.detail)) {
           errorMessage = "Validation failed";
           errorDetails = {

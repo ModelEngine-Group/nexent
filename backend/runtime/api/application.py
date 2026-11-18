@@ -4,8 +4,10 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-from infrastructure.concurrency import runtime_thread_manager
+from backend.http.server.app_factory import create_app
+from runtime.api.agent.execution import agent_runtime_router as agent_router
+from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
+from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from management.api.automation.agent_automation import (
     conversation_automation_router,
 )
@@ -19,13 +21,15 @@ from management.api.conversation.conversation_share import (
     router as conversation_share_router,
 )
 from management.api.conversation.workbench_pins import router as workbench_pins_router
+from runtime.api.file.upload import file_management_runtime_router as file_management_router
+from runtime.api.skill.creation import skill_creator_router
+from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.identity_routes import is_runtime_service_request
 from management.configuration.runtime import (
     start_system_configuration,
     stop_system_configuration,
 )
-from management.services.agent.run_state import runtime_state_service
-from management.utils.app_factory import create_app
-from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -33,14 +37,9 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from runtime.api.agent.execution import agent_runtime_router as agent_router
-from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
-from runtime.api.file.upload import (
-    file_management_runtime_router as file_management_router,
-)
-from runtime.api.skill.creation import skill_creator_router
 from runtime.api.sandbox import router as sandbox_router
-from runtime.api.voice.streaming import voice_runtime_router as voice_router
+from runtime.thread_management import runtime_thread_manager
+from infrastructure.redis.run_state import creator_runtime_state_service, runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
@@ -74,6 +73,7 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
+    creator_runtime_state_service.set_thread_manager(runtime_thread_manager)
 
     async def run_configuration_io(fn):
         return await runtime_thread_manager.run(
@@ -85,14 +85,14 @@ async def runtime_lifespan(_app):
             fn,
         )
 
-    from infrastructure.observability.bootstrap import local_trajectory_processor
+    from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
         configuration_runtime = await start_system_configuration(run_configuration_io)
         if _app is not None:
             _app.state.configuration_runtime = configuration_runtime
         if local_trajectory_processor is not None:
-            from infrastructure.observability.trajectory_runtime import (
+            from infrastructure.trace.trajectory_runtime import (
                 conversation_deleted,
             )
 
@@ -101,7 +101,7 @@ async def runtime_lifespan(_app):
                 runtime_thread_manager,
                 ManagedThreadSpec(
                     task_name="trajectory-file-writer",
-                    owner="infrastructure.observability.trajectory_runtime",
+                    owner="infrastructure.trace.trajectory_runtime",
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
@@ -124,26 +124,34 @@ async def runtime_lifespan(_app):
             from management.services.agent.execution import (
                 shutdown_agent_stream_tasks,
             )
-
-            pending_stream_tasks = await shutdown_agent_stream_tasks(
-                timeout=max(0, shutdown_deadline - time.monotonic())
+            from management.services.conversation.creator_runtime import (
+                shutdown_creator_streams,
             )
-            if pending_stream_tasks:
-                logger.warning(
-                    "Agent stream tasks exceeded shutdown grace pending=%s",
-                    pending_stream_tasks,
-                )
-            from nexent.core.agents.sandbox.execution import SandboxPoolManager
 
-            sandbox_pool = SandboxPoolManager._instance
-            if sandbox_pool is not None:
-                if distributed:
-                    await runtime_thread_manager.run(
-                        'control-io', ManagedTaskSpec(task_name='sandbox-pool-shutdown', owner='runtime'),
-                        sandbox_pool.shutdown, logger,
+            try:
+                await shutdown_creator_streams(
+                    timeout=max(0, shutdown_deadline - time.monotonic())
+                )
+            finally:
+                pending_stream_tasks = await shutdown_agent_stream_tasks(
+                    timeout=max(0, shutdown_deadline - time.monotonic())
+                )
+                if pending_stream_tasks:
+                    logger.warning(
+                        "Agent stream tasks exceeded shutdown grace pending=%s",
+                        pending_stream_tasks,
                     )
-                else:
-                    sandbox_pool.shutdown(logger)
+                from nexent.core.agents.sandbox.execution import SandboxPoolManager
+
+                sandbox_pool = SandboxPoolManager._instance
+                if sandbox_pool is not None:
+                    if distributed:
+                        await runtime_thread_manager.run(
+                            'control-io', ManagedTaskSpec(task_name='sandbox-pool-shutdown', owner='runtime'),
+                            sandbox_pool.shutdown, logger,
+                        )
+                    else:
+                        sandbox_pool.shutdown(logger)
         finally:
             try:
                 if local_trajectory_processor is not None:
@@ -171,6 +179,8 @@ app = create_app(
     title="Nexent Runtime API",
     description="Runtime APIs",
     lifespan=runtime_lifespan,
+    gateway_identity_audience="runtime",
+    internal_runtime_request=is_runtime_service_request,
 )
 if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager

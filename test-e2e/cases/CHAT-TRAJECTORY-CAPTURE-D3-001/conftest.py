@@ -21,8 +21,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import TrajectoryFileStore
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.orchestration.entry import agent_run_thread

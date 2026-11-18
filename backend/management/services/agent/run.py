@@ -21,7 +21,7 @@ from management.services.agent.lifecycle import (
     agent_run_manager,
 )
 from management.services.agent.background import BackgroundExecutionState
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preprocessing import (
     preprocess_manager,
@@ -68,12 +68,10 @@ from management.services.conversation.service import (
 from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -618,7 +616,9 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generati
     """
     # Stop agent run
     ref_options = current_reference_options(tenant_id, user_id, conversation_id)
-    if expected_generation is None:
+    if ref_options and ref_options['run_ref'] is None:
+        agent_stopped = agent_run_manager.stop_creator_run(conversation_id, user_id, expected_generation)
+    elif expected_generation is None:
         agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, **ref_options)
     else:
         agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, expected_generation=expected_generation,

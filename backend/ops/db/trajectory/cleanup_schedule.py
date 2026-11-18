@@ -7,7 +7,7 @@ from sqlalchemy import func, select, text
 
 # isort: split
 from contracts.trajectory import CleanupPolicy
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.configuration.models import TenantConfig
 
 SCHEDULE_KEY = "trajectory.cleanup_schedule"

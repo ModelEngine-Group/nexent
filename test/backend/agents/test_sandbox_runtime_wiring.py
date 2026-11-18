@@ -70,7 +70,7 @@ def test_request_binding_requires_lease_and_updates_reference(monkeypatch, confi
 
 @pytest.fixture
 def admission(monkeypatch, configured):
-    thread_module = importlib.import_module('infrastructure.concurrency')
+    thread_module = importlib.import_module('runtime.thread_management')
     manager = Mock(wait_until_started=AsyncMock())
     deferred = Mock(is_bound=False)
     run_manager = Mock()

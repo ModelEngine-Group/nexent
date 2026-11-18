@@ -74,13 +74,12 @@ async def test_cancelled_admission_cleans_up_late_exact_reservation(monkeypatch,
     import asyncio
     from concurrent.futures import Future
     from unittest.mock import Mock
-    from infrastructure import concurrency
-    from runtime import identity
+    from runtime import identity, thread_management
 
     future = Future()
     manager, thread_manager = Mock(), Mock()
     thread_manager.submit.return_value = SimpleNamespace(future=future)
-    monkeypatch.setattr(concurrency, 'runtime_thread_manager', thread_manager)
+    monkeypatch.setattr(thread_management, 'runtime_thread_manager', thread_manager)
     if outcome == 'release_failed':
         manager.release_agent_run_reservation.side_effect = OSError('Redis unavailable')
     task = asyncio.create_task(identity.reserve_runtime_run(manager, 7, 'user', tenant_id='tenant'))

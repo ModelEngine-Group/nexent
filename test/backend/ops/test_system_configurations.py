@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,

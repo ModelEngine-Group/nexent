@@ -6,9 +6,12 @@ from contextlib import contextmanager
 from dataclasses import replace
 from unittest.mock import Mock
 
+import fakeredis
 import pytest
+from management.services.agent.replay import CompactReplay
 from runtime.sandbox_coordination import SandboxRunBusy, SandboxRunCoordinator, SandboxRunLifecycle
 from runtime.sandbox_journal import SandboxCoordinationUnknown, SandboxRunJournal
+from runtime.sandbox_stream_state import SandboxStreamState
 from runtime.sandbox_workspace import KubernetesWorkspace
 
 from nexent.core.agents.sandbox_contracts import SandboxOwner
@@ -176,12 +179,35 @@ def test_owner_and_stream_ttls_are_renewed_together_and_completion_uses_retentio
     coordinator.renew_active()
     assert pipeline.eval.call_count == 2
     renewal = pipeline.eval.call_args.args
-    assert renewal[1] == 6
+    assert renewal[1] == 7
     assert renewal[-4:] == (3, 6, 9, 12)
     assert coordinator.finish(lease)
     retention = coordinator.client.eval.call_args.args
-    assert retention[1] == 5 and retention[-2:] == (lease.run_id, 9)
+    assert retention[1] == 6 and retention[-2:] == (lease.run_id, 9)
     assert coordinator.active_count == 0
+
+
+def test_active_lease_renews_compact_replay_until_completion(coordinator):
+    coordinator.client = fakeredis.FakeRedis(decode_responses=True)
+    state = SandboxStreamState(coordinator, run_ttl=30, stream_ttl=6, completed_ttl=9,
+                               cancel_ttl=12, max_stream_length=100)
+    lease = coordinator.reserve('tenant', 'user', 7, 'a' * 32)
+    coordinator.activate(lease)
+    ref = coordinator.reference(lease)
+    state.reset_stream('user', 7, run_ref=ref)
+    replay = CompactReplay()
+    first = 'data: {"type":"final_answer","content":"first "}\n\n'
+    state.append_stream_event('user', 7, first, run_ref=ref, replay_update=replay.append(first))
+    checkpoint_key = state.keys(ref)[2] + ':replay'
+    assert coordinator.client.expire(checkpoint_key, 1)
+    coordinator.renew_active()
+    assert coordinator.client.ttl(checkpoint_key) > 1
+
+    second = 'data: {"type":"final_answer","content":"second"}\n\n'
+    state.append_stream_event('user', 7, second, run_ref=ref, replay_update=replay.append(second))
+    assert state.read_replay_checkpoint('user', 7, run_ref=ref)['entries'][0]['content'] == 'first second'
+    assert coordinator.finish(lease)
+    assert coordinator.client.ttl(checkpoint_key) > state.stream_ttl
 
 
 @pytest.mark.parametrize('response', [-1, OSError('Redis unavailable')])

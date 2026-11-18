@@ -133,7 +133,7 @@ def test_context_uses_server_receipt_only_for_local_capture(
     )
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.observability.bootstrap",
+        "infrastructure.trace.bootstrap",
         SimpleNamespace(monitoring_manager=manager),
     )
     monkeypatch.setitem(

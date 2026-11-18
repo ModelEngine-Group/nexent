@@ -86,7 +86,7 @@ def _base_task():
 @pytest.mark.parametrize('outcome', ['completed', 'failed', 'remote_cancel', 'busy'])
 async def test_distributed_automation_owns_admission_until_business_finalization(monkeypatch, outcome):
     from management.services.agent.lifecycle import AgentRunAlreadyActiveError
-    from management.services.agent.run_state import runtime_state_service
+    from infrastructure.redis.run_state import runtime_state_service
     from runtime import sandbox_runtime
 
     module = _load_runner_with_stubs(monkeypatch)

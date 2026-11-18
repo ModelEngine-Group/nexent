@@ -24,7 +24,7 @@ def recover_runtime_tasks() -> dict[str, int]:
     from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
     from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
     from management.db.conversation.repository import fail_streaming_assistant_messages
-    from management.services.agent.run_state import runtime_state_service
+    from infrastructure.redis.run_state import runtime_state_service
 
     messages = fail_streaming_assistant_messages()
     for message in messages:
@@ -104,7 +104,7 @@ def recover_northbound_tasks() -> dict[str, int]:
 def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int:
     """Fail old uploads owned by a restarted service and remove partial objects."""
     from management.db.file.attachment import delete_file
-    from management.db.client import minio_client
+    from infrastructure.object_storage.client import minio_client
     from management.db.knowledge_base.file_lifecycle import list_uploading_files_created_before, transition_file_record
 
     failed = 0
@@ -160,24 +160,31 @@ def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int
     return failed
 
 
-async def schedule_interrupted_upload_cleanup(upload_owner_service: str) -> None:
+async def schedule_interrupted_upload_cleanup(upload_owner_service: str, *, thread_manager=None) -> asyncio.Task:
     """Clean this service's old uploads now and again after the grace period."""
     startup_time = datetime.utcnow()
     immediate_cutoff = startup_time - timedelta(seconds=UPLOAD_RECOVERY_GRACE_SECONDS)
-    await asyncio.to_thread(
-        fail_interrupted_uploads,
-        immediate_cutoff,
-        upload_owner_service,
-    )
+
+    async def cleanup(cutoff):
+        if thread_manager is None:
+            await asyncio.to_thread(fail_interrupted_uploads, cutoff, upload_owner_service)
+        else:
+            from nexent.core.concurrency import ManagedTaskSpec
+
+            await thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="recover-interrupted-uploads", owner="management.recovery"),
+                fail_interrupted_uploads, cutoff, upload_owner_service,
+            )
+
+    await cleanup(immediate_cutoff)
 
     async def _delayed_cleanup() -> None:
         await asyncio.sleep(UPLOAD_RECOVERY_GRACE_SECONDS)
-        await asyncio.to_thread(
-            fail_interrupted_uploads,
-            startup_time,
-            upload_owner_service,
-        )
+        await cleanup(startup_time)
 
     task = asyncio.create_task(_delayed_cleanup())
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
+    return task
+

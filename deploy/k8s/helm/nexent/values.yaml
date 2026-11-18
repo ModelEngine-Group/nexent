@@ -122,7 +122,7 @@ nexent-runtime:
   replicaCount: 1
 nexent-mcp:
   enabled: true
-nexent-northbound:
+nexent-gateway:
   enabled: true
   replicaCount: 1
 nexent-web:

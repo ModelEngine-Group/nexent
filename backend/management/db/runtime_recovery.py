@@ -5,7 +5,7 @@
 from sqlalchemy import exists, func, select, update
 
 from contracts.evaluation import EvalRunStatus
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import (
     AgentAutomationRun,
     AgentAutomationTask,

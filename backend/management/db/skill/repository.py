@@ -14,9 +14,9 @@ from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, SKILL_DESCRIPTION_MAX_LENGTH
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
-from management.utils.orm import filter_property, as_dict
+from infrastructure.rdb.orm import filter_property, as_dict
 from management.utils.serialization import convert_list_to_string, convert_string_to_list
 from management.utils.skill_params import strip_params_comments_for_db
 

@@ -6,7 +6,7 @@ import json
 import logging
 
 import pytest
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
@@ -14,7 +14,7 @@ from ops.services.trajectory.primitives import QueryError
 
 
 def audit_context(**kwargs):
-    from infrastructure.observability.trajectory_audit import cleanup_audit
+    from infrastructure.trace.trajectory_audit import cleanup_audit
 
     return cleanup_audit(
         source="scheduled",
@@ -88,7 +88,7 @@ def test_periodic_empty_scans_do_not_generate_audit_noise(caplog):
 
 
 def test_audit_failure_keeps_original_result_and_error(monkeypatch):
-    from infrastructure.observability import trajectory_audit
+    from infrastructure.trace import trajectory_audit
 
     def fail(*args, **kwargs):
         raise OSError("controlled log handler failure")

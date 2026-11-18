@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Administrator branch of the existing latest-Agent conversation directory."""
 
-from infrastructure.observability.trajectory_store import business_id
+from infrastructure.trace.trajectory_store import business_id
 
 from .access import authorize
 from .primitives import QueryError

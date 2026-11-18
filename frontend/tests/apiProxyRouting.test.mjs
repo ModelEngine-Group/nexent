@@ -9,11 +9,6 @@ const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 const start = source.indexOf("function handleAllApiProxy(");
 const end = source.indexOf("// ======================", start);
 assert.ok(start >= 0 && end > start);
-const trajectoryHelperStart = source.indexOf(
-  "function isTrajectoryOpsRequest("
-);
-assert.ok(trajectoryHelperStart > end);
-
 function dispatch(method, pathname) {
   const calls = [];
   const context = vm.createContext({
@@ -22,7 +17,6 @@ function dispatch(method, pathname) {
       "/api/user/refresh_token",
     ]),
     HTTP_BACKEND: "http://config:5010",
-    OPS_HTTP_BACKEND: "http://ops:5016",
     PROXY_TIMEOUT_MS: 100,
     SSE_PROXY_TIMEOUT_MS: 200,
     forwardAuthRequest: (_req, _res, target) =>
@@ -34,7 +28,7 @@ function dispatch(method, pathname) {
     proxy: { web: (_req, _res, config) => calls.push(config) },
   });
   vm.runInContext(
-    source.slice(start, end) + source.slice(trajectoryHelperStart),
+    source.slice(start, end),
     context
   );
   const req = { method, url: pathname };
@@ -53,11 +47,11 @@ for (const [method, path, target] of [
   ["POST", "/api/file/preprocess", "runtime"],
   ["POST", "/api/agent/run", "runtime"],
   ["GET", "/api/conversation/42", "runtime"],
-  ["GET", "/api/trajectory/records", "ops"],
-  ["GET", "/api/trajectory/conversations/42", "ops"],
-  ["GET", "/api/trajectory/conversations/42/snapshot", "ops"],
-  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "ops"],
-  ["POST", "/api/trajectory/cleanup", "ops"],
+  ["GET", "/api/trajectory/records", "config"],
+  ["GET", "/api/trajectory/conversations/42", "config"],
+  ["GET", "/api/trajectory/conversations/42/snapshot", "config"],
+  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "config"],
+  ["POST", "/api/trajectory/cleanup", "config"],
   ["GET", "/api/trajectory_config", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
@@ -67,7 +61,7 @@ for (const [method, path, target] of [
     assert.equal(
       result.calls[0].target,
       `http://${target}:${
-        target === "config" ? 5010 : target === "ops" ? 5016 : 5014
+        target === "config" ? 5010 : 5014
       }`
     );
   });
@@ -89,19 +83,15 @@ test("authentication interception and streaming timeout are preserved", () => {
   });
 });
 
-test("system configuration requests reach ops through the same-origin proxy", () => {
-  for (const [method, path, forwarded] of [
-    ["GET", "/api/system_configurations", "/system_configurations"],
-    ["PATCH", "/api/system_configurations", "/system_configurations"],
-    [
-      "POST",
-      "/api/system_configurations/recommendations",
-      "/system_configurations/recommendations",
-    ],
+test("system configuration requests preserve their URL through the Gateway proxy", () => {
+  for (const [method, path] of [
+    ["GET", "/api/system_configurations"],
+    ["PATCH", "/api/system_configurations"],
+    ["POST", "/api/system_configurations/recommendations"],
   ]) {
     const result = dispatch(method, path);
     assert.equal(result.handled, true);
-    assert.equal(result.calls[0].target, "http://ops:5016");
-    assert.equal(result.req.url, forwarded);
+    assert.equal(result.calls[0].target, "http://config:5010");
+    assert.equal(result.req.url, path);
   }
 });

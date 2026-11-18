@@ -34,7 +34,7 @@ def signal_distributed_cancel(client, *, deployment_id, namespace, tenant_id, us
 
 def request_distributed_cancel(tenant_id, user_id, conversation_id, expected_generation=None):
     from contracts.constants import environment as settings
-    from management.services.agent.run_state import runtime_state_service
+    from infrastructure.redis.run_state import runtime_state_service
 
     return signal_distributed_cancel(runtime_state_service.client,
         deployment_id=settings.NEXENT_RUNTIME_DEPLOYMENT_ID, namespace=settings.KUBERNETES_NAMESPACE,

@@ -52,7 +52,7 @@ utils_mock.str_utils.convert_list_to_string = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -70,17 +70,17 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -485,8 +485,12 @@ def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
     monkeypatch.setattr(
         "management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
 
+    lookup = MagicMock(return_value=None)
+    monkeypatch.setattr("management.db.identity.user_tenant.get_user_tenant_by_user_id", lookup)
     ok = soft_delete_user_tenant_by_user_id("none", "test_user")
     assert ok is False
+    lookup.assert_called_once_with("none")
+    mock_ctx.__enter__.assert_not_called()
 
 
 def test_get_users_by_tenant_id_success_with_pagination(monkeypatch, mock_session):

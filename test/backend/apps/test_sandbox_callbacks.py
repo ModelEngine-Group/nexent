@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from backend.http.server.app_factory import create_app
+from contracts.constants import environment
 from runtime.api import sandbox
 
 from nexent.core.agents.sandbox.execution import _ToolBridge
@@ -15,7 +17,7 @@ from nexent.core.tools.run_skill_script_tool import SkillScriptExecutionError
 
 
 @pytest.fixture
-def callback(monkeypatch):
+def callback(monkeypatch, request):
     registry = SandboxCallbackRegistry(SandboxOwner('release', 'test', 'runtime', 'uid', '10.0.0.1', 'epoch'))
     bridge = _ToolBridge(logging.getLogger(__name__), registry=registry,
                          endpoint='http://10.0.0.1:5014/internal/sandbox/tool-invoke')
@@ -28,7 +30,13 @@ def callback(monkeypatch):
 
     monkeypatch.setattr(sandbox, 'current_callback_registry', lambda: registry)
     monkeypatch.setattr(sandbox, 'runtime_thread_manager', SimpleNamespace(run=dispatch))
-    app = FastAPI()
+    if getattr(request, "param", False):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "sandbox-callback-fixture-signing-key")
+        app = create_app(enable_monitoring=False, gateway_identity_audience="runtime")
+    else:
+        app = FastAPI()
+    app.add_api_route("/protected", lambda: {"ok": True}, methods=["POST"])
     app.include_router(sandbox.router)
     with TestClient(app) as client:
         with bridge.execution_context() as execution_id:
@@ -51,6 +59,25 @@ def test_invalid_token_and_old_context_do_not_invoke_tool(callback):
     response = client.post('/internal/sandbox/tool-invoke', headers={'Authorization': 'Bearer ' + bridge._token},
                            json={'execution_id': 'old', 'tool': 'add', 'args': [2, 3]})
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize("callback", [True], indirect=True)
+def test_gateway_auth_preserves_only_the_exact_sandbox_callback(callback):
+    client, bridge, execution_id, calls = callback
+    headers = {"Authorization": "Bearer " + bridge._token}
+    payload = {"execution_id": execution_id, "tool": "add", "args": [2, 3]}
+    path = "/internal/sandbox/tool-invoke"
+
+    assert client.post(path, json=payload).status_code == 403
+    assert client.get(path, headers=headers).status_code == 401
+    assert client.post("/internal/sandbox/drain", headers=headers).status_code == 401
+    assert client.post("/protected", headers=headers).status_code == 401
+    assert not calls
+
+    assert client.post(path, headers=headers, json={**payload, "execution_id": "old"}).status_code == 403
+    response = client.post(path, headers=headers, json=payload)
+    assert response.status_code == 200
+    assert response.json() == {"result": 5}
 
 
 @pytest.mark.parametrize('content,status', [('[]', 400), ('{broken', 400), ('x' * (1024 * 1024 + 1), 413)],

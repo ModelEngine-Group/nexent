@@ -94,7 +94,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/runtime_service.py
+            - -m
+            - backend.http.runtime_service
           envFrom:
             - configMapRef:
                 name: nexent-config
@@ -105,6 +106,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_RUNTIME_POD_NAMESPACE
               valueFrom:

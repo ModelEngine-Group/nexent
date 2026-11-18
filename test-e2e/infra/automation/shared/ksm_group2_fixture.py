@@ -415,7 +415,7 @@ def cleanup(config):
 
 
 def start_exit_probe(prepare):
-    from infrastructure.concurrency import runtime_thread_manager
+    from runtime.thread_management import runtime_thread_manager
     from nexent.core.concurrency import ManagedTaskSpec
     owned = {}
     coordinator, run_id, scope, config, workspace = prepare(owned)

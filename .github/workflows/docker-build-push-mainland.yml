@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [main, web, data-process, mcp, terminal, sandbox, sandbox-full]
+        image: [main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full]
     steps:
       - name: Free disk space for large images
         if: matrix.image == 'data-process' || matrix.image == 'sandbox-full'

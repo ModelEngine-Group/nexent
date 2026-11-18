@@ -41,7 +41,7 @@ class RecordsQuery(BaseModel):
     @classmethod
     def validate_id(cls, value):
         if value is not None:
-            from infrastructure.observability.trajectory_store import business_id
+            from infrastructure.trace.trajectory_store import business_id
 
             business_id(value)
         return value

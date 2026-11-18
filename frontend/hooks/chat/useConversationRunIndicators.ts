@@ -84,11 +84,12 @@ export function useConversationRunIndicators(
       const id = aui.threads().getState().mainThreadId;
       if (content?.dataset.conversationContent === id) acknowledge(id);
     };
-    document.addEventListener("click", viewed, true);
-    document.addEventListener("keydown", viewed, true);
+    // Let controlled inputs process their event before acknowledging the view.
+    document.addEventListener("click", viewed);
+    document.addEventListener("keydown", viewed);
     return () => {
-      document.removeEventListener("click", viewed, true);
-      document.removeEventListener("keydown", viewed, true);
+      document.removeEventListener("click", viewed);
+      document.removeEventListener("keydown", viewed);
     };
   }, [aui, acknowledge]);
 

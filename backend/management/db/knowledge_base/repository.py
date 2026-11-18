@@ -13,9 +13,9 @@ from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, normalize_roles
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import KnowledgeRecord, UserTenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")

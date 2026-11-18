@@ -31,11 +31,13 @@ def test_ops_isolated_start_and_restart(tmp_path):
         }
     }
     environment.update(
-        PYTHON_DOTENV_DISABLED='1', OPS_PORT=str(port), LOG_LEVEL='info', LOG_DIR=str(tmp_path / 'persistent-logs'),
+        PYTHONPATH=os.pathsep.join((str(backend.parent), str(backend), str(backend.parent / 'sdk'))),
+        PYTHON_DOTENV_DISABLED='1', GATEWAY_AUTH_ENABLED='false', OPS_PORT=str(port), LOG_LEVEL='info', LOG_DIR=str(tmp_path / 'persistent-logs'),
     )
     # Audit the real launcher rather than substituting its application or clients.
     bootstrap = '''
 import importlib.abc
+import platform
 import runpy
 import socket
 import sys
@@ -44,13 +46,15 @@ class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         allowed_base_imports = {
             'management', 'management.db', 'management.utils',
-            'management.utils.exception_handlers', 'management.utils.orm',
-            'management.utils.request_context',
+            'management.utils.exception_handlers', 'management.utils.request_context',
+            'management.utils.account_passwords',
             'management.configuration',
         }
         allowed_shared_import = (
             fullname in allowed_base_imports
             or fullname.startswith('management.db.')
+            or fullname.startswith('management.services.permission.identity')
+            or fullname in {'management.services', 'management.services.permission'}
             or fullname.startswith('management.configuration.')
             or fullname == 'nexent' or fullname.startswith('nexent.')
         )
@@ -58,11 +62,9 @@ class BusinessImportGuard(importlib.abc.MetaPathFinder):
             'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
-        if fullname.startswith('infrastructure.') and not (
-            fullname == 'infrastructure.logging'
-            or fullname == 'infrastructure.security'
-            or fullname.startswith('infrastructure.security.')
-        ):
+        if fullname.startswith('infrastructure.') and fullname not in {
+            'infrastructure.rdb', 'infrastructure.rdb.orm', 'infrastructure.rdb.client',
+        }:
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):
@@ -79,9 +81,12 @@ def audit(event, args):
     if event in {'subprocess.Popen', 'os.system'}:
         raise RuntimeError('Forbidden child command')
 
+# Cache OS metadata before the audit guard; Windows platform probing can spawn cmd.
+if sys.platform == 'win32':
+    platform.uname()
 sys.meta_path.insert(0, BusinessImportGuard())
 sys.addaudithook(audit)
-runpy.run_path('ops_service.py', run_name='__main__')
+runpy.run_module('backend.http.ops_service', run_name='__main__')
 '''
     opener = build_opener(ProxyHandler({}))
     for attempt in range(2):

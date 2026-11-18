@@ -3,7 +3,7 @@
 from typing import Optional
 from sqlalchemy.exc import SQLAlchemyError
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import PartnerMappingId
 
 

@@ -28,17 +28,19 @@ install_business_constant_stubs(consts_mock.const)
 
 
 # ---------------------------------------------------------------------------
-# Mock management.db.client
+# Mock infrastructure.rdb.client
 # ---------------------------------------------------------------------------
 db_client_mock = MagicMock()
-sys.modules['management.db.client'] = db_client_mock
+sys.modules['infrastructure.rdb.client'] = db_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = db_client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = db_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # ---------------------------------------------------------------------------

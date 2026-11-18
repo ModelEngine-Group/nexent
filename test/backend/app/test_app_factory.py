@@ -20,7 +20,8 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.utils.app_factory import create_app, register_exception_handlers
+from contracts.constants import environment
+from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -112,6 +113,24 @@ class TestCreateApp:
         app = create_app(lifespan=lifespan)
 
         assert app.router.lifespan_context is lifespan
+
+    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.downstream.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
+        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
+        client = TestClient(app)
+        assert client.post("/service").json() == {"ok": True}
+        assert client.post("/ordinary").status_code == 401
 
 
 class TestRegisterExceptionHandlers:
@@ -515,8 +534,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch('management.utils.app_factory.monitoring_manager', None):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', None):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +551,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -551,8 +570,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch('management.utils.app_factory.monitoring_manager', mock_module.monitoring_manager):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', mock_module.monitoring_manager):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available

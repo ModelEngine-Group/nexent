@@ -40,7 +40,7 @@ class AgentAutomationRunner:
         if not uses_distributed_runtime():
             return await self._execute_task_impl(task, trigger_type, scheduled_fire_at, lease_owner)
         from management.services.agent.lifecycle import AgentRunAlreadyActiveError
-        from management.services.agent.run_state import runtime_state_service
+        from infrastructure.redis.run_state import runtime_state_service
         from contracts.constants.environment import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
         from runtime.sandbox_runtime import begin_automation_admission, finish_automation_admission, get_coordinator
 

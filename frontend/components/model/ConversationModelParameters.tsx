@@ -31,6 +31,18 @@ import {
 import { patchModelDraft, readModelDraft } from "@/lib/conversationModelDrafts";
 import type { ConversationModelPreferenceView } from "@/types/modelProfile";
 import { ModelParameterField } from "./ModelParameterField";
+import { modelPreferenceErrorMessage } from "@/lib/modelPreferenceErrors";
+
+function preferenceDefaults(
+  saved: ConversationModelPreferenceView | undefined,
+  conversationId: number | undefined,
+  agentDefaults: Record<string, unknown>
+) {
+  // Saved views already include normalized Agent defaults on the server.
+  return conversationId
+    ? (saved?.defaults ?? {})
+    : { ...saved?.defaults, ...agentDefaults };
+}
 
 function usePreferenceView({
   conversationId,
@@ -60,7 +72,8 @@ function usePreferenceView({
         issues: [],
         output_limit: outlet.profile.capabilities?.context?.output_limit,
         reasoning_status: outlet.profile.capabilities?.reasoning?.status,
-        reasoning_can_disable: outlet.profile.capabilities?.reasoning?.can_disable,
+        reasoning_can_disable:
+          outlet.profile.capabilities?.reasoning?.can_disable,
       } satisfies ConversationModelPreferenceView;
     },
     enabled: Boolean(conversationId || draftScope),
@@ -102,8 +115,7 @@ export function ConversationModelParameterSummary({
   const { query } = usePreferenceView({ conversationId, draftScope, modelId });
   if (!query.data || query.isError || query.data.issues.length) return null;
   const values = {
-    ...query.data.defaults,
-    ...agentDefaults,
+    ...preferenceDefaults(query.data, conversationId, agentDefaults),
     ...query.data.parameter_values,
   };
   if (
@@ -200,8 +212,7 @@ export function ConversationModelParameters({
       const values: Record<string, unknown> = reset ? {} : { [key]: value };
       if (key === "enable_thinking" && value === true) {
         const effective = {
-          ...query.data!.defaults,
-          ...agentDefaults,
+          ...preferenceDefaults(query.data, conversationId, agentDefaults),
           ...query.data!.parameter_values,
         };
         const mode = detectThinkingMode(query.data!.field_specs, effective);
@@ -224,10 +235,10 @@ export function ConversationModelParameters({
         delete_parameters: reset ? [key] : removed,
       });
     },
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: (error) => message.error(modelPreferenceErrorMessage(error, t)),
   });
   const saved = query.data;
-  const defaults = { ...saved?.defaults, ...agentDefaults };
+  const defaults = preferenceDefaults(saved, conversationId, agentDefaults);
   const effective = { ...defaults, ...saved?.parameter_values };
   const state = thinkingDisplayState(
     saved?.field_specs ?? [],
@@ -352,7 +363,7 @@ function PreferenceEditor({
       parameter_values: Record<string, unknown>;
       delete_parameters: string[];
     }) => onSave(patch),
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: (error) => message.error(modelPreferenceErrorMessage(error, t)),
   });
   const update = (key: string, value?: unknown) =>
     save.mutate({
@@ -467,7 +478,10 @@ function PreferenceEditor({
           />
         ))}
       {save.isError && (
-        <Alert type="error" title={t("modelProfile.preferencesFailed")} />
+        <Alert
+          type="error"
+          title={modelPreferenceErrorMessage(save.error, t)}
+        />
       )}
     </div>
   );

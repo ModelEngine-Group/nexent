@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from test.backend.app import test_agent_app as legacy
+from test.common.creator_runtime_boundary import isolate_creator_runtime
 
 
 @pytest.mark.asyncio
@@ -20,9 +21,8 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     service = types.ModuleType("management.services.conversation.model_preferences")
     service.read_model_preferences = Mock(return_value={"selected_model_id": 42, "model_parameter_preferences": preferences})
     monkeypatch.setitem(sys.modules, service.__name__, service)
-    from nexent.core import concurrency
     from management.services.conversation import creator_execution as execution
-    monkeypatch.setattr(concurrency, "run_blocking", AsyncMock(side_effect=lambda name, fn, *args: fn(*args)))
+    runtime = isolate_creator_runtime(monkeypatch, execution)
     monkeypatch.setattr(execution.system_agent_provider, "get_creator_ref", Mock(return_value=types.SimpleNamespace(agent_id=99)))
     monkeypatch.setattr(execution, "get_conversation_history", Mock(return_value={"agent_id": 99}))
     monkeypatch.setattr(execution, "authorize_target", lambda target, *_: target)
@@ -34,10 +34,9 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     prepare = Mock(return_value=(11, 0))
     monkeypatch.setattr(module, "create_nl2agent_stream", stream)
     monkeypatch.setattr(execution, "prepare_creation_history", prepare)
-    monkeypatch.setattr(execution, "persist_creation_stream", lambda value, **kwargs: value)
     request = legacy.NL2AgentRunRequest(query="fixture", agent_id=7, conversation_id=11,
                                       model_id=explicit, persist_history=True)
-    response = await module.nl2agent_run_api(request, Mock(), authorization="token")
+    response = await module.nl2agent_run_api(request, Mock(), authorization="token", resume=False)
     assert [chunk async for chunk in response.body_iterator] == ["data: done\n\n"]
     service.read_model_preferences.assert_called_once_with(11, "owner")
     effective = stream.call_args.kwargs["request"]
@@ -47,3 +46,6 @@ async def test_existing_creator_history_restores_preferences_before_stream(monke
     assert prepare.call_args.kwargs["selected_model_id"] == effective.model_id
     assert prepare.call_args.kwargs.get("model_parameter_preferences", {}) == {}
     assert response.headers["conversation_id"] == "11"
+    runtime.control.admit.assert_awaited_once()
+    runtime.checkpoint.assert_called_once()
+    runtime.launch.assert_awaited_once()

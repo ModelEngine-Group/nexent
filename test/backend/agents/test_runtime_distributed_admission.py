@@ -15,7 +15,7 @@ def admission(monkeypatch):
     future = Future()
     execution = SimpleNamespace(future=future)
     threads = SimpleNamespace(submit=Mock(return_value=execution))
-    monkeypatch.setattr('infrastructure.concurrency.runtime_thread_manager', threads)
+    monkeypatch.setattr('runtime.thread_management.runtime_thread_manager', threads)
     manager = Mock()
     return future, threads, manager
 

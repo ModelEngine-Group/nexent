@@ -6,8 +6,8 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
@@ -18,7 +18,7 @@ def processor(mocker):
     ticker = [100.0]
     wall = [datetime(2026, 11, 1, 15, 59, 59, tzinfo=UTC)]
     mocker.patch(
-        "infrastructure.observability.trajectory_processor.time.monotonic",
+        "infrastructure.trace.trajectory_processor.time.monotonic",
         side_effect=lambda: ticker[0],
     )
     identity = CaptureIdentity("tenant", "owner", "123", "7")

@@ -4,6 +4,7 @@
 
 import time
 
+from infrastructure.redis.stream_replay import APPEND_COMPACT_REPLAY, compact_replay_args, decode_replay_checkpoint
 from runtime.sandbox_coordination import SandboxRunReference
 from runtime.sandbox_journal import SandboxCoordinationUnknown
 
@@ -98,7 +99,8 @@ class SandboxStreamState:
             redis.call('HSET', KEYS[1], 'status', ARGV[2], 'updated_at', ARGV[3])
             for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[4]) end
             return 1
-        """, 4, run, stream, done, cancel, ref.run_id, status, str(int(time.time())), self.completed_ttl)
+        """, 5, run, stream, done, cancel, stream + ':replay',
+                          ref.run_id, status, str(int(time.time())), self.completed_ttl)
 
     def set_cancel_signal(self, user_id, conversation_id, expected_generation=None, *, run_ref=None):
         if run_ref is None:
@@ -127,15 +129,25 @@ class SandboxStreamState:
         ref = self._ref(user_id, conversation_id, run_ref)
         return self._call('get', self.keys(ref)[4]) == ref.run_id
 
-    def append_stream_event(self, user_id, conversation_id, chunk, *, run_ref=None):
+    def append_stream_event(self, user_id, conversation_id, chunk, *, run_ref=None, replay_update=None):
         ref = self._ref(user_id, conversation_id, run_ref)
         index, _, stream, _, _ = self.keys(ref)
+        if replay_update is not None:
+            return self._call('eval', APPEND_COMPACT_REPLAY, 3, index, stream, stream + ':replay',
+                              ref.run_id, self.max_stream_length, chunk, self.stream_ttl,
+                              *compact_replay_args(replay_update)) or None
         result = self._call('eval', _CURRENT + """
             local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
             redis.call('EXPIRE', KEYS[2], ARGV[4])
             return id
         """, 2, index, stream, ref.run_id, self.max_stream_length, chunk, self.stream_ttl)
         return result if result else None
+
+    def read_replay_checkpoint(self, user_id, conversation_id, *, run_ref=None):
+        if run_ref is None:
+            return None
+        ref = self._ref(user_id, conversation_id, run_ref)
+        return decode_replay_checkpoint(self._call('hgetall', self.keys(ref)[2] + ':replay'))
 
     def mark_stream_completed(self, user_id, conversation_id, status, error=None, *, run_ref=None):
         ref = self._ref(user_id, conversation_id, run_ref)
@@ -145,7 +157,8 @@ class SandboxStreamState:
             if ARGV[4] ~= '' then redis.call('HSET', KEYS[2], 'error', ARGV[4]) end
             for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[5]) end
             return 1
-        """, 4, run, done, stream, cancel, ref.run_id, status, str(int(time.time())), error or '', self.completed_ttl)
+        """, 5, run, done, stream, cancel, stream + ':replay',
+                          ref.run_id, status, str(int(time.time())), error or '', self.completed_ttl)
 
     def get_stream_status(self, user_id, conversation_id, *, run_ref=None):
         ref = self._ref(user_id, conversation_id, run_ref)

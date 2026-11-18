@@ -18,7 +18,7 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.identity.membership import (
     check_admin_removal,
@@ -33,8 +33,8 @@ from management.db.models import (
     UserOAuthAccount,
     UserTenant,
 )
+from infrastructure.rdb.orm import as_dict
 from management.db.trajectory.repository import detach_owner
-from management.utils.orm import as_dict
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger(__name__)

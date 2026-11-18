@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import uvicorn
 from fastapi import HTTPException, Request
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from runtime.adapters.nexent.sandbox import get_runtime_sandbox_options, resolve_sandbox_config
 from runtime.api.application import app
 from runtime.sandbox_runtime import get_coordinator
@@ -473,7 +473,7 @@ def probe_core(owned):
 
 
 def probe_multiruntime(_owned):
-    from management.services.agent.run_state import runtime_state_service as state
+    from infrastructure.redis.run_state import runtime_state_service as state
     from runtime.sandbox_coordination import SandboxRunBusy
 
     coordinator = get_coordinator()
@@ -572,4 +572,14 @@ async def controlled_core(request: Request, scenario: str):
 
 
 if __name__ == '__main__':
+    from management.configuration import runtime as configuration_runtime
+    from management.configuration.catalog import DEFAULT_CATALOG
+
+    async def load_fixture_configuration():
+        return dict(DEFAULT_CATALOG.defaults)
+
+    # The isolated namespace has no configuration database.
+    configuration_runtime._process_runtime = configuration_runtime.SystemConfigurationRuntime(
+        loader=load_fixture_configuration,
+    )
     uvicorn.run(app, host='0.0.0.0', port=5014, log_level='warning')

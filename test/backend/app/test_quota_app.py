@@ -15,7 +15,7 @@ from fastapi import FastAPI
 
 from fastapi import HTTPException
 from management.api.knowledge_base import quota as quota_app
-from management.utils.app_factory import create_app
+from backend.http.server.app_factory import create_app
 from management.api.file.file_management import upload_files
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
@@ -129,7 +129,7 @@ def mock_personal_auth():
         ):
             stack.enter_context(
                 patch(
-                    "gateway.authentication.auth.get_current_user_context",
+                    "management.services.permission.identity.session.get_current_user_context",
                     return_value=(user_id, tenant_id, role),
                 )
             )

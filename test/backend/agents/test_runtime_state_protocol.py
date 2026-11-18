@@ -2,11 +2,14 @@
 
 """Public runtime state calls keep immutable generations through the Redis adapter."""
 
+import json
 from dataclasses import replace
 from unittest.mock import Mock
 
+import fakeredis
 import pytest
-from management.services.agent.run_state import RuntimeStateService
+from infrastructure.redis.run_state import RuntimeStateService
+from management.services.agent.replay import CompactReplay, subscribe_shared_checkpoint
 from runtime.sandbox_coordination import SandboxRunReference
 from runtime.sandbox_journal import SandboxCoordinationUnknown
 from runtime.sandbox_stream_state import SandboxStreamState
@@ -64,6 +67,33 @@ async def test_stream_turn_runs_through_public_service_with_generation_scoped_ke
     with pytest.raises(SandboxCoordinationUnknown):
         await service.append_stream_event_async('foreign-user', 7, 'forbidden', run_ref=ref)
     assert len(client.mock_calls) == before
+
+
+@pytest.mark.asyncio
+async def test_shared_replay_keeps_sandbox_generation_and_rejects_stale_writes(protocol):
+    service, adapter, _, ref = protocol
+    adapter.client = fakeredis.FakeRedis(decode_responses=True)
+    index, run, _, _, _ = adapter.keys(ref)
+    adapter.client.hset(index, 'generation', ref.run_id)
+    adapter.client.hset(run, mapping={'generation': ref.run_id, 'status': 'running'})
+    replay = CompactReplay()
+    for fragment in ('first ', 'second'):
+        chunk = f'data: {{"type":"final_answer","content":"{fragment}"}}\n\n'
+        assert await service.append_stream_event_async('user', 7, chunk, run_ref=ref,
+                                                       replay_update=replay.append(chunk))
+
+    checkpoint = await service.read_replay_checkpoint_async('user', 7, run_ref=ref)
+    assert checkpoint['generation'] == ref.run_id
+    assert checkpoint['entries'] == [{'type': 'final_answer', 'content': 'first second'}]
+    await service.mark_stream_completed_async('user', 7, 'completed', run_ref=ref)
+    recovered = subscribe_shared_checkpoint(service, 'user', 7, checkpoint, run_ref=ref)
+    assert [json.loads(chunk.removeprefix('data: ')) async for chunk in recovered] == [
+        {'type': 'final_answer', 'content': 'first second'}, {'status': 'completed'},
+    ]
+    adapter.client.hset(index, 'generation', 'new-generation')
+    assert await service.append_stream_event_async('user', 7, 'late', run_ref=ref,
+                                                   replay_update=replay.append('late')) is None
+    assert await service.read_replay_checkpoint_async('user', 7, run_ref=ref) == checkpoint
 
 
 def test_missing_active_state_is_unknown_while_terminal_and_unbound_reads_are_empty(protocol):

@@ -222,8 +222,9 @@ export function SuggestedResourceInstallationCard({
   const aui = useAui();
   const queryClient = useQueryClient();
   const reactId = useId();
-  const cardKey = `suggested_resource_installation:${payload.agent_id}:${reactId}`;
-  const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
+  const cardKey = `suggested_resource_installation:${payload.agent_id}:${payload.card_id ?? reactId}`;
+  const { registerCard, submitCard, isCardInteractive, sessionGeneration } =
+    useNl2AgentFlow();
   const [items, dispatch] = useReducer(
     reducer,
     payload.resources,
@@ -240,7 +241,7 @@ export function SuggestedResourceInstallationCard({
 
   useEffect(() => {
     if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+  }, [cardKey, disabled, payload.subtype, registerCard, sessionGeneration]);
 
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
@@ -492,6 +493,7 @@ export function SuggestedResourceInstallationCard({
     if (!canContinue) return;
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "continue",

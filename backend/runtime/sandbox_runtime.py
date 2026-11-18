@@ -36,7 +36,7 @@ async def begin_automation_admission(tenant_id, user_id, conversation_id, cancel
 
 
 async def begin_owned_agent_admission(tenant_id, user_id, conversation_id, cancel, *, kind, holder):
-    from infrastructure.concurrency import runtime_thread_manager
+    from runtime.thread_management import runtime_thread_manager
     from management.services.agent.lifecycle import agent_run_manager
     from runtime.adapters.nexent.runner import DeferredAgentRun
 
@@ -94,7 +94,7 @@ def get_coordinator():
 
     if settings.NEXENT_SANDBOX_PROVIDER != 'kubernetes' or not settings.IS_DEPLOYED_BY_KUBERNETES:
         return None
-    from management.services.agent.run_state import runtime_state_service
+    from infrastructure.redis.run_state import runtime_state_service
 
     owner = SandboxOwner(
         settings.NEXENT_RUNTIME_DEPLOYMENT_ID, settings.NEXENT_RUNTIME_POD_NAMESPACE,

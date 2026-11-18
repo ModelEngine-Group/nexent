@@ -54,7 +54,8 @@ class LocalExecutionRegistry:
             self._coordinator = coordinator
 
     def reserve_agent_run(self, conversation_id: Union[int, str], user_id: str, *,
-                          tenant_id=None, execution_run_id=None, kind='CHAT', cancel=lambda: None) -> str:
+                          tenant_id=None, execution_run_id=None, kind='CHAT', cancel=lambda: None,
+                          creator=False) -> str:
         """Atomically reserve a conversation before asynchronous run preparation."""
         with self._lock:
             run_key = self._get_run_key(conversation_id, user_id)
@@ -63,7 +64,7 @@ class LocalExecutionRegistry:
                     f"An agent run is already active for conversation {conversation_id}"
                 )
             token = uuid.uuid4().hex
-            if self._coordinator is not None:
+            if self._coordinator is not None and not creator:
                 from runtime.sandbox_coordination import SandboxRunBusy
 
                 if not tenant_id or not execution_run_id:
@@ -140,6 +141,7 @@ class LocalExecutionRegistry:
         agent_run_info,
         user_id: str,
         reservation_token: str | None = None,
+        *, creator=False,
     ):
         """register agent run instance"""
         with self._lock:
@@ -157,8 +159,12 @@ class LocalExecutionRegistry:
                 raise AgentRunAlreadyActiveError(
                     f"An agent run is already being prepared for conversation {conversation_id}"
                 )
-            if self._coordinator is not None:
-                lease = self._distributed_leases.get(run_key)
+            lease = self._distributed_leases.get(run_key)
+            if creator:
+                if reservation_token is None or lease is not None:
+                    raise AgentRunAlreadyActiveError('Creator execution requires its local reservation')
+                agent_run_info.__dict__['_creator_runtime'] = True
+            elif self._coordinator is not None:
                 if lease is None:
                     raise AgentRunAlreadyActiveError('Distributed execution requires an admitted run lease')
                 self._coordinator.activate(lease)

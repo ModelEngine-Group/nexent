@@ -17,11 +17,11 @@ from statistics import mean
 
 from contracts.constants.constants import MAX_TURNS_PER_SESSION
 from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
     agent_run_manager,
@@ -166,7 +166,7 @@ async def _run_agent_to_final_answer(
             ) if value is not None}
             if associations:
                 await runtime_journal_call('associate-evaluation-run', associate_run_request, agent_request, **associations)
-            from management.services.agent.run_state import runtime_state_service
+            from infrastructure.redis.run_state import runtime_state_service
 
             await runtime_state_service.reset_stream_async(user_id, run_conversation_id, **reference_options(agent_request))
 

@@ -9,11 +9,12 @@ services:
       - nexent
     volumes:
       - ${ROOT_DIR:?Set ROOT_DIR for persistent ops logs}/logs:/mnt/nexent-data/logs
-      - ${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}
+      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       OPS_PORT: "${OPS_PORT:-5016}"
       LOG_DIR: "/mnt/nexent-data/logs"
       NEXENT_SQL_STARTUP_MODE: "off"
@@ -21,7 +22,7 @@ services:
     entrypoint:
       - /opt/nexent/scripts/start-backend.sh
       - python
-      - backend/ops_service.py
+      - backend/http/ops_service.py
     healthcheck:
       test:
         - CMD

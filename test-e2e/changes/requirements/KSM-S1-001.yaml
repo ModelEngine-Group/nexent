@@ -85,9 +85,9 @@
       ],
       "behaviors": [
         "Pod identity/profile/conflict/response-loss and pinned TLS generation.",
-        "Owner/run workspace permissions, protected exact associations and scoped cleanup.",
+        "Owner/run workspace permissions, protected exact associations and scoped cleanup. Sealed workspace UT fixtures remove their own read-only trees after assertions so repeated Linux runner Checkouts can clean .pytest-tmp.",
         "Kernel/script compatibility, callback authentication/context lifetime and no replay.",
-        "Redis compare-token admission/renewal/generation, both recovery paths and existing shutdown compatibility; graceful drain removed by user.",
+        "Redis compare-token admission/renewal/generation, compact replay fenced to the admitted run, both recovery paths and existing shutdown compatibility; graceful drain removed by user.",
         "Keep reservation while real native children, callbacks, kernels or uncertain script exec can still act; definitive exit releases only its own holder.",
         "Preserve develop's Jiuwen tool cancellation lifetime, returned awaitables and explicit local fallback mapping; choose script runner from the actual executor backend."
       ],

@@ -7,6 +7,7 @@ import json
 from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
+from management.services.agent.replay import subscribe_shared_checkpoint
 from copy import (
     deepcopy,
 )
@@ -89,17 +90,15 @@ from management.services.knowledge_base.scope import (
     prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
-from management.services.agent.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
@@ -714,6 +713,18 @@ async def run_agent_stream(
             if runtime_state_service.enabled and is_remote_running:
 
                 async def redis_channel_stream():
+                    checkpoint = await runtime_state_service.read_replay_checkpoint_async(
+                        resolved_user_id, agent_request.conversation_id, **resume_options,
+                    )
+                    if checkpoint:
+                        yield STREAM_STATUS_EVENT
+                        yield _resume_status_chunk(len(checkpoint["entries"]))
+                        async for chunk in subscribe_shared_checkpoint(
+                            runtime_state_service, resolved_user_id, agent_request.conversation_id,
+                            checkpoint, **resume_options,
+                        ):
+                            yield chunk
+                        return
                     replay_events = (
                         await runtime_state_service.read_stream_events_async(
                             user_id=resolved_user_id,
@@ -807,15 +818,14 @@ async def run_agent_stream(
             yield STREAM_STATUS_EVENT
             yield _resume_status_chunk(replay_chunk_count)
 
-            # Use subscribe_with_history(0) to replay ALL chunks from the buffer
-            # This ensures no chunks are lost even if frontend disconnected during streaming
-            # The frontend skips all chunks until replay_chunk_count is reached
-            async for chunk in channel.subscribe_with_history(0):
+            # Replay rendering checkpoints independently of the bounded raw tail.
+            # Reconnection rebuilds the answer before consuming newer suffixes.
+            async for chunk in channel.subscribe_with_history(0, include_replay_checkpoint=True):
                 yield chunk
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield _resume_completed_chunk()
+            yield _resume_completed_chunk(channel.completion_status or "failed")
 
         return StreamingResponse(
             channel_stream(),
@@ -943,9 +953,11 @@ async def run_agent_stream(
 
     try:
         await runtime_coordination_call('bind-admitted-run', bind_run_reservation, agent_request, resolved_user_id)
+        stream_generation = execution_run_id
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
             conversation_id=execution_conversation_id(agent_request),
+            generation=stream_generation,
             **reference_options(agent_request),
         )
 
@@ -980,6 +992,7 @@ async def run_agent_stream(
                 user_id=resolved_user_id,
                 **reference_options(agent_request),
             )
+            channel.generation = stream_generation
     except Exception:
         deferred_run.cancel()
         runtime_thread_manager.cancel(

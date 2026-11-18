@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from runtime.sandbox_services import current_callback_registry
 
 from nexent.core.agents.sandbox.execution import _serialize_tool_bridge_value

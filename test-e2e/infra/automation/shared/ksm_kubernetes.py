@@ -19,7 +19,7 @@ from kubernetes.stream import stream
 
 
 def verification_image(repo, evidence):
-    tracked = subprocess.run(['git', 'ls-files', 'backend', 'sdk/nexent'], cwd=repo,
+    tracked = subprocess.run(['git', 'ls-files', 'backend', 'infrastructure', 'sdk/nexent'], cwd=repo,
                              capture_output=True, text=True, check=True).stdout.splitlines()
     owned = list((repo / 'backend/runtime').glob('*.py'))
     owned += [repo / 'backend/runtime/api/sandbox.py', repo / 'backend/management/db/runtime_recovery.py']
@@ -47,9 +47,10 @@ def verification_image(repo, evidence):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(repo / rel, destination)
             (target / 'Dockerfile').write_text(
-                f'FROM {base}\nCOPY backend/ /opt/backend/\n'
+                f'FROM {base}\nCOPY backend/ /opt/verification-tree/backend/\n'
+                'COPY infrastructure/ /opt/verification-tree/infrastructure/\n'
                 'COPY sdk/nexent/ /opt/verification-sdk/nexent/\n'
-                'ENV PYTHONPATH=/opt/verification-sdk:/opt/backend\n'
+                'ENV PYTHONPATH=/opt/verification-sdk:/opt/verification-tree:/opt/verification-tree/backend\n'
                 f'LABEL nexent.ksm.source="{fingerprint}"\n', encoding='utf-8')
             completed = subprocess.run(['docker', 'build', '--pull=false', '-q', '-t', image, str(target)],
                                        capture_output=True, text=True, timeout=300)
@@ -149,7 +150,8 @@ def run_owned_runtime_probe(repo, evidence, *, scenario='core', runtime_overlay=
                     'NEXENT_SANDBOX_WORKSPACE_CLAIM': 'workspace', 'NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT': 'true',
                     'NEXENT_SANDBOX_DOCKER_IMAGE': os.environ.get('NEXENT_KSM_SANDBOX_IMAGE', 'nexent/nexent-sandbox-full:latest'),
                     'NEXENT_SANDBOX_NETWORK': 'enabled' if name == 'runtime-b' else 'disabled',
-                    'JWT_SECRET': secrets.token_hex(32), 'ENABLE_TELEMETRY': 'false'}
+                    'JWT_SECRET': secrets.token_hex(32), 'ENABLE_TELEMETRY': 'false',
+                    'GATEWAY_AUTH_ENABLED': 'true'}
                 if runtime_overlay is not None:
                     values['PYTHONPATH'] = '/opt/backend'
                 if scenario == 'group2-memory':
@@ -233,15 +235,19 @@ def run_owned_runtime_probe(repo, evidence, *, scenario='core', runtime_overlay=
             receipt['core_agents'] = {}
             probe_timeout = 600 if scenario == 'group2' else 240
             core_program = (
-                'import urllib.request; '
-                f"request=urllib.request.Request('http://127.0.0.1:5014/__ksm/{scenario}', data=b''); "
+                'import sys, urllib.request; '
+                'from gateway.downstream.identity import IDENTITY_HEADER, sign_identity; '
+                'path=sys.argv[1]; '
+                'identity={"user_id":"fixture-user","tenant_id":"fixture-tenant","kind":"session"}; '
+                'header=sign_identity(identity,"runtime","POST",path,b""); '
+                'request=urllib.request.Request("http://127.0.0.1:5014"+path, data=b"",'
+                'headers={IDENTITY_HEADER:header}); '
                 f'print(urllib.request.urlopen(request, timeout={probe_timeout}).read().decode())'
             )
             def execute_core(name, endpoint=scenario):
                 with client.ApiClient() as peer_transport:
                     peer = client.CoreV1Api(peer_transport)
-                    program = core_program.replace('/__ksm/' + scenario, '/__ksm/' + endpoint)
-                    ws = stream(peer.connect_get_namespaced_pod_exec,name,namespace,container='nexent-runtime',command=['python','-c',program],stderr=True,stdout=True,stdin=False,tty=False,_preload_content=False)
+                    ws = stream(peer.connect_get_namespaced_pod_exec,name,namespace,container='nexent-runtime',command=['python','-c',core_program,'/__ksm/' + endpoint],stderr=True,stdout=True,stdin=False,tty=False,_preload_content=False)
                     result, errors = '', ''
                     try:
                         while ws.is_open():

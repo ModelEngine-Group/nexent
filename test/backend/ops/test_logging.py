@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-import infrastructure.logging as shared_logging
+import backend.http.logging as shared_logging
 
 
 @pytest.mark.parametrize(('level', 'debug', 'expected'), [('INFO', False, 'INFO'), ('WARNING', False, 'WARNING'), ('INFO', True, 'DEBUG')])

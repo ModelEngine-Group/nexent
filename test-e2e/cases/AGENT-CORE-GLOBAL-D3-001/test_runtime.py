@@ -81,7 +81,7 @@ def _assert_creator_history(monkeypatch, info, output):
     from sqlalchemy import update
     from jiuwen_output_runtime import context_database
     from contracts.agent import NL2SkillRunRequest
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import ConversationMessageUnit
     from management.db.conversation.repository import create_conversation, get_conversation_history
     from management.services.conversation.creation_history import persist_creation_stream

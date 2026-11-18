@@ -2,7 +2,7 @@
 
 """Bridge local execution ownership to the existing Redis state protocol."""
 
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.redis.run_state import creator_runtime_state_service, runtime_state_service
 from runtime.identity import reference_options
 from runtime.executions import (
     AgentRunAlreadyActiveError,
@@ -22,11 +22,14 @@ class AgentRunManager(LocalExecutionRegistry):
     """Preserve the legacy API while isolating local worker resources."""
 
     def register_agent_run(
-        self, conversation_id, agent_run_info, user_id, reservation_token=None
+        self, conversation_id, agent_run_info, user_id, reservation_token=None, *, creator=False,
     ):
         super().register_agent_run(
-            conversation_id, agent_run_info, user_id, reservation_token
+            conversation_id, agent_run_info, user_id, reservation_token, creator=creator,
         )
+        if creator:
+            # The creator Redis lease already set the run state when it claimed ownership.
+            return
         runtime_state_service.register_run(
             user_id=user_id, conversation_id=conversation_id, **reference_options(agent_run_info),
         )
@@ -41,11 +44,28 @@ class AgentRunManager(LocalExecutionRegistry):
         if removed:
             generation = agent_run_info.__dict__.get("_automation_runtime_generation") if agent_run_info is not None else None
             generation_kwargs = {"generation": generation} if generation is not None else {}
-            runtime_state_service.mark_run_finished(
+            state_service = (creator_runtime_state_service
+                             if reference_source is not None and reference_source.__dict__.get('_creator_runtime')
+                             else runtime_state_service)
+            state_service.mark_run_finished(
                 user_id=user_id, conversation_id=conversation_id, status=status, **generation_kwargs,
                 **reference_options(reference_source),
             )
         return removed
+
+    def stop_creator_run(self, conversation_id, user_id, expected_generation=None):
+        info = self.get_agent_run_info(conversation_id, user_id)
+        try:
+            remote_signal = creator_runtime_state_service.cancel_creator_run(
+                user_id, conversation_id, expected_generation,
+            )
+        except Exception:
+            remote_signal = False
+        if (info is not None and info.__dict__.get('_creator_runtime')
+                and (expected_generation is None
+                     or info.__dict__.get('_automation_runtime_generation') == expected_generation)):
+            return super().stop_agent_run(conversation_id, user_id, expected_run_info=info) or remote_signal
+        return remote_signal
 
     def stop_agent_run(self, conversation_id, user_id, expected_generation=None, *, run_ref=None):
         ref_options = {'run_ref': run_ref} if run_ref is not None else {}

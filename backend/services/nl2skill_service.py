@@ -32,7 +32,7 @@ from management.services.skill.stream_parser import SkillStreamParser
 from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency import run_blocking
 from management.services.agent.system import system_agent_provider
 from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
@@ -311,7 +311,12 @@ async def create_nl2skill_stream(
 ) -> AsyncIterator[str]:
     """Create the SSE payload stream for one ephemeral NL2Skill turn."""
 
-    run_info = await build_nl2skill_run_info(request, tenant_id, language, system_ref=system_ref, user_id=user_id)
+    run_info = await build_nl2skill_run_info(
+        request, tenant_id, language, system_ref=system_ref, user_id=user_id
+    )
+    control = getattr(request, "_creator_control", None)
+    if control is not None:
+        control.configure(run_info)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     target_file_set = set(target_files)
 
@@ -346,6 +351,8 @@ async def create_nl2skill_stream(
             async for raw_chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,
+                **({"execution": control.execution, "deferred_run": control.deferred}
+                   if control is not None and control.execution is not None else {}),
             ):
                 try:
                     chunk = json.loads(raw_chunk) if isinstance(raw_chunk, str) else raw_chunk
@@ -379,6 +386,7 @@ async def create_nl2skill_stream(
                 }
             )
         finally:
-            run_info.stop_event.set()
+            if control is None:
+                run_info.stop_event.set()
 
     return generate()

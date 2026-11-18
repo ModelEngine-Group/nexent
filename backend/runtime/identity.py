@@ -89,7 +89,7 @@ async def reserve_runtime_run(manager, conversation_id, user_id, **options):
         return manager.reserve_agent_run(conversation_id, user_id)
     from nexent.core.concurrency import ManagedTaskSpec
 
-    from infrastructure.concurrency import runtime_thread_manager
+    from runtime.thread_management import runtime_thread_manager
 
     execution = runtime_thread_manager.submit(
         'control-io', ManagedTaskSpec(task_name='reserve-distributed-run', owner='runtime'),
