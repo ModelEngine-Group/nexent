@@ -42,6 +42,7 @@ from .monitoring import (
     OPENINFERENCE_USER_ID,
     OPENINFERENCE_TAG_TAGS,
 )
+from .skill_usage import SkillUsageObservation, observe_skill_usage
 
 __version__ = "0.2.0"
 __all__ = [
@@ -78,4 +79,6 @@ __all__ = [
     'OPENINFERENCE_SESSION_ID',
     'OPENINFERENCE_USER_ID',
     'OPENINFERENCE_TAG_TAGS',
+    'SkillUsageObservation',
+    'observe_skill_usage',
 ]

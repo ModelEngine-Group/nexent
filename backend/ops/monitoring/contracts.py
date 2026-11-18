@@ -65,6 +65,16 @@ class Fact(BaseModel):
         return self.started_at.astimezone(zone).date()
 
 
+class SkillFact(Fact):
+    """A formal Skill guide read or script start."""
+
+    fact_kind: Literal["skill"] = "skill"
+    skill_id: str = Field(min_length=1, max_length=128)
+    skill_name: str = Field(min_length=1, max_length=200)
+    triggered_at: AwareDatetime
+    trigger_kind: Literal["guide_read", "script_started"]
+
+
 @dataclass(frozen=True)
 class MonitoringKind:
     """A fact schema, daily reducer, and optional fields for the shared indices."""

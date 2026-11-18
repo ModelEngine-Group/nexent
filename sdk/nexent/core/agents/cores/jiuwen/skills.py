@@ -10,10 +10,12 @@ from openjiuwen.harness.rails.skills.skill_use_rail import SkillUseRail
 class NexentSkillRail(SkillUseRail):
     """Keep native skill discovery/prompt lifecycle without adding host shell tools."""
 
-    def __init__(self, directories: list[str], names: list[str], *, authorized_by_root=None):
+    def __init__(self, directories: list[str], names: list[str], *, authorized_by_root=None,
+                 skill_name_to_id=None):
         super().__init__(directories, enabled_skills=names, skill_mode="all", include_tools=False, enable_cache=False)
         self._roots = tuple(Path(directory).resolve() for directory in directories)
         self._names = frozenset(names)
+        self._skill_name_to_id = dict(skill_name_to_id or {})
         authorization = authorized_by_root if authorized_by_root is not None else {
             directory: names for directory in directories
         }
@@ -33,6 +35,8 @@ class NexentSkillRail(SkillUseRail):
                    for root, allowed in self._authorized_by_root.items()):
             raise PermissionError("Skill path escapes the authorized snapshot")
         text = path.read_text(encoding="utf-8-sig")
+        from nexent.monitor.skill_usage import observe_skill_usage
+        observe_skill_usage(self._skill_name_to_id.get(path.parent.name), path.parent.name, "guide_read")
         return "\n".join(text.splitlines()[:head]) if head is not None else text
 
     async def _load_yaml(self, path: Path):

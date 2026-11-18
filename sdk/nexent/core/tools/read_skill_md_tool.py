@@ -58,6 +58,7 @@ class ReadSkillMdTool(Tool):
         version_no: int = 0,
         authorized_skill_names: Optional[list[str]] = None,
         isolated_skills_root: bool = False,
+        skill_id_by_name: Optional[dict[str, str | int]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -74,6 +75,7 @@ class ReadSkillMdTool(Tool):
         self.tenant_id = tenant_id
         self.version_no = version_no
         self.isolated_skills_root = isolated_skills_root
+        self.skill_id_by_name = dict(skill_id_by_name or {})
         self.authorized_skill_names = (
             frozenset(authorized_skill_names) if authorized_skill_names is not None else None
         )
@@ -189,6 +191,10 @@ class ReadSkillMdTool(Tool):
                     else:
                         result_parts.append(f"\n\n[Warning: {file_path} not found]\n")
 
+            skill_id = self.skill_id_by_name.get(skill_name)
+            if not additional_files and skill_id is not None:
+                from nexent.monitor.skill_usage import observe_skill_usage
+                observe_skill_usage(skill_id, skill_name, "guide_read")
             return ''.join(result_parts)
 
         except Exception as e:

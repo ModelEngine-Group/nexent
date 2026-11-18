@@ -66,6 +66,7 @@ class RunSkillScriptTool(Tool):
         execution_backend: Optional[Any] = None,
         authorized_skill_names: Optional[Sequence[str]] = None,
         isolated_skills_root: bool = False,
+        skill_id_by_name: Optional[Dict[str, str | int]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -91,6 +92,7 @@ class RunSkillScriptTool(Tool):
         self.on_complete = on_complete
         self.execution_backend = execution_backend
         self.isolated_skills_root = isolated_skills_root
+        self.skill_id_by_name = dict(skill_id_by_name or {})
         self.authorized_skill_names = (
             frozenset(name for name in (authorized_skill_names or []) if name)
             if authorized_skill_names is not None
@@ -291,6 +293,10 @@ class RunSkillScriptTool(Tool):
                     params,
                     **run_kwargs,
                 )
+            skill_id = self.skill_id_by_name.get(skill_name)
+            if skill_id is not None:
+                from nexent.monitor.skill_usage import observe_skill_usage
+                observe_skill_usage(skill_id, skill_name, "script_started")
             if self.on_complete is not None:
                 self.on_complete(result)
             artifacts = (
