@@ -68,6 +68,11 @@ class KnowledgeService:
 
         return await ChunkMutationService(self.client, self.models).mutate(payload, actor, context=context)
 
+    async def inspect_chunk(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.chunk_write import ChunkMutationService
+
+        return await ChunkMutationService(self.client, self.models).lookup(payload, actor, context=context)
+
     async def inspect_base(self, payload, actor, *, context=None):
         from runtime.knowledge_base.manifest import KnowledgeManifestService
 

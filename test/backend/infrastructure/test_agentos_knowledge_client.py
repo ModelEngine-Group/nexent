@@ -141,3 +141,24 @@ async def test_chunks_use_standard_signature_and_close_transport(monkeypatch):
     result=await AgentOSClient('http://runtime',create).knowledge_chunks(
         KnowledgeChunks(knowledge_id=1,expected_revision='a'*64),'reader','tenant')
     assert result.total==0 and len(clients)==1 and clients[0].is_closed
+
+
+async def test_chunk_target_metadata_budget_closes_only_client_without_retry(monkeypatch):
+    from contracts.agentos_knowledge import KnowledgeOperation
+    from contracts.knowledge_chunk_mutation import ChunkMutationLookup
+
+    monkeypatch.setattr(environment,'JWT_SECRET','synthetic-target-client-key')
+    monkeypatch.setattr('infrastructure.agentos_client._KNOWLEDGE_DEADLINE_SECONDS',.05)
+    clients,calls = [],[]
+    async def blocked(message):
+        calls.append(True)
+        assert message.url.path == '/api'+KnowledgeOperation.INSPECT_CHUNK.value
+        await asyncio.Event().wait()
+    def create(**kwargs):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(blocked),**kwargs)
+        clients.append(client)
+        return client
+    with pytest.raises(RuntimeServiceTimeoutError):
+        await AgentOSClient('http://runtime',create).inspect_knowledge_chunk(
+            ChunkMutationLookup(knowledge_id=1,chunk_id='manual',operation='create',resource_revision='a'*64),'user','tenant')
+    assert len(calls) == len(clients) == 1 and clients[0].is_closed

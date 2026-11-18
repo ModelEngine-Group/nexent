@@ -13,7 +13,9 @@ from contracts.knowledge_chunk_mutation import (
     ChunkMutationAuthorization,
     ChunkMutationGrant,
     ChunkMutationIntent,
+    ChunkMutationLookup,
     ChunkMutationState,
+    ChunkMutationTarget,
 )
 from fastapi import FastAPI
 from management.api.knowledge_base.agentos_authorization import (
@@ -70,7 +72,17 @@ async def api(monkeypatch):
         count_delta=1,
         commit_epoch=1,
     )
-    service = SimpleNamespace(mutate_chunk=AsyncMock(return_value=state))
+    lookup = ChunkMutationLookup(
+        knowledge_id=1,
+        chunk_id="manual",
+        operation="create",
+        resource_revision="a" * 64,
+    )
+    target = ChunkMutationTarget(**lookup.model_dump(), change_epoch=0)
+    service = SimpleNamespace(
+        mutate_chunk=AsyncMock(return_value=state),
+        inspect_chunk=AsyncMock(return_value=target),
+    )
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_knowledge_router(service))
@@ -94,23 +106,29 @@ async def api(monkeypatch):
         assert not (await manager.shutdown(timeout=3)).stuck_execution_ids
 
 
-@pytest.mark.parametrize("direction", ["runtime", "management"])
+@pytest.mark.parametrize("direction", ["runtime", "management", "target"])
 @pytest.mark.parametrize("credential", ["signed", "tampered", "missing"])
 async def test_chunk_write_routes_bind_identity_and_exact_body(
     api, direction, credential
 ):
     s = api
-    app = getattr(s, direction)
+    app = s.runtime if direction == "target" else getattr(s, direction)
     operation = (
-        KnowledgeOperation.MUTATE_CHUNK
+        KnowledgeOperation.INSPECT_CHUNK
+        if direction == "target"
+        else KnowledgeOperation.MUTATE_CHUNK
         if direction == "runtime"
         else ManagementOperation.KNOWLEDGE_CHUNK_MUTATION_AUTHORIZE
     )
     payload = (
-        s.payload
-        if direction == "runtime"
-        else ChunkMutationAuthorization(
-            knowledge_id=1, chunk_id="manual", operation="create"
+        s.lookup
+        if direction == "target"
+        else (
+            s.payload
+            if direction == "runtime"
+            else ChunkMutationAuthorization(
+                knowledge_id=1, chunk_id="manual", operation="create"
+            )
         )
     )
     body = payload.model_dump_json().encode()
@@ -131,11 +149,14 @@ async def test_chunk_write_routes_bind_identity_and_exact_body(
         assert response.status_code == 200
         if direction == "runtime":
             s.service.mutate_chunk.assert_awaited_once_with(payload, s.actor)
+        elif direction == "target":
+            s.service.inspect_chunk.assert_awaited_once_with(payload, s.actor)
         else:
             assert s.authorize.call_args.args == (payload, s.actor)
     else:
         assert response.status_code == 401
         s.service.mutate_chunk.assert_not_awaited()
+        s.service.inspect_chunk.assert_not_awaited()
         s.authorize.assert_not_called()
 
 
@@ -154,6 +175,12 @@ async def test_typed_transport_roundtrips_both_directions(api):
             s.payload, s.actor.user_id, s.actor.tenant_id
         )
         == s.state
+    )
+    assert (
+        await runtime.inspect_knowledge_chunk(
+            s.lookup, s.actor.user_id, s.actor.tenant_id
+        )
+        == s.target
     )
     request = ChunkMutationAuthorization(
         knowledge_id=1, chunk_id="manual", operation="create"

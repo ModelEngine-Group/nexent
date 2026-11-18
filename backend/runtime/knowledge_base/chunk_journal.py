@@ -162,6 +162,8 @@ class ChunkMutationJournal:
             if row["request_sha256"] != digest:
                 raise Conflict()
             return row, False
+        if intent.expected_change_epoch is not None and state["epoch"] != intent.expected_change_epoch:
+            raise Conflict()
         logical_key = chunk_key(self.tenant, self.knowledge_id, intent.chunk_id)
         pending = tx.query(
             CHANGES,

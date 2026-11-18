@@ -5,7 +5,12 @@ import hashlib
 import json
 from typing import Literal
 
-from contracts.agentos_knowledge import Contract, KnowledgeFileReference, ModelVersion
+from contracts.agentos_knowledge import (
+    Contract,
+    KnowledgeChunk,
+    KnowledgeFileReference,
+    ModelVersion,
+)
 from pydantic import Field, JsonValue, model_validator
 
 CHANGES = "runtime_knowledge_chunk_changes"
@@ -34,6 +39,24 @@ class ChunkMutationGrant(ChunkMutationAuthorization):
     embedding_model_id: int | None = Field(default=None, gt=0)
 
 
+class ChunkMutationLookup(ChunkMutationAuthorization):
+    resource_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ChunkMutationTarget(ChunkMutationLookup):
+    change_epoch: int = Field(ge=0)
+    chunk: KnowledgeChunk | None = None
+    generation: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def exact_target(self):
+        if (self.chunk is None) != (self.generation is None):
+            raise ValueError("A stored chunk and its generation must be present together")
+        if self.chunk is not None and (self.chunk.knowledge_id != self.knowledge_id or self.chunk.chunk_id != self.chunk_id):
+            raise ValueError("Target must belong to the requested knowledge base and key")
+        return self
+
+
 class ChunkMutationState(ChunkMutationAuthorization):
     mutation_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: Literal["reserved", "writing", "unknown", "completed", "failed"]
@@ -53,6 +76,7 @@ class ChunkMutationIntent(Contract):
     file_ref: KnowledgeFileReference | None = None
     generation: str | None = Field(default=None, min_length=1, max_length=256)
     chunk_index: int | None = Field(default=None, ge=0, le=2**63 - 1)
+    expected_change_epoch: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def valid_binding(self):
@@ -71,9 +95,12 @@ class ChunkMutationIntent(Contract):
         return self
 
     def fingerprint(self):
+        payload = self.model_dump(mode="json")
+        if self.expected_change_epoch is None:
+            payload.pop("expected_change_epoch")
         return hashlib.sha256(
             json.dumps(
-                self.model_dump(mode="json"),
+                payload,
                 sort_keys=True,
                 separators=(",", ":"),
                 allow_nan=False,

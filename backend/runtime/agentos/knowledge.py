@@ -16,7 +16,7 @@ from contracts.knowledge_base_deletion import (
     KnowledgeBaseDelete,
     KnowledgeBaseDeleteLookup,
 )
-from contracts.knowledge_chunk_mutation import ChunkMutationIntent
+from contracts.knowledge_chunk_mutation import ChunkMutationIntent, ChunkMutationLookup
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
@@ -75,6 +75,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.MUTATE_CHUNK.value, include_in_schema=False)
     async def mutate_chunk(request: Request):
         return await dispatch(request, ChunkMutationIntent, service.mutate_chunk, 200)
+
+    @router.post(KnowledgeOperation.INSPECT_CHUNK.value, include_in_schema=False)
+    async def inspect_chunk(request: Request):
+        return await dispatch(request, ChunkMutationLookup, service.inspect_chunk, 200)
 
     @router.post(KnowledgeOperation.INSPECT_BASE.value, include_in_schema=False)
     async def inspect_base(request: Request):

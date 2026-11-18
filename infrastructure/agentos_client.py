@@ -60,7 +60,11 @@ from contracts.knowledge_base_deletion import (
     KnowledgeBaseDeleteGrant,
     KnowledgeBaseDeleteState,
 )
-from contracts.knowledge_chunk_mutation import ChunkMutationGrant, ChunkMutationState
+from contracts.knowledge_chunk_mutation import (
+    ChunkMutationGrant,
+    ChunkMutationState,
+    ChunkMutationTarget,
+)
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -134,6 +138,9 @@ class AgentOSClient:
 
     async def mutate_knowledge_chunk(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.MUTATE_CHUNK, payload, user_id, tenant_id, ChunkMutationState)
+
+    async def inspect_knowledge_chunk(self, payload, user_id, tenant_id):
+        return await self._record_json(KnowledgeOperation.INSPECT_CHUNK, payload, user_id, tenant_id, ChunkMutationTarget)
 
     async def authorize_knowledge_content(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, payload, user_id, tenant_id, KnowledgeContentGrant)
