@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: SKILLS-QUERY-PERF-20261113
+  change_type: refactor
+  title: Batch visible skill enrichment and cache successful YAML parses
+  description: Reduce skill relation queries and synchronous event-loop work while preserving permissions and configuration precedence.
+  affected_features:
+    existing: [F-072]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-076]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Existing list API contract is unchanged. Reuse API-076 for deployed list regression; isolated SQL, visibility, cache and scheduling assertions belong in traditional UT.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/management-skills-query-performance/.
+    Responsibility remains with the skill domain through F-072. Reused API-076
+    retains its preparation and cleanup declarations. Its script checks list shape
+    and installation statuses; it does not certify every legacy written obligation.
+    No new D1 duplicates isolated unit assertions. No new D3-D5 boundary is introduced.
+    Managed admission retains existing retryable 429 errors when capacity is exhausted.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve tenant scope, soft deletion, ordering and tool relation multiplicity with bounded query counts
+    - Filter using existing roles and group policy before relation and YAML enrichment
+    - Preserve local YAML precedence, absence and failure fallback across edits and concurrent requests
+    - Keep blocking skill reads off the event loop with managed admission and unchanged successful HTTP payloads
+    reason: Existing UT covers permissions and overlays but not bounded reads, cache freshness or route scheduling.
+    test_selectors:
+    - test/backend/database/test_skill_batch_queries.py
+    - test/backend/services/test_skill_list_optimization.py
+    - test/backend/services/test_skill_yaml_cache.py
+    - test/backend/app/test_skill_list_scheduling.py
+    - test/backend/database/test_skill_db.py
+    - test/backend/services/test_skill_service.py
+    - test/backend/app/test_skill_app.py
+    - test/backend/app/test_managed_read.py
+    - test/sdk/core/concurrency/test_thread_manager.py

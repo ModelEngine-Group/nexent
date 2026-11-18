@@ -25,6 +25,7 @@ from management.db.identity.group import (
     check_group_name_exists,
     check_user_in_group,
     count_group_users,
+    count_users_by_group_ids,
     modify_group,
     query_group_ids_by_user,
     query_group_users,
@@ -105,10 +106,12 @@ def get_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Opt
         result = query_groups_by_tenant(tenant_id, page, page_size, sort_by, sort_order)
 
     # Filter to only return required fields for each group and add user count
+    group_ids = [group["group_id"] for group in result["groups"] if group.get("group_id")]
+    counts = count_users_by_group_ids(group_ids) if group_ids else {}
     filtered_groups = []
     for group in result["groups"]:
         group_id = group.get("group_id")
-        user_count = count_group_users(group_id) if group_id else 0
+        user_count = counts.get(group_id, 0)
         filtered_groups.append({
             "group_id": group.get("group_id"),
             "group_name": group.get("group_name"),

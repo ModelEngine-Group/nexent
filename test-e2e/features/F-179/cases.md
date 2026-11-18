@@ -5,3 +5,4 @@
 - D1 [UT-BE-027](../../cases/UT-BE-027/case.yaml) · active
 - D1 [UT-FE-040](../../cases/UT-FE-040/case.yaml) · active
 - D2 [API-167](../../cases/API-167/case.yaml) · active
+- D4 [CHAT-RETRY-HISTORY-D4-001](../../cases/CHAT-RETRY-HISTORY-D4-001/case.yaml) · active

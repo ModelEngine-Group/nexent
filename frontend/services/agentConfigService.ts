@@ -297,12 +297,18 @@ export type PagedAgentList = {
   creatorCounts?: { all: number; created: number; others: number };
 };
 
-export const fetchAgentList = async (tenantId?: string) => {
+export const fetchAgentList = async (
+  tenantId?: string,
+  includeVersionLabel = false
+) => {
   try {
     const trimmedTenantId = tenantId?.trim();
-    const url = trimmedTenantId
+    let url = trimmedTenantId
       ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
       : API_ENDPOINTS.agent.list;
+    if (includeVersionLabel) {
+      url += `${trimmedTenantId ? "&" : "?"}include_version_label=true`;
+    }
     const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
@@ -1098,6 +1104,7 @@ export const searchAgentInfo = async (
     // convert backend data to frontend format
     const formattedAgent = {
       id: data.agent_id,
+      enable_context_manager: data.enable_context_manager ?? true,
       name: data.name,
       display_name: data.display_name,
       description: data.description,

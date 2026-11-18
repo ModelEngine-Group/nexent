@@ -1,6 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Preview or apply the one-time LLM outlet migration with sanitized summaries."""
+"""Preview or apply the one-time LLM outlet migration with sanitized summaries.
+
+The existing schema is sufficient. If an older deployment has the optional
+historical envelope column, validated frozen profiles are imported from it.
+Canonical rows are never overwritten; no schema changes or credentials are emitted.
+"""
 
 import argparse
 import json

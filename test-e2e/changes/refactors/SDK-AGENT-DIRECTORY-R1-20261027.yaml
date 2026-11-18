@@ -1,0 +1,55 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-DIRECTORY-R1-20261027
+  change_type: refactor
+  title: Relocate Agent contracts factory and Core adapters without changing execution
+  description: Move canonical Agent contracts, factory, child dispatch and Core-specific adapters; retain old module
+    aliases and object identity. Model directories and R2 resource extraction are excluded.
+  feature_contract_changed: false
+  no_case_change_reason: Existing runtime contracts remain unchanged. The model bridge script's stale exact tool
+    list is synchronized to the established controlled native Python tool, with the same failure reproduced against
+    the pre-refactor SDK. No new acceptance contract or duplicate D1 is needed.
+  affected_features:
+    existing:
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-RESOURCES
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-OUTPUT-D3-001
+    modified:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Old and canonical modules share types, exceptions, registry and monkeypatch lookup sites.
+    - Factory registration and lazy creation preserve success and invalid, duplicate and missing-Core failures.
+    - Resource, model and output behavior remains unchanged through old and canonical imports.
+    - Public contracts and factory import without loading optional Jiuwen modules; built wheel contains both paths.
+    reason: Existing unit suites prove behavior but cannot detect duplicate canonical types or registries; subprocess
+      and identity assertions cover these new migration boundaries without a new formal D1.
+    test_selectors:
+    - test/sdk/core/agents/test_canonical_agent_imports.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_jiuwen_resources.py
+    - test/sdk/core/agents/test_jiuwen_output.py
+    - test/sdk/core/agents/test_jiuwen_answer_boundary.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/sdk/core/agents/test_subagent_invocation_wrapper.py
+    - test/sdk/core/agents/test_subagent_resource_ownership.py
+    - test/backend/utils/test_runtime_output.py
+    - test/backend/utils/test_runtime_history_projection.py
+  notes: runtime-agent-core-factory/sdk-directory-refactor.md R1; product baseline f1d515ffc. AgentConfig/run-info
+    splitting, NexentAgent resource extraction and executor callback removal remain R2. core/models and model-interface
+    compatibility directories remain unchanged. Existing formal Cases are reused. The original model bridge Case
+    failed both before and after migration because it expected only add, despite the previously delivered nexent_execute_python.
+    Keep an exact two-tool allowlist, not a subset check. On 2026-10-29, obsolete compatibility UT file selectors
+    were rebound to canonical/removal tests by SDK-AGENT-CANONICAL-IMPORTS-20261029. Original old-import execution
+    claims describe this historical stage only.

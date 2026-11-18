@@ -34,7 +34,7 @@ class TestPromptTemplateUtils:
         parsed_template = Environment().parse(template_config["system_prompt"])
         assert meta.find_undeclared_variables(parsed_template) == {
             "installed_tool_name", "recommend_tool_name", "save_tool_name",
-            "max_results", "uninstalled_tool_name", "wrapper_name",
+            "max_results", "uninstalled_tool_name", "wrapper_name", "target_core",
         }
 
 

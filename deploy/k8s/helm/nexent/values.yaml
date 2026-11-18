@@ -26,6 +26,10 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/logs"
       existingClaim: "nexent-logs"
+    trajectory:
+      size: "50Gi"
+      localPath: "/var/lib/nexent-data/trajectory"
+      existingClaim: "nexent-trajectory"
     projectConfig:
       size: "1Gi"
       localPath: "/var/lib/nexent-data/project-config"
@@ -42,6 +46,8 @@ global:
   monitoring:
     enabled: false
     provider: otlp
+    trajectoryRootDir: "/mnt/nexent-data/trajectory"
+    trajectoryReadEnabled: false
     projectName: "nexent"
     serviceName: nexent-backend
     otlpEndpoint: http://nexent-otel-collector:4318
@@ -67,7 +73,7 @@ global:
     traceMaxItems: "20"
 
 # Optional monitoring stack. Set provider to one of:
-# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+# local_file, otlp, phoenix, langfuse, langsmith.
 nexent-common:
   # Shared ConfigMap values rendered into the Kubernetes nexent-config ConfigMap.
   config:

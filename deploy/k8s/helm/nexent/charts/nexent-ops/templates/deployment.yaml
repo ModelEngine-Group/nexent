@@ -1,4 +1,6 @@
 {{- $global := default dict .Values.global -}}
+{{- $monitoring := default dict $global.monitoring -}}
+{{- $trajectory := or (default false $monitoring.trajectoryReadEnabled) (eq (default "otlp" $monitoring.provider) "local_file") -}}
 {{- $logs := dig "sharedStorage" "logs" (dict) $global -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -24,7 +26,10 @@ spec:
       annotations:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" $global | quote }}
-        checksum/ops-config: {{ dict "port" .Values.service.port | toJson | sha256sum | quote }}
+        checksum/ops-config: {{ dict "port" .Values.service.port "monitoring" $monitoring | toJson | sha256sum | quote }}
+        {{- if $trajectory }}
+        checksum/nexent-secret: {{ dig "rolloutChecksums" "authSecret" "" $global | quote }}
+        {{- end }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -39,6 +44,17 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+          {{- if $trajectory }}
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-env
+            - secretRef:
+                name: nexent-monitoring-env
+            - secretRef:
+                name: nexent-secrets
+          {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -84,7 +100,16 @@ spec:
           volumeMounts:
             - name: ops-logs
               mountPath: /mnt/nexent-data/logs
+            {{- if $trajectory }}
+            - name: ops-trajectory
+              mountPath: {{ default "/mnt/nexent-data/trajectory" $monitoring.trajectoryRootDir | quote }}
+            {{- end }}
       volumes:
         - name: ops-logs
           persistentVolumeClaim:
             claimName: {{ default .Values.logs.existingClaim $logs.existingClaim }}
+        {{- if $trajectory }}
+        - name: ops-trajectory
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-trajectory" (dig "sharedStorage" "trajectory" "existingClaim" "" $global) }}
+        {{- end }}

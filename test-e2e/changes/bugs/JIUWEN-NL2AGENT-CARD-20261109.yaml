@@ -1,0 +1,52 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-NL2AGENT-CARD-20261109
+  change_type: bugfix
+  bug_id: JIUWEN-NL2AGENT-CARD-20261109
+  title: Decode Jiuwen MCP creator cards and stop at the interaction boundary
+  description: Native MCP result carriers hide nl2a cards; creator terminal filtering
+    and history envelope loss also break interaction replay.
+  observed_behavior: A valid nl2a_wrapper result is not rendered and the creator asks
+    the model again.
+  expected_behavior: Trusted successful workflow results expose the existing card/state
+    protocol; a valid card ends the run awaiting input.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Previous creator coverage prints cards through Python and does not
+      invoke native MCPTool.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - AGENT-CORE-CONFIG
+    - JIUWEN-MODEL-BRIDGE
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    modified:
+    - AGENT-CORE-GLOBAL-D3-001
+    added:
+    - JIUWEN-AGENT-CREATOR-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Single-layer native MCP results expose exact creator card and draft state; legacy
+      logs/content stay compatible.
+    - Failed/malformed or ordinary results do not create workflow cards.
+    - Once a card is emitted, later tools and model requests are rejected without
+      changing the waiting terminal.
+    - Creator persistence and public history preserve native tool identity and completed
+      results; legacy tool unwrapping remains unchanged.
+    - A valid creator boundary drains delayed worker cleanup; ordinary cancellation
+      and consumer close keep their original behavior.
+    reason: Unit carrier and boundary checks complement actual MCP/Runner/history
+      D3 and real browser D4; no duplicate D1.
+    test_selectors:
+    - test/backend/agents/test_jiuwen_creator_results.py
+  notes: Existing SPEC runtime-agent-core-factory AC-NA-01..03. D3 owns and releases
+    its loopback servers, database and tasks. D4 creates only uniquely owned draft/conversation
+    and protects existing data; no shared preparation family or deployment switching.

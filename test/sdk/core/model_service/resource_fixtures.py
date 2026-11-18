@@ -2,7 +2,7 @@
 
 """Controlled model-visible resources shared by boundary and converter unit tests."""
 
-from nexent.core.agent_runtime_support.contracts import ResourceItem, RuntimeResourceView
+from nexent.core.agents.contracts.resources import ResourceItem, RuntimeResourceView
 from nexent.core.model_service.contracts import ModelMessage, ToolCall, ToolDefinition
 
 

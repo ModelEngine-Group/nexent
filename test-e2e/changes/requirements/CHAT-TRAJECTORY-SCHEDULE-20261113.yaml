@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-SCHEDULE-20261113
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-SCHEDULE-20261113
+  title: 页面设置各租户定时清理周期
+  description: ADMIN配置本租户、SU配置授权租户，复用配置表，后台按各租户周期独立调度。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 配置缺省与持久化、管理员与租户权限、严格整数范围和失败传播。
+    - 30秒批量刷新、不同租户独立周期、缩短延长、扫描中变更、读取故障保留与恢复。
+    - SU入口、分钟换算、保存与重开、失败重试和取消。
+    reason: 现有UT覆盖启动配置与手动清理，新增动态配置边界；复用D2/D4，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_cleanup_schedule.py
+    - test/backend/services/trajectory/test_cleanup_schedule_repository.py
+    - test/backend/utils/test_trajectory_cleanup_schedule.py
+    - test/backend/utils/test_trajectory_runtime.py
+    - frontend/tests/component/trajectorySchedule.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+  notes: 责任域runtime；沿用自包含D2和受控HTTP D4的资源准备与teardown。正式验收和真实PG按用户要求暂缓，静态校验不算执行通过。

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAgentList as fetchAgentListService,
@@ -13,7 +15,10 @@ const EMPTY_AGENTS: Agent[] = [];
 const isLegacyInput = (input: UseAgentListInput): input is string | null =>
   typeof input === "string" || input === null;
 
-export function useAgentList(input: UseAgentListInput) {
+export function useAgentList(
+  input: UseAgentListInput,
+  includeVersionLabel = false
+) {
   const queryClient = useQueryClient();
   const legacyInput = isLegacyInput(input);
   const filters = legacyInput
@@ -30,7 +35,12 @@ export function useAgentList(input: UseAgentListInput) {
 
   const query = useQuery({
     queryKey: legacyInput
-      ? ["agents", "legacy", apiTenantId]
+      ? [
+          "agents",
+          "legacy",
+          apiTenantId,
+          ...(includeVersionLabel ? ["version-label"] : []),
+        ]
       : ["agents", filters],
     queryFn: async () => {
       if (!legacyInput) {
@@ -40,7 +50,7 @@ export function useAgentList(input: UseAgentListInput) {
         }
         return res.data;
       }
-      const res = await fetchAgentListService(apiTenantId);
+      const res = await fetchAgentListService(apiTenantId, includeVersionLabel);
       if (!res || !res.success) {
         throw new Error(res?.message || "Failed to fetch agents");
       }

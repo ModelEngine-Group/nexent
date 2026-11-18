@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 SDK unit contracts. All I/O clients are fakes owned by the test."""
 
 from __future__ import annotations
@@ -89,7 +90,7 @@ class _FakeStorage:
 @STAGE
 @pytest.mark.case_id("UT-SDK-016")
 def test_gateway_context_and_final_context_contract() -> None:
-    from nexent.core.context_runtime.contracts import ContextEvidence, FinalContext
+    from nexent.core.agents.contracts.context import ContextEvidence, FinalContext
     from nexent.core.gateway.model_context import EmbeddingContext, LLMContext, ModelContext
     from nexent.core.gateway.modality.rerank.openai import OpenAICompatibleRerankAdapter
     from nexent.core.models.openai_llm import OpenAIModel
@@ -138,5 +139,3 @@ def test_gateway_context_and_final_context_contract() -> None:
     assert source["enable_thinking"] is False
     final = FinalContext(messages=[{"role": "user", "content": "hello"}], evidence=ContextEvidence())
     assert final.messages[0]["role"] == "user" and final.tools == []
-
-

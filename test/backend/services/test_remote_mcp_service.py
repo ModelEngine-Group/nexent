@@ -53,7 +53,7 @@ sys.modules['nexent.storage.minio_config'] = nexent_minio
 
 # Pre-mock all nexent submodules that may be referenced downstream
 for _mod_name in [
-    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.agent_model',
+    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.contracts.config',
     'nexent.core.models', 'nexent.core.utils',
     'nexent.container', 'nexent.memory',
 ]:
@@ -69,7 +69,7 @@ for _mod_name in [
         sys.modules[_mod_name] = _mod
 
 # Ensure specific attributes needed by imports are present
-nexent_agent_model = sys.modules['nexent.core.agents.agent_model']
+nexent_agent_model = sys.modules['nexent.core.agents.contracts.config']
 nexent_agent_model.AgentVerificationConfig = MagicMock()
 nexent_agent_model.ToolConfig = MagicMock()
 

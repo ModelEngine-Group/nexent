@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-MODEL-BRIDGE-D3-001
+  feature_id: JIUWEN-MODEL-BRIDGE
+  requirement_ids:
+  - JIUWEN-MODEL-BRIDGE-20261015
+  business_rule_ids:
+  - JIUWEN-MODEL-BRIDGE-RULE-001
+  - JIUWEN-MODEL-BRIDGE-RULE-002
+  - JIUWEN-MODEL-BRIDGE-RULE-005
+  title: Jiuwen canonical model service and dual-protocol runtime
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Exercise actual runtime and transport boundaries beyond isolated mapping/parser UT.
+  preconditions:
+  - Installed compatible Jiuwen dependency and shared ModelService; controlled loopback HTTP/SSE provider and fixture
+    tools.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run the actual Jiuwen adapter with a trusted snapshot and the selected protocol.
+    expected: The actual factory/adapter/Jiuwen loop uses canonical ModelService and real local HTTP/SSE; native
+      and text/unknown capability paths return one final result and one tool effect.
+  - order: 2
+    action: Run the actual Jiuwen adapter with a trusted snapshot and the selected protocol.
+    expected: Text requests contain no native tools; actual tool observations reach the next request; native provider
+      IDs are preserved, including an empty-ID continuation placeholder after the same call index is already bound.
+  - order: 3
+    action: Run missing-information clarification, malformed or mixed actions and a subsequent answered run in native/text/unknown
+      modes.
+    expected: Valid exclusive forms produce one public human_interaction and completed/awaiting_input after one
+      model request; malformed/mixed calls dispatch no business tools and no form; a supplied-answer run completes
+      normally. All owned sessions, tools and threads are released.
+  expected_results:
+  - The actual factory/adapter/Jiuwen loop uses canonical ModelService and real local HTTP/SSE; native and text/unknown
+    capability paths return one final result and one tool effect.
+  - Text requests contain no native tools; actual tool observations reach the next request; native provider IDs
+    are preserved, including an empty-ID continuation placeholder after the same call index is already bound.
+  - Valid exclusive forms produce one public human_interaction and completed/awaiting_input after one model request;
+    malformed/mixed calls dispatch no business tools and no form; a supplied-answer run completes normally. All
+    owned sessions, tools and threads are released.
+  forbidden_side_effects:
+  - No native Jiuwen provider HTTP or CodeAgent loop; no unauthorized executable bindings, credentials or duplicate
+    effects.
+  - Never execute an ask_user Python payload, dispatch a sibling resource call, invent a form from ordinary prose,
+    or convert a clarification pause into user cancellation.
+  acceptance:
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Terminal human clarification follows the existing public event and next-turn contract for both
+      wire protocols.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  integration_boundary:
+  - Nexent factory/worker to Jiuwen to ModelService to real HTTP/SSE to controlled execution.
+  observations:
+  - Provider request capture, execution counter, native events and terminal outcome.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and HTTP response.

@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-RETAIN-SUMMARY-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-RETAIN-SUMMARY-20261117
+  title: 清理轨迹文件后保留数据库摘要与累计指标
+  description: 已清理执行保留摘要和已知用量，累计耗时及Token继续显示；自然到期补偿保持原指标，后台只回收已软删除摘要。
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-RETENTION-D5-001]
+    added: []
+    modified: [CHAT-TRAJECTORY-QUERY-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 聚合保留已清理执行耗时与Token，支持混合执行、零值、未知及空集合。
+    - 自然到期与主动清理只更新状态，补偿不覆盖已有摘要，后台不回收活动会话expired摘要。
+    - 数据库耗时统计包含已清理执行，TTFT文件扫描仍排除已清理文件。
+    - 完整摘要在界面显示累计耗时和Token且不提示缺口，实际未知用量仍提示不完整。
+    reason: SQL聚合与仓库生命周期用传统UT验证，复用QUERY-D2验证真实HTTP、文件清理与PG结果映射；RETENTION-D5复用文件生命周期回归。
+    test_selectors:
+    - test/backend/services/trajectory/test_retained_summary_metrics.py
+    - test/backend/services/trajectory/test_summary_lifecycle.py
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: 直接更新既有design.md第3节及CHAT-TRAJECTORY/TRJ-RULE-006，基线824348864并保留其他未提交改动。
+    复用runtime责任域，D2拥有独占临时文件、受控PG目录及TestClient与线程清理；无新增共享资源。
+    完整真实PG、部署及正式浏览器验收按用户此前要求暂缓；不改变会话删除与迁租撤权规则，既有已删除摘要不能凭空恢复。

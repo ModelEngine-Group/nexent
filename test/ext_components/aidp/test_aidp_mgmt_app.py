@@ -47,6 +47,7 @@ def _mod(name):
 
 
 nexent_pkg = _mod("nexent")
+# Keep unmocked SDK packages importable without relying on prior collection.
 nexent_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent")]
 nexent_utils = _mod("nexent.utils")
 nexent_http_mgr = _mod("nexent.utils.http_client_manager")

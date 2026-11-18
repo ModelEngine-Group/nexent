@@ -2,10 +2,24 @@
 
 """Stable retry classification with shared HTTP-boundary display diagnostics."""
 
+import logging
+
 from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
 from nexent.core.model_service.contracts import ModelError
 from nexent.core.model_service.http_contracts import ModelTransportError
 
+
+logger = logging.getLogger(__name__)
+_PROTOCOL_DIAGNOSTICS = frozenset({
+    "MODEL_RESPONSE_INVALID", "MODEL_RESPONSE_INCOMPLETE", "MODEL_TOOL_CALL_INVALID",
+    "MODEL_STREAM_IDENTITY_CONFLICT", "MODEL_USAGE_CONFLICT", "MODEL_USAGE_INVALID",
+    "MODEL_STREAM_AFTER_FINISH", "MODEL_CONTENT_UNSUPPORTED", "MODEL_MESSAGE_INVALID",
+    "MODEL_ROLE_UNSUPPORTED", "MODEL_RESPONSE_TOO_LARGE", "MODEL_TOOL_CALL_LIMIT",
+    "MODEL_REQUEST_CONFIGURATION_INVALID", "MODEL_REASONING_FORMAT_UNSUPPORTED",
+    "MODEL_SNAPSHOT_MISMATCH", "MODEL_PROTOCOL_UNSUPPORTED", "NATIVE_TOOL_PROTOCOL_UNAVAILABLE",
+    "HTTP_RESPONSE_TOO_LARGE", "HTTP_STREAM_FORMAT_INVALID", "SSE_INVALID_TEXT",
+    "SSE_EVENT_TOO_LARGE", "SSE_INCOMPLETE_EVENT", "SSE_DECODER_CLOSED",
+})
 
 _CATEGORIES = {
     "MODEL_AUTHENTICATION_ERROR": (False, "Model service authentication failed."),
@@ -144,6 +158,12 @@ def normalize_model_error(
         if parameter in {"model", "temperature", "top_p", "max_tokens", "reasoning_effort",
                          "thinking_budget", "thinking_token_budget", "enable_thinking", "chat_template_kwargs"}:
             parameter_name = parameter
+    if category == "MODEL_PROTOCOL_ERROR" and response is None:
+        source_code = getattr(error, "category", None)
+        code = next((known for known in (*_PROTOCOL_DIAGNOSTICS, *_DIAGNOSTICS)
+                     if known == source_code), "UNCLASSIFIED")
+        logger.warning("event=model_protocol_error protocol_code=%s request_id=%s", code, request_id,
+                       extra={"protocol_code": code, "request_id": request_id})
     retryable, message = _CATEGORIES[category]
     diagnostic = getattr(error, "category", None)
     diagnostic = diagnostic if diagnostic in _DIAGNOSTICS else category

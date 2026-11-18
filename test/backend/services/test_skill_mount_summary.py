@@ -80,16 +80,20 @@ def test_mount_query_empty_catalog_never_queries_relations(mocker, repository_se
     relations.assert_not_called()
 
 
-def test_mount_service_retains_visibility_and_configuration(mocker):
+@pytest.mark.parametrize("include_content", [False, True])
+def test_mount_service_retains_visibility_and_configuration(mocker, include_content):
     summaries = mocker.patch.object(skill_service.skill_db, "list_skill_mount_summaries", create=True,
                                    return_value=[metadata(), metadata(2, "other")])
     full = mocker.patch.object(skill_service.skill_db, "list_skills")
+    tools = mocker.patch.object(skill_service.skill_db, "get_tool_ids_by_skill_ids")
     mocker.patch.object(skill_service, "_get_user_role", return_value="USER")
     mocker.patch.object(skill_service, "query_group_ids_by_user", return_value=[])
     service = skill_service.SkillService(tenant_id="tenant-a", skill_manager=MagicMock())
-    mocker.patch.object(service, "_enrich_configs_from_yaml", side_effect=lambda skill: skill)
+    enrich = mocker.patch.object(service, "_enrich_configs_from_yaml", side_effect=lambda skill, **kwargs: skill)
 
-    rows = service.list_visible_skills(tenant_id="tenant-a", user_id="viewer", for_mount=True)
+    rows = service.list_visible_skills(
+        tenant_id="tenant-a", user_id="viewer", for_mount=True, include_content=include_content
+    )
 
     assert [row["skill_id"] for row in rows] == [1]
     assert rows[0]["config_values"] == {"region": "west"}
@@ -98,6 +102,10 @@ def test_mount_service_retains_visibility_and_configuration(mocker):
     assert "content" not in rows[0] and "tool_ids" not in rows[0]
     summaries.assert_called_once_with("tenant-a")
     full.assert_not_called()
+    tools.assert_not_called()
+    assert enrich.call_count == 1
+    assert enrich.call_args.args[0]["skill_id"] == 1
+    assert isinstance(enrich.call_args.kwargs["path_context"], skill_service.SkillConfigPaths)
 
 
 def test_mount_service_maps_database_failure(mocker):
@@ -109,16 +117,20 @@ def test_mount_service_maps_database_failure(mocker):
 
 
 @pytest.mark.parametrize("view", [None, "full", "mount"])
-def test_skill_api_routes_opt_in_without_changing_full_default(mocker, view):
+@pytest.mark.parametrize("include_content", [None, False, True])
+def test_skill_api_routes_opt_in_without_changing_full_default(mocker, view, include_content):
     mocker.patch.object(skill_api, "get_current_user_id", return_value=("viewer", "tenant-a"))
     mocker.patch.object(skill_api, "resource_read_tenant", return_value=None)
     service = mocker.patch.object(skill_api, "SkillService").return_value
     service.list_visible_skills.return_value = [metadata()]
     app = FastAPI()
     app.include_router(skill_api.router)
-    response = TestClient(app).get("/skills", params={} if view is None else {"view": view})
+    params = {} if view is None else {"view": view}
+    if include_content is not None:
+        params["include_content"] = str(include_content).lower()
+    response = TestClient(app).get("/skills", params=params)
     assert response.status_code == 200
-    expected = dict(tenant_id="tenant-a", user_id="viewer")
+    expected = dict(tenant_id="tenant-a", user_id="viewer", include_content=bool(include_content))
     if view == "mount":
         expected["for_mount"] = True
     service.list_visible_skills.assert_called_once_with(**expected)

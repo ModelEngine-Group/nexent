@@ -304,24 +304,8 @@ def query_invitations_with_pagination(
     """
 
     with get_db_session() as session:
-        # Create subquery to count usage records per invitation
-        usage_subquery = (
-            session.query(
-                TenantInvitationRecord.invitation_id,
-                func.count(TenantInvitationRecord.invitation_record_id).label("used_times"),
-            )
-            .filter(TenantInvitationRecord.delete_flag == "N")
-            .group_by(TenantInvitationRecord.invitation_id)
-            .subquery()
-        )
-
-        # Main query with left join to get usage counts
-        query = (
-            session.query(TenantInvitationCode, func.coalesce(usage_subquery.c.used_times, 0).label("used_times"))
-            .outerjoin(usage_subquery, TenantInvitationCode.invitation_id == usage_subquery.c.invitation_id)
-            .filter(TenantInvitationCode.delete_flag == "N")
-        )
-
+        # Count and page the invitation table before aggregating usage.
+        query = session.query(TenantInvitationCode).filter(TenantInvitationCode.delete_flag == "N")
         # Apply tenant filter when tenant_id is specified (including ASSET_OWNER virtual tenant)
         if tenant_id is not None:
             query = query.filter(TenantInvitationCode.tenant_id == tenant_id)
@@ -341,11 +325,22 @@ def query_invitations_with_pagination(
         offset = (page - 1) * page_size
         results = query.offset(offset).limit(page_size).all()
 
-        # Convert to dict format and add used_times
+        invitation_ids = [record.invitation_id for record in results]
+        counts = {}
+        if invitation_ids:
+            usage_rows = session.query(
+                TenantInvitationRecord.invitation_id,
+                func.count(TenantInvitationRecord.invitation_record_id),
+            ).filter(
+                TenantInvitationRecord.invitation_id.in_(invitation_ids),
+                TenantInvitationRecord.delete_flag == "N",
+            ).group_by(TenantInvitationRecord.invitation_id).all()
+            counts = dict(usage_rows)
+
         items = []
-        for invitation_record, used_times in results:
+        for invitation_record in results:
             invitation_dict = as_dict(invitation_record)
-            invitation_dict["used_times"] = int(used_times)
+            invitation_dict["used_times"] = int(counts.get(invitation_record.invitation_id, 0))
             items.append(invitation_dict)
 
         return {

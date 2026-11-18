@@ -1,0 +1,25 @@
+schema_version: '1.0'
+changes:
+- change_id: AGENT-CORE-REQ-001
+  change_type: requirement
+  requirement_id: AGENT-CORE-REQ-001
+  title: Add Jiuwen native agent core through a factory
+  description: Preserve Nexent configuration while translating native executable resources
+    and streaming results.
+  affected_features:
+    existing: []
+    added:
+    - AGENT-CORE-001
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AGENT-CORE-D1-001
+    - AGENT-CORE-D1-002
+    - AGENT-CORE-D1-003
+    - AGENT-CORE-D2-001
+    - AGENT-CORE-D3-001
+    - AGENT-CORE-D5-001
+    modified: []
+    retired: []

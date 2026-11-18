@@ -94,9 +94,9 @@ class _MockToolConfig:
 
 _agent_model_mock.AgentVerificationConfig = _MockAgentVerificationConfig
 _agent_model_mock.ToolConfig = _MockToolConfig
-sys.modules["nexent.core.agents.agent_model"] = _agent_model_mock
-sys.modules["nexent.core.agents.agent_context"] = MagicMock()
-sys.modules["nexent.core.agents.run_agent"] = MagicMock()
+sys.modules["nexent.core.agents.contracts.config"] = _agent_model_mock
+sys.modules["nexent.core.agents.context"] = MagicMock()
+sys.modules["nexent.core.agents.orchestration.entry"] = MagicMock()
 sys.modules["nexent.core.utils.observer"] = MagicMock()
 sys.modules["nexent.core.utils.common"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()

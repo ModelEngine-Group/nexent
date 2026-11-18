@@ -12,6 +12,9 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    "agent/core_policy.py",
+    "model/runtime_options.py",
+    "model/legacy_snapshot.py",
     'agent/creation.py',
     'agent/lifecycle.py',
     'agent/background.py',
@@ -207,6 +210,7 @@ MIGRATED_MODULES = {
     'repository/review_notifications.py',
     'skill/classifier.py',
     'skill/files.py',
+    'skill/local_config.py',
     'skill/naming.py',
     'skill/params.py',
     'skill/permission.py',
@@ -214,6 +218,7 @@ MIGRATED_MODULES = {
     'skill/service.py',
     'skill/stream_parser.py',
     'skill/transfer.py',
+    'skill/yaml_cache.py',
     'tag/identity.py',
     'tag/library.py',
     'tag/projection.py',
