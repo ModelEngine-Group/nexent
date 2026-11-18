@@ -12,7 +12,7 @@ from management.services.agent.preparation.evaluation_snapshot import build_eval
 from runtime.agentos import prepared_attachments
 
 ACTOR = ServicePrincipal("actor", "tenant")
-from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+from test.backend.services.model_profile_helpers import canonical_record, legacy_record, stub_resolved_model_catalog
 
 
 @pytest.fixture(autouse=True)
@@ -126,11 +126,10 @@ async def test_evaluation_compiler_exports_history_refs_without_pre_rendering_li
     from management.services.agent.preparation import evaluation_snapshot, run
     from nexent.core.agents.contracts.config import AgentConfig
 
-    record = {
-        "model_id": 11, "tenant_id": "tenant", "model_type": "llm", "model_name": "provider-model",
-        "display_name": "Evaluation", "model_repo": None, "api_key": "local-only", "base_url": "https://provider.invalid",
-        "update_time": "revision-1",
-    }
+    record = canonical_record(legacy_record(
+        model_id=11, display_name="Evaluation", api_key="local-only",
+        base_url="https://provider.invalid/v1", delete_flag="N", update_time="revision-1",
+    ))
     model = create_model_config_from_record(record)
     config = AgentConfig(
         agent_id=7, version_no=2, name="evaluation", description="", model_name=model.cite_name, tools=[],

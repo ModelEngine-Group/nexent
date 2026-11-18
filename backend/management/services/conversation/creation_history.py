@@ -167,7 +167,7 @@ async def persist_creation_stream(
                     )
                     if kind in {
                         "skill_body", "file_content", "agent_new_run",
-                        "target_files", "model_attempt_control", "done",
+                        "target_files", "model_attempt_control", "run_terminal", "done",
                     }:
                         content = json.dumps(chunk, ensure_ascii=False)
                     units.append((kind, content))

@@ -99,30 +99,29 @@ async def test_card_blocks_next_model_prepare_and_tool_dispatch():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["run_terminal", "error"])
-async def test_creator_stream_preserves_terminal_or_real_failure_after_card(monkeypatch, ending):
-    from contracts.agent import NL2AgentRunRequest
-    from contracts.authentication import AuthenticatedIdentity
-    from services import nl2agent_service as service
+async def test_creator_stream_closes_at_first_interaction_card(monkeypatch, ending):
+    from runtime.agentos import ephemeral
 
     adapter, _observer, _stop = setup_adapter()
-    adapter.run_info.agent_config.agent_id = None
-    monkeypatch.setattr(service, "build_nl2agent_run_info", AsyncMock(return_value=adapter.run_info))
     events = [{"type": "nl2a", "content": "card"}, {"type": "execution_logs", "content": "hidden"},
               {"type": "tool_result", "content": "already admitted call finished"},
               {"type": "execution_logs", "content": "still hidden after the result"},
               {"type": "nl2a", "content": "duplicate card must stay hidden"},
               {"type": ending, "content": "actual outcome"}, {"type": "done", "content": ""}]
+    closed = Mock()
 
     async def run(*args, **kwargs):
-        for event in events:
-            yield json.dumps(event)
+        try:
+            for event in events:
+                yield json.dumps(event)
+        finally:
+            closed()
 
-    monkeypatch.setattr(service, "agent_run", run)
-    stream = await service.create_nl2agent_stream(
-        NL2AgentRunRequest(query="create", agent_id=42), "tenant", "en",
-        identity=AuthenticatedIdentity("owner", "tenant"))
+    monkeypatch.setattr(ephemeral, "agent_run", run)
+    stream = ephemeral._observer_stream(adapter.run_info, Mock(), Mock(), creator_mode="nl2agent")
     output = [json.loads(item.removeprefix("data: ")) async for item in stream]
-    assert [item["type"] for item in output] == ["nl2a", "tool_result", ending, "done"]
+    assert output == [events[0]]
+    closed.assert_called_once_with()
 
 
 @pytest.mark.asyncio
