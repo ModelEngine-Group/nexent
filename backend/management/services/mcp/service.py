@@ -18,10 +18,7 @@ from contracts.constants.constants import (
     PERMISSION_EDIT,
     PERMISSION_READ,
 )
-from contracts.constants.environment import (
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    NEXENT_MCP_DOCKER_IMAGE,
-)
+from contracts.constants.environment import NEXENT_MCP_DOCKER_IMAGE
 from contracts.errors.exceptions import (
     MCPConnectionError,
     MCPContainerError,

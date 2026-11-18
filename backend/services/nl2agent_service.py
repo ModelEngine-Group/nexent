@@ -33,7 +33,8 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN
+from management.configuration.runtime import get_config_snapshot
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
@@ -1561,7 +1562,7 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        mcp_request_timeout_seconds=get_config_snapshot().get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,

@@ -5,10 +5,9 @@ import argparse
 import json
 import sys
 
-from sqlalchemy import select
-
 from contracts.errors.exceptions import AccountConflictError
 from infrastructure.security.passwords import hash_password
+from management.configuration.runtime import load_system_configuration
 from management.db.client import get_db_session
 from management.db.identity.account import (
     create_account,
@@ -17,10 +16,10 @@ from management.db.identity.account import (
 )
 from management.db.identity.user_tenant import insert_user_tenant
 from management.db.models import UserTenant
+from sqlalchemy import select
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
-
 
     email = email.strip().lower()
     with get_db_session() as session:
@@ -68,6 +67,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             raise ValueError(
                 "Password must contain uppercase, lowercase and digit and be at least 8 characters"
             )
+        load_system_configuration()
         account = create_account(email, hash_password(password), db_session=session)
         insert_user_tenant(
             account["user_id"], "", "SU", email, created_by="system", db_session=session

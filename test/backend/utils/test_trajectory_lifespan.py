@@ -30,6 +30,10 @@ def runtime_module(monkeypatch):
         "runtime.api.skill.creation": {"skill_creator_router": Mock()},
         "middleware.exception_handler": {"ExceptionHandlerMiddleware": Mock()},
         "infrastructure.concurrency": {"runtime_thread_manager": manager},
+        "management.configuration.runtime": {
+            "start_system_configuration": AsyncMock(),
+            "stop_system_configuration": AsyncMock(),
+        },
         "management.services.agent.run_state": {"runtime_state_service": Mock()},
         "infrastructure.observability.bootstrap": {"local_trajectory_processor": processor},
         "management.services.agent.execution": {"shutdown_agent_stream_tasks": AsyncMock(return_value=[])},
@@ -73,6 +77,7 @@ async def test_trajectory_lifespan_always_releases_runtime_manager(runtime_modul
     manager.start.assert_called_once()
     processor.request_stop.assert_called_once()
     manager.shutdown.assert_awaited_once()
+    module.stop_system_configuration.assert_awaited_once()
     module.clear_default_thread_manager.assert_called_once_with(manager)
     assert manager.run.await_args.args[2] == processor.shutdown
     if failure != "scheduler_stop":
