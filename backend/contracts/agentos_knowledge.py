@@ -469,6 +469,7 @@ class FileCleanseReleased(FileCleanseLookup):
 
 
 class KnowledgeOperation(str, Enum):
+    MUTATE_CHUNK = '/internal/agentos/v1/knowledge/chunks/mutate'
     INSPECT_BASE = '/internal/agentos/v1/knowledge/bases/state'
     DELETE_BASE = '/internal/agentos/v1/knowledge/bases/delete'
     INSPECT_BASE_DELETION = '/internal/agentos/v1/knowledge/bases/inspect'

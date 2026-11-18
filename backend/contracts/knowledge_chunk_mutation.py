@@ -21,6 +21,28 @@ class ChunkCreateData(Contract):
     embedding_input: str | None = None
 
 
+class ChunkMutationAuthorization(Contract):
+    knowledge_id: int = Field(gt=0)
+    chunk_id: str = Field(min_length=1, max_length=1024)
+    operation: Literal["create", "update", "delete"]
+
+
+class ChunkMutationGrant(ChunkMutationAuthorization):
+    collection: str = Field(min_length=1, max_length=100)
+    resource_tenant_id: str = Field(min_length=1, max_length=100)
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_model_id: int | None = Field(default=None, gt=0)
+
+
+class ChunkMutationState(ChunkMutationAuthorization):
+    mutation_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal["reserved", "writing", "unknown", "completed", "failed"]
+    writer_ended: bool
+    count_delta: Literal[-1, 0, 1] | None = None
+    commit_epoch: int | None = Field(default=None, gt=0)
+    error_code: str | None = None
+
+
 class ChunkMutationIntent(Contract):
     knowledge_id: int = Field(gt=0)
     chunk_id: str = Field(min_length=1, max_length=1024)

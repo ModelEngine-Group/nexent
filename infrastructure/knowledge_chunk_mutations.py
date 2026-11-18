@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from contracts.knowledge_chunk_mutation import CHANGES, STATES
 from nexent.storage.models import StorageScope
 
-from infrastructure.knowledge_vectors import bind_knowledge_creation_vectors
+from infrastructure.knowledge_vectors import (
+    bind_knowledge_chunk_vectors,
+    bind_knowledge_creation_vectors,
+)
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
 
@@ -28,6 +31,16 @@ def knowledge_chunk_mutation_ports(actor, *, context):
 def knowledge_creation_vector_ports(actor, collection, dimensions, *, context):
     context.remaining()
     vectors = bind_knowledge_creation_vectors(actor, collection, dimensions)
+    try:
+        yield vectors
+    finally:
+        close_owned(context, [vectors.close])
+
+
+@contextmanager
+def knowledge_chunk_vector_ports(actor, collection, *, context):
+    context.remaining()
+    vectors = bind_knowledge_chunk_vectors(actor, collection)
     try:
         yield vectors
     finally:

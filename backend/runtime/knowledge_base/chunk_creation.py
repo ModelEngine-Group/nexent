@@ -237,7 +237,7 @@ class ChunkCreationExecutor:
                 context=context,
             )
 
-    async def execute(self, intent, *, context=None):
+    async def execute(self, intent, *, context=None, authorize=None):
         if not isinstance(intent, ChunkMutationIntent) or intent.operation != "create":
             raise InvalidInput()
         intent = ChunkMutationIntent.model_validate(intent.model_dump(mode="json"))
@@ -261,6 +261,9 @@ class ChunkCreationExecutor:
                         self._existing, intent, context=context
                     )
                     dimensions, vector = await self._embedding(data, context=context)
+                    if authorize is not None:
+                        await authorize()
+                        context.remaining()
                 except Exception:
                     await run_blocking(
                         "knowledge-chunk-create-rejected",

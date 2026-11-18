@@ -95,17 +95,20 @@ async def test_search_total_deadline_closes_the_only_client(monkeypatch):
     assert len(requests) == len(clients) == 1 and clients[0].is_closed
 
 
-async def test_sample_total_deadline_cancels_and_closes_without_retry(monkeypatch):
+@pytest.mark.parametrize('mutation', [False, True])
+async def test_knowledge_total_deadline_cancels_and_closes_without_retry(monkeypatch, mutation):
     from contracts.agentos_knowledge import KnowledgeOperation, KnowledgeSample
+    from contracts.knowledge_chunk_mutation import ChunkMutationIntent
 
     monkeypatch.setattr(environment, 'JWT_SECRET', 'synthetic-sample-client-key')
     monkeypatch.setattr('infrastructure.agentos_client._KNOWLEDGE_SEARCH_DEADLINE_SECONDS', 0.1)
     clients, calls, cancelled = [], [], []
+    operation = KnowledgeOperation.MUTATE_CHUNK if mutation else KnowledgeOperation.SAMPLE
     async def blocked(message):
         calls.append(message)
-        assert message.url.path == '/api' + KnowledgeOperation.SAMPLE.value
+        assert message.url.path == '/api' + operation.value
         token = message.headers['Authorization'].removeprefix('Bearer ')
-        assert verify_call(token, KnowledgeOperation.SAMPLE, message.content) == ServicePrincipal('user', 'tenant')
+        assert verify_call(token, operation, message.content) == ServicePrincipal('user', 'tenant')
         try:
             await asyncio.Event().wait()
         finally:
@@ -115,8 +118,10 @@ async def test_sample_total_deadline_cancels_and_closes_without_retry(monkeypatc
         clients.append(client)
         return client
     with pytest.raises(RuntimeServiceTimeoutError):
-        await AgentOSClient('http://runtime', create).sample_knowledge(
-            KnowledgeSample(knowledge_id=1, expected_revision='a' * 64), 'user', 'tenant')
+        client = AgentOSClient('http://runtime', create)
+        payload = ChunkMutationIntent(knowledge_id=1,chunk_id='manual',request_key='request',operation='create',
+            resource_revision='a'*64,changes={'content':'body'}) if mutation else KnowledgeSample(knowledge_id=1, expected_revision='a' * 64)
+        await (client.mutate_knowledge_chunk if mutation else client.sample_knowledge)(payload, 'user', 'tenant')
     assert len(clients) == len(calls) == 1 and clients[0].is_closed and cancelled == [True]
 
 
