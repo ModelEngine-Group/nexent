@@ -6808,7 +6808,7 @@
   "trajectory.errors.archive_upload_timeout": "上传超时，请重试",
   "trajectory.recordList": "会话轨迹",
   "trajectory.recordTotal": "共 {{count}} 条",
-  "trajectory.refreshData": "刷新数据",
+  "trajectory.refreshData": "刷新",
   "trajectory.title": "可观测中心",
   "trajectory.subtitle": "按会话查看多轮执行，追踪每轮的调用耗时、指标与完整输入输出。",
   "trajectory.forbidden": "仅运维管理员和超级管理员可访问可观测中心",

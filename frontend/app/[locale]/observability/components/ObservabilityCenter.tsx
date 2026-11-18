@@ -563,8 +563,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
             )}
           </div>
           <Button
-            color="primary"
-            variant="outlined"
             icon={<RefreshCw size={14} />}
             loading={records.isFetching}
             disabled={records.isFetching}

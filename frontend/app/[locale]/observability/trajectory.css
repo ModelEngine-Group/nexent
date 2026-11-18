@@ -172,6 +172,19 @@
   font-weight: 500;
   white-space: nowrap;
 }
+.trajectory-table-panel .ant-table-thead > tr > th.ant-table-column-sort,
+.trajectory-table-panel
+  .ant-table-thead
+  > tr
+  > th.ant-table-column-has-sorters:hover {
+  background: var(--ant-table-header-bg, var(--color-bg-3));
+}
+.trajectory-table-panel
+  .ant-table-tbody
+  > tr:not(.ant-table-row-selected)
+  > td.ant-table-column-sort:not(.ant-table-cell-row-hover) {
+  background: transparent;
+}
 .trajectory-version-tag {
   display: inline-block;
   background: #e6f4ff;

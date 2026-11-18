@@ -6811,7 +6811,7 @@
   "trajectory.errors.archive_upload_timeout": "Upload timed out. Please try again.",
   "trajectory.recordList": "Conversation trajectories",
   "trajectory.recordTotal": "{{count}} total",
-  "trajectory.refreshData": "Refresh data",
+  "trajectory.refreshData": "Refresh",
   "trajectory.title": "Observability center",
   "trajectory.subtitle": "Review conversation runs, call timings, metrics, and complete inputs and outputs.",
   "trajectory.forbidden": "Operations or super administrator access required",
