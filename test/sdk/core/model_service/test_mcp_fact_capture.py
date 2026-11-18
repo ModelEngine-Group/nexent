@@ -306,3 +306,22 @@ def test_server_identity_lookup_matches_catalog_entry_by_url(monkeypatch):
     identity = resolve_mcp_server_identity("http://docs.invalid/mcp", "search")
     assert identity == {"mcp_server_id": 3, "mcp_server_name": "docs", "mcp_server_type": "container"}
     assert resolve_mcp_server_identity("http://other.invalid/mcp", "search") is None
+
+
+def test_server_identity_tool_override_takes_precedence(monkeypatch):
+    catalog = [{
+        "url": "http://local.invalid/mcp/tenant-1/sse",
+        "mcp_server_id": None,
+        "mcp_server_name": "outer-apis",
+        "mcp_server_type": "builtin",
+        "tool_types": {"search_docs": "api_convert"},
+    }]
+    monkeypatch.setattr(mcp_fact, "get_agent_monitoring_context",
+                        lambda: SimpleNamespace(monitoring_mcp_servers=catalog))
+    url = "http://local.invalid/mcp/tenant-1/sse"
+    overridden = resolve_mcp_server_identity(url, "search_docs")
+    assert overridden["mcp_server_type"] == "api_convert"
+    assert overridden["mcp_server_name"] == "outer-apis"
+    url_level = resolve_mcp_server_identity(url, "builtin_tool")
+    assert url_level["mcp_server_type"] == "builtin"
+    assert resolve_mcp_server_identity("http://other.invalid/mcp", "search_docs") is None

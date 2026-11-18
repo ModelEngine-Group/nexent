@@ -16,6 +16,7 @@ from contracts.constants.environment import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
+    OPS_MONITORING_ENABLED,
     RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     NEXENT_MCP_INTERNAL_TOKEN,
@@ -39,6 +40,7 @@ from management.services.agent.preparation.inputs import (
 )
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
 from management.services.agent.mcp_passthrough import apply_mcp_header_passthrough
+from management.services.agent.monitoring_catalog import build_run_monitoring_catalog
 from management.services.agent.tool_identity import resolve_tool_user_context
 from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
@@ -473,6 +475,17 @@ async def create_agent_run_info(
     # Filter MCP servers and tools, and build mcp_host with authorization
     used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
 
+    # Per-run MCP server catalog for monitoring facts (design D-003): omitted
+    # when monitoring is off, for debug runs, or when no MCP tools are used.
+    monitoring_mcp_servers = build_run_monitoring_catalog(
+        tenant_id,
+        used_mcp_urls,
+        remote_mcp_list,
+        default_mcp_url,
+        enabled=OPS_MONITORING_ENABLED,
+        is_debug=is_debug,
+    )
+
     # Build mcp_host list with authorization tokens and custom headers
     mcp_host = []
     for url in used_mcp_urls:
@@ -586,6 +599,9 @@ async def create_agent_run_info(
         # Only surface the kwarg when the caller actually sent metadata, so
         # agents without metadata keep the exact pre-existing payload shape.
         **({"runtime_metadata": metadata} if metadata is not None else {}),
+        # Same conditional pattern for the monitoring catalog: runs without a
+        # catalog keep the exact pre-existing payload shape.
+        **({"monitoring_mcp_servers": monitoring_mcp_servers} if monitoring_mcp_servers else {}),
         collaboration_timeout_seconds=RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
         tool_call_timeout_seconds=DEFAULT_TOOL_CALL_TIMEOUT,
         mcp_request_timeout_seconds=configuration.get("MCP_REQUEST_TIMEOUT_SECONDS"),

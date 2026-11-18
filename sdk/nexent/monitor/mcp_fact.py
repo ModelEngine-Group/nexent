@@ -132,10 +132,12 @@ def resolve_mcp_server_identity(url, tool_name=None):
     """Resolve server identity for one URL from the live run's monitoring catalog.
 
     The backend builds the per-run catalog (design D-003); entries are plain
-    dicts ``{url, mcp_server_id, mcp_server_name, mcp_server_type}``. Returns
-    the identity subset, or ``None`` when the context is absent or the catalog
-    does not carry the URL so facts fall back to the normalized ``unknown``
-    type. ``tool_name`` reserves the per-tool override lookup (design §3).
+    dicts ``{url, mcp_server_id, mcp_server_name, mcp_server_type}`` with an
+    optional ``tool_types`` override map for endpoints hosting several tool
+    origins. Returns the identity subset, or ``None`` when the context is
+    absent or the catalog does not carry the URL so facts fall back to the
+    normalized ``unknown`` type. A per-tool override replaces only
+    ``mcp_server_type`` (design section 3: local endpoint ``api_convert``).
     """
     context = get_agent_monitoring_context()
     if context is None or not url:
@@ -143,6 +145,10 @@ def resolve_mcp_server_identity(url, tool_name=None):
     catalog = getattr(context, "monitoring_mcp_servers", None) or []
     for entry in catalog:
         if isinstance(entry, dict) and entry.get("url") == url:
-            return {key: entry[key] for key in
-                    ("mcp_server_id", "mcp_server_name", "mcp_server_type") if key in entry}
+            identity = {key: entry[key] for key in
+                        ("mcp_server_id", "mcp_server_name", "mcp_server_type") if key in entry}
+            overrides = entry.get("tool_types") or {}
+            if tool_name and isinstance(overrides, dict) and tool_name in overrides:
+                identity["mcp_server_type"] = overrides[tool_name]
+            return identity
     return None
