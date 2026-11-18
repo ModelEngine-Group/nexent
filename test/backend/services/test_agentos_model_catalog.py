@@ -76,6 +76,25 @@ async def test_catalog_does_not_return_foreign_or_deleted_rows(mocker):
             await service.list(ModelListQuery(), ServicePrincipal("user", "tenant"))
 
 
+@pytest.mark.parametrize('model_type,configured,expected', [('embedding', 1536, 1536), ('multi_embedding', 512, 512),
+    ('llm', 4096, None), ('embedding', None, None), ('embedding', True, None), ('embedding', '2', None)])
+async def test_catalog_and_get_report_the_same_dimension_without_creating_an_adapter(mocker, model_type, configured, expected):
+    async def blocking(name, method, *args, **kwargs):
+        kwargs.pop('lane', None); kwargs.pop('owner', None)
+        return method(*args, **kwargs)
+    mocker.patch('runtime.model.service.run_blocking', side_effect=blocking)
+    row = {'model_id': 7, 'tenant_id': 'tenant', 'delete_flag': 'N', 'model_type': model_type, 'max_tokens': configured}
+    records = Mock(return_value=SimpleNamespace(items=[row], next_cursor=None))
+    adapters = Mock()
+    service = ModelService(Mock(return_value=row), adapters, list_records=records)
+    actor = ServicePrincipal('user', 'tenant')
+    catalog = await service.list(ModelListQuery(), actor)
+    metadata = await service.get(7, actor)
+    assert catalog.models[0].embedding_dimensions == metadata.embedding_dimensions == expected
+    assert 'max_tokens' not in catalog.model_dump_json()
+    adapters.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_signed_catalog_http_round_trip_and_invalid_page(mocker):
     from unittest.mock import AsyncMock

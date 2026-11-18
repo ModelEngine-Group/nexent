@@ -899,6 +899,7 @@ class ModelMetadata(ModelReference):
     display_name: str | None
     revision: str
     profile_version: str | None = None
+    embedding_dimensions: int | None = Field(default=None, gt=0, strict=True)
 
 
 class ModelListQuery(RunSpecModel):

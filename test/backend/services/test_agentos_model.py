@@ -4,20 +4,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
-
 from contracts.agentos import (
     ChatInvocation,
     ChatMessage,
     ChatOptions,
     EmbeddingInvocation,
     ModelInvocation,
+    ModelMetadata,
     RerankInput,
     RerankInvocation,
     RerankOptions,
 )
-from infrastructure.agentos_identity import ServicePrincipal
+from pydantic import TypeAdapter, ValidationError
 from runtime.model.service import ModelAccessError, ModelService
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 _ACTOR = ServicePrincipal("user", "tenant")
 
@@ -55,7 +56,28 @@ async def test_metadata_omits_credentials():
         "display_name": None,
         "revision": "2026-11-09",
         "profile_version": "p1",
+        "embedding_dimensions": None,
     }
+
+
+@pytest.mark.parametrize('model_type,dimensions,expected', [
+    ('embedding', 1024, 1024), ('multi_embedding', 512, 512), ('llm', 4096, None), ('rerank', 512, None),
+    ('embedding', None, None), ('embedding', True, None), ('embedding', '1024', None),
+    ('embedding', 0, None), ('embedding', -1, None), ('embedding', 2.5, None),
+])
+async def test_metadata_exposes_only_configured_embedding_dimensions(model_type, dimensions, expected):
+    build = Mock()
+    service = ModelService(Mock(return_value=_record(model_type=model_type, max_tokens=dimensions)), build)
+    model = await service.get(1, _ACTOR)
+    assert model.embedding_dimensions == expected
+    assert 'secret' not in model.model_dump_json()
+    build.assert_not_called()
+
+
+@pytest.mark.parametrize('dimensions', [True, 0, -1, 2.5, '2'])
+def test_metadata_dimension_contract_does_not_coerce_invalid_values(dimensions):
+    with pytest.raises(ValidationError):
+        ModelMetadata(model_id=1, model_type='embedding', display_name=None, revision='v1', embedding_dimensions=dimensions)
 
 
 @pytest.mark.asyncio

@@ -70,7 +70,7 @@ state = await client.stop_run(
 
 | 用途 | 路径 | 输入 |
 | --- | --- | --- |
-| 获取模型元数据 | `/model/get` | `ModelReference`，返回 ID、类型和 revision，不返回供应方密钥 |
+| 获取模型元数据 | `/model/get` | `ModelReference`，返回 ID、类型、revision 和可选 embedding_dimensions，不返回供应方密钥 |
 | 分页查询模型元数据 | `/model/list` | `ModelListQuery`，可按 model_type 筛选，返回 `ModelCatalogPage` |
 | 文本对话 | `/model/invoke` | `ChatInvocation`，operation 为 chat |
 | 向量化 | `/model/invoke` | `EmbeddingInvocation`，operation 为 embedding |
@@ -278,3 +278,5 @@ DataMate 目录属于 Management 的本地关联，远端仍拥有内容。租�
 用户通过原文件 process 接口显式再次处理新链 FAILED 文件时，Management 先 inspect 旧清洗/Runtime任务，确认终态、执行已结束、无待核对写入，以及清洗产物归属明确，再单次 CAS 接纳 processing_attempt+1。source_generation、源对象revision/hash保持不变，任务ID换新，旧进度与错误清空。进行中与已完成请求继续复用原意图；后台不会自动重试失败文件。旧执行用户不同、历史意图不完整、404或闭合信息缺失都拒绝重处理，不借其他用户身份查询旧job。
 
 KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_known，Runtime File.inspect补充 writer_ended、reconcile_required。它们是可空严格布尔值，缺失表示未知。Runtime upload同时拒绝旧writer仍需reconcile的同版本替换。已确认、仍由旧job精确归属的局部对象保留到正常File.delete统一清理，不声称物理删除完成；未知历史义务留待维护。升级先完成全部Management实例，再升级Runtime，回滚先Runtime后Management，避免旧严格解析器收到新增字段。没有新AgentOS operation、SQL或公开请求参数。
+
+模型的 `embedding_dimensions` 表示 Runtime 已配置的向量维度。`Model.get` 与 `Model.list` 使用同一规则，embedding 和 multi_embedding 从现有模型配置读取正整数，缺失或无效时返回 null；其他模型类型返回 null。该字段不代表已探测提供商输出。Management 可以将它与旧索引维度核对，无须读取 Runtime 数据库。实际摄取继续校验模型版本及配置维度，缺失值保持原有错误，不选择备用模型。内部响应增加字段仍遵循先升级Management、再升级Runtime的顺序，旧严格解析器不能先接收新Runtime响应。

@@ -21,7 +21,7 @@ from infrastructure.storage.catalog import (
 
 DATASET = "model_metadata"
 FIELDS = ("model_id", "tenant_id", "delete_flag", "model_type", "display_name", "model_repo", "model_name",
-          "update_time", "create_time", "capability_profile_version")
+          "update_time", "create_time", "capability_profile_version", "max_tokens")
 
 
 def bind_model_metadata(scope, engine):
@@ -29,7 +29,7 @@ def bind_model_metadata(scope, engine):
     table = sa.select(*(sa.cast(source.c[name], sa.String).label(name) if name in {"create_time", "update_time"}
                         else source.c[name] for name in FIELDS)).subquery("model_metadata")
     definition = DatasetDefinition(DATASET, "model_id", tuple(
-        FieldDefinition(name, "integer" if name == "model_id" else "string", nullable=source.c[name].nullable)
+        FieldDefinition(name, "integer" if name in {"model_id", "max_tokens"} else "string", nullable=source.c[name].nullable)
         for name in FIELDS), frozenset({"runtime"}), tenant_field="tenant_id", active_field="delete_flag")
     return SQLRecordStore(scope, DatasetCatalog((definition,)), {DATASET: table}, engine, revision_fields={})
 

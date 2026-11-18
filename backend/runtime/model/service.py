@@ -45,6 +45,13 @@ _MODEL_TYPES = {
 }
 
 
+def _configured_embedding_dimensions(record):
+    dimensions = record.get('max_tokens')
+    if record.get('model_type') in _MODEL_TYPES['embedding'] and type(dimensions) is int and dimensions > 0:
+        return dimensions
+    return None
+
+
 class ModelService:
     def __init__(self, load_record, build_adapter, *, list_records=None):
         self.load_record = load_record
@@ -71,6 +78,7 @@ class ModelService:
             display_name=record.get("display_name"),
             revision=revision or "legacy",
             profile_version=record.get("capability_profile_version"),
+            embedding_dimensions=_configured_embedding_dimensions(record),
         )
 
     async def get(self, model_id: int, actor: ServicePrincipal) -> ModelMetadata:
@@ -94,7 +102,8 @@ class ModelService:
                     result.append(ModelCatalogEntry(model_id=row["model_id"], model_type=row.get("model_type") or "",
                                                     display_name=row.get("display_name"), revision=(
                                                         revision.isoformat() if isinstance(revision, datetime) else revision),
-                                                    profile_version=row.get("capability_profile_version"), qualified_name=(
+                                                    profile_version=row.get("capability_profile_version"),
+                                                    embedding_dimensions=_configured_embedding_dimensions(row), qualified_name=(
                                                         f"{row['model_repo']}/{row['model_name']}" if row.get("model_repo")
                                                         else row.get("model_name"))))
                 return ModelCatalogPage(models=result, next_cursor=page.next_cursor)
@@ -104,13 +113,13 @@ class ModelService:
             raise ModelAccessError(504, "MODEL_TIMEOUT") from error
 
     async def embedding_dimensions(self, binding, actor: ServicePrincipal) -> int:
-        record, metadata = await self._load(binding.model_id, actor)
+        _, metadata = await self._load(binding.model_id, actor)
         if normalize_model_revision(binding.revision) != normalize_model_revision(metadata.revision):
             raise ModelAccessError(409, "MODEL_REVISION_MISMATCH")
         if metadata.model_type not in _MODEL_TYPES["embedding"]:
             raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
-        dimensions = record.get("max_tokens")
-        if type(dimensions) is not int or dimensions <= 0:
+        dimensions = metadata.embedding_dimensions
+        if dimensions is None:
             raise ModelAccessError(409, "MODEL_EMBEDDING_DIMENSIONS_MISSING")
         return dimensions
 
