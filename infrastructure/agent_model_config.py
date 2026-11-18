@@ -3,15 +3,20 @@
 """Translate an already authorized model record into SDK configuration."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
 from contracts.model_names import add_repo_to_name, get_model_name_from_config
 from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.model_service.compatibility.legacy_config import (
+    legacy_extra_body,
+    legacy_reasoning_budget,
+    legacy_reasoning_effort,
+    legacy_thinking_enabled,
+)
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
-from infrastructure.model_adapter import restore_model_snapshot
-from nexent.core.model_service.compatibility.legacy_config import (legacy_extra_body, legacy_reasoning_budget, legacy_reasoning_effort, legacy_thinking_enabled)
 
+from infrastructure.model_adapter import restore_model_snapshot
 
 COMMON_REASONING_LEVELS = ("low", "medium", "high")
 
@@ -40,7 +45,7 @@ def create_tenant_default_model_config(record: dict, alias: str, *, include_logp
 
 def normalize_model_revision(value: datetime | str | None) -> str:
     """Compare catalog timestamps independent of the query's serialization format."""
-    if isinstance(value, str) and "T" in value:
+    if isinstance(value, str) and ("T" in value or " " in value):
         try:
             value = datetime.fromisoformat(value)
         except ValueError:
@@ -55,7 +60,7 @@ def model_record_revision(record: dict) -> str:
     return normalize_model_revision(record.get("update_time") or record.get("create_time"))
 
 
-def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
+def _is_thinking_enabled(extra_params: dict[str, Any] | None) -> bool:
     """Return whether the model explicitly or implicitly enables reasoning."""
     if not isinstance(extra_params, dict):
         return False
@@ -67,8 +72,8 @@ def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
 
 
 def _build_extra_body(
-    extra_params: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    extra_params: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Build extra_body for ModelConfig from model_record_t.extra_params.
 
     Merges __custom__ user-defined params into the top level so they flow
@@ -89,9 +94,9 @@ def _build_extra_body(
 
 def _resolve_reasoning_capability(
     model_name: str,
-    base_url: Optional[str],
-    provider_hint: Optional[str],
-) -> Optional[Dict[str, Any]]:
+    base_url: str | None,
+    provider_hint: str | None,
+) -> dict[str, Any] | None:
     """Resolve catalog reasoning metadata without coupling import-time setup."""
     try:
         from configs.model_catalog_loader import resolve_reasoning_capability
@@ -105,9 +110,9 @@ def _resolve_reasoning_capability(
 
 
 def _resolve_model_reasoning_effort(
-    extra_params: Optional[Dict[str, Any]],
-    capability: Optional[Dict[str, Any]],
-) -> Optional[str]:
+    extra_params: dict[str, Any] | None,
+    capability: dict[str, Any] | None,
+) -> str | None:
     """Resolve the enabled model's effort from its supported profile."""
     if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
         return None
@@ -132,9 +137,9 @@ def _resolve_model_reasoning_effort(
 
 
 def _resolve_model_reasoning_budget(
-    extra_params: Optional[Dict[str, Any]],
-    capability: Optional[Dict[str, Any]],
-) -> Optional[int]:
+    extra_params: dict[str, Any] | None,
+    capability: dict[str, Any] | None,
+) -> int | None:
     """Resolve a persisted numeric reasoning budget within the source range."""
     if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
         return None

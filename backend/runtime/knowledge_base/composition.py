@@ -49,12 +49,12 @@ def default_service():
 
     from infrastructure.agentos_client import AgentOSClient
     from infrastructure.model_adapter import get_adapter_from_config
-    from infrastructure.rdb.model_records import get_model_by_model_id
+    from infrastructure.rdb.model_invocation import read_invocation_model
 
     return KnowledgeService(
         AgentOSClient(
             environment.MANAGEMENT_AGENTOS_URL,
             lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
         ),
-        ModelService(get_model_by_model_id, get_adapter_from_config),
+        ModelService(read_invocation_model, get_adapter_from_config),
     )

@@ -16,6 +16,10 @@ from contracts.agentos import (
     ModelMetadata,
     ModelResult,
 )
+from contracts.constants.constants import (
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+)
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRequest
@@ -59,16 +63,20 @@ class ModelService:
         self.list_records = list_records
 
     async def _load(self, model_id: int, actor: ServicePrincipal) -> tuple[dict, ModelMetadata]:
-        record = await run_blocking(
-            "agentos-model-lookup",
-            self.load_record,
-            model_id,
-            actor.tenant_id,
-            lane="control-io",
-            owner="runtime.model",
-        )
+        context = OperationContext('model-lookup-'+uuid4().hex, monotonic()+MODEL_CATALOG_SECONDS)
+        try:
+            async with asyncio.timeout(context.remaining()):
+                record = await run_blocking('agentos-model-lookup',self.load_record,model_id,actor,context=context,
+                    lane='control-io',owner='runtime.model')
+        except (TimeoutError, DeadlineExceeded) as error:
+            logger.warning('agentos_model_lookup_timeout model_id=%s phase=records operation_id=%s threshold_seconds=%s exception_type=%s',
+                model_id,context.operation_id,MODEL_CATALOG_SECONDS,type(error).__name__)
+            raise ModelAccessError(504,'MODEL_TIMEOUT') from error
         if not record or record.get("tenant_id") != actor.tenant_id or record.get("delete_flag") != "N":
             raise ModelAccessError(404, "MODEL_NOT_FOUND")
+        if record.get('model_type') in _MODEL_TYPES['embedding']:
+            if record.get('expected_chunk_size') is None: record['expected_chunk_size'] = DEFAULT_EXPECTED_CHUNK_SIZE
+            if record.get('maximum_chunk_size') is None: record['maximum_chunk_size'] = DEFAULT_MAXIMUM_CHUNK_SIZE
         revision = record.get("update_time") or record.get("create_time")
         if isinstance(revision, datetime):
             revision = revision.isoformat()

@@ -34,10 +34,10 @@ from runtime.thread_management import (
 
 from backend.http.server.app_factory import create_app
 from infrastructure.model_adapter import get_adapter_from_config
+from infrastructure.rdb.model_invocation import read_invocation_model
 from infrastructure.rdb.model_metadata import read_model_metadata
 from infrastructure.rdb.model_records import (
     fail_detecting_models_on_startup,
-    get_model_by_model_id,
 )
 from infrastructure.redis.run_state import runtime_state_service
 
@@ -117,7 +117,7 @@ async def thread_capacity():
 app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 
-app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config, list_records=read_model_metadata)))
+app.include_router(create_model_router(ModelService(read_invocation_model, get_adapter_from_config, list_records=read_model_metadata)))
 app.include_router(create_tool_router())
 app.include_router(create_memory_store_router())
 app.include_router(create_knowledge_router())

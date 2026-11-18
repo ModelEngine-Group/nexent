@@ -49,7 +49,8 @@ def test_invoke_disallows_connection_and_identity_overrides(override):
 async def test_metadata_omits_credentials():
     load = Mock(return_value=_record(access_token="secret", base_url="private", capability_profile_version="p1"))
     model = await ModelService(load, None).get(1, _ACTOR)
-    load.assert_called_once_with(1, "tenant")
+    assert load.call_count == 1 and load.call_args.args == (1, _ACTOR)
+    assert load.call_args.kwargs['context'].remaining() <= 10
     assert model.model_dump() == {
         "model_id": 1,
         "model_type": "llm",

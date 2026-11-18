@@ -294,3 +294,8 @@ Runtime用实际签名身份在读取前后重新请求Management授权。全量
 Management的 `KnowledgeIngestionIntent.legacy_snapshot` 只保存历史状态和审计，不随子请求发送。普通意图没有该字段时序列化形状保持不变。显式失败重处理保留既有迁移快照。旧任务引用、非canonical ID、缺失或未固定源仍拒绝接纳；维护前必须先停旧接纳并排空旧worker。仅INGEST_ACCEPTED且尚未预约子执行时允许SQL状态撤销，完整执行后的回滚仍需单独验证。
 
 历史迁移维护入口增加只读 `management.maintenance.migration inspect`。它在当前实际用户 edit DAC 下通过 StorageInterface 核对已有计划回执，不要求 Runtime 在线，不调用模型或重新提交任务。旧任务盘点会跳过已确认的新摄取任务引用，无法解析的意图单独计数，避免把 AgentOS 任务误归入 Celery。
+
+
+Model.get 与 Model.invoke 的执行配置读取现使用 Runtime 专用只读 StorageInterface RecordStore。ModelService 向读取函数传入实际签名 user/tenant 和同一 OperationContext，模型路由、KB 默认模型及 Memory 的推理组合复用该实现。私有记录保留凭据和 profile 原结构，public metadata/catalog 仍只返回白名单字段。读取受既有 10 秒预算约束，超时返回 MODEL_TIMEOUT，并记录 model_id、operation_id 与 phase，不自动重试。
+
+SQL 时间字符串转换为原 get 使用的 ISO T 形式；revision 比较同时接受 catalog 已有的空格时间形式，普通版本 tag 保持。原 embedding 空 chunk 参数默认值保留在 Runtime，维度仍只取已配置 max_tokens，不探测或替换模型。此项没有迁移全部模型写入/健康检查或 Memory 配置读取，也不代表完整 data-process 流水线已验收。

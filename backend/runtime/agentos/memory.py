@@ -5,27 +5,37 @@ import logging
 import math
 from functools import cache, partial
 
-from fastapi import APIRouter, Request
-from pydantic import ValidationError
-from starlette.responses import JSONResponse
-
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, AgentMemoryReceipt, AgentMemoryStore, EmbeddingInvocation, MemoryOperation,
+    BODY_KEY,
+    PRINCIPAL_KEY,
+    AgentMemoryReceipt,
+    AgentMemoryStore,
+    EmbeddingInvocation,
+    MemoryOperation,
 )
 from contracts.constants import environment
+from fastapi import APIRouter, Request
+from nexent.core.concurrency import run_blocking
+from nexent.memory.embedding_model import EmbeddingModelInfo
+from pydantic import ValidationError
+from runtime.model.service import ModelService
+from starlette.responses import JSONResponse
+
 from infrastructure.agent_model_config import model_record_revision
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.model_adapter import get_adapter_from_config
 from infrastructure.rdb.memory_store import (
-    MemoryStoreConflictError, MemoryStoreScopeError, find_existing_memory, mirror_current_memory,
-    read_memory_embedding_model_id, write_agent_memory,
+    MemoryStoreConflictError,
+    MemoryStoreScopeError,
+    find_existing_memory,
+    mirror_current_memory,
+    read_memory_embedding_model_id,
+    write_agent_memory,
 )
+from infrastructure.rdb.model_invocation import read_invocation_model
 from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.vdb.client import create_elasticsearch_core
 from infrastructure.vdb.memory_index import MemoryIndexService
-from nexent.core.concurrency import run_blocking
-from nexent.memory.embedding_model import EmbeddingModelInfo
-from runtime.model.service import ModelService
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +78,7 @@ class AgentMemoryStoreService:
                     and len(output[0]) == model.dimension
                     and all(type(value) in (int, float) and math.isfinite(value) for value in output[0])):
                 return output[0]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Preserve the existing optional memory-index failure boundary.
             logger.warning("Memory embedding failed tenant=%s model_id=%s error_type=%s",
                            actor.tenant_id, model.model_id, type(exc).__name__)
         return None
@@ -97,7 +107,7 @@ class AgentMemoryStoreService:
                     memory_id, payload.content, index_name, publish, lane="background-service", owner="runtime.memory",
                 )
                 indexed = bool(mirrored and embedding is not None)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- Preserve the existing optional memory-index failure boundary.
                 logger.warning("Memory index sync failed memory_id=%s error_type=%s", memory_id, type(exc).__name__)
         return AgentMemoryReceipt(memory_id=memory_id, event=event, indexed=indexed)
 
@@ -116,7 +126,7 @@ def _build_memory_store_service(model_service, index_service=None):
 
 @cache
 def get_memory_store_service() -> AgentMemoryStoreService:
-    return _build_memory_store_service(ModelService(get_model_by_model_id, get_adapter_from_config))
+    return _build_memory_store_service(ModelService(read_invocation_model, get_adapter_from_config))
 
 
 def create_memory_store_router(model_service=None, index_service=None) -> APIRouter:
