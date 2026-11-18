@@ -13,6 +13,7 @@ from nexent.core.agents.contracts.config import AgentConfig
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.parametrize("change", [None, "body", "removed", "unpersisted"])
@@ -27,6 +28,7 @@ def test_evaluation_rebuilds_only_pinned_persisted_model_body(mocker, change):
     agent = AgentConfig(agent_id=8, version_no=3, name="evaluate", description="Model body",
                         model_name=base.cite_name, tools=[])
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[row])
+    stub_resolved_model_catalog(mocker, row)
     snapshot = evaluation_snapshot.export_snapshot(
         agent, [selected], "query", [], tenant_id="tenant-a", conversation_id=-91,
         language="en", agent_model_overrides={} if change == "unpersisted" else override,

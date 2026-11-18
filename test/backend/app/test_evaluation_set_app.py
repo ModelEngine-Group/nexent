@@ -267,6 +267,18 @@ class TestCreateEvaluationSet:
         assert response.status_code == 500
 
 
+@pytest.fixture(autouse=True)
+def _default_system_configuration(mocker):
+    from management.api.evaluation import evaluation_set
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    mocker.patch.object(
+        evaluation_set,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # POST /evaluation-sets/upload
 # ---------------------------------------------------------------------------
@@ -385,8 +397,13 @@ class TestUploadEvaluationSet:
     def test_upload_rejects_oversized_file_before_parsing(self, client, mocker):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_MB", 1)
-        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_BYTES", 3)
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        mocker.patch.object(
+            evaluation_set_app,
+            "get_config_snapshot",
+            return_value=system_config_snapshot(MAX_EVALUATION_SET_FILE_SIZE_MB=1),
+        )
         evaluation_set_app.parse_evaluation_cases_from_excel = MagicMock(
             side_effect=AssertionError("oversized files must be rejected before parsing")
         )
@@ -394,7 +411,7 @@ class TestUploadEvaluationSet:
         response = client.post(
             "/evaluation-sets/upload",
             data={"name": "test"},
-            files=[("files", ("set.xlsx", b"1234", "application/octet-stream"))],
+            files=[("files", ("set.xlsx", b"x" * (1024 * 1024 + 1), "application/octet-stream"))],
         )
 
         assert response.status_code == 413, response.text
@@ -404,8 +421,8 @@ class TestUploadEvaluationSet:
             "resource": "evaluation_set_file",
             "filename": "set.xlsx",
             "limit_mb": 1,
-            "limit_bytes": 3,
-            "actual_bytes": 4,
+            "limit_bytes": 1024 * 1024,
+            "actual_bytes": 1024 * 1024 + 1,
         }
         evaluation_set_app.parse_evaluation_cases_from_excel.assert_not_called()
 

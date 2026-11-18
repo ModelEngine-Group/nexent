@@ -7,7 +7,7 @@ import pytest
 from contracts.agentos import WorkbenchDebugSkillLookup, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from test.common.local_agent_tools import create_local_tool
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
             prepared_local_tool.materialize_local_tools(resource, actor, "zh", workbench_tools=[row])
         options = {"workbench_tools": [row], "workbench_lookup": lookup}
     hydrated = prepared_local_tool.materialize_local_tools(resource, actor, "zh", **options)
-    instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), hydrated["ind_aidp_search"])
+    instance = create_local_tool(hydrated["ind_aidp_search"])
     assert instance.api_key == "runtime-aidp-fixture-key"
     assert instance.kds_list == ["private-kb"]
     reference = instance.image_url_builder("/KnowledgeBase/Tenants/provider-a/KnowledgeBases/private-kb/p.png")

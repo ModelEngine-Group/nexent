@@ -121,14 +121,13 @@ def test_invalid_or_incomplete_batch_never_overwrites_previous(tmp_path, invalid
 def test_configured_and_dynamic_credentials_are_redacted_without_truncating_logs(tmp_path):
     batch = make_batch(tmp_path)
     secret = "configured-credential-123"
-    save(tmp_path / "config/users.yaml", {"user": {"password": secret}})
     log = batch / "cases/CASE-1/step-1.log"
     text = ("Authorization: Bearer dynamic-credential-456\nCookie: session=dynamic-cookie-789\n"
             '{"api_key":"inline-credential-111","password":"inline-password-222"}\n'
             "https://user:url-password-333@example.invalid/path\n" + secret + "\n" + "x" * 6000)
     log.write_text(text, encoding="utf-8")
     save(batch / "cases/CASE-1/failure.json", {"headers": {"Authorization": "dynamic-credential-456"}, "message": secret})
-    suite_publish.publish_latest(batch, tmp_path)
+    suite_publish.publish_latest(batch, tmp_path, env={"FIXTURE_PASSWORD": secret})
     with zipfile.ZipFile(tmp_path / "runs-ubuntu/latest-batch.zip") as package:
         for name in package.namelist():
             data = package.read(name).decode()

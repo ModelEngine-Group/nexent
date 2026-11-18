@@ -4617,6 +4617,39 @@
     },
     {
       "method": "GET",
+      "path": "/api/system_configurations",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "route-9b3be3a80b86c9b7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/system_configurations",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "route-468b087a2519e617",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/system_configurations/recommendations",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "route-ebb75bac64a1aa1e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/tag-libraries",
       "transport": "http",
       "target": "management",

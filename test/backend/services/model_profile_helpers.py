@@ -25,3 +25,17 @@ def canonical_record(record):
 
     profile = ensure_outlet_parameter_rules(profile)
     return {**record, **encode_resolved_model_profile(profile, registered_references=model_service_references())}
+
+
+def stub_resolved_model_catalog(mocker, *rows):
+    from management.services.agent.preparation import model_bindings
+    from runtime.agentos import prepared_evaluation
+
+    catalog = {(row["model_id"], row["tenant_id"]): row for row in rows}
+    mocker.patch.object(
+        model_bindings,
+        "get_model_by_model_id",
+        side_effect=lambda model_id, tenant_id: catalog.get((model_id, tenant_id)),
+    )
+    mocker.patch.object(model_bindings, "read_agent_model_overrides", return_value={})
+    mocker.patch.object(prepared_evaluation, "read_agent_model_overrides", return_value={})

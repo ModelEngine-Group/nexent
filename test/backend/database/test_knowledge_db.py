@@ -191,6 +191,20 @@ def mock_session():
     return mock_session, mock_query
 
 
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.knowledge_base.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
+
+
 def test_lock_and_check_knowledge_name_available(mock_session):
     session, query = mock_session
 
@@ -268,9 +282,11 @@ def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
     """The tenant ceiling rejects creation at the boundary with structured details."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 1)
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 10)
-    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_KNOWLEDGE_BASES_PER_TENANT=1),
+    )
     session = _LimitSession([1])
 
     with pytest.raises(Exception) as exc_info:
@@ -306,7 +322,11 @@ def test_knowledge_limit_skips_user_scope_without_creator(monkeypatch):
     """Legacy integrations without a creator still observe the tenant ceiling."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_KNOWLEDGE_BASES_PER_TENANT=10),
+    )
     session = _LimitSession([0])
 
     knowledge_db._enforce_knowledge_limits(session, "tenant-1", None)
@@ -329,19 +349,25 @@ def test_knowledge_limit_skips_all_scopes_without_tenant():
     "role, expected_limit",
     [
         ("USER", 1),
-        ("DEV", 1000),
-        ("ADMIN", 1000),
-        ("SU", 1000),
-        ("ASSET_OWNER", 1000),
+        ("DEV", 2),
+        ("ADMIN", 2),
+        ("SU", 2),
+        ("ASSET_OWNER", 2),
     ],
 )
 def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expected_limit):
     """The creator ceiling is checked after the tenant ceiling and includes role details."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
-    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(
+            MAX_KNOWLEDGE_BASES_PER_TENANT=10,
+            MAX_KNOWLEDGE_BASES_PER_USER=1,
+            MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER=2,
+        ),
+    )
     monkeypatch.setattr(knowledge_db, "_get_user_role_in_session", lambda *_: role)
     session = _LimitSession([0, expected_limit])
 

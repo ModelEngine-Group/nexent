@@ -6,6 +6,7 @@ import pytest
 
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.asyncio
@@ -215,6 +216,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     ))
     model = model_record(model_id=11)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[model])
+    stub_resolved_model_catalog(mocker, model)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model)
     selected = create_model_config_from_record(model)
     child = AgentConfig(agent_id=9, version_no=4, name="child", description="", model_name=selected.cite_name, tools=[tool])

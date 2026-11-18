@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from contracts.agentos import PreparedEvaluationRun
 from infrastructure.agentos_identity import ServicePrincipal
 from runtime.agentos.prepared_evaluation import prepare_evaluation_run
+from test.backend.services.model_profile_helpers import canonical_record, legacy_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.fixture(autouse=True)
@@ -46,11 +48,12 @@ def test_prepared_case_rejects_real_or_coerced_conversation_ids(conversation_id)
 
 
 def model_record(**changes):
-    return {
-        "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm", "model_name": "provider-model",
-        "model_repo": None, "display_name": "Evaluation", "api_key": "runtime-only",
-        "base_url": "https://runtime-provider.example/v1", "update_time": "revision-1",
-    } | changes
+    row = legacy_record(
+        model_id=11, tenant_id="tenant-a", delete_flag="N", model_name="provider-model",
+        display_name="Evaluation", api_key="runtime-only", base_url="https://runtime-provider.example/v1",
+        update_time="revision-1",
+    ) | changes
+    return canonical_record(row) if row["model_type"] == "llm" else row
 
 
 @pytest.mark.parametrize("target", ["evaluation", "subagent", "workbench"])
@@ -186,6 +189,7 @@ def test_exported_builtin_binding_reconstructs_run_scope_without_transmitting_cl
         context_manager_config=ContextManagerConfig(token_threshold=1234),
     )
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=record)
 
     payload = export_snapshot(agent, [model], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
@@ -346,6 +350,7 @@ def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, 
         worker_agents=[child],
     )
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[model_row])
+    stub_resolved_model_catalog(mocker, model_row)
     snapshot = export_snapshot(root, [model], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
     assert snapshot is not None
     encoded = snapshot.model_dump_json()
@@ -430,6 +435,7 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
         tools=compiled,
     )
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[model_row])
+    stub_resolved_model_catalog(mocker, model_row)
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.read_bound_mcp_tools", return_value=[tool_row])
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.read_mcp_execution_servers", return_value=[server])
     mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value={
@@ -506,6 +512,7 @@ def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(moc
         }],
     )
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=record)
     mocker.patch("runtime.agentos.prepared_evaluation.AGENT_WORKSPACE_ROOT", str(tmp_path))
     mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", level)

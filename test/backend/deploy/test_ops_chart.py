@@ -110,6 +110,15 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
     assert ("ops-trajectory" in mounts) is enabled
     assert ("envFrom" in container) is enabled
+    env = {item["name"]: item for item in container["env"]}
+    assert len(env) == len(container["env"])
+    assert env["GATEWAY_AUTH_ENABLED"]["value"] == "true"
+    for name in ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_DB", "JWT_ISSUER"):
+        assert env[name]["valueFrom"]["configMapKeyRef"] == {"name": "nexent-config", "key": name}
+    for name in ("NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "GATEWAY_SIGNING_SECRET"):
+        ref = env[name]["valueFrom"]["secretKeyRef"]
+        assert (ref["name"], ref["key"]) == ("nexent-secrets", name)
+        assert ref.get("optional", False) is (name == "GATEWAY_SIGNING_SECRET")
     if enabled:
         assert mounts["ops-trajectory"]["mountPath"] == "/srv/trajectory"
         assert (

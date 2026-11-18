@@ -118,4 +118,3 @@ def build_run_preparation_arguments(
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
     return create_run_kwargs
-

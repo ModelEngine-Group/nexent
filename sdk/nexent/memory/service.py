@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Memory service facade for the new Memory system.
 
 This module provides a high-level facade for memory operations used by

@@ -13,6 +13,7 @@ from infrastructure.agent_model_overrides import apply_turn_model_generation
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
 from runtime.agentos import prepared_evaluation
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 _RECORD = {
@@ -52,6 +53,7 @@ def test_real_catalog_model_wins_when_its_name_matches_reserved_alias(mocker):
     listed = create_model_config_from_record(record)
     default = create_tenant_default_model_config(_RECORD, "main_model", include_logprobs=False)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     get_default = mocker.patch.object(evaluation_snapshot.tenant_config_manager, "get_model_config")
     binding = evaluation_snapshot._export_model("main_model", [listed, default], "tenant", _RESOURCE, {})
     assert binding.tenant_default_profile is None

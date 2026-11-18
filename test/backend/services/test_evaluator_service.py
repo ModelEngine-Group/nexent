@@ -17,6 +17,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
     if _p not in sys.path:
@@ -57,21 +60,6 @@ def _mk_mod(name: str, **attrs) -> types.ModuleType:
 
 
 def _install_stubs():
-    class _ErrorCode:
-        COMMON_VALIDATION_ERROR = "000502"
-        COMMON_RESOURCE_NOT_FOUND = "000501"
-
-    class _AppException(Exception):
-        def __init__(self, code, message: str = "", extra=None):
-            super().__init__(message)
-            self.code = code
-            self.message = message
-            self.extra = extra
-
-    _consts = _register_package("consts")
-    _consts.error_code = _mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
-    _consts.exceptions = _mk_mod("contracts.errors.exceptions", AppException=_AppException)
-
     _db = _register_package("database")
     _db.evaluator_db = _mk_mod(
         "management.db.evaluation.evaluator", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
@@ -117,10 +105,7 @@ def _install_stubs():
     prompts = sys.modules["nexent.core.prompts"]
     prompts.load_prompt = load_test_prompt
     prompts.render_prompt_text = render_test_prompt
-    return _ErrorCode, _AppException
-
-
-_ERROR_CODE, _APP_EXC = _install_stubs()
+_install_stubs()
 
 
 @pytest.fixture
@@ -169,15 +154,15 @@ def bundle():
     b.fmt_profile = fmt_profile
     b.llm = llm
     b.tmpl = tmpl
-    b.ErrorCode = _ERROR_CODE
-    b.AppException = _APP_EXC
+    b.ErrorCode = ErrorCode
+    b.AppException = AppException
     return b
 
 
 def _exc_code(bundle, fn, *args, **kwargs):
     with pytest.raises(bundle.AppException) as exc:
         fn(*args, **kwargs)
-    return exc.value.code
+    return exc.value.error_code
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +371,7 @@ class TestGenerateEvaluatorByLlm:
         bundle.llm.side_effect = RuntimeError("boom")
         with pytest.raises(bundle.AppException) as exc:
             await bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7, user_id="actor")
-        assert exc.value.code == bundle.ErrorCode.COMMON_VALIDATION_ERROR
+        assert exc.value.error_code == bundle.ErrorCode.COMMON_VALIDATION_ERROR
 
 
 # ---------------------------------------------------------------------------

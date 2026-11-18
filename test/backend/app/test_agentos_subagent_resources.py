@@ -10,6 +10,7 @@ from management.services.agent.preparation import evaluation_snapshot
 from nexent.core.agents.contracts.config import AgentConfig
 from runtime.agentos import prepared_evaluation
 from test.backend.app.test_agentos_prepared_evaluation import model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.parametrize("depth", [1, 2])
@@ -34,6 +35,7 @@ def test_nested_sandbox_configuration_exports_without_legacy_fallback(mocker, tm
         mcp_host=[], history=[], language="zh", user_id=actor.user_id, tenant_id=actor.tenant_id,
     )
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     snapshot = evaluation_snapshot.export_snapshot(root, [model], "hello", None,
                                                   tenant_id="tenant-a", conversation_id=0, language="zh")
     assert snapshot is not None

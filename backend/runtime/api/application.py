@@ -22,6 +22,10 @@ from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from infrastructure.system_configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
+)
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -55,9 +59,23 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
+
+    async def run_configuration_io(fn):
+        return await runtime_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="system-configuration-refresh",
+                owner="infrastructure.system_configuration.runtime",
+            ),
+            fn,
+        )
+
     from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         if local_trajectory_processor is not None:
             from infrastructure.trace.trajectory_runtime import conversation_deleted
 
@@ -106,9 +124,12 @@ async def runtime_lifespan(_app):
                 )
         finally:
             try:
-                await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                await stop_system_configuration()
             finally:
-                clear_default_thread_manager(runtime_thread_manager)
+                try:
+                    await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                finally:
+                    clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(

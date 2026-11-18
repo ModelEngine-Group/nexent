@@ -12,10 +12,11 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.local_tool_execution import catalog_tool_parameters
 from management.services.agent.preparation import evaluation_snapshot, local_tool
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
-from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from test.common.local_agent_tools import create_local_tool
 from runtime.agentos import prepared_local_tool
 from test.backend.app.test_agentos_prepared_evaluation import model_record
 from test.backend.app.test_agentos_prepared_local_tool import stored_tool
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.parametrize("name", ["tenant_search", "mcp", "analyze_image"])
@@ -25,11 +26,12 @@ def test_local_catalog_name_crosses_export_and_keeps_actual_sdk_behavior(mocker,
         name=name, class_name="DifySearchTool", source="local", description=stored_tool["description"],
         output_type=stored_tool["output_type"], params=catalog_tool_parameters(stored_tool),
     )
-    legacy = NexentAgent.create_local_tool(SimpleNamespace(observer=None), original)
+    legacy = create_local_tool(original)
     record = model_record(model_id=11)
     model = create_model_config_from_record(record)
     root = AgentConfig(agent_id=7, version_no=3, name="root", description="", model_name=model.cite_name, tools=[original])
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     lookup = mocker.patch.object(evaluation_snapshot, "read_bound_local_tools", return_value=[stored_tool])
     mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
     snapshot = evaluation_snapshot.export_snapshot(root, [model], "hello", None,
@@ -45,7 +47,7 @@ def test_local_catalog_name_crosses_export_and_keeps_actual_sdk_behavior(mocker,
     restored = prepared_local_tool.materialize_local_tools(
         SimpleNamespace(agent_id=7, version_no=3, tools=[binding]), ServicePrincipal("user-a", "tenant-a"), "zh",
     )[binding.tool_id]
-    actual = NexentAgent.create_local_tool(SimpleNamespace(observer=None), restored)
+    actual = create_local_tool(restored)
     assert restored.name == original.name and restored.params == original.params
     assert actual.name == legacy.name == "dify_search"
     assert (actual.dataset_ids, actual.top_k, actual.api_key) == (legacy.dataset_ids, legacy.top_k, legacy.api_key)

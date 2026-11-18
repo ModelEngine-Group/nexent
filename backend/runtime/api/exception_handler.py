@@ -8,7 +8,6 @@ It catches all exceptions and returns a standardized JSON response.
 """
 
 import logging
-import traceback
 import uuid
 from typing import Callable
 
@@ -109,7 +108,7 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                     status_code=exc.status_code,
                     content={
                         "code": error_code.value,  # Keep as string to preserve leading zeros
-                        "message": exc.detail,
+                        "message": ErrorMessage.get_message(error_code),
                         "trace_id": trace_id
                     }
                 )

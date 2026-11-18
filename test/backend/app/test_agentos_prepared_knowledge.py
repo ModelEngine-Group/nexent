@@ -8,10 +8,11 @@ from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
-from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from test.common.local_agent_tools import create_local_tool
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.fixture
@@ -55,6 +56,7 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
         tools=[knowledge_tool],
     )
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[llm])
+    stub_resolved_model_catalog(mocker, llm)
     snapshot = evaluation_snapshot.export_snapshot(
         agent, [selected], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
     )
@@ -91,7 +93,7 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
     else:
         info = prepared_evaluation.prepare_evaluation_run(payload, actor)
         assert info.agent_config.tools[0].name == knowledge_tool.name
-        tool = NexentAgent.create_local_tool(info, info.agent_config.tools[0])
+        tool = create_local_tool(info.agent_config.tools[0])
         assert tool.name == "knowledge_base_search"
         assert tool._internal_document_paths == ["reports/approved.txt"]
         denied_scope = tool._resolve_search_scope(["Denied"])
@@ -274,6 +276,7 @@ def test_prepared_model_revision_matches_database_list_and_id_formats(mocker):
     selected = create_model_config_from_record(row)
     listed = row | {"update_time": "2026-11-10T13:40:00Z"}
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[listed])
+    stub_resolved_model_catalog(mocker, listed)
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=row)
     agent = AgentConfig(agent_id=7, version_no=2, name="agent", description="", model_name=selected.cite_name, tools=[])
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
@@ -319,7 +322,7 @@ def test_distinct_knowledge_catalog_aliases_keep_independent_sdk_configuration(m
     assert list(actual) == [item.tool_id for item in references]
     assert [(tool.name, tool.params["top_k"]) for tool in actual.values()] == [("first", 3), ("second", 7)]
     for config in actual.values():
-        sdk = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
+        sdk = create_local_tool(config)
         assert sdk.name == "knowledge_base_search"
         assert sdk._resolve_search_scope(None).used_scope == []
     storage.assert_not_called()

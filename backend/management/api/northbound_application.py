@@ -13,6 +13,7 @@ from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECOND
 from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
 from management.api.northbound import a2a_router
 from management.api.northbound import router as northbound_router
+from infrastructure.system_configuration.runtime import start_system_configuration, stop_system_configuration
 from management.thread_management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from backend.http.server.app_factory import create_app
@@ -53,7 +54,21 @@ async def northbound_lifespan(_app):
     set_default_thread_manager(config_thread_manager)
     runtime_state_service.set_thread_manager(config_thread_manager)
     cleanup_tasks = []
+
+    async def run_configuration_io(fn):
+        return await config_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="system-configuration-refresh",
+                owner="infrastructure.system_configuration.runtime",
+            ),
+            fn,
+        )
+
     try:
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         await recover_northbound_tasks_on_startup(cleanup_tasks)
         yield
     finally:
@@ -63,10 +78,13 @@ async def northbound_lifespan(_app):
             await asyncio.gather(*cleanup_tasks, return_exceptions=True)
         finally:
             try:
-                await config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+                await stop_system_configuration()
             finally:
-                runtime_state_service.set_thread_manager(None)
-                clear_default_thread_manager(config_thread_manager)
+                try:
+                    await config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+                finally:
+                    runtime_state_service.set_thread_manager(None)
+                    clear_default_thread_manager(config_thread_manager)
 
 
 northbound_app = create_app(

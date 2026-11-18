@@ -21,11 +21,12 @@ from infrastructure.agent_model_config import create_model_config_from_record, c
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import runtime_client, workbench
 from management.services.agent.preparation import compiler, evaluation_snapshot, run
-from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from test.common.local_agent_tools import create_local_tool
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -41,6 +42,7 @@ def test_root_sandbox_policy_crosses_agentos_and_is_resolved_in_runtime(mocker, 
         model_name=model.cite_name, sandbox_policy=policy,
     )
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "docker")
     exported = evaluation_snapshot.export_snapshot(
@@ -87,6 +89,7 @@ def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocke
     models = [create_model_config_from_record(record) for record in [first, second]]
     current = {**first, "update_time": "revision-2"} if changed else first
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[second, current])
+    stub_resolved_model_catalog(mocker, second, current)
     resource = SimpleNamespace(agent_id=7, version_no=2)
     aliases = {"Evaluation": (11, "revision-1")}
 
@@ -633,12 +636,11 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 assert "create_proposal" not in encoded
             if planning and agent is info.agent_config:
                 expected.extend(["create_plan", "update_plan_step"])
-                executor = SimpleNamespace(observer=info.observer)
-                tools = [NexentAgent.create_local_tool(executor, item) for item in agent.tools[-2:]]
+                tools = [create_local_tool(item, observer=info.observer) for item in agent.tools[-2:]]
                 assert [tool.name for tool in tools] == expected[-2:]
             assert [tool.name for tool in agent.tools] == expected
             config = agent.tools[0]
-            tool = NexentAgent.create_local_tool(None, config)
+            tool = create_local_tool(config)
             assert tool.default_timeout_seconds == 37
             assert tool.inputs["timeout"]["default"] == 37
             assert tool.forward([(echo, {"value": "answer"})]) == ["ANSWER"]

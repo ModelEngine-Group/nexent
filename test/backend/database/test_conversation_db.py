@@ -238,6 +238,59 @@ from management.db.conversation.repository import _parse_history_summary_content
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
 
 
+from infrastructure.rdb.conversation_state import fail_streaming_assistant_messages
+
+
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+def test_fail_streaming_assistant_messages_returns_runtime_identities(
+    monkeypatch, mock_session_ctx
+):
+    """Startup recovery fails only the rows it locked as streaming."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = [
+        SimpleNamespace(message_id=7, conversation_id=11, created_by="user-1"),
+        SimpleNamespace(message_id=8, conversation_id=12, created_by="user-2"),
+    ]
+    query.update.return_value = 2
+    session.query.return_value = query
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
+
+    rows = fail_streaming_assistant_messages()
+
+    assert rows == [
+        {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
+        {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
+    ]
+    updates = query.update.call_args.args[0]
+    assert updates["status"] == "failed"
+    assert query.with_for_update.called
+
+
+def test_fail_streaming_assistant_messages_returns_empty_without_rows(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
+
+    assert fail_streaming_assistant_messages() == []
+    query.update.assert_not_called()
+
+
 @pytest.mark.parametrize("config_version,metadata_version", [(1, 9), (2, 8)])
 def test_ut_be_wb_027_joint_conflict_has_no_partial_mutation(
     monkeypatch, mock_session_ctx, config_version, metadata_version
@@ -736,7 +789,8 @@ def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_sessio
     session, ctx = mock_session_ctx
     session.scalar.return_value = 1
     monkeypatch.setattr(
-        "management.db.conversation.repository.MAX_CONVERSATIONS_PER_USER", 1
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATIONS_PER_USER=1),
     )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -932,7 +986,10 @@ def test_create_conversation_message_rejects_turn_limit(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.conversation.repository.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATION_TURNS=1),
+    )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
@@ -3709,6 +3766,10 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
 
 
 @pytest.fixture(autouse=True)
