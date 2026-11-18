@@ -14,15 +14,16 @@ from test.backend.services.model_profile_helpers import stub_resolved_model_cata
 
 
 @pytest.fixture(autouse=True)
-def local_sandbox(monkeypatch):
+def runtime_defaults(monkeypatch):
     monkeypatch.setattr("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr("runtime.model.parameters.read_agent_model_overrides", lambda *args: {})
 
 
 def evaluation_payload():
     return {
         "mode": "nexent",
         "resource": {
-            "agent_id": 7, "version_no": 2, "name": "test_agent",
+            "agent_id": 7, "version_no": 2, "name": "test_agent", "model_alias": "evaluation_llm",
             "description": "Evaluation agent", "prompt_templates": {"system_prompt": "Answer the query"},
         },
         "models": {"llm": {"model_id": 11, "alias": "evaluation_llm", "revision": "revision-1"}},
@@ -233,9 +234,7 @@ def test_exported_child_with_separate_model_and_explicit_overrides_round_trips(m
         agent_id=1, version_no=4, name="root", model_name="root_model", description="root", tools=[],
         worker_agents=[child],
     )
-    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", side_effect=(
-        lambda filters, tenant: [record for record in records.values() if record["display_name"] == filters["display_name"]]
-    ))
+    stub_resolved_model_catalog(mocker, *records.values())
     lookup = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id",
                           side_effect=lambda model_id, tenant: records[model_id])
     snapshot = export_snapshot(root, models, "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
@@ -402,7 +401,7 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
 
     mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-agentos-mcp-key")
     mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", "http://local-mcp.example")
-    mocker.patch("contracts.constants.environment.TOKEN", "runtime-internal-token")
+    mocker.patch("contracts.constants.environment.NEXENT_MCP_INTERNAL_TOKEN", "runtime-internal-token")
     tool_row = {
         "tool_instance_id": 17, "name": "lookup", "class_name": "lookup", "origin_name": "lookup",
         "description": "Lookup", "inputs": None, "output_type": "object",
@@ -572,7 +571,9 @@ async def test_management_prepares_evaluation_with_nonlocal_deployment_setting(m
     request = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
     assert await evaluation_snapshot.prepare_evaluation_snapshot(request, "user-a", "tenant-a") is compiler.return_value
     compiler.assert_awaited_once()
-    assert compiler.call_args.kwargs["export_evaluation"] is True
+    assert compiler.call_args.kwargs["is_debug"] is True
+    assert compiler.call_args.kwargs["override_version_no"] == 2
+    assert compiler.call_args.kwargs["enable_automation_tool"] is False
 
 
 @pytest.mark.parametrize("scope", ["evaluation", "a2a", "child", "debug_child", "missing", "duplicate", "parameters", "credential"])
