@@ -97,7 +97,6 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
     from sqlalchemy import select
     from management.db.models import UserTenant
 
-
     email = email.strip().lower()
     with get_db_session() as session:
         lock_account_keys(session, "super-admin-bootstrap", email)

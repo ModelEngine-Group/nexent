@@ -130,7 +130,7 @@ def _lookup_first_active_tenant() -> Optional[str]:
             DEFAULT_TENANT_ID as _DF,
             TENANT_ID as _TK,
         )
-        from management.db.client import get_db_session as _gds
+        from infrastructure.rdb.client import get_db_session as _gds
         from management.db.models import TenantConfig
         from sqlalchemy import select as _sel
 
