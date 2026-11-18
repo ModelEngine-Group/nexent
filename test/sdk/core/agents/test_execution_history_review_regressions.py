@@ -17,14 +17,14 @@ from smolagents.tools import Tool
 from smolagents.utils import AgentExecutionError
 from test_guardrail_checkpoints import KEYWORD, _make_step_agent, _msg
 
-from nexent.core.agents.agent_model import GuardrailRule
+from nexent.core.agents.contracts.config import GuardrailRule
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.context.execution_history import ExecutionHistory, summarize_record
 from nexent.core.agents.context.models import ContextItem, ContextItemInput
 from nexent.core.agents.context.rendering import ContextItemRenderer
-from nexent.core.agents.context.runtime import ManagedContextRuntime
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.sandbox import _install_host_tool_bridge
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.sandbox.execution import _install_host_tool_bridge
 from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
 from nexent.core.utils.observer import MessageObserver
 

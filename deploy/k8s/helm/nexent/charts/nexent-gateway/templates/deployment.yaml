@@ -91,6 +91,8 @@ spec:
                   optional: true
             - name: GATEWAY_MANAGEMENT_URL
               value: "http://nexent-config:5010"
+            - name: GATEWAY_OPS_URL
+              value: {{ default "http://nexent-ops:5016" .Values.opsUrl | quote }}
             - name: GATEWAY_RUNTIME_URL
               value: "http://nexent-runtime:5014"
             - name: GATEWAY_NORTHBOUND_URL

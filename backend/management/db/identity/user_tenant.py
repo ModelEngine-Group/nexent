@@ -41,6 +41,7 @@ from management.db.models import (
     UserTenant,
 )
 from infrastructure.rdb.orm import as_dict
+from management.db.trajectory.repository import detach_owner
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,12 @@ def upsert_user_tenant(
     snapshot = get_user_tenant_by_user_id(user_id)
     with get_db_session() as session:
         lock_tenants(session, [tenant_id] + ([snapshot["tenant_id"]] if snapshot else []))
-        result = session.query(UserTenant).filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N").first()
+        result = (
+            session.query(UserTenant)
+            .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+            .with_for_update()
+            .first()
+        )
 
         if result:
             if snapshot and result.tenant_id != snapshot["tenant_id"]:
@@ -281,6 +287,7 @@ def upsert_user_tenant(
             promoted_roles = set(assigned) - set(old_roles)
             if is_new_tenant:
                 _validate_user_tenant_limit(session, tenant_id, assigned)
+                detach_owner(session, user_id, result.tenant_id, tenant_id)
             elif has_any_role(promoted_roles, {'ADMIN','SU'}):
                 _validate_user_tenant_limit(session, tenant_id, assigned, include_user_count=False)
             result.tenant_id = tenant_id

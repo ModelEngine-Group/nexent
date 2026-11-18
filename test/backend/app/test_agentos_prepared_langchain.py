@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
 
 @pytest.mark.parametrize("change", [None, "request", "derived", "config", "revoked", "missing", "plugin", "path", "scope"])

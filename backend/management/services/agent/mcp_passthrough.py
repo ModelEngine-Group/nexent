@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Sequence
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException

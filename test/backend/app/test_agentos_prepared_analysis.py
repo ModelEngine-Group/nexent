@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from contracts.agentos import ToolBinding
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
 from test.backend.app.test_agentos_prepared_evaluation import model_record
 

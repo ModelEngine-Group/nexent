@@ -45,13 +45,14 @@ from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.redis.client import get_redis_client
 from infrastructure.workspace_paths import create_run_workspace
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.context_input import build_authorized_context_input
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
-from nexent.core.agents.sandbox import SandboxLevel
+from nexent.core.agents.sandbox.config import SandboxLevel
 from nexent.core.concurrency import run_blocking
 from runtime.adapters.nexent.factory import materialize_run
 from runtime.adapters.nexent.runner import agent_run

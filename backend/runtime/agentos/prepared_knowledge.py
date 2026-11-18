@@ -13,7 +13,7 @@ from infrastructure.model_adapter import build_adapter_fresh
 from infrastructure.rdb.knowledge_search_records import read_knowledge_search_actor, read_knowledge_search_records
 from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.vdb.client import create_elasticsearch_core
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from permissions.dac import resolve_knowledge_permissions
 
 logger = logging.getLogger(__name__)

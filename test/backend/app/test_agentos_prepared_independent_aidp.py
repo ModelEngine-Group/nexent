@@ -7,7 +7,7 @@ import pytest
 from contracts.agentos import WorkbenchDebugSkillLookup, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECOND
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,
+    ManagedThreadSpec,
     ManagerState,
     clear_default_thread_manager,
     set_default_thread_manager,
@@ -54,7 +55,21 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
+    from infrastructure.trace.bootstrap import local_trajectory_processor
+
     try:
+        if local_trajectory_processor is not None:
+            from infrastructure.trace.trajectory_runtime import conversation_deleted
+
+            local_trajectory_processor.deleted_conversation_check = conversation_deleted
+            local_trajectory_processor.start(
+                runtime_thread_manager,
+                ManagedThreadSpec(
+                    task_name="trajectory-file-writer",
+                    owner="infrastructure.trace.trajectory_runtime",
+                    close_hook=local_trajectory_processor.request_stop,
+                ),
+            )
         await runtime_thread_manager.run(
             "control-io",
             ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
@@ -76,15 +91,24 @@ async def runtime_lifespan(_app):
                 "Agent stream tasks exceeded shutdown grace pending=%s",
                 pending_stream_tasks,
             )
-        from nexent.core.agents.sandbox import SandboxPoolManager
+        from nexent.core.agents.sandbox.execution import SandboxPoolManager
 
         sandbox_pool = SandboxPoolManager._instance
         if sandbox_pool is not None:
             sandbox_pool.shutdown(logger)
         try:
-            await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+            if local_trajectory_processor is not None:
+                local_trajectory_processor.request_stop()
+                await runtime_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                    local_trajectory_processor.shutdown,
+                )
         finally:
-            clear_default_thread_manager(runtime_thread_manager)
+            try:
+                await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+            finally:
+                clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(

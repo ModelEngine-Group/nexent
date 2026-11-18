@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RECOVERY-D5-001
+  feature_id: JIUWEN-RECOVERY
+  requirement_ids:
+  - JIUWEN-M6-20261016
+  business_rule_ids:
+  - JIUWEN-RECOVERY-RULE-001
+  - JIUWEN-RECOVERY-RULE-002
+  title: Bounded logical recovery over real Jiuwen loop
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Recover validated model-step failures within fixed budgets without restarting
+    the Agent or tools.
+  preconditions:
+  - Installed Jiuwen, actual ModelService and controlled loopback model/resource HTTP
+    services.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Use real Runner, ModelService and local HTTP to inject invalid arguments,
+      completed empty/reasoning-only/length output and exhausted budgets. Known invalid
+      execution-code parameters use the same argument-correction quota.
+    expected: Only allowed logical corrections send another request; per-step and
+      per-turn limits are enforced independently from physical attempts.
+  - order: 2
+    action: Inject cancellation/deadline/visible transport failure and complete a
+      fresh turn.
+    expected: No follow-up after stop/deadline, completed tools execute once and owned
+      runtime resources drain.
+  expected_results:
+  - Only allowed logical corrections send another request; per-step and per-turn limits
+    are enforced independently from physical attempts.
+  - No follow-up after stop/deadline, completed tools execute once and owned runtime
+    resources drain.
+  forbidden_side_effects:
+  - No tool replay, unauthorized action, automatic model/Core switch, credential leak
+    or unbounded retry.
+  acceptance:
+  - id: AC-01
+    description: Logical budgets, errors and execution ownership remain bounded.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  risk_type: RELIABILITY
+  risk: Logical and physical retry multiplication or repeated side effects.
+  condition:
+  - Invalid/empty/completed length model responses, cancellation and exhausted correction
+    budgets.
+  - Recognized nested, syntactically invalid or empty execution-code arguments; persistent
+    nested blocks exhaust the step quota.
+  metrics:
+  - Logical request counts, physical attempts, tools executed and managed cleanup.
+  thresholds:
+  - Argument correction <=1 per step and <=3 per turn; response correction <=1 per
+    turn; no effect replay.
+  recovery_expectations:
+  - Fresh independent authorized run succeeds after faults.

@@ -7,7 +7,8 @@ from fastapi import HTTPException
 
 from contracts.agentos import PreparedSkillCreatorRun
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.context_input import build_authorized_context_input
 from nexent.core.agents.prompt.meta import compose_nl2skill

@@ -240,8 +240,8 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
     from management.services.agent.preparation import evaluation_snapshot, local_tool
     from management.services.agent.preparation.run import apply_root_generation_overlay
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import prepared_evaluation, prepared_local_tool, prepared_run
     from runtime.executions import LocalExecutionRegistry
 
@@ -413,8 +413,8 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
     from infrastructure.local_tool_execution import build_local_tool
     from management.services.agent.preparation import evaluation_snapshot, tools
     from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.utils.observer import ProcessType
     from runtime.agentos import prepared_evaluation, prepared_langchain, prepared_local_tool
     from runtime.executions import LocalExecutionRegistry
@@ -715,8 +715,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     from management.services.model import adapter as management_model_adapter
     from management.services.knowledge_base import permission as knowledge_permission
     from infrastructure.a2a_execution import build_external_agent_config
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import (
         prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge,
         prepared_local_tool, prepared_mcp, prepared_skills,
@@ -1435,8 +1435,8 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from management.services.memory import agentos_callback as memory_callback
     from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
     from nexent.core.tools.store_memory_tool import StoreMemoryTool
     from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
@@ -1853,8 +1853,8 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import Mock
 
     from infrastructure.agent_model_config import model_record_revision
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.plan_repo import PlanRepo
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
     from runtime.agentos import prepared_run
 
     principal = ServicePrincipal("planning-user", "planning-tenant")
@@ -1950,8 +1950,8 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
     from management.services.knowledge_base.providers import aidp
     from management.services.agent.preparation import evaluation_snapshot
     from management.services.agent.workbench import ResolvedSkillMount
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import prepared_mcp, prepared_run, prepared_skills
 
     actor = ServicePrincipal("workbench-user", "workbench-tenant")
@@ -2621,8 +2621,8 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from management.services.model import run_controls
     from nexent.core.agents import run_agent as sdk_runner
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.plan_repo import PlanRepo
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
     from runtime.agentos import debug as debug_lifecycle, ephemeral, resume
@@ -2942,7 +2942,7 @@ async def _assert_automation_proposal_callback(monkeypatch):
     from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
     from management.api.automation import agentos_callback as callback_api
     from management.services.automation import agentos_callback, proposal
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import resume
     from runtime.agentos.prepared_automation import materialize_automation_tool
 
@@ -3162,7 +3162,7 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
     from management.services.agent import creator_run, nl2agent_callback, nl2agent, runtime_client
     from management.services.model import creator_snapshot
     from nexent.core.agents import run_agent as sdk_runner
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
     from runtime.agentos import ephemeral, prepared_agent_creator
@@ -3542,8 +3542,8 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     from management.services.agent import tool_identity
     from management.services.agent.preparation import run as preparation, evaluation_snapshot
     from management.services.model import run_controls
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
     actor = ServicePrincipal("profile-user", "profile-tenant")
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-profile-key")

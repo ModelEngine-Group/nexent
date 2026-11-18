@@ -1,0 +1,37 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-OUTPUT
+  name: Jiuwen public observations and persisted runtime display
+  status: active
+  description: Ordered public observations, explicit terminal results and identical
+    live/history display.
+  business_rules:
+  - rule_id: JIUWEN-OUTPUT-RULE-001
+    description: Content, reasoning, tools and exact results retain ordered blocks
+      and call/invocation identities through public StepObservation and RunResult.
+  - rule_id: JIUWEN-OUTPUT-RULE-002
+    description: Only an explicit terminal confirms final blocks once; failure, cancellation
+      and missing terminal preserve partial and never imply success.
+  - rule_id: JIUWEN-OUTPUT-RULE-003
+    description: Realtime and persisted history use the same envelope projection for
+      tools, MCP, Skills, children and A2A; legacy Code display remains compatible.
+  - rule_id: JIUWEN-OUTPUT-RULE-004
+    description: All Core outputs normalize on the backend before SSE publishing and
+      history responses into established Nexent types and payloads. Northbound clients
+      and the web UI share the same existing protocol without client-side engine conversion.
+  - rule_id: JIUWEN-OUTPUT-RULE-005
+    description: All Core usage output takes context capacity and CM limits from the
+      same resolved Nexent configuration, even in passthrough mode; absent capacity
+      stays unknown and does not inherit another run.
+  required_test_stages:
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - JIUWEN-M5-20261016
+    - JIUWEN-UNIFIED-OUTPUT-20261016
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

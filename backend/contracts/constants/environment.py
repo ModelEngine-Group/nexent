@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -12,6 +12,9 @@ from ..configuration import _build_otlp_headers, _require_positive, _resolve_app
 # avoids silently replacing operator-provided service addresses.
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
+
+# One deployment owns the execution Core; persisted Agent fields are legacy metadata.
+NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'))
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
@@ -26,15 +29,10 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
 MANAGEMENT_AGENTOS_URL = os.getenv('MANAGEMENT_AGENTOS_URL', 'http://nexent-config:5010').rstrip('/')
-AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS = parse_positive_float(
-    os.getenv('AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS'), 'AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS', 60.0,
-)
+AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS = parse_positive_float(os.getenv('AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS'), 'AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS', 60.0)
 # Downstream verification settings; Gateway owns its upstream configuration.
 # Staged compatibility flag; shipped deployment and the standalone image enable it.
-_GATEWAY_AUTH_FLAG = os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower()
-if _GATEWAY_AUTH_FLAG not in {'true', 'false'}:
-    raise ValueError('GATEWAY_AUTH_ENABLED must be true or false')
-GATEWAY_AUTH_ENABLED = _GATEWAY_AUTH_FLAG == 'true'
+GATEWAY_AUTH_ENABLED = _require_choice(os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower(), ('true', 'false'), 'GATEWAY_AUTH_ENABLED must be true or false') == 'true'
 GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
 GATEWAY_SERVICE_URL = os.getenv('GATEWAY_SERVICE_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
@@ -75,6 +73,14 @@ AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(os.getenv('AGENT_AUTOMATION_SHUTDO
 AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(os.getenv('AGENT_AUTOMATION_MIN_INTERVAL_SECONDS', '5'))
 # Timeout in seconds for invoking external A2A agents (runtime sub-agent path and northbound direct calls)
 A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
+
+# Queue-plus-execution deadline for one Jiuwen local-child or external A2A call (seconds).
+# The parent model deadline may shorten this limit; it does not replace the A2A HTTP deadline.
+RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS = parse_positive_float(os.getenv('RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS'), 'RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS', 300.0)
+# Jiuwen's outer deadline for one tool.invoke, including A2A and controlled Python tools (seconds).
+# Pass it through run parameters and ToolCard metadata instead of changing Jiuwen's process-global default.
+# For longer A2A calls, increase this, the collaboration limit and A2A_AGENT_INVOCATION_TIMEOUT_SECONDS together.
+DEFAULT_TOOL_CALL_TIMEOUT = parse_positive_float(os.getenv('DEFAULT_TOOL_CALL_TIMEOUT'), 'DEFAULT_TOOL_CALL_TIMEOUT', 300.0)
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')
@@ -362,7 +368,7 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
-MONITORING_PROVIDER = os.getenv('MONITORING_PROVIDER', '')
+MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
 ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
@@ -381,7 +387,7 @@ OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION = os.getenv('OTEL_EXPORTER_OTLP_LA
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
 LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', '')
 OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv('OTEL_EXPORTER_OTLP_METRICS_ENABLED')
-OTEL_EXPORTER_OTLP_METRICS_ENABLED = (OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true'
+OTEL_EXPORTER_OTLP_METRICS_ENABLED = ((OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true' and MONITORING_PROVIDER != 'local_file')
 MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv('MONITORING_INSTRUMENT_REQUESTS')
 MONITORING_INSTRUMENT_REQUESTS = (MONITORING_INSTRUMENT_REQUESTS_RAW or 'false').lower() == 'true'
 MONITORING_FASTAPI_INCLUDED_URLS = os.getenv('MONITORING_FASTAPI_INCLUDED_URLS', '')
@@ -400,6 +406,18 @@ MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROL
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
+TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
+TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
+TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
+TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR') or '/mnt/nexent-data/trajectory'
+TRAJECTORY_STORAGE_MODE = _require_choice(os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower(), ('single_node', 'shared_directory'), 'TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
+TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)
+TRAJECTORY_FLUSH_INTERVAL_MS = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_INTERVAL_MS'), 'TRAJECTORY_FLUSH_INTERVAL_MS', 200)
+TRAJECTORY_FLUSH_BYTES = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_BYTES'), 'TRAJECTORY_FLUSH_BYTES', 262144)
+TRAJECTORY_QUEUE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUEUE_MAX_BYTES'), 'TRAJECTORY_QUEUE_MAX_BYTES', 268435456)
+TRAJECTORY_RUN_QUEUE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_RUN_QUEUE_MAX_BYTES'), 'TRAJECTORY_RUN_QUEUE_MAX_BYTES', 16777216)
+TRAJECTORY_CLEANUP_ENABLED = os.getenv('TRAJECTORY_CLEANUP_ENABLED', 'true').lower() == 'true'
+TRAJECTORY_CLEANUP_INTERVAL_SECONDS = parse_positive_int(os.getenv('TRAJECTORY_CLEANUP_INTERVAL_SECONDS'), 'TRAJECTORY_CLEANUP_INTERVAL_SECONDS', 3600)
 TELEMETRY_SAMPLE_RATE_RAW = os.getenv('TELEMETRY_SAMPLE_RATE')
 TELEMETRY_SAMPLE_RATE = float(TELEMETRY_SAMPLE_RATE_RAW or '1.0')
 
@@ -421,7 +439,7 @@ APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 # Agent Sandbox Configuration
 # =============================================================================
 NEXENT_TOOL_FASTPATH_ENABLED = os.getenv('NEXENT_TOOL_FASTPATH_ENABLED', 'true').strip().lower() == 'true'
-NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys((item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip())))
+NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip()))
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv('NEXENT_SANDBOX_DEFAULT_LEVEL', 'local').lower()
 # Default sandbox isolation level: local / docker / wasm.
 #    Default 'local' preserves backward-compatibility for existing deployments.

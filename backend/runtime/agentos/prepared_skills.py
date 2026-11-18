@@ -13,7 +13,7 @@ from contracts.agentos import EvaluationSkillTool, FileToolDescription, Workbenc
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from runtime.agentos.prepared_workbench import fetch_workbench_skill_mounts
 
 _stage_lock = Lock()

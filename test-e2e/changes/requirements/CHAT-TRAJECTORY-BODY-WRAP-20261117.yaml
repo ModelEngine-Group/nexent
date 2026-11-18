@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-BODY-WRAP-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-BODY-WRAP-20261117
+  title: 轨迹输入输出支持按框宽自动换行
+  description: 各正文独立切换换行，保留内容、复制和分块加载逻辑。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 输入输出及JSON/文本支持换行切换，两个框独立，节点切换重置。
+    - 长字符串保留源内容，复制不变，正文不可用时禁用。
+    - 既有分块加载、取消和滚动触底读取保持。
+    reason: 前端组件证明局部显示状态，Python产品行为未改；D4证明浏览器布局与页面交互。
+    test_selectors:
+    - frontend/tests/component/trajectoryBodyWrap.test.tsx
+    - frontend/tests/component/trajectoryBodyLoading.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+  notes: SPEC changes/chat-trajectory-body-wrap；复用JOURNEY-D4/AC-03，runtime责任域及自包含浏览器/路由清理保持，完整旅程已有阻塞保留。

@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: AGENT-CORE-GLOBAL-D3-001
+implementations:
+- framework: pytest
+  file: test_runtime.py
+  selector: test_global_core_real_protocol
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_global_core_real_protocol
+  - test_global_creator_card_completes_at_interactive_boundary
+  - test_global_creator_native_mcp_card_and_history
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

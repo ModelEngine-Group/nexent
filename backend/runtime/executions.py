@@ -8,7 +8,7 @@ from contracts.errors.exceptions import AgentRunAlreadyActiveError, AgentRunConc
 from infrastructure.redis.run_state import runtime_state_service
 
 if TYPE_CHECKING:
-    from nexent.core.agents.agent_model import AgentRunInfo
+    from nexent.core.agents.contracts.run import AgentRunInfo
 
 logger = logging.getLogger("agent_run_manager")
 

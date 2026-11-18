@@ -3,7 +3,7 @@
 
 from contracts.agentos import LangChainToolBinding, ToolBinding
 from infrastructure.langchain_plugins import build_langchain_tool, langchain_binding_revision
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 
 def export_langchain_tool(tool: ToolConfig, candidates, artifacts, agent_id, version_no, tenant_id) -> ToolBinding:

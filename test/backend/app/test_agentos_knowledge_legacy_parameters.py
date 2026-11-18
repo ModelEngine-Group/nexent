@@ -6,7 +6,7 @@ import pytest
 from contracts.agentos import KnowledgeSearchBinding, ToolBinding
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import knowledge_search
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from runtime.agentos import prepared_knowledge
 

@@ -9,8 +9,8 @@ from fastapi import HTTPException
 from contracts.agentos import ToolBinding
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
 
 @pytest.fixture
@@ -223,7 +223,7 @@ def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_to
     from infrastructure.local_tool_execution import LOCAL_PARAMETER_OVERRIDES_METADATA, build_local_tool
     from management.services.agent import tool_identity
     from management.services.agent.preparation import evaluation_snapshot, local_tool
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from runtime.agentos import prepared_local_tool
     from test.backend.app.test_agentos_prepared_evaluation import model_record
 

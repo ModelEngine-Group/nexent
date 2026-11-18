@@ -167,7 +167,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation import evaluation_snapshot, local_tool, tools
     from management.services.knowledge_base import scope
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from runtime.agentos import prepared_evaluation, prepared_local_tool
     from test.backend.app.test_agentos_prepared_evaluation import model_record
 

@@ -168,7 +168,7 @@ async def test_cancellation_keeps_run_registered_until_worker_exits(mocker):
 
 
 def test_exported_builtin_binding_reconstructs_run_scope_without_transmitting_clients(mocker):
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
     from nexent.core.agents.context import ContextManagerConfig
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
@@ -213,7 +213,7 @@ def test_exported_builtin_binding_reconstructs_run_scope_without_transmitting_cl
 def test_exported_child_with_separate_model_and_explicit_overrides_round_trips(mocker):
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     records = {
         11: model_record(model_id=11, display_name="root_model"),
@@ -323,7 +323,7 @@ def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, 
     from infrastructure.a2a_execution import build_external_agent_config
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-agentos-a2a-key")
     row = {
@@ -393,7 +393,7 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
     from infrastructure.mcp_execution import build_mcp_tool
     from management.services.agent.preparation import tools
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-agentos-mcp-key")
     mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", "http://local-mcp.example")
@@ -493,7 +493,7 @@ def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(moc
     from contracts.constants import environment
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
 
     record = model_record(model_id=11)

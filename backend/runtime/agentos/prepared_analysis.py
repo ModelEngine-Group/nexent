@@ -12,7 +12,7 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.model_adapter import get_adapter_from_config
 from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.model_records import get_model_by_model_id
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.utils.observer import MessageObserver
 from nexent.multi_modal.utils import is_url
 

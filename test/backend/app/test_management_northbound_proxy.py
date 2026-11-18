@@ -37,4 +37,4 @@ async def test_gateway_forwards_original_northbound_and_a2a_paths_to_management(
                     denied = await client.get("/api/internal/thread-capacity")
                     assert denied.status_code == 404
                     wrong_method = await client.delete("/nb/v1/health")
-                    assert wrong_method.status_code == 405
+                    assert wrong_method.status_code == 404

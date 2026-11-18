@@ -29,12 +29,16 @@ def control(phase, attempt="a1"):
 
 @pytest.fixture
 def collect():
-    async def run(chunks, *, failure=None):
+    async def run(chunks, *, failure=None, outcome=None):
         async def events():
             for chunk in chunks:
                 yield json.dumps(chunk)
             if failure:
                 raise failure
+            if outcome is not None:
+                yield {"type": "agentos_execution_error", "payload": json.dumps({
+                    "type": "error", "content": outcome,
+                })}
 
         stream = project_creation_events(events(), [])
         result = [json.loads(item.removeprefix("data: ")) async for item in stream]
@@ -171,3 +175,11 @@ async def test_explicit_reasoning_tag_examples_never_write_skill_files(collect, 
     assert all(item["origin_type"] == "final_answer" for item in events if item["type"] in {
         "skill_body", "file_content", "summary",
     })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failed", "stopped"])
+async def test_native_failed_terminal_cannot_confirm_a_generated_skill(collect, outcome):
+    events = await collect([answer(WIRE)], outcome=outcome)
+    assert events[-1]["type"] == "error"
+    assert not any(event["type"] == "done" for event in events)

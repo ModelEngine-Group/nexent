@@ -16,6 +16,9 @@ def test_flat_service_exclusions_match_remaining_scope():
     assert not list((BACKEND / "utils").glob("*.py"))
     assert (BACKEND / "runtime/api/application.py").is_file()
     assert (BACKEND / "gateway/application.py").is_file()
+    assert not (BACKEND / "gateway/api").exists()
+    assert (BACKEND / "management/api/northbound.py").is_file()
+    assert (BACKEND / "runtime/api/__init__.py").is_file()
 
 
 def test_production_imports_use_canonical_owners():

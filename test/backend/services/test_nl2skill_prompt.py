@@ -9,7 +9,7 @@ from smolagents import CodeAgent
 
 from contracts.agentos import PreparedSkillCreatorRun
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from runtime.agentos import prepared_skill_creator as runtime
 from runtime.agentos.prepared_skill_creator import create_nl2skill_agent_config
 from runtime.agentos.prepared_skill_creator import get_nl2skill_prompt_template

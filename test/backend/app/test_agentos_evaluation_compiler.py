@@ -21,7 +21,7 @@ from infrastructure.agent_model_config import create_model_config_from_record, c
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import runtime_client, workbench
 from management.services.agent.preparation import compiler, evaluation_snapshot, run
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from runtime.agentos import prepared_evaluation
 
@@ -30,7 +30,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_root_sandbox_policy_crosses_agentos_and_is_resolved_in_runtime(mocker, changed):
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from nexent.core.agents.sandbox import SandboxLevel
 
     record = model_record(model_id=11)
@@ -91,7 +91,7 @@ def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocke
     aliases = {"Evaluation": (11, "revision-1")}
 
     if changed:
-        from nexent.core.agents.agent_model import AgentConfig
+        from nexent.core.agents.contracts.config import AgentConfig
 
         agent = AgentConfig(
             agent_id=7, version_no=2, name="agent", description="agent", model_name="Evaluation", tools=[],
@@ -869,7 +869,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
 async def test_explicit_turn_controls_reject_missing_root_binding_without_legacy_retry(mocker):
     from contracts.agentos import TurnModelGeneration
     from contracts.errors.exceptions import RunModelControlsError
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
     mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})

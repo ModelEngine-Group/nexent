@@ -7,7 +7,7 @@ import json
 from contracts.agentos import LocalSearchOverrides
 from contracts.constants import environment
 from infrastructure.shared_aidp_tool import shared_aidp_parameters
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 LOCAL_SDK_TOOL_CLASSES = {
     "dify_search": "DifySearchTool",

@@ -34,6 +34,7 @@ from infrastructure.agentos_identity import ServicePrincipal
 import runtime.agentos.ephemeral
 import management.services.model.adapter
 from management.api.agent.creator import nl2agent_run_api, require_agent_create_permission, router as agent_creator_router
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -122,13 +123,15 @@ monitoring_stub.get_monitoring_manager = lambda: monitoring_manager_mock
 monitoring_stub.monitoring_manager = monitoring_manager_mock
 monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
+monitoring_stub.AgentRunMetadata = AgentRunMetadata
+monitoring_stub.agent_monitoring_context = agent_monitoring_context
 
 # Mock all external dependencies that agent_app.py imports
 # These must be in sys.modules BEFORE we import management.api.agent.agent
 sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent.core'] = types.ModuleType('nexent.core')
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
-sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
+sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
 sys.modules['infrastructure.rdb.client'] = MagicMock()
@@ -141,7 +144,7 @@ sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
 
-sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
 sys.modules['management.services.permission.identity.session'] = MagicMock()
 sys.modules['management.services.permission.identity.session'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
@@ -158,6 +161,14 @@ sys.modules['management.services.conversation.service'] = MagicMock()
 sys.modules['management.services.configuration.user.memory'] = MagicMock()
 sys.modules['management.services.agent.versions'] = MagicMock()
 sys.modules['management.services.agent.prompt_generation'] = MagicMock()
+
+from importlib.machinery import ModuleSpec as _SDKModuleSpec
+from pathlib import Path as _SDKPath
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.core.agents.contracts"):
+    if _package in sys.modules:
+        sys.modules[_package].__path__ = [str(_SDKPath(__file__).resolve().parents[3] / "sdk" / _package.replace(".", "/"))]
+        sys.modules[_package].__spec__ = _SDKModuleSpec(_package, loader=None, is_package=True)
+        sys.modules[_package].__package__ = _package
 
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api

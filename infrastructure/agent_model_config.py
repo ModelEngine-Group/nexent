@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
 from contracts.model_names import add_repo_to_name, get_model_name_from_config
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from infrastructure.model_adapter import restore_model_snapshot
 from nexent.core.model_service.compatibility.legacy_config import (legacy_extra_body, legacy_reasoning_budget, legacy_reasoning_effort, legacy_thinking_enabled)

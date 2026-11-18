@@ -50,6 +50,12 @@ for (const [method, path, target] of [
   ["POST", "/api/agent/nl2agent/run", "runtime"],
   ["POST", "/api/skills/nl2skill/run", "runtime"],
   ["GET", "/api/conversation/42", "runtime"],
+  ["GET", "/api/trajectory/records", "runtime"],
+  ["GET", "/api/trajectory/conversations/42", "runtime"],
+  ["GET", "/api/trajectory/conversations/42/snapshot", "runtime"],
+  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "runtime"],
+  ["POST", "/api/trajectory/cleanup", "runtime"],
+  ["GET", "/api/trajectory_config", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
     const result = dispatch(method, path);

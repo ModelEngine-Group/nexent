@@ -12,7 +12,7 @@ from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agent_model_overrides import overlay_root_model
 from management.services.agent import raw_execution as service, tool_identity
 from management.services.agent.preparation import run, evaluation_snapshot
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from runtime.agentos import prepared_evaluation
 from .test_agentos_raw_preparation import ACTOR, preparation
 

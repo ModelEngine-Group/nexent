@@ -11,8 +11,8 @@ from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.local_tool_execution import catalog_tool_parameters
 from management.services.agent.preparation import evaluation_snapshot, local_tool
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from runtime.agentos import prepared_local_tool
 from test.backend.app.test_agentos_prepared_evaluation import model_record
 from test.backend.app.test_agentos_prepared_local_tool import stored_tool

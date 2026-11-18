@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from management.db.automation import repository as agent_automation_db
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 from infrastructure.agent_tool_config import build_automation_proposal_tool
 
@@ -43,7 +43,7 @@ def _run_coroutine(coro):
         return asyncio.run(coro)
     manager = get_current_thread_manager()
     if manager is None:
-        from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+        from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
 
         manager = _get_default_agent_thread_manager()
     return manager.run_sync(

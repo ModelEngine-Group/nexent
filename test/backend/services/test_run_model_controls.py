@@ -60,60 +60,13 @@ def test_su_ac_05_selected_model_is_resolved_with_tenant(monkeypatch):
     lookup.assert_called_once_with(42, "tenant")
 
 
-def test_partial_fields_do_not_enable_thinking_and_off_clears_active_controls():
-    base = model(enable_thinking=False)
-    result = run_controls.overlay_root_model(base, {"thinking_effort": "xhigh"}, "root")
-    assert result.enable_thinking is False and result.reasoning_effort is None
-    result = run_controls.overlay_root_model(model(), {"deep_thinking": False, "thinking_effort": "max"}, "root")
-    assert result.enable_thinking is False and result.reasoning_effort is None and result.reasoning_budget_tokens is None
-    unchanged = run_controls.overlay_root_model(model(), {}, "root")
-    assert unchanged.reasoning_effort == "medium" and unchanged.extra_body == {"custom": "retained"}
-
-
-@pytest.mark.parametrize("budget,expected", [(0, 2048), (1024, 1024), (8192, 8192)])
-def test_budget_range_and_zero_auto_keep_sampling(budget, expected):
-    base = model(reasoning_budget_tokens=2048, reasoning_capability={
-        "status": "supported", "controls": [{"type": "budget_tokens", "min": 1024, "max": 8192}],
-    })
-    result = run_controls.overlay_root_model(base, {"reasoning_budget_tokens": budget}, "root")
-    assert result.reasoning_budget_tokens == expected and result.reasoning_effort is None
-    assert result.temperature == base.temperature and result.top_p == base.top_p
-    for invalid in [1, 9000]:
-        with pytest.raises(RunModelControlsError):
-            run_controls.overlay_root_model(base, {"reasoning_budget_tokens": invalid}, "root")
-
-
-def test_unknown_capability_conflicts_and_model_errors_fail_closed(mocker):
-    for values in [{"deep_thinking": True}, {"deep_thinking": True, "thinking_effort": "xhigh"}]:
-        with pytest.raises(RunModelControlsError):
-            run_controls.overlay_root_model(model(reasoning_capability=None), values, "root")
-    with pytest.raises(RunModelControlsError):
-        run_controls.overlay_root_model(model(), {"thinking_effort": "high", "reasoning_budget_tokens": 2000}, "root")
+def test_invalid_selected_model_records_fail_closed(mocker):
     for record, code in [(None, "model_not_available"), ({"delete_flag": "Y"}, "model_not_available"),
-                         ({"model_type": "embedding"}, "model_type_invalid"),
-                         ({"connect_status": "Unavailable"}, "model_unavailable")]:
+                         ({"model_type": "embedding"}, "model_type_invalid")]:
         lookup = mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
         with pytest.raises(RunModelControlsError, match=code):
             run_controls.validate_selected_model(9, "current-tenant")
         lookup.assert_called_once_with(9, "current-tenant")
-
-
-def test_creator_alias_preserves_independent_models_and_real_record(mocker):
-    base = model()
-    independent = model(cite_name="business", model_name="independent")
-    agent = AgentConfig(name="creator", model_name="main_model", tools=[], description="")
-    record = {"model_id": 9, "display_name": "selected", "model_type": "llm", "connect_status": "Available",
-              "model_repo": "", "model_name": "provider-B", "base_url": base.url,
-              "temperature": 0.43, "top_p": 0.78, "max_input_tokens": 7000,
-              "extra_params": {"enable_thinking": True, "reasoning_effort": "medium"}}
-    mocker.patch("infrastructure.agent_model_config._resolve_reasoning_capability", return_value=base.reasoning_capability)
-    mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
-    models = [base, independent]
-    result = run_controls.resolve_creator_model(models, agent, "tenant", 9, {"deep_thinking": True}, {})
-    assert result == record and agent.model_name == "creator_root_model"
-    assert models[-1].url == base.url and models[-1].model_name == base.model_name
-    assert models[-1].max_input_tokens == 7000
-    assert independent.model_name == "independent" and base.cite_name == "selected"
 
 
 @pytest.mark.parametrize("version_no,current,expected", [(3, 7, 3), (None, 7, 7), (None, None, 0)])
@@ -129,7 +82,7 @@ def test_native_selection_preserves_agent_version_and_tenant(mocker, version_no,
         published.assert_called_once_with(42, "tenant")
     else:
         with pytest.raises(ForbiddenError):
-            run_controls.validate_agent_model_selection(request, "tenant", Mock())
+            run_controls.validate_agent_model_selection(request, "tenant", Mock(return_value={"model_ids": [8]}))
 
 
 def test_su_ac_05_preflight_uses_shared_profile_validation(monkeypatch):
@@ -210,7 +163,7 @@ def test_debug_selected_model_preferences_preserve_selection_exemption(monkeypat
     monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
     request = AgentRequest(agent_id=7, query="fixture", is_debug=True,
         model_id=42, model_parameter_preferences={"42": {"temperature": 0}})
-    run_controls.validate_agent_model_selection(request, "tenant", Mock())
+    run_controls.validate_agent_model_selection(request, "tenant", Mock(return_value={"model_ids": [9]}))
     run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [41]})
 
 

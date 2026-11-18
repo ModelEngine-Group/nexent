@@ -5,12 +5,10 @@
 from copy import deepcopy
 
 import pytest
-from pydantic import ValidationError
 
-from runtime.adapters.nexent.legacy_workspace import materialize_legacy_skill_snapshot
-from management.services.agent.preparation.run import apply_root_generation_overlay
-from contracts.agent import WorkbenchGenerationConfig
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from management.services.agent.preparation.run import apply_root_model_preferences
+from contracts.errors.exceptions import ModelOutletValidationError
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from management.services.model.profiles import build_outlet_draft
 from test.backend.services.test_model_profile_service import draft_request
 
@@ -52,27 +50,3 @@ def test_su_ac_05_conflicting_values_cannot_mutate_aliases_or_defaults(profile):
     with pytest.raises(ModelOutletValidationError):
         apply_root_model_preferences(models, root, {"42": {"enable_thinking": False, "reasoning_budget_tokens": 64}})
     assert len(models) == 1 and root.model_name == "shared"
-
-
-def test_ut_be_wb_011_materializes_an_immutable_run_skill_snapshot(tmp_path):
-    """UT-BE-WB-011: materialization is immutable and run-scoped."""
-    source = [{
-        "name": "invoice-skill",
-        "files": [
-            ("SKILL.md", b"---\nname: invoice-skill\ndescription: Test\n---\nGuide"),
-            ("scripts/run.py", b"print('snapshot')"),
-        ],
-    }]
-
-    effective = materialize_legacy_skill_snapshot(
-        source,
-        str(tmp_path / "run"),
-        "tenant",
-    )
-
-    snapshot_root = effective[0]["_snapshot_root"]
-    assert (tmp_path / "run" / ".skill_snapshot" / "tenant" / "invoice-skill" / "scripts" / "run.py").read_bytes() == b"print('snapshot')"
-    assert "files" not in effective[0]
-    assert "_snapshot_root" not in source[0]
-    assert source[0]["files"][1][1] == b"print('snapshot')"
-    assert snapshot_root == str((tmp_path / "run" / ".skill_snapshot").resolve())

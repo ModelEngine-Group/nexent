@@ -18,7 +18,7 @@ from infrastructure.nl2agent_tool_config import (
     NL2A_WRAPPER_NAME, RECOMMEND_RESOURCES_NAME, SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME, SEARCH_UNINSTALLED_RESOURCES_NAME, create_nl2agent_mcp_tool_configs,
 )
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.context_input import build_authorized_context_input
 from nexent.core.utils.observer import MessageObserver, ProcessType

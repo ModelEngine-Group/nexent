@@ -56,7 +56,7 @@ class ExposureRegistry:
             if (method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
                     or transport not in {"http", "websocket"}
                     or transport == "websocket" and method != "GET"
-                    or row["target"] not in {"management", "runtime", "northbound"}
+                    or row["target"] not in {"management", "runtime", "northbound", "ops"}
                     or not valid_path(path) or "*" in path):
                 raise ValueError("Invalid Gateway exposure route")
             if not isinstance(row["route_id"], str) or not row["route_id"] or row["route_id"] in ids:

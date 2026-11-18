@@ -1245,6 +1245,17 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/conversation/branch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-9dde36faeae0f9ec",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "PUT",
       "path": "/api/conversation/create",
       "transport": "http",
@@ -1372,6 +1383,50 @@
       "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-5fb5283f3e7ac19c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/{conversation_id}/model_preferences",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-73f7a5098f260d29",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/conversation/{conversation_id}/model_preferences",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-fc6aeaef483b9aa5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/{conversation_id}/model_preferences/{model_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-5463f198ffb741b2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/conversation/{conversation_id}/model_preferences/{model_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-1cfa509729cfba5f",
       "credential_kinds": [
         "session"
       ]
@@ -3412,6 +3467,105 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/api/model/model_profiles",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-9cbbcd2f7f45899b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/outlet_validations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-5184169166c14259",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/outlets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-6cc37f600ce919a1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/outlets/{model_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-438dc20a33703a1c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/model/outlets/{model_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-90ea781a092e1a8b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/outlets/{model_id}/migration_reviews",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-00c2b6ccd80ce453",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/outlets/{model_id}/profile_previews",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-d843c7b8cb886026",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/profile_previews",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-39863f6b29225e00",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/profile_protocols",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-72d34fa655fa3453",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/model/provider/batch_create",
       "transport": "http",
@@ -3440,6 +3594,17 @@
       "target": "management",
       "source": "backend/management/api/model/model_managment.py",
       "route_id": "route-d8cbeb774e353aa4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/provider_profiles",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-b08815b188cae208",
       "credential_kinds": [
         "session"
       ]
@@ -3849,6 +4014,39 @@
       "target": "management",
       "source": "backend/management/api/notification/notification.py",
       "route_id": "route-ca532ed1f2b39652",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/authorization",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ops/api/access.py",
+      "route_id": "route-5a417223a926f4c1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/resources",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ops/api/access.py",
+      "route_id": "route-03a5f7e7ad8f6156",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/scope",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ops/api/access.py",
+      "route_id": "route-a1e8b5e11c48a871",
       "credential_kinds": [
         "session"
       ]
@@ -4919,6 +5117,83 @@
       "target": "management",
       "source": "backend/management/api/tool/tool_config.py",
       "route_id": "route-48ede9e0c5fc97db",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/trajectory/cleanup",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-971b296bb3792512",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/cleanup/schedule",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-3daaa597354dad0b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/trajectory/cleanup/schedule",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-1e93b84906b898af",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/conversations/{conversation_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-8ea1093c61ae554a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/conversations/{conversation_id}/contents/{content_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-8f5e9a81bf76fb9a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/conversations/{conversation_id}/snapshot",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-8141ef3d14ed625d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/records",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-3f85377fad2fd064",
       "credential_kinds": [
         "session"
       ]
@@ -5998,5 +6273,5 @@
       ]
     }
   ],
-  "revision": "2026-11-09.2"
+  "revision": "2026-11-18.2"
 }

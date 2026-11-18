@@ -7,7 +7,7 @@ from pathlib import Path
 
 from contracts.constants import environment
 from infrastructure.sandbox_deployment import get_sandbox_minio_client
-from nexent.core.agents.agent_model import AgentRunInfo
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.utils.observer import MessageObserver
 
 

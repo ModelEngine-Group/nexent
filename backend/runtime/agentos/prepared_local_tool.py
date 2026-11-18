@@ -24,7 +24,7 @@ from infrastructure.local_tool_execution import (
 from infrastructure.local_tool_overrides import PREFIX, open_tool_overrides
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
 from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from runtime.agentos.prepared_knowledge import _reranker
 
 

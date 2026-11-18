@@ -16,7 +16,7 @@ import pytest
 
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.models.capacity_resolver import ModelCapacitySnapshot
@@ -67,7 +67,7 @@ def _make_context_budget_snapshot(**overrides):
 async def test_nl2agent_context_budget_resolution_and_fallback(monkeypatch):
     from contracts.agentos import PreparedAgentCreatorRun
     from infrastructure.agentos_identity import ServicePrincipal
-    from nexent.core.agents.agent_model import ModelConfig
+    from nexent.core.agents.contracts.config import ModelConfig
     from runtime.agentos import prepared_agent_creator as runtime
 
     snapshot = _make_context_budget_snapshot()

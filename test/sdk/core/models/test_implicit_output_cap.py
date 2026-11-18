@@ -120,7 +120,7 @@ def test_sampling_fallback_does_not_restore_implicit_cap():
 def test_streaming_and_overflow_recovery_without_wire_cap(outcome):
     from openai import OpenAI
 
-    from nexent.core.context_runtime.contracts import FinalContext
+    from nexent.core.agents.contracts.context import FinalContext
     from nexent.core.models.retry import ModelInvocationTerminalError
     from nexent.core.utils.observer import MessageObserver
 

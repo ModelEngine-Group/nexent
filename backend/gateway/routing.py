@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Fixed upstream selection and proxy header policy."""
 
-from gateway.exposure.registry import default_registry
+from urllib.parse import parse_qs
+
+from gateway.exposure.registry import Exposure, default_registry
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade",
@@ -17,6 +19,16 @@ def select_upstream(method: str, path: str, *, transport="http") -> str | None:
     """Resolve only a declared public method/path/transport to a fixed service."""
     match = default_registry().match(method, path, transport=transport)
     return match.target if match else None
+
+
+def exposure_target(match: Exposure, query: bytes) -> str:
+    """Keep the two shared directory URLs while routing only trajectory reads to Ops."""
+    if (match.method == "GET" and match.transport == "http" and match.path in {
+        "/api/conversation/agent_groups",
+        "/api/conversation/agent_groups/{group_key}/conversations",
+    } and parse_qs(query.decode("latin-1"), keep_blank_values=True).get("view") == ["trajectory"]):
+        return "ops"
+    return match.target
 
 
 def filtered_headers(headers, *, request=False):

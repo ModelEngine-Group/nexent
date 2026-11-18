@@ -102,6 +102,25 @@ def test_conversation_share_and_pins_are_mounted_by_management():
         assert mounted & owners == expected
 
 
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/model/model_profiles"),
+    ("GET", "/api/model/provider_profiles"),
+    ("GET", "/api/model/profile_protocols"),
+    ("POST", "/api/model/outlet_validations"),
+    ("POST", "/api/model/outlets"),
+    ("PATCH", "/api/model/outlets/7"),
+    ("POST", "/api/conversation/branch"),
+    ("GET", "/api/conversation/1/model_preferences"),
+    ("PATCH", "/api/conversation/1/model_preferences/7"),
+    ("GET", "/api/ops/authorization"),
+    ("GET", "/api/ops/scope"),
+])
+def test_web_features_are_exposed_only_to_sessions(method, path):
+    match = default_registry().match(method, path)
+    assert match.target == "management"
+    assert match.credential_kinds == ("session",)
+
+
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():
     assert select_upstream("GET", "/api/voice/stt/ws") is None
     assert select_upstream("GET", "/api/voice/stt/ws", transport="websocket") == "runtime"

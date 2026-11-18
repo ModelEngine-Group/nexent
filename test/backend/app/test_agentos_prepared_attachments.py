@@ -123,7 +123,7 @@ async def test_evaluation_compiler_exports_history_refs_without_pre_rendering_li
     from contracts.agentos import EvaluationAgentRun
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation import evaluation_snapshot, run
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     record = {
         "model_id": 11, "tenant_id": "tenant", "model_type": "llm", "model_name": "provider-model",

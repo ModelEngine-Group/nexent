@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Channel readiness must precede execution; cancelled requests must not retry."""
 
 import json
@@ -6,7 +7,7 @@ from concurrent.futures import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents import sandbox as sb
+from nexent.core.agents.sandbox import execution as sb
 from websocket import (
     ABNF,
     WebSocketBadStatusException,

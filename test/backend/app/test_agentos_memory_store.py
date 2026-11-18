@@ -146,7 +146,7 @@ def test_prepared_memory_rejects_ephemeral_and_tool_overrides(conversation_id, c
 
 def test_long_term_memory_survives_presearch_failure_in_a_persistent_snapshot():
     from management.services.agent.preparation import evaluation_snapshot
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
 
     item = {"id": "tenant-memory", "type": "memory", "content": {
         "memory": "Authorized tenant context", "scope": "tenant", "memory_level": "tenant",

@@ -13,7 +13,7 @@ from infrastructure.local_tool_overrides import seal_tool_overrides
 from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, scoped_shared_aidp_revision
 from management.services.agent.preparation.knowledge_search import _rerank_bindings
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 
 def export_scoped_shared_aidp(

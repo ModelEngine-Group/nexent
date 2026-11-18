@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import PreparedCreatorRun
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 

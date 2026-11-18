@@ -108,3 +108,42 @@ def test_k8s_runtime_renderer_passes_existing_postgres_values(tmp_path):
     config = yaml.safe_load(output.read_text(encoding="utf-8"))["nexent-common"]["config"]
     assert config["postgres"] == dict(host="existing-db", port="5544", db="existing", user="existing-user")
     assert set(config) == {"timezone", "postgres", "services", "redis", "dataProcess"}
+
+
+@pytest.mark.parametrize(("file_key", "chart_key", "expected"), [
+    (None, None, None),
+    ("fixture-from-env", None, "fixture-from-env"),
+    ("fixture-from-env", "fixture-helm-override", "fixture-helm-override"),
+])
+def test_helm_gateway_and_downstream_share_signing_key(tmp_path, file_key, chart_key, expected):
+    key = "GATEWAY_SIGNING_SECRET"
+    common = {"secrets": {"jwtSecret": "fixture-jwt"}}
+    if chart_key:
+        common["secrets"]["gatewaySigningSecret"] = chart_key
+    if file_key:
+        common["envFiles"] = {"rootData": {key: base64.b64encode(file_key.encode()).decode()}}
+    values = tmp_path / "values.yaml"
+    values.write_text(yaml.safe_dump({"nexent-common": common}), encoding="utf-8")
+    result = subprocess.run(
+        ["helm", "template", "fixture", str(CHART.parent), "-f", str(values)],
+        capture_output=True, text=True, check=True,
+    )
+    docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    shared = next(doc["data"] for doc in docs if doc["kind"] == "Secret"
+                  and doc["metadata"]["name"] == "nexent-secrets")
+    if expected:
+        assert base64.b64decode(shared[key]).decode() == expected
+    else:
+        assert key not in shared
+
+    def container(name):
+        deployment = next(doc for doc in docs if doc["kind"] == "Deployment"
+                          and doc["metadata"]["name"] == name)
+        return deployment["spec"]["template"]["spec"]["containers"][0]
+
+    gateway = container("nexent-gateway")
+    signing = next(item for item in gateway["env"] if item["name"] == key)
+    assert signing["valueFrom"]["secretKeyRef"] == {"name": "nexent-secrets", "key": key, "optional": True}
+    for name in ("nexent-config", "nexent-runtime", "nexent-mcp"):
+        refs = [ref["secretRef"]["name"] for ref in container(name)["envFrom"] if "secretRef" in ref]
+        assert refs[-1] == "nexent-secrets"

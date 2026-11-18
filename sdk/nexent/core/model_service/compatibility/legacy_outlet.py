@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from nexent.core.model_service.profiles.configuration_errors import ModelOutletValidationError
 from nexent.core.model_service.profiles.configuration_inputs import ModelProfilePreviewRequest
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.model_service.compatibility.legacy_config import legacy_agent_request_parameters, legacy_thinking_enabled
 from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile, encode_resolved_model_profile
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile

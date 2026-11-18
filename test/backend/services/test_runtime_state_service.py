@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from infrastructure.redis.client import run_state as runtime_state_module
+from infrastructure.redis import run_state as runtime_state_module
 from infrastructure.redis.run_state import RuntimeStateService
 
 

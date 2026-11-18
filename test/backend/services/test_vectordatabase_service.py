@@ -260,6 +260,9 @@ setattr(nexent_mock, 'core', nexent_core_module)
 
 nexent_core_gateway_module = _create_package_mock('nexent.core.gateway')
 nexent_core_gateway_modality_module = types.ModuleType('nexent.core.gateway.modality')
+nexent_core_gateway_modality_module.__path__ = [
+    str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/gateway/modality")
+]
 nexent_core_gateway_modality_module.EmbeddingAdapter = MockBaseEmbedding
 nexent_core_gateway_module.modality = nexent_core_gateway_modality_module
 nexent_core_module.gateway = nexent_core_gateway_module
@@ -308,12 +311,12 @@ nexent_storage_module.storage_client_factory = storage_factory_module
 nexent_storage_module.minio_config = storage_config_module
 setattr(nexent_mock, 'storage', nexent_storage_module)
 
-# Mock nexent.core.agents.agent_model
+# Mock nexent.core.agents.contracts.config
 nexent_core_agents_module = _create_package_mock('nexent.core.agents')
-nexent_core_agents_agent_model_module = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_agents_agent_model_module = types.ModuleType('nexent.core.agents.contracts.config')
 nexent_core_agents_agent_model_module.ToolConfig = MagicMock()
 sys.modules['nexent.core.agents'] = nexent_core_agents_module
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model_module
+sys.modules['nexent.core.agents.contracts.config'] = nexent_core_agents_agent_model_module
 
 # Mock nexent.core.nlp
 nexent_core_nlp_module = _create_package_mock('nexent.core.nlp')

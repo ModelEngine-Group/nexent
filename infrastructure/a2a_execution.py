@@ -7,7 +7,7 @@ from typing import Optional
 
 from contracts.constants import environment
 from contracts.constants.constants import PROTOCOL_JSONRPC
-from nexent.core.agents.agent_model import ExternalA2AAgentConfig
+from nexent.core.agents.contracts.config import ExternalA2AAgentConfig
 
 
 def extract_url_from_card(raw_card: Optional[dict]) -> str:

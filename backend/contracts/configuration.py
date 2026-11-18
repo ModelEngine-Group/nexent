@@ -117,6 +117,13 @@ def _require_positive(value, message):
     return value
 
 
+def _require_choice(value, choices, message):
+    """Validate a fixed configuration vocabulary without reading the environment."""
+    if value not in choices:
+        raise ValueError(message)
+    return value
+
+
 def _build_otlp_headers(headers_str, authorization, x_api_key, langsmith_api_key, langsmith_project, langfuse_version):
     OTLP_HEADERS = _parse_otlp_headers(headers_str)
     if authorization:
@@ -132,3 +139,11 @@ def _build_otlp_headers(headers_str, authorization, x_api_key, langsmith_api_key
 
 
     return OTLP_HEADERS
+
+
+def parse_agent_core(value: str) -> str:
+    """Validate the deployment Core without reading process configuration."""
+    core = value.strip().lower()
+    if core not in {"smolagents", "jiuwen"}:
+        raise ValueError("NEXENT_AGENT_CORE must be smolagents or jiuwen")
+    return core

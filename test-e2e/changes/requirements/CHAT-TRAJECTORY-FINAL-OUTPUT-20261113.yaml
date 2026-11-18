@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-FINAL-OUTPUT-20261113
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-FINAL-OUTPUT-20261113
+  title: 流式轨迹只保存合并正文
+  description: 成功、失败及取消均合并接收内容后终态保存，移除逐块SSE和增量正文快照。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 成功、失败、取消与工具参数只保存合并内容，流式传递不变。
+    - 活动快照不含生成正文；保留预算、脱敏、TTFT及历史文件兼容。
+    reason: 已有重试/取消/预算UT及真实采集D3缺少禁止逐块存储的断言，加强现有测试。
+    test_selectors:
+    - test/sdk/core/model_service/test_model_attempt_capture.py
+    - test/backend/utils/test_trajectory_processor.py
+  notes: Baseline 30e5ec4ca with current ops migration preserved. Existing runtime
+    responsibility and private D3 preparation/cleanup are retained; no new shared
+    assets. Live PG/model acceptance remains deferred.

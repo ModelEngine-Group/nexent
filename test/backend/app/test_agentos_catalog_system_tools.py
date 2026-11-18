@@ -7,7 +7,7 @@ import pytest
 
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import local_tool, tools
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from runtime.agentos import prepared_local_tool
 from test.backend.app.test_agentos_prepared_local_tool import stored_tool
 
