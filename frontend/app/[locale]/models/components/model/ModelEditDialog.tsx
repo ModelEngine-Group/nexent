@@ -373,10 +373,7 @@ export const ModelEditDialog = ({
         </DialogHeader>
 
         {model.migrationStatus === "failed" && (
-          <p
-            role="alert"
-            className="border-b px-6 py-3 text-sm text-destructive"
-          >
+          <p role="alert" className="border-b px-6 py-3 text-sm text-destructive">
             {t("modelMigration.failedHint")}
           </p>
         )}

@@ -151,11 +151,9 @@ export function ModelParameterField({
         aria-label={label ?? rule.key}
         value={typeof value === "number" ? value : null}
         placeholder={
-          optionalSampling
-            ? t("modelProfile.serviceSamplingDefault")
-            : inModelSelector && rule.key === "reasoning_budget_tokens"
-              ? t("modelProfile.thinkingModeOption.default")
-              : undefined
+          inModelSelector && rule.key === "reasoning_budget_tokens"
+            ? t("modelProfile.thinkingModeOption.default")
+            : undefined
         }
         disabled={disabled}
         min={
@@ -172,7 +170,7 @@ export function ModelParameterField({
           types.includes("integer") && !types.includes("number") ? 0 : undefined
         }
         onChange={(next) => {
-          if (next !== null || types.includes("null") || optionalSampling)
+          if (next !== null || types.includes("null"))
             onChange(rule.key, next);
           else onReset(rule.key);
         }}
