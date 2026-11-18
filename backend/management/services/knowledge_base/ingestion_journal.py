@@ -11,6 +11,7 @@ from contracts.knowledge_ingestion import (
     KnowledgeIngestionIntent,
     LegacyFileState,
     LegacyIngestionSnapshot,
+    LegacySourceState,
 )
 from nexent.storage.errors import (
     Conflict,
@@ -83,6 +84,13 @@ class IngestionJournal:
         self._source(row, intent)
         return intent
 
+    def _legacy_source(self, row, intent):
+        binding = intent.legacy_snapshot.source_binding
+        if binding is not None and row['ingestion_request'] is None:
+            if LegacySourceState.capture(row) != binding.previous: raise Conflict()
+            row = {**row, **binding.bound_values(intent.source)}
+        self._source(row, intent)
+
     def _patch(self, row, values, context):
         receipt = self.records.patch(
             INGESTION_DATASET,
@@ -148,14 +156,14 @@ class IngestionJournal:
     def admit_legacy(self, intent, row, *, context):
         if not isinstance(intent, KnowledgeIngestionIntent) or intent.legacy_snapshot is None: raise InvalidInput()
         KnowledgeIngestionIntent.model_validate_json(intent.model_dump_json())
-        self._source(row, intent)
+        self._legacy_source(row, intent)
         snapshot = intent.legacy_snapshot
         if snapshot.tenant_id != self.records.scope.tenant_id: raise ScopeDenied()
         if row['ingestion_request'] is not None:
             if self.request(row) != intent: raise Conflict()
             return row
         if (LegacyIngestionSnapshot.capture(row, resource_revision=snapshot.resource_revision, legacy_quiesced=True,
-                task_archive_sha256=snapshot.task_archive_sha256) != snapshot
+                task_archive_sha256=snapshot.task_archive_sha256, source_binding=snapshot.source_binding) != snapshot
             or intent.attempt != row['processing_attempt'] + 1
             or bool(snapshot.task_references) != bool(snapshot.task_archive_sha256)):
             raise Conflict()
@@ -163,7 +171,7 @@ class IngestionJournal:
 
     def restore_legacy(self, intent, row, *, context):
         if not isinstance(intent, KnowledgeIngestionIntent) or intent.legacy_snapshot is None: raise InvalidInput()
-        self._source(row, intent)
+        self._legacy_source(row, intent)
         snapshot = intent.legacy_snapshot
         if snapshot.tenant_id != self.records.scope.tenant_id: raise ScopeDenied()
         if row['ingestion_request'] is None:
@@ -175,7 +183,8 @@ class IngestionJournal:
             or row['forward_task_id'] is not None or row['parent_task_id'] is not None):
             raise Conflict()
         return self._patch(row, {**snapshot.previous.model_dump(), 'ingestion_request': None,
-            'process_task_id': None, 'forward_task_id': None, 'parent_task_id': None, **snapshot.task_references}, context)
+            'process_task_id': None, 'forward_task_id': None, 'parent_task_id': None, **snapshot.task_references,
+            **(snapshot.source_binding.previous.model_dump() if snapshot.source_binding is not None else {})}, context)
 
     def _accept(self, intent, row, context):
         return self._patch(
@@ -199,6 +208,8 @@ class IngestionJournal:
                 "runtime_status": None,
                 "processed_chunks": None,
                 "total_chunks": None,
+                **(intent.legacy_snapshot.source_binding.bound_values(intent.source)
+                    if intent.legacy_snapshot is not None and intent.legacy_snapshot.source_binding is not None else {}),
             },
             context,
         )

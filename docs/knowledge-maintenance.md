@@ -174,8 +174,9 @@ python -m management.maintenance.migration execute \
 
 `plan` verifies current edit DAC, the exact PG source/ledger, actual pinned object
 bytes, current model configuration and absence of a Runtime manifest for the file.
-Source rebuild supports canonical IDs and fully pinned sources. Files with no
-legacy task references can be admitted directly. Referenced terminal tasks require
+Source rebuild supports canonical IDs and fully pinned sources. A proven historical
+source can be pinned by the explicit planning option below. Files with no legacy
+task references can be admitted directly. Referenced terminal tasks require
 the private archive and live verification described below. Other records remain
 blocked for explicit identity/source review. It never guesses a mapping from a filename or copies legacy vectors.
 
@@ -299,3 +300,38 @@ receipt without re-reading Redis or the archive. `inspect` and pre-execution
 also restores the original task references, while old workers remain quiesced.
 It still rejects any reserved child execution. Actual processing and retirement
 completion require the remaining execution, cutover and rollback acceptance.
+
+
+## Explicitly pin a proven historical source
+
+If inspection reports only unpinned source fields or an unbound ledger link,
+create the plan with an explicit choice:
+
+```sh
+python -m management.maintenance.migration plan \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID --legacy-quiesced --bind-observed-source \
+  --output /maintenance/file-plan.jsonl
+```
+
+Add `--task-archive` when old task references require it. The binding flag is
+plan-only; the resulting immutable plan carries this decision into `admit` or
+`execute`. Upgrade every Management writer before using it. Default planning
+continues to reject unpinned records.
+
+The inspector must prove exact ownership of an active COMMITTED ledger entry and
+read the exact object version, size and independent SHA-256. The plan records the
+candidate ledger ID and original six source fields. Admission reads the evidence
+again and uses one lifecycle CAS to bind source, ledger link and size together
+with the standard ingestion intent. It preserves file ID, source generation,
+creator and source upload hash. No object is copied, quota charged or ledger
+updated. A valid existing field cannot be overwritten with a different value.
+
+Binding does not accept missing objects/ledgers, URL aliases, hash/size/version
+conflicts or an unknown file identity. The existing edit DAC and file ownership
+checks still apply before admission. Strict pinned-source authorization applies
+after admission, including actual cleansing execution. Repeating an accepted
+plan only reads its receipt. Before child reservation, `restore` restores all
+six original source fields, including nulls, alongside archived task references.
+After reservation it refuses SQL-only restoration. This capability does not
+complete historical source recovery, actual ingestion or data-process retirement.

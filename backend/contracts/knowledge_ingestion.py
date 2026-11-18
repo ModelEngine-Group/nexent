@@ -42,6 +42,29 @@ class LegacyFileState(Contract):
         return cls.model_validate(values)
 
 
+class LegacySourceState(Contract):
+    source_space: str | None = None
+    source_key: str | None = None
+    source_revision: str | None = None
+    source_sha256: str | None = None
+    storage_object_id: int | None = Field(default=None, gt=0)
+    file_size: int | None = Field(default=None, ge=0)
+
+    @classmethod
+    def capture(cls, row):
+        return cls.model_validate({name: row.get(name) for name in cls.model_fields})
+
+
+class LegacySourceBinding(Contract):
+    previous: LegacySourceState
+    storage_object_id: int = Field(gt=0)
+    file_size: int = Field(ge=0)
+
+    def bound_values(self, source):
+        return {'source_space': source.space, 'source_key': source.key, 'source_revision': source.version,
+            'source_sha256': source.sha256, 'storage_object_id': self.storage_object_id, 'file_size': self.file_size}
+
+
 class LegacyIngestionSnapshot(Contract):
     schema_version: Literal[1] = 1
     mode: Literal['rebuild_source'] = 'rebuild_source'
@@ -55,21 +78,23 @@ class LegacyIngestionSnapshot(Contract):
     task_archive_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     task_references: dict[Literal['process_task_id', 'forward_task_id', 'parent_task_id'],
                           Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]] = Field(default_factory=dict, max_length=3)
+    source_binding: LegacySourceBinding | None = None
 
     @model_serializer(mode='wrap')
     def serialize_snapshot(self, handler):
         value = handler(self)
         if self.task_archive_sha256 is None: value.pop('task_archive_sha256', None)
         if not self.task_references: value.pop('task_references', None)
+        if self.source_binding is None: value.pop('source_binding', None)
         return value
 
     @classmethod
-    def capture(cls, row, *, resource_revision, legacy_quiesced, task_archive_sha256=None):
+    def capture(cls, row, *, resource_revision, legacy_quiesced, task_archive_sha256=None, source_binding=None):
         updated = row.get('update_time')
         return cls(tenant_id=row['tenant_id'], resource_revision=resource_revision, lifecycle_revision=row['version'],
                    legacy_quiesced=legacy_quiesced, previous=LegacyFileState.capture(row), original_updated_by=row.get('updated_by'),
                    original_update_time=updated.isoformat() if isinstance(updated, datetime) else updated,
-                   task_archive_sha256=task_archive_sha256,
+                   task_archive_sha256=task_archive_sha256, source_binding=source_binding,
                    task_references={name: row[name] for name in ('process_task_id', 'forward_task_id', 'parent_task_id') if row.get(name) is not None})
 
 

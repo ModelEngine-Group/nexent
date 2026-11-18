@@ -121,6 +121,7 @@ class KnowledgeSourceInspector:
                         item.issues.append('SOURCE_HASH_MISMATCH')
                         break
                 item.candidate_source = ObjectReference(space='files', key=key, version=metadata.ref.version.value, sha256=digest.hexdigest())
+                item.candidate_storage_object_id = ledger['storage_object_id']
             except NotFound:
                 item.issues.append('SOURCE_MISSING')
             except Conflict:

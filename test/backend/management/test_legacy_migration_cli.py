@@ -52,6 +52,13 @@ async def test_archive_path_is_forwarded_only_to_explicit_plan_and_admission(cli
     assert s.service.admit.call_args.kwargs['task_archive'] == s.args.task_archive
 
 
+async def test_explicit_source_binding_choice_is_frozen_in_plan_only(cli):
+    s = cli
+    s.args.bind_observed_source = True
+    await module.run(s.args, service=s.service)
+    assert s.service.plan.call_args.kwargs['bind_observed_source'] is True
+
+
 async def test_execute_and_restore_distinguish_new_completion_from_old_completed_state(cli):
     s=cli;await module.run(s.args,service=s.service)
     s.args.plan=s.args.output

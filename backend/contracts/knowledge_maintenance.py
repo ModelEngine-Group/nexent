@@ -28,6 +28,7 @@ class SourceFinding(Contract):
     issues: list[Issue] = Field(default_factory=list, max_length=32)
     candidate_source: ObjectReference | None = None
     observed_size: int | None = Field(default=None, ge=0)
+    candidate_storage_object_id: int | None = Field(default=None, gt=0)
 
 
 class SourceInspectionPage(Contract):

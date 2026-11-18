@@ -99,6 +99,7 @@ def test_reads_fixed_revision_hashes_actual_bytes_and_never_grants_migration(ins
     item, = report.files
     assert item.issues == [] and item.candidate_source.sha256 == s.digest
     assert item.candidate_source.version == 'etag:one' and item.observed_size == len(s.data)
+    assert item.candidate_storage_object_id == 1
     assert report.actor_id == 'user-a' and report.tenant_id == 'tenant-a'
     assert set(report.pending_checks) == {'legacy_vectors', 'legacy_tasks', 'runtime_visibility', 'model_dimensions'}
     assert s.readers == [ObjectRef('files', s.row['object_name'], Revision('etag:one'))]

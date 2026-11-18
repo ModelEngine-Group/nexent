@@ -63,6 +63,7 @@ async def run(args, *, service=None):
             async with asyncio.timeout(context.remaining()):
                 archive = {'task_archive': args.task_archive} if getattr(args, 'task_archive', None) is not None else {}
                 if args.action == 'plan':
+                    if getattr(args, 'bind_observed_source', False): archive['bind_observed_source'] = True
                     plan = await service.plan(args.knowledge_id,args.file_id,actor,legacy_quiesced=args.legacy_quiesced,context=context,**archive)
                     _emit(stream, {'kind':'migration_plan','plan_hash':plan_hash(plan),'intent':plan.model_dump(mode='json')})
                     state, row = 'planned', None
@@ -97,6 +98,7 @@ def main(argv=None):
     parser.add_argument('--knowledge-id',required=True,type=int);parser.add_argument('--file-id',required=True)
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--plan',type=Path)
     parser.add_argument('--task-archive',type=Path,help='Complete private archive-tasks report for original PG task references')
+    parser.add_argument('--bind-observed-source',action='store_true',help='Explicitly pin a proven historical source in the plan')
     parser.add_argument('--legacy-quiesced',action='store_true',help='Operator confirms old admission and workers are stopped and drained')
     parser.add_argument('--timeout',type=int,default=300)
     args = parser.parse_args(argv)
@@ -104,7 +106,8 @@ def main(argv=None):
         or any(not value.strip() or len(value)>100 for value in (args.user_id,args.tenant_id))
         or len(args.file_id)!=32 or any(c not in '0123456789abcdef' for c in args.file_id)
         or args.action!='plan' and args.plan is None or args.action=='plan' and args.plan is not None
-        or args.task_archive is not None and args.action in {'inspect','restore'}):
+        or args.task_archive is not None and args.action in {'inspect','restore'}
+        or args.bind_observed_source and args.action != 'plan'):
         parser.error('Select a canonical file, actual actor/tenant, deadline 1..3600 and confirmed legacy quiescence; non-plan actions require --plan')
     try:
         print(json.dumps(asyncio.run(run(args))));return 0
