@@ -11,7 +11,6 @@ from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from infrastructure.rdb import account_access
-from infrastructure.rdb.orm import as_dict
 from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RoleAssignmentConflict, TenantResourceLimitError
 from contracts.roles import (
@@ -24,7 +23,7 @@ from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.identity.membership import (
     check_admin_removal,
-    get_user_tenant_by_user_id,
+    get_user_tenant_by_user_id as get_user_tenant_by_user_id,
     lock_tenants,
     locked_members,
 )
@@ -124,24 +123,6 @@ def _validate_user_tenant_limit(
 
 def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:
     return account_access.get_user_role_by_tenant(user_id, tenant_id, session_factory=get_db_session)
-
-
-def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get user tenant relationship by user ID
-
-    Args:
-        user_id (str): User ID
-
-    Returns:
-        Optional[Dict[str, Any]]: User tenant relationship record
-    """
-    with get_db_session() as session:
-        result = session.query(UserTenant).filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N").first()
-
-        if result:
-            return as_dict(result)
-        return None
 
 
 def get_user_email_map(user_ids: List[str]) -> Dict[str, str]:

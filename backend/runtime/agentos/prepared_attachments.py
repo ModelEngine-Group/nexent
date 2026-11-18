@@ -15,7 +15,7 @@ from infrastructure.object_storage.read_access import build_attachment_proxy_url
 from nexent.multi_modal.utils import parse_s3_url
 
 
-def materialize_evaluation_input(run_input, actor, language):
+def materialize_evaluation_input(run_input, actor, language, *, include_history_in_query=True):
     refs = [*run_input.attachment_refs, *(item for turn in run_input.history for item in turn.attachment_refs)]
     try:
         validate_attachment_references(list({file.url for file in refs}), actor.user_id, actor.tenant_id)
@@ -45,7 +45,9 @@ def materialize_evaluation_input(run_input, actor, language):
     ]
     effective = _collect_run_minio_files(current, history)
     return (
-        render_query_with_attachments(current, run_input.query, history, language=language),
+        render_query_with_attachments(
+            current, run_input.query, history if include_history_in_query else None, language=language,
+        ),
         _convert_history_with_minio_files([turn for turn in history if turn.role != "attachment"], language=language),
         effective,
     )

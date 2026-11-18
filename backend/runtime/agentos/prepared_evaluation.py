@@ -20,7 +20,7 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
@@ -28,6 +28,7 @@ from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_attachments import validate_attachment_references
+from infrastructure.agent_core_policy import apply_agent_core_policy
 from infrastructure.agent_model_config import (
     create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
 )
@@ -374,7 +375,9 @@ def prepare_run_snapshot(
     historical_context = (
         _restore_conversation_history(payload.historical_context, actor) if isinstance(payload, PreparedAgentRun) else None
     )
-    query, history, files = materialize_evaluation_input(payload.input, actor, payload.language)
+    query, history, files = materialize_evaluation_input(
+        payload.input, actor, payload.language, include_history_in_query=NEXENT_AGENT_CORE != "jiuwen",
+    )
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
@@ -401,6 +404,7 @@ def prepare_run_snapshot(
                 workbench_version=workbench_version, allow_debug_planning=debug,
                 workbench_debug_run_id=payload.run_id if workbench_debug else None,
             )
+            apply_agent_core_policy(agent_config, NEXENT_AGENT_CORE)
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")
         except (ValidationError, TypeError, ValueError) as exc:
