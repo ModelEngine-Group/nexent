@@ -21,7 +21,7 @@ class StatisticsRefresher:
         self._cache_bytes = 0
 
     def refresh(self, tenants, kind, identity, check=lambda: None):
-        from infrastructure.observability.trajectory_reader import JSONReader
+        from infrastructure.trace.trajectory_reader import JSONReader
         from ops.db.trajectory import statistics as database
 
         from .nodes import build_nodes
@@ -53,7 +53,7 @@ class StatisticsRefresher:
                         if row["agent_id"] is not None
                         else None,
                     }
-                    from infrastructure.observability.trajectory_store import (
+                    from infrastructure.trace.trajectory_store import (
                         CaptureIdentity,
                     )
 

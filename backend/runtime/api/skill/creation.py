@@ -11,8 +11,9 @@ from permissions.depends import require
 from permissions.models import CurrentUser
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from services.nl2skill_service import create_nl2skill_stream
+from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from management.services.conversation.creator_execution import start_creation_turn
-from gateway.authentication.auth import get_current_user_info
 
 logger = logging.getLogger(__name__)
 

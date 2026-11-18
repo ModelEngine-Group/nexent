@@ -43,7 +43,7 @@ sys.modules['boto3'] = boto3_module
 storage_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 class SearchRequest(BaseModel):
@@ -68,8 +68,8 @@ class IndexingResponse(BaseModel):
 # Module-level mocks for AWS connections
 # Apply these patches before importing any modules to prevent actual AWS connections
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-patch('management.db.client.get_db_session').start()
-patch('management.db.client.db_client').start()
+patch('infrastructure.rdb.client.get_db_session').start()
+patch('infrastructure.rdb.client.db_client').start()
 
 # Mock Elasticsearch to prevent connection errors
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()

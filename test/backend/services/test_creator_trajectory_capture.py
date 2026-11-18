@@ -241,10 +241,10 @@ async def test_invalid_saved_message_id_cannot_claim_completeness(creator, inval
 async def test_managed_worker_receives_creation_context_for_file_capture(creator, tmp_path):
     import json
 
-    from infrastructure.observability.trajectory_processor import (
+    from infrastructure.trace.trajectory_processor import (
         LocalTrajectoryProcessor,
     )
-    from infrastructure.observability.trajectory_store import TrajectoryFileStore
+    from infrastructure.trace.trajectory_store import TrajectoryFileStore
     from nexent.core.concurrency import (
         LanePolicy,
         ManagedTaskSpec,

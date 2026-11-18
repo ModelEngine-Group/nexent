@@ -4,7 +4,7 @@
 
 from contracts.constants.environment import APP_VERSION
 from contracts.conversation import ConversationTarget
-from infrastructure.nexent_output import adapt_nexent_stream
+from management.services.conversation.nexent_output import adapt_nexent_stream
 from management.db.conversation.repository import get_conversation_history
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (

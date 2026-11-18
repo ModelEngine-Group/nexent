@@ -39,7 +39,7 @@ def isolated_runtime():
         }.items():
             patch.setenv(name, value)
         from management.db import models
-        from management.db.client import db_client
+        from infrastructure.rdb.client import db_client
         from sqlalchemy import create_engine
         from sqlalchemy.engine import URL
 
@@ -123,9 +123,9 @@ def isolated_runtime():
         from management.api.identity import api_key, user_management, user, invitation, group, tenant
         from management.api.configuration import tenant_config
         from management.api.model import model_managment
-        from gateway.authentication import auth as helpers
+        from management.services.permission.identity import session as helpers
         from ops.api import access
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         patch.setattr(auth, "init_tool_list_for_tenant", AsyncMock())
         patch.setattr(auth, "init_skill_list_for_tenant", AsyncMock())
@@ -154,7 +154,7 @@ class Runtime:
         self.password = "OwnedPassword123"
 
     def seed(self):
-        from management.db.client import get_db_session
+        from infrastructure.rdb.client import get_db_session
         from management.db.identity.account import create_account
         from management.db.identity.user_tenant import insert_user_tenant
         from infrastructure.security.passwords import hash_password

@@ -59,7 +59,7 @@ deployment_render_helm_chart_values
     values = yaml.safe_load(result.stdout)
     settings = values["nexent-ops"]
     assert (
-        values["nexent-web"]["config"]["opsHttpBackend"] == f"http://nexent-ops:{port}"
+        values["nexent-gateway"]["opsUrl"] == f"http://nexent-ops:{port}"
     )
     assert settings["enabled"] is (component == "application")
     assert settings["images"]["backend"] == {
@@ -110,6 +110,15 @@ def test_ops_chart_mounts_trajectory_and_supplies_pg_configuration_only_when_ena
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
     assert ("ops-trajectory" in mounts) is enabled
     assert ("envFrom" in container) is enabled
+    env = {item["name"]: item for item in container["env"]}
+    assert len(env) == len(container["env"])
+    assert env["GATEWAY_AUTH_ENABLED"]["value"] == "true"
+    for name in ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_DB", "JWT_ISSUER"):
+        assert env[name]["valueFrom"]["configMapKeyRef"] == {"name": "nexent-config", "key": name}
+    for name in ("NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "GATEWAY_SIGNING_SECRET"):
+        ref = env[name]["valueFrom"]["secretKeyRef"]
+        assert (ref["name"], ref["key"]) == ("nexent-secrets", name)
+        assert ref.get("optional", False) is (name == "GATEWAY_SIGNING_SECRET")
     if enabled:
         assert mounts["ops-trajectory"]["mountPath"] == "/srv/trajectory"
         assert (
@@ -146,6 +155,6 @@ def test_docker_ops_uses_monitoring_configuration_and_same_archive_as_runtime():
         services = yaml.safe_load((directory / filename).read_text())["services"]
         assert archive_mount in services["nexent-runtime"]["volumes"]
         assert (
-            "OPS_HTTP_BACKEND=http://nexent-ops:${OPS_PORT:-5016}"
-            in services["nexent-web"]["environment"]
+            services["nexent-gateway"]["environment"]["GATEWAY_OPS_URL"]
+            == "http://nexent-ops:${OPS_PORT:-5016}"
         )

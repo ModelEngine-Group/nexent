@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from infrastructure.observability.trajectory_store import parse_time
+from infrastructure.trace.trajectory_store import parse_time
 
 from .access import authorize
 from .conversation_view import frozen_runs, project

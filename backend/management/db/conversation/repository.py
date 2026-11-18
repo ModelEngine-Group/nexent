@@ -38,7 +38,7 @@ from contracts.errors.exceptions import (
     WorkbenchError,
 )
 from contracts.roles import has_any_role, roles_from_record
-from management.db.client import db_client, get_db_session
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.conversation.branch_titles import build_branch_title as _build_branch_title
 from management.db.conversation.classification import (
     executor_system_key,
@@ -56,7 +56,7 @@ from management.db.models import (
     UserTenant,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 
 def load_execution_result_content(

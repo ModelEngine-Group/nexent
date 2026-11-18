@@ -106,14 +106,6 @@ if _utils_pkg is None or not getattr(_utils_pkg, "__path__", None):
     _utils_pkg.__path__ = [str(_BACKEND_DIR / "utils")]
     sys.modules["utils"] = _utils_pkg
 
-# adapters package.
-_adapters_pkg = sys.modules.get("adapters")
-if _adapters_pkg is None or not getattr(_adapters_pkg, "__path__", None):
-    _adapters_pkg = types.ModuleType("adapters")
-    _adapters_pkg.__path__ = [str(_BACKEND_DIR / "adapters")]
-    sys.modules["adapters"] = _adapters_pkg
-
-
 # ---------------------------------------------------------------------------
 # Helpers — build the same ``AppException`` the service layer raises.
 # Service code never raises bare ``ValueError``; it always raises
@@ -142,7 +134,7 @@ def client():
     of ``TestClient`` as a raw exception.
     """
     from fastapi import FastAPI
-    from middleware.exception_handler import ExceptionHandlerMiddleware
+    from runtime.api.exception_handler import ExceptionHandlerMiddleware
 
     from management.api.evaluation.evaluation_set import router
 
