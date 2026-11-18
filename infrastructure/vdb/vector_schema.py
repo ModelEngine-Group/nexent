@@ -24,6 +24,7 @@ class VectorBinding:
     additional_text_fields: tuple[str, ...] = ()
     owns_collection: bool = False
     mutable_fields: frozenset[str] = frozenset()
+    allow_unembedded: bool = False
 
     def __post_init__(self):
         if not isinstance(self.mutable_fields, (tuple, list, set, frozenset)):
@@ -37,7 +38,8 @@ class VectorBinding:
         object.__setattr__(self, "additional_text_fields", tuple(self.additional_text_fields))
         names = [field.name for field in self.fields]
         if (
-            type(self.writable) is not bool
+            type(self.allow_unembedded) is not bool
+            or type(self.writable) is not bool
             or type(self.owns_collection) is not bool
             or not self.collection
             or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", self.index)
@@ -64,7 +66,7 @@ class VectorBinding:
         return {field.name: field for field in self.fields}
 
     def mapping(self):
-        if self.dimensions is None:
+        if self.dimensions is None and not self.allow_unembedded:
             raise CapabilityUnsupported()
         kinds = {
             "string": "keyword",
@@ -82,7 +84,7 @@ class VectorBinding:
                     if field.name in (self.text_field, *self.additional_text_fields)
                     else kinds[field.kind]
                 }
-        return {
+        mapping = {
             "dynamic": "strict",
             "properties": {
                 "_si_tenant": {"type": "keyword"},
@@ -102,6 +104,9 @@ class VectorBinding:
                 },
             },
         }
+        if self.dimensions is None:
+            mapping["properties"].pop("embedding")
+        return mapping
 
 
 def matches_mapping(expected, actual):

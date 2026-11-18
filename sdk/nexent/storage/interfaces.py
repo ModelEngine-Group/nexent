@@ -172,6 +172,9 @@ class VectorStore(StoragePort, Protocol):
 
     def upsert(self, records: tuple[VectorRecord, ...], *, context: OperationContext) -> tuple[WriteReceipt, ...]: ...
 
+    def put(self, record: VectorRecord, *, expected_generation: Revision | None,
+            context: OperationContext) -> WriteReceipt: ...
+
     def get(self, key: VectorKey, *, context: OperationContext, include_vector: bool = True) -> VectorRecord | None: ...
 
     def delete_key(self, key: VectorKey, *, expected_generation: Revision | None,

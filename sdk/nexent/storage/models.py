@@ -254,7 +254,7 @@ class VectorKey:
 @dataclass(frozen=True)
 class VectorCollectionInfo:
     collection: str
-    dimensions: int
+    dimensions: int | None
     metric: str
 
 

@@ -26,9 +26,9 @@ def knowledge_index(tenant_id, collection):
     return "si-kb-" + hashlib.sha256(identity.encode()).hexdigest()
 
 
-def vector_binding(tenant_id, collection, dimensions, *, writable=True):
+def vector_binding(tenant_id, collection, dimensions, *, writable=True, allow_unembedded=False):
     fields = tuple(
-        FieldDefinition(name, kind)
+        FieldDefinition(name, kind, nullable=name in {"file_id", "file_version", "chunk_index", "embedding_model_id", "embedding_revision", "parser_version"})
         for name, kind in (
             ("knowledge_id", "integer"),
             ("file_id", "string"),
@@ -48,6 +48,7 @@ def vector_binding(tenant_id, collection, dimensions, *, writable=True):
         dimensions,
         fields,
         writable=writable,
+        allow_unembedded=allow_unembedded,
     )
 
 
@@ -77,7 +78,7 @@ def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True, reso
     scope = StorageScope("runtime", tenant, actor.user_id, {collection})
     return ElasticsearchVectorStore(
         scope,
-        (vector_binding(tenant, collection, dimensions, writable=writable),),
+        (vector_binding(tenant, collection, dimensions, writable=writable, allow_unembedded=writable and dimensions is not None),),
         _configured_client,
     )
 
@@ -89,4 +90,13 @@ def bind_knowledge_chunk_vectors(actor, collection):
     return ElasticsearchVectorStore(
         StorageScope("runtime", actor.tenant_id, actor.user_id, {collection}),
         (binding,), _configured_client,
+    )
+
+
+def bind_knowledge_creation_vectors(actor, collection, dimensions):
+    """Explicitly grant payload-only creation and later compatible vector mapping upgrades."""
+    return ElasticsearchVectorStore(
+        StorageScope("runtime", actor.tenant_id, actor.user_id, {collection}),
+        (vector_binding(actor.tenant_id, collection, dimensions, allow_unembedded=True),),
+        _configured_client,
     )

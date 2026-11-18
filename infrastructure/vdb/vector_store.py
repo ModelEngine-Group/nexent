@@ -52,6 +52,7 @@ class ElasticsearchVectorStore:
                 "vector.collection.describe",
                 "vector.collection.exists",
                 "vector.upsert",
+                "vector.put",
                 "vector.get",
                 "vector.get.payload",
                 "vector.delete.key",
@@ -86,6 +87,10 @@ class ElasticsearchVectorStore:
         self._factory = client_factory
         if any(binding.dimensions is None for binding in bindings):
             self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload", "vector.get.payload", "vector.delete.key"}))
+        if any(binding.allow_unembedded for binding in bindings):
+            self.capabilities = CapabilitySet(self.capabilities.supported | {
+                "vector.put", "vector.collection.ensure", "vector.collection.describe",
+            })
         if any(binding.owns_collection and binding.writable for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         if any(binding.writable and binding.mutable_fields for binding in bindings):
@@ -171,15 +176,23 @@ class ElasticsearchVectorStore:
         return result
 
     def describe_collection(self, collection, *, context):
-        binding = self._binding(collection)
+        binding = self._binding(collection, maintenance=True)
+        expected = binding.mapping()
         with self._client(context) as client:
-            result = self._call(
-                client, "indices.get_mapping", context, index=binding.index
-            )
+            result = self._call(client, "indices.get_mapping", context, index=binding.index)
         mapping = result.get(binding.index, {}).get("mappings", {})
-        if not matches_mapping(binding.mapping(), mapping):
+        if not matches_mapping(expected, mapping):
             raise Conflict(operation_id=context.operation_id)
-        return VectorCollectionInfo(collection, binding.dimensions, binding.metric)
+        dimensions = binding.dimensions
+        if dimensions is None:
+            properties = mapping.get("properties", {})
+            embedding = properties.get("embedding")
+            if "embedding" in properties:
+                dimensions = embedding.get("dims") if isinstance(embedding, dict) else None
+                if (type(dimensions) is not int or dimensions < 1 or embedding.get("type") != "dense_vector"
+                    or embedding.get("similarity", "cosine") != binding.metric):
+                    raise Conflict(operation_id=context.operation_id)
+        return VectorCollectionInfo(collection, dimensions, binding.metric)
 
     def collection_exists(self, collection, *, context):
         binding = self._binding(collection, maintenance=True)
@@ -214,18 +227,27 @@ class ElasticsearchVectorStore:
         return DeleteReceipt(context.operation_id, True)
 
     def ensure_collection(self, collection, *, context):
-        binding = self._binding(collection, write=True)
+        binding = self._binding(collection, write=True, maintenance=True)
+        expected = binding.mapping()
         with self._client(context) as client:
             exists = self._call(client, "indices.exists", context, index=binding.index)
             if not exists:
-                self._call(
-                    client,
-                    "indices.create",
-                    context,
-                    write=True,
-                    index=binding.index,
-                    mappings=binding.mapping(),
-                )
+                result = self._call(client, "indices.create", context, write=True, index=binding.index, mappings=expected)
+                if result.get("acknowledged") is not True:
+                    raise OutcomeUnknown(operation_id=context.operation_id)
+            elif binding.allow_unembedded and binding.dimensions is not None:
+                current = self._call(client, "indices.get_mapping", context, index=binding.index)
+                actual = current.get(binding.index, {}).get("mappings", {})
+                if not isinstance(actual, dict) or not isinstance(actual.get("properties"), dict):
+                    raise Conflict(operation_id=context.operation_id)
+                if "embedding" not in actual.get("properties", {}):
+                    base = {**expected, "properties": {name: value for name, value in expected["properties"].items() if name != "embedding"}}
+                    if not matches_mapping(base, actual):
+                        raise Conflict(operation_id=context.operation_id)
+                    result = self._call(client, "indices.put_mapping", context, write=True, index=binding.index,
+                        properties={"embedding": expected["properties"]["embedding"]})
+                    if result.get("acknowledged") is not True:
+                        raise OutcomeUnknown(operation_id=context.operation_id)
         return self.describe_collection(collection, context=context)
 
     def _filter(self, binding, where):
@@ -297,6 +319,38 @@ class ElasticsearchVectorStore:
             return ()
         with self._client(context) as client:
             return self._bulk(client, operations, context, len(records))
+
+    def put(self, record, *, expected_generation, context):
+        if not isinstance(record, VectorRecord) or not isinstance(record.key, VectorKey):
+            raise InvalidInput()
+        if expected_generation is not None and not isinstance(expected_generation, Revision):
+            raise InvalidInput()
+        if record.generation is not None and not isinstance(record.generation, Revision):
+            raise InvalidInput()
+        binding = self._binding(record.key.collection, write=True, maintenance=True)
+        plain = isinstance(record.vector, tuple) and not record.vector and binding.allow_unembedded
+        if not plain and binding.dimensions is None:
+            raise CapabilityUnsupported()
+        values = None if plain else vector(binding, record.vector)
+        document = {"_si_tenant": self.scope.tenant_id, "_si_collection": binding.collection,
+            "_si_key": record.key.key, "payload": payload(binding, record.payload)}
+        if values is not None:
+            document["embedding"] = values
+        if record.generation is not None:
+            document["_si_generation"] = record.generation.value
+        options = {"op_type": "create"}
+        provider_key = self._key(binding.collection, record.key.key)
+        with self._client(context) as client:
+            if expected_generation is not None:
+                target = self._payload_target(client, binding, record.key, expected_generation, context)
+                if target is None:
+                    raise Conflict(operation_id=context.operation_id)
+                options = {"if_seq_no": target[0], "if_primary_term": target[1]}
+            result = self._call(client, "index", context, write=True, index=binding.index, id=provider_key,
+                document=document, refresh="wait_for", **options)
+            if result.get("result") != ("created" if expected_generation is None else "updated"):
+                raise OutcomeUnknown(operation_id=context.operation_id)
+        return WriteReceipt(context.operation_id, True)
 
     def _decode(self, binding, source, *, partial=False):
         if not isinstance(source, dict):
