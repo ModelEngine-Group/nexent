@@ -108,7 +108,7 @@ from infrastructure.runtime_output import RuntimeOutputState, is_runtime_event
 from infrastructure.nexent_output import NexentSSEAdapter
 
 logger = logging.getLogger(__name__)
-from runtime.identity import associate_run_request, execution_conversation_id, reference_options
+from runtime.identity import associate_run_request, execution_conversation_id, reference_options, runtime_journal_call
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
@@ -448,7 +448,8 @@ async def _stream_agent_chunks(
             if execution_state is not None:
                 execution_state.assistant_message_id = streaming_message_id
             if reference_options(agent_request) and streaming_message_id is not None:
-                associate_run_request(agent_request, assistant_message_id=streaming_message_id)
+                await runtime_journal_call('associate-assistant-message', associate_run_request,
+                                           agent_request, assistant_message_id=streaming_message_id)
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True

@@ -118,3 +118,24 @@ async def runtime_coordination_call(task_name, function, *args, **kwargs):
     from nexent.core.concurrency import run_blocking
 
     return await run_blocking(task_name, function, *args, lane='control-io', owner='runtime', **kwargs)
+
+
+async def runtime_journal_call(task_name, function, *args, **kwargs):
+    """Settle the durable association before cancellation can release its reservation."""
+    if not uses_distributed_runtime():
+        return function(*args, **kwargs)
+
+    task = asyncio.create_task(runtime_coordination_call(task_name, function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logging.getLogger(__name__).warning('Runtime journal write failed during cancellation: %s', type(error).__name__)
+        raise

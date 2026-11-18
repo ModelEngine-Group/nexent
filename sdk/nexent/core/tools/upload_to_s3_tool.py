@@ -12,6 +12,8 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackPublicError
+
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
@@ -213,13 +215,13 @@ class UploadToS3Tool(Tool):
 
             # 1. Validate inputs
             if not file_path or not file_path.strip():
-                raise Exception("File path cannot be empty")
+                raise SandboxCallbackPublicError("File path cannot be empty")
 
             if self.minio_client is None:
                 raise Exception("MinIO client is not configured. Cannot upload files to S3.")
 
             if not self.user_id:
-                raise Exception("User authentication required for uploading files to S3.")
+                raise SandboxCallbackPublicError("User authentication required for uploading files to S3.")
             # 2. Validate local path
             workspace = Path(self.workspace_path).resolve()
             candidates = self._upload_path_candidates(file_path)
@@ -234,24 +236,24 @@ class UploadToS3Tool(Tool):
 
             # 3. Check file exists and is a regular file
             if not os.path.exists(abs_path):
-                raise Exception(f"File does not exist: {file_path}")
+                raise SandboxCallbackPublicError(f"File does not exist: {file_path}")
 
             if not os.path.isfile(abs_path):
-                raise Exception(f"Path is not a regular file: {file_path}")
+                raise SandboxCallbackPublicError(f"Path is not a regular file: {file_path}")
 
             # 4. Validate metadata and upload through the same pinned handle.
             with _open_upload_file(abs_path, workspace) as file_obj:
                 info = os.fstat(file_obj.fileno())
                 if not stat.S_ISREG(info.st_mode):
-                    raise Exception(f"Path is not a regular file: {file_path}")
+                    raise SandboxCallbackPublicError(f"Path is not a regular file: {file_path}")
                 file_size = info.st_size
                 if file_size > self.MAX_UPLOAD_SIZE:
-                    raise Exception(
+                    raise SandboxCallbackPublicError(
                         f"File too large: {file_size} bytes (max {self.MAX_UPLOAD_SIZE} bytes). "
                         f"Please use a smaller file."
                     )
                 if file_size == 0:
-                    raise Exception(f"File is empty: {file_path}")
+                    raise SandboxCallbackPublicError(f"File is empty: {file_path}")
 
                 # 5. Determine target filename and S3 key
                 target_name = target_filename or os.path.basename(abs_path)
@@ -291,6 +293,9 @@ class UploadToS3Tool(Tool):
                 self.on_upload(dict(response))
             return json.dumps(response, ensure_ascii=False)
 
+        except SandboxCallbackPublicError as exc:
+            logger.error("Upload rejected: %s", exc.public_message)
+            raise SandboxCallbackPublicError(f"Failed to upload file: {exc.public_message}") from exc
         except Exception as e:
             logger.error(f"Upload failed: {e}")
             raise Exception(f"Failed to upload file: {e}")

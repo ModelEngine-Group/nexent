@@ -3,11 +3,16 @@
 """Existing script planning with RWX preparation and nonroot Kubernetes exec."""
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
 from nexent.core.agents.sandbox_kubernetes_exec import KubernetesProcessAdapter
+
+
+logger = logging.getLogger(__name__)
+_STORE_ROOT = '/tmp/nexent-pnpm-stores'
 
 
 _PREPARE_STORE = """import os, shutil, sys
@@ -35,6 +40,23 @@ if not target.exists():
 """
 
 
+_REMOVE_STORE = """import os, shutil, sys
+key = sys.argv[1]
+if len(key) != 24 or any(c not in '0123456789abcdef' for c in key):
+    raise ValueError('Invalid pnpm store key')
+try:
+    fd = os.open('/tmp/nexent-pnpm-stores', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+except FileNotFoundError:
+    sys.exit(0)
+try:
+    shutil.rmtree(key, dir_fd=fd)
+except FileNotFoundError:
+    pass
+finally:
+    os.close(fd)
+"""
+
+
 @dataclass(frozen=True)
 class _ProcessOutput:
     exit_code: int
@@ -51,6 +73,10 @@ class KubernetesSkillScriptRunner(SandboxSkillScriptRunner):
             connection.backend, connection.owner, connection.profile, connection.generation,
             check_cancelled=executor._check_execution_cancelled,
             run_lifecycle=getattr(executor, '_runtime_lifecycle', None),
+        )
+        # Owned housekeeping is bounded and cannot execute business work.
+        self._cleanup_process = KubernetesProcessAdapter(
+            connection.backend, connection.owner, connection.profile, connection.generation,
         )
         self._invocation = hashlib.sha256(executor.kernel_id.encode()).hexdigest()[:24]
         self._root = f'{self._workspace_path}/skills/{self._invocation}'
@@ -99,7 +125,7 @@ class KubernetesSkillScriptRunner(SandboxSkillScriptRunner):
 
     def _resolve_network_pnpm_store(self, workspace_dir):
         key = hashlib.sha256((workspace_dir + ':' + self._invocation).encode()).hexdigest()[:24]
-        self._pnpm_store_path = '/tmp/nexent-pnpm-stores/' + key
+        self._pnpm_store_path = f'{_STORE_ROOT}/{key}'
         return self._pnpm_store_path
 
     def _ensure_network_pnpm_store(self, workspace_dir):
@@ -111,6 +137,16 @@ class KubernetesSkillScriptRunner(SandboxSkillScriptRunner):
             self._pnpm_store_seeded = True
 
     def cleanup(self):
-        self._access.cleanup_skills(self._host_workspace, self._invocation)
+        try:
+            self._access.cleanup_skills(self._host_workspace, self._invocation)
+        except Exception as exc:
+            logger.warning('Kubernetes Skill staging cleanup failed: %s', type(exc).__name__)
         if self._pnpm_store_path:
-            self._execute_process(['rm', '-rf', '--', self._pnpm_store_path])
+            try:
+                key = self._pnpm_store_path.rsplit('/', 1)[1]
+                result = self._cleanup_process.run(['python', '-c', _REMOVE_STORE, key],
+                                                   cwd='/', env={}, timeout_seconds=5)
+                if result.exit_code != 0:
+                    logger.warning('Kubernetes pnpm store cleanup exited with status %s', result.exit_code)
+            except Exception as exc:
+                logger.warning('Kubernetes pnpm store cleanup failed: %s', type(exc).__name__)

@@ -15,6 +15,14 @@ class SandboxCallbackAuthorizationError(PermissionError):
     """A process-local callback capability is absent or has expired."""
 
 
+class SandboxCallbackPublicError(RuntimeError):
+    """A tool deliberately reports a caller-safe business error."""
+
+    def __init__(self, public_message: str):
+        super().__init__(public_message)
+        self.public_message = public_message
+
+
 class SandboxCallbackRegistry:
     def __init__(self, owner):
         self.owner = owner

@@ -3,6 +3,7 @@
 """Owner-local sandbox tool callbacks with scoped invocation capabilities."""
 
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -10,11 +11,14 @@ from infrastructure.concurrency import runtime_thread_manager
 from runtime.sandbox_services import current_callback_registry
 
 from nexent.core.agents.sandbox.execution import _serialize_tool_bridge_value
-from nexent.core.agents.sandbox_callbacks import SandboxCallbackAuthorizationError, SandboxCallbackContextError
+from nexent.core.agents.sandbox_callbacks import (
+    SandboxCallbackAuthorizationError, SandboxCallbackContextError, SandboxCallbackPublicError,
+)
 from nexent.core.concurrency import ManagedTaskSpec
 
 
 router = APIRouter(prefix='/internal/sandbox', include_in_schema=False)
+logger = logging.getLogger(__name__)
 
 
 @router.post('/tool-invoke')
@@ -48,5 +52,8 @@ async def invoke_tool(request: Request):
         raise HTTPException(status_code=403, detail='Expired callback capability') from None
     except SandboxCallbackContextError:
         raise HTTPException(status_code=403, detail='Unknown callback context or tool') from None
+    except SandboxCallbackPublicError as exc:
+        return JSONResponse(status_code=500, content={'error': exc.public_message})
     except Exception as exc:
-        return JSONResponse(status_code=500, content={'error': str(exc)})
+        logger.warning('Unexpected sandbox callback failure: %s', type(exc).__name__)
+        return JSONResponse(status_code=500, content={'error': 'Sandbox tool invocation failed'})

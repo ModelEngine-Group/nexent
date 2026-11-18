@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 from runtime.api import sandbox
 
 from nexent.core.agents.sandbox.execution import _ToolBridge
-from nexent.core.agents.sandbox_callbacks import SandboxCallbackRegistry
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackPublicError, SandboxCallbackRegistry
 from nexent.core.agents.sandbox_contracts import SandboxOwner
+from nexent.core.tools.run_skill_script_tool import SkillScriptExecutionError
 
 
 @pytest.fixture
@@ -61,17 +62,33 @@ def test_callback_body_is_bounded_and_validated_before_dispatch(callback, conten
     assert response.status_code == status and not calls
 
 
-def test_tool_value_error_uses_existing_bridge_error_payload(callback):
+@pytest.mark.parametrize('error_type', [SandboxCallbackPublicError, SkillScriptExecutionError])
+def test_public_business_error_uses_existing_bridge_error_payload(callback, error_type):
     client, bridge, _, _ = callback
 
     def fail():
-        raise ValueError('Tool rejected input')
+        raise error_type('Tool rejected input')
 
     bridge.register({'fail': fail})
     with bridge.execution_context() as execution_id:
         response = client.post('/internal/sandbox/tool-invoke', headers={'Authorization': 'Bearer ' + bridge._token},
                                json={'execution_id': execution_id, 'tool': 'fail'})
     assert response.status_code == 500 and response.json() == {'error': 'Tool rejected input'}
+
+
+@pytest.mark.parametrize('error_type', [RuntimeError, ValueError])
+def test_unexpected_callback_errors_do_not_expose_exception_text(callback, error_type, caplog):
+    client, bridge, _, _ = callback
+
+    def fail():
+        raise error_type('private-fixture-value')
+
+    bridge.register({'fail': fail})
+    with bridge.execution_context() as execution_id:
+        response = client.post('/internal/sandbox/tool-invoke', headers={'Authorization': 'Bearer ' + bridge._token},
+                               json={'execution_id': execution_id, 'tool': 'fail'})
+    assert response.status_code == 500 and response.json() == {'error': 'Sandbox tool invocation failed'}
+    assert error_type.__name__ in caplog.text and 'private-fixture-value' not in caplog.text
 
 
 def test_removed_drain_route_is_unavailable_even_with_a_callback_capability(callback):

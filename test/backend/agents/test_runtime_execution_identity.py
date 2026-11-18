@@ -116,3 +116,46 @@ async def test_coordination_calls_use_control_lane_and_preserve_local_execution(
     monkeypatch.setattr(concurrency, 'run_blocking', run)
     assert await identity.runtime_coordination_call('lookup', function, 7, user='user') == 'distributed'
     run.assert_awaited_once_with('lookup', function, 7, lane='control-io', owner='runtime', user='user')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('write_fails', [False, True])
+async def test_cancelled_journal_call_settles_before_reservation_release(monkeypatch, write_fails):
+    import asyncio
+    from concurrent.futures import Future
+
+    import nexent.core.concurrency as concurrency
+    from runtime import identity
+
+    started, released = asyncio.Event(), asyncio.Event()
+    worker = Future()
+    assert worker.set_running_or_notify_cancel()
+
+    async def run_blocking(_name, _fn, *args, lane, owner, **kwargs):
+        assert lane == 'control-io'
+        started.set()
+        return await asyncio.wrap_future(worker)
+
+    monkeypatch.setattr(identity, 'uses_distributed_runtime', lambda: True)
+    monkeypatch.setattr(concurrency, 'run_blocking', run_blocking)
+
+    async def admitted_run():
+        try:
+            await identity.runtime_journal_call('associate', lambda: None)
+        finally:
+            assert worker.done()
+            released.set()
+
+    task = asyncio.create_task(admitted_run())
+    await started.wait()
+    for _ in range(2):
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not released.is_set()
+    if write_fails:
+        worker.set_exception(OSError('write failed'))
+    else:
+        worker.set_result(None)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert released.is_set()

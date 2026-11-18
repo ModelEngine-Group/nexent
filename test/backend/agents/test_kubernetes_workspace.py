@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,10 @@ from nexent.core.agents.sandbox_contracts import SandboxOwner
 
 
 @pytest.fixture
-def workspace(tmp_path):
+def workspace(tmp_path, monkeypatch):
+    if os.name == 'posix':
+        monkeypatch.setattr('runtime.sandbox_workspace.os.geteuid', lambda: 0)
+        monkeypatch.setattr('runtime.sandbox_workspace.os.chown', lambda *args, **kwargs: None)
     owner = SandboxOwner('release', 'namespace', 'runtime', 'uid-a', '10.0.0.1', 'epoch')
     return KubernetesWorkspace(tmp_path, owner, execution_gid=1000)
 
@@ -30,8 +34,7 @@ def test_run_id_is_a_validated_internal_identity(workspace, run_id):
         workspace.run_path('tenant', 'user', run_id)
 
 
-def test_prepare_does_not_widen_or_follow_output_symlinks(workspace, tmp_path, mocker):
-    mocker.patch('runtime.sandbox_workspace.os.chown', create=True)
+def test_prepare_does_not_widen_or_follow_output_symlinks(workspace, tmp_path):
     run = workspace.prepare_run('tenant', 'user', 'a' * 32)
     assert all((run / name).is_dir() for name in ('inputs', 'outputs', 'tmp', '.skills'))
     outside = tmp_path / 'outside'

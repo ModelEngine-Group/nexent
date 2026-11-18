@@ -9,6 +9,13 @@ from runtime.sandbox_workspace import KubernetesWorkspace
 from nexent.core.agents.sandbox_contracts import SandboxOwner
 
 
+@pytest.fixture(autouse=True)
+def trusted_runtime_identity(monkeypatch):
+    if os.name == 'posix':
+        monkeypatch.setattr('runtime.sandbox_workspace.os.geteuid', lambda: 0)
+        monkeypatch.setattr('runtime.sandbox_workspace.os.chown', lambda *args, **kwargs: None)
+
+
 def test_staging_normalizes_only_private_shell_copy_and_child_cleanup_preserves_parent(tmp_path, monkeypatch):
     # Identity hashing has separate tests; keep filesystem fixture paths short on Windows.
     monkeypatch.setattr('runtime.sandbox_workspace._business_key', lambda value: value)
@@ -22,6 +29,10 @@ def test_staging_normalizes_only_private_shell_copy_and_child_cleanup_preserves_
     child = workspace.stage_skill(str(source), str(run), 'c' * 24)
     assert (source / 'run.sh').read_bytes() == b'echo hello\r\n'
     assert (parent / 'run.sh').read_bytes() == (child / 'run.sh').read_bytes() == b'echo hello\n'
+    if os.name == 'posix':
+        assert child.stat().st_mode & 0o777 == 0o550
+        # Emulate the trusted Runtime's ability to remove the read-only staged files.
+        child.chmod(0o750)
     workspace.cleanup_skills(str(run), 'c' * 24)
     assert (parent / 'run.sh').exists() and not child.exists()
     assert workspace.stage_skill(str(source), str(run), 'b' * 24) == parent

@@ -106,7 +106,7 @@ from infrastructure.serialization.runtime_metadata import (
 from runtime.identity import (
     bind_run_reservation, current_reference_options, distributed_run_options, execution_conversation_id,
     reference_options,
-    reserve_runtime_run, runtime_coordination_call,
+    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
     uses_distributed_runtime,
 )
 
@@ -950,7 +950,8 @@ async def run_agent_stream(
         )
 
         if not agent_request.is_debug and not skip_user_save:
-            save_messages(
+            await runtime_journal_call(
+                'save-stream-user-message', save_messages,
                 agent_request,
                 target=MESSAGE_ROLE["USER"],
                 user_id=resolved_user_id,

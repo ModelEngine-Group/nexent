@@ -32,7 +32,7 @@ from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from runtime.adapters.nexent.runner import agent_run
 from runtime.identity import (
     associate_run_request, bind_run_reservation, distributed_run_options, reference_options, uses_distributed_runtime,
-    reserve_runtime_run, runtime_coordination_call,
+    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
 )
 
 
@@ -165,7 +165,7 @@ async def _run_agent_to_final_answer(
                 ('evaluation_id', evaluation_id), ('evaluation_case_id', evaluation_case_id),
             ) if value is not None}
             if associations:
-                associate_run_request(agent_request, **associations)
+                await runtime_journal_call('associate-evaluation-run', associate_run_request, agent_request, **associations)
             from management.services.agent.run_state import runtime_state_service
 
             await runtime_state_service.reset_stream_async(user_id, run_conversation_id, **reference_options(agent_request))

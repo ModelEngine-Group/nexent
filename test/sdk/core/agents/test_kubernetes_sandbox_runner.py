@@ -25,11 +25,16 @@ def runner(tmp_path, mocker):
     connection = SimpleNamespace(backend=Mock(), owner=Mock(), profile=Mock(), generation='generation')
     executor = SimpleNamespace(_nexent_backend='kubernetes', _container_executor=connection,
                                kernel_id='unique-kernel', _check_execution_cancelled=lambda: None)
-    process = mocker.patch('nexent.core.agents.sandbox_kubernetes_runner.KubernetesProcessAdapter').return_value
-    process.run.return_value = ScriptProcessResult(b'OK', b'', 0)
+    process, cleanup = Mock(), Mock()
+    adapter = mocker.patch('nexent.core.agents.sandbox_kubernetes_runner.KubernetesProcessAdapter',
+                           side_effect=[process, cleanup])
+    process.run.return_value = cleanup.run.return_value = ScriptProcessResult(b'OK', b'', 0)
     mapping = SandboxWorkspace(run, PurePosixPath('/mnt/nexent/workdir/tenant/user/' + run.name))
     instance = KubernetesSkillScriptRunner(executor, workspace_access=access, workspace_path=str(run),
                                           workspace_mapping=mapping, timeout_seconds=5)
+    assert adapter.call_args_list[1].args == adapter.call_args_list[0].args
+    assert 'check_cancelled' in adapter.call_args_list[0].kwargs
+    assert not adapter.call_args_list[1].kwargs
     manager = Mock()
     manager.resolve_skill_script.return_value = (str(source), str(source / 'run.py'), 'run.py')
     return instance, manager, process, access, run
@@ -105,8 +110,12 @@ def test_online_store_is_seeded_once_per_invocation_and_removed_at_cleanup(runne
     instance._ensure_network_pnpm_store(instance._workspace_path)
     assert process.run.call_count == 1
     assert store.startswith('/tmp/nexent-pnpm-stores/') and len(store.rsplit('/', 1)[1]) == 24
+    run.rmdir()
     instance.cleanup()
-    assert process.run.call_args.args[0] == ['rm', '-rf', '--', store]
+    cleanup_call = instance._cleanup_process.run.call_args
+    assert cleanup_call.args[0][-1] == store.rsplit('/', 1)[1]
+    assert cleanup_call.kwargs == {'cwd': '/', 'env': {}, 'timeout_seconds': 5}
+    assert process.run.call_count == 1
     access.cleanup_skills.assert_called_once_with(str(run), instance._invocation)
 
 
@@ -116,3 +125,18 @@ def test_failed_store_seed_is_not_marked_ready(runner):
     with pytest.raises(RuntimeError, match='prepare nonroot'):
         instance._ensure_network_pnpm_store(instance._workspace_path)
     assert not instance._pnpm_store_seeded
+
+
+@pytest.mark.parametrize('failure', ['exit', 'transport'])
+def test_cleanup_attempts_both_resources_and_logs_failure(runner, caplog, failure):
+    instance, _, _, access, _ = runner
+    instance._resolve_network_pnpm_store(instance._workspace_path)
+    access.cleanup_skills.side_effect = OSError('local cleanup failed')
+    if failure == 'transport':
+        instance._cleanup_process.run.side_effect = TimeoutError('cleanup timed out')
+    else:
+        instance._cleanup_process.run.return_value = ScriptProcessResult(b'', b'failure', 1)
+    instance.cleanup()
+    instance._cleanup_process.run.assert_called_once()
+    assert 'Kubernetes Skill staging cleanup failed' in caplog.text
+    assert 'Kubernetes pnpm store cleanup' in caplog.text

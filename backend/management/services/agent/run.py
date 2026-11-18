@@ -13,7 +13,7 @@ from typing import (
 from runtime.identity import (
     associate_run_request, bind_run_reservation, current_reference_options, distributed_run_options,
     execution_conversation_id, reference_options, uses_distributed_runtime,
-    reserve_runtime_run, runtime_coordination_call,
+    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
 )
 
 from management.services.agent.lifecycle import (
@@ -555,7 +555,8 @@ async def run_agent_background(
     try:
         await runtime_coordination_call('bind-background-run', bind_run_reservation, agent_request, user_id)
         if uses_distributed_runtime() and execution_state.runtime_generation is not None:
-            associate_run_request(agent_request, automation_run_id=execution_state.runtime_generation)
+            await runtime_journal_call('associate-background-run', associate_run_request, agent_request,
+                                       automation_run_id=execution_state.runtime_generation)
         agent_request.__dict__["_runtime_automation_generation"] = execution_state.runtime_generation
         await runtime_state_service.reset_stream_async(
             user_id, agent_request.conversation_id, generation=execution_state.runtime_generation,
@@ -568,7 +569,8 @@ async def run_agent_background(
         agent_request._message_source = "AUTOMATION"
 
         if not agent_request.is_debug and not skip_user_save:
-            save_messages(
+            await runtime_journal_call(
+                'save-background-user-message', save_messages,
                 agent_request,
                 target=MESSAGE_ROLE["USER"],
                 user_id=user_id,

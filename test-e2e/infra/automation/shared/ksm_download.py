@@ -56,9 +56,9 @@ async def verify_download(identity, units, fixture, case_id):
     assert content == b'2\n4\n6\n'
     logs = '\n'.join(str(unit.get('content', '')) for unit in units if unit.get('type') == 'execution_logs')
     verified = fixture['fingerprints']
+    namespace = _namespace()
+    assert namespace == verified['namespace']
     with client.ApiClient() as transport:
-        namespace = _namespace()
-        assert namespace == verified['namespace']
         pods = client.CoreV1Api(transport).list_namespaced_pod(namespace, label_selector='nexent.ai/sandbox=system').items
         pod, = [pod for pod in pods if f'KSM_POD={pod.metadata.name}' in logs]
         assert any(ref.uid in verified['runtime_uids'] for ref in pod.metadata.owner_references)
