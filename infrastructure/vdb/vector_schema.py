@@ -23,8 +23,14 @@ class VectorBinding:
     writable: bool = False
     additional_text_fields: tuple[str, ...] = ()
     owns_collection: bool = False
+    mutable_fields: frozenset[str] = frozenset()
 
     def __post_init__(self):
+        if not isinstance(self.mutable_fields, (tuple, list, set, frozenset)):
+            raise InvalidInput()
+        if any(not isinstance(name, str) for name in self.mutable_fields):
+            raise InvalidInput()
+        object.__setattr__(self, 'mutable_fields', frozenset(self.mutable_fields))
         object.__setattr__(self, "fields", tuple(self.fields))
         if not isinstance(self.additional_text_fields, (tuple, list)):
             raise InvalidInput()
@@ -41,6 +47,7 @@ class VectorBinding:
             or len(set(names)) != len(names)
             or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names)
             or self.text_field not in names
+            or not self.mutable_fields <= set(names)
         ):
             raise InvalidInput()
         if self.metric != "cosine":

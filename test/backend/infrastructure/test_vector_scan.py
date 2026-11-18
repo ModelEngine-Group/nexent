@@ -62,6 +62,24 @@ def test_cursor_resumes_by_key_after_previous_rows_disappear(store):  # noqa: F8
     assert [r.key.key for r in second.items] == ['c', 'd'] and second.next_cursor is None
 
 
+def test_existing_read_cursor_survives_payload_edit_policy(store):  # noqa: F811
+    import base64
+    import json
+
+    port, client, factory = store
+    # Frozen fingerprint from the read contract before mutable payload fields existed.
+    cursor = base64.urlsafe_b64encode(json.dumps({
+        'query': 'd74b674d1e1ad437438708c9975256ee75596fd38c41aeb2b0ed2f90b68b040f',
+        'after': 'a',
+    }, separators=(',', ':')).encode()).decode()
+    binding = replace(port._bindings['kb'], mutable_fields=frozenset({'content'}))
+    editable = ElasticsearchVectorStore(port.scope, (binding,), factory)
+    client.search.return_value = {'hits': {'hits': [hit('b')]}}
+    result = editable.scan('kb', None, PageRequest(limit=1, cursor=cursor), context=context())
+    assert [row.key.key for row in result.items] == ['b']
+    assert client.search.call_args.kwargs['search_after'] == ['a']
+
+
 @pytest.mark.parametrize('change', ['actor', 'tenant', 'where', 'schema'])
 def test_cursor_cannot_escape_original_scope_or_query(store, change):  # noqa: F811
     port, client, factory = store

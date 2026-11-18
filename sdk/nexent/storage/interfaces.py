@@ -174,6 +174,13 @@ class VectorStore(StoragePort, Protocol):
 
     def get(self, key: VectorKey, *, context: OperationContext) -> VectorRecord | None: ...
 
+    def patch_payload(
+        self, key: VectorKey, patch: FieldPatch, *, expected_generation: Revision | None,
+        context: OperationContext,
+    ) -> WriteReceipt:
+        """Edit explicitly mutable payload fields without changing vectors or identity."""
+        ...
+
     def search(self, collection: str, query: SearchQuery, *, context: OperationContext) -> tuple[SearchHit, ...]: ...
 
     def scan(

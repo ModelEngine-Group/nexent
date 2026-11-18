@@ -32,8 +32,11 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True):
     if not isinstance(page, PageRequest):
         raise InvalidInput()
     query = store._filter(binding, where)
+    read_schema = asdict(binding)
+    # Payload edit policy does not alter the established read cursor contract.
+    read_schema.pop('mutable_fields')
     fingerprint = hashlib.sha256(json.dumps(
-        [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, asdict(binding), query, include_vector],
+        [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, read_schema, query, include_vector],
         sort_keys=True, separators=(',', ':'), allow_nan=False,
     ).encode()).hexdigest()
     after = _after(page.cursor, fingerprint)

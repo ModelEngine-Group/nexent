@@ -23,6 +23,7 @@ from nexent.storage.errors import (
 from nexent.storage.models import (
     CapabilitySet,
     DeleteReceipt,
+    FieldPatch,
     Revision,
     SearchHit,
     SearchQuery,
@@ -85,6 +86,8 @@ class ElasticsearchVectorStore:
             self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload"}))
         if any(binding.owns_collection and binding.writable for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
+        if any(binding.writable and binding.mutable_fields for binding in bindings):
+            self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.patch.payload'})
         self._closed = False
 
     @property
@@ -340,6 +343,48 @@ class ElasticsearchVectorStore:
         return VectorRecord(
             actual, vector(binding, source.get("embedding")), data, generation
         )
+
+    def patch_payload(self, key, patch, *, expected_generation, context):
+        if not isinstance(key, VectorKey) or not isinstance(patch, FieldPatch):
+            raise InvalidInput()
+        if expected_generation is not None and not isinstance(expected_generation, Revision):
+            raise InvalidInput()
+        binding = self._binding(key.collection, write=True, maintenance=True)
+        if not binding.mutable_fields:
+            raise CapabilityUnsupported()
+        if patch.unset_fields or patch.increments:
+            raise CapabilityUnsupported()
+        changes = payload(binding, patch.set_values, partial=True)
+        if not changes:
+            raise InvalidInput()
+        if not changes.keys() <= binding.mutable_fields:
+            raise ScopeDenied()
+        provider_key = self._key(binding.collection, key.key)
+        with self._client(context) as client:
+            try:
+                result = self._call(client, 'get', context, index=binding.index, id=provider_key,
+                    source_includes=['_si_tenant', '_si_collection', '_si_key', '_si_generation']
+                        + ['payload.' + field for field in binding.schema])
+            except NotFound:
+                return WriteReceipt(context.operation_id, False)
+            actual, _data, generation = self._decode(binding, result.get('_source', {}))
+            if actual != key:
+                raise ScopeDenied()
+            if generation != expected_generation:
+                raise Conflict(operation_id=context.operation_id)
+            sequence, term = result.get('_seq_no'), result.get('_primary_term')
+            if type(sequence) is not int or sequence < 0 or type(term) is not int or term < 1:
+                raise Unavailable(operation_id=context.operation_id)
+            try:
+                result = self._call(client, 'update', context, write=True, index=binding.index, id=provider_key,
+                    if_seq_no=sequence, if_primary_term=term, retry_on_conflict=0, scripted_upsert=False,
+                    script={'source': 'for (def field : params.values.keySet()) { ctx._source.payload[field] = params.values[field]; }',
+                            'lang': 'painless', 'params': {'values': changes}}, refresh='wait_for')
+            except NotFound:
+                return WriteReceipt(context.operation_id, False)
+            if result.get('result') not in {'updated', 'noop'}:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+        return WriteReceipt(context.operation_id, True)
 
     def search(self, collection, query, *, context):
         binding = self._binding(collection)
