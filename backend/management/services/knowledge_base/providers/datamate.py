@@ -9,7 +9,9 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from management.services.knowledge_base.providers.configuration import datamate_configuration_url
-from management.db.knowledge_base.repository import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
+from management.services.knowledge_base.providers.catalog import (
+    upsert_datamate_record, list_datamate_records, delete_datamate_record,
+)
 from nexent.vector_database.datamate_core import DataMateCore
 from nexent.core.concurrency import run_blocking
 from contracts.constants.environment import MODEL_ENGINE_ENABLED
@@ -56,7 +58,7 @@ async def _create_datamate_knowledge_records(knowledge_base_ids: List[str],
 
             created_record = await run_blocking(
                 "datamate-upsert-knowledge",
-                upsert_knowledge_record,
+                upsert_datamate_record,
                 record_data,
                 lane="control-io",
                 owner="config",
@@ -221,9 +223,9 @@ async def sync_datamate_knowledge_bases_and_create_records(
         # Get all existing DataMate records for this tenant
         existing_records = await run_blocking(
             "datamate-existing-records",
-            get_knowledge_info_by_tenant_and_source,
+            list_datamate_records,
             tenant_id,
-            "datamate",
+            user_id,
             lane="control-io",
             owner="config",
         )
@@ -241,8 +243,8 @@ async def sync_datamate_knowledge_bases_and_create_records(
             try:
                 delete_result = await run_blocking(
                     "datamate-delete-record",
-                    delete_knowledge_record,
-                    {"index_name": index_name, "user_id": user_id},
+                    delete_datamate_record,
+                    {"index_name": index_name, "user_id": user_id, "tenant_id": tenant_id},
                     lane="control-io",
                     owner="config",
                 )

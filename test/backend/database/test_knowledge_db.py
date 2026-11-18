@@ -56,7 +56,7 @@ minio_config_mock.validate = MagicMock()
 # Use additional context manager to ensure MinioClient is properly mocked during import
 with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_last_summary_time, update_last_doc_update_time
+    from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_ids_and_tenant, _generate_index_name, get_knowledge_name_map_by_index_names, update_last_summary_time, update_last_doc_update_time
 
 
 # Add project root to Python path
@@ -177,7 +177,7 @@ sys.modules['management.db.models'] = db_models_mock
 sys.modules['management.db.models'] = db_models_mock
 
 # Import backend modules after all patches are applied
-from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, update_embedding_model_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, _enforce_knowledge_limits
+from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, update_embedding_model_by_index_name, get_index_name_by_knowledge_name, _generate_index_name, get_knowledge_name_map_by_index_names, _enforce_knowledge_limits
 
 
 @pytest.fixture
@@ -1979,235 +1979,16 @@ def test_get_knowledge_ids_by_index_names_empty_list(monkeypatch, mock_session):
     assert result == []
 
 
-def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
-    """Test upsert_knowledge_record creates new record when not exists"""
-    session, query = mock_session
-
-    # Mock that no existing record is found
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = None
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    # Mock the same-session creator used to keep the existence check and limit
-    # check in one transaction.
-    expected_result = {
-        "knowledge_id": 123,
-        "index_name": "test_index",
-        "knowledge_name": "test_kb"
-    }
-
-    with patch(
-        'management.db.knowledge_base.repository._create_knowledge_record_in_session',
-        return_value=expected_result,
-    ):
-        test_query = {
-            "index_name": "test_index",
-            "tenant_id": "test_tenant",
-            "knowledge_name": "test_kb",
-            "knowledge_describe": "Test description",
-            "knowledge_sources": "elasticsearch",
-            "embedding_model_name": "test_model",
-            "user_id": "test_user"
-        }
-
-        result = upsert_knowledge_record(test_query)
-
-        assert result == expected_result
 
 
-def test_upsert_knowledge_record_update_existing(monkeypatch, mock_session):
-    """Test upsert_knowledge_record updates existing record"""
-    session, query = mock_session
-
-    # Create mock existing record
-    mock_existing_record = MockKnowledgeRecord()
-    mock_existing_record.knowledge_id = 123
-    mock_existing_record.index_name = "test_index"
-    mock_existing_record.knowledge_name = "old_name"
-    mock_existing_record.knowledge_describe = "old description"
-    mock_existing_record.knowledge_sources = "old_source"
-    mock_existing_record.embedding_model_name = "old_model"
-    mock_existing_record.updated_by = "old_user"
-
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = mock_existing_record
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    test_query = {
-        "index_name": "test_index",
-        "tenant_id": "test_tenant",
-        "knowledge_name": "updated_kb",
-        "knowledge_describe": "Updated description",
-        "knowledge_sources": "datamate",
-        "embedding_model_name": "updated_model",
-        "user_id": "updated_user"
-    }
-
-    result = upsert_knowledge_record(test_query)
-
-    assert result == {
-        "knowledge_id": 123,
-        "index_name": "test_index",
-        "knowledge_name": "updated_kb"
-    }
-    assert mock_existing_record.knowledge_name == "updated_kb"
-    assert mock_existing_record.knowledge_describe == "Updated description"
-    assert mock_existing_record.knowledge_sources == "datamate"
-    assert mock_existing_record.embedding_model_name == "updated_model"
-    assert mock_existing_record.updated_by == "updated_user"
-    session.flush.assert_called_once()
-    session.commit.assert_called_once()
 
 
-def test_upsert_knowledge_record_exception(monkeypatch, mock_session):
-    """Test exception during upsert_knowledge_record"""
-    session, query = mock_session
-    query.filter.side_effect = MockSQLAlchemyError("Database error")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    test_query = {
-        "index_name": "test_index",
-        "tenant_id": "test_tenant",
-        "knowledge_name": "test_kb",
-        "user_id": "test_user"
-    }
-
-    with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        upsert_knowledge_record(test_query)
-
-    session.rollback.assert_called_once()
 
 
-def test_get_knowledge_info_by_tenant_and_source_success(monkeypatch, mock_session):
-    """Test retrieving knowledge info by tenant and source"""
-    session, query = mock_session
-
-    mock_record1 = MockKnowledgeRecord()
-    mock_record1.knowledge_id = 1
-    mock_record1.tenant_id = "tenant1"
-    mock_record1.knowledge_sources = "datamate"
-
-    mock_record2 = MockKnowledgeRecord()
-    mock_record2.knowledge_id = 2
-    mock_record2.tenant_id = "tenant1"
-    mock_record2.knowledge_sources = "datamate"
-
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [mock_record1, mock_record2]
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    # Mock as_dict function
-    def mock_as_dict(record):
-        return {
-            "knowledge_id": record.knowledge_id,
-            "tenant_id": record.tenant_id,
-            "knowledge_sources": record.knowledge_sources
-        }
-
-    monkeypatch.setattr("management.db.knowledge_base.repository.as_dict", mock_as_dict)
-
-    result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
-
-    expected = [
-        {"knowledge_id": 1, "tenant_id": "tenant1",
-            "knowledge_sources": "datamate"},
-        {"knowledge_id": 2, "tenant_id": "tenant1", "knowledge_sources": "datamate"}
-    ]
-
-    assert result == expected
 
 
-def test_get_knowledge_info_by_tenant_and_source_empty_result(monkeypatch, mock_session):
-    """Test retrieving knowledge info by tenant and source returns empty list"""
-    session, query = mock_session
-
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = []
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
-
-    assert result == []
 
 
-def test_get_knowledge_info_by_tenant_and_source_exception(monkeypatch, mock_session):
-    """Test exception when retrieving knowledge info by tenant and source"""
-    session, query = mock_session
-    query.filter.side_effect = MockSQLAlchemyError("Database error")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
-
-    with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
 
 
 def test_get_knowledge_name_map_by_index_names_success(monkeypatch, mock_session):
@@ -2389,14 +2170,12 @@ def test_update_last_times(monkeypatch, mock_session):
     "func_name,args,kwargs",
     [
         ("create_knowledge_record", ({"index_name": "i1"},), {}),
-        ("upsert_knowledge_record", ({"index_name": "i1", "tenant_id": "t1"},), {}),
         ("update_knowledge_record", ({"index_name": "i1"},), {}),
         ("delete_knowledge_record", ({"index_name": "i1"},), {}),
         ("get_knowledge_record", ({"index_name": "i1"},), {}),
         ("get_knowledge_info_by_knowledge_ids", (["1"],), {}),
         ("get_knowledge_ids_by_index_names", (["i1"],), {}),
         ("get_knowledge_info_by_tenant_id", ("t1",), {}),
-        ("get_knowledge_info_by_tenant_and_source", ("t1", "datamate"), {}),
         ("update_model_name_by_index_name", ("i1", "m1", "t1", "u1"), {}),
         ("get_index_name_by_knowledge_name", ("kb1", "t1"), {}),
         ("get_knowledge_name_map_by_index_names", (["i1"], "t1"), {}),

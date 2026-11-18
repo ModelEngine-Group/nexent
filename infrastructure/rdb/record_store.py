@@ -90,8 +90,16 @@ class SQLRecordStore:
     )
 
     def __init__(
-        self, scope, catalog, tables, engine, *, revision_fields, audit_mappings=None, write_tables=None
+        self, scope, catalog, tables, engine, *, revision_fields, audit_mappings=None, write_tables=None,
+        transaction_locks=(),
     ):
+        if (not isinstance(transaction_locks, tuple) or len(transaction_locks) > 16
+            or any(not isinstance(key, str) or not key.strip() or len(key) > 512 for key in transaction_locks)
+            or len(set(transaction_locks)) != len(transaction_locks)):
+            raise InvalidInput()
+        if transaction_locks and engine.dialect.name != 'postgresql':
+            raise CapabilityUnsupported()
+        self._transaction_locks = transaction_locks
         self._audits = MappingProxyType(dict(audit_mappings or {}))
         self._scope = scope
         self._catalog = catalog
@@ -241,6 +249,7 @@ class SQLRecordStore:
             revision_fields=self._revisions,
             audit_mappings=self._audits,
             write_tables=self._write_tables,
+            transaction_locks=self._transaction_locks,
         )
         bound._connection = connection
         bound._thread = get_ident()
@@ -254,6 +263,10 @@ class SQLRecordStore:
                 transaction = connection.begin()
             except DBAPIError:
                 raise Unavailable(operation_id=context.operation_id) from None
+            for key in self._transaction_locks:
+                bound._execute(connection, sa.text(
+                    'SELECT pg_advisory_xact_lock(hashtext(:lock_key))'
+                ).bindparams(lock_key=key), context)
             yield bound
             context.remaining()
             try:
@@ -293,6 +306,8 @@ class SQLRecordStore:
             failure = Conflict if duplicate else InvalidInput
             raise failure(operation_id=context.operation_id) from None
         except DBAPIError as error:
+            if getattr(error.orig, "pgcode", None) == "57014":
+                raise DeadlineExceeded(operation_id=context.operation_id) from None
             if getattr(error.orig, "pgcode", None) in {"40001", "40P01"}:
                 raise Conflict(operation_id=context.operation_id) from None
             raise Unavailable(operation_id=context.operation_id) from None

@@ -12,14 +12,6 @@ import pytest
 
 @pytest.fixture
 def service(monkeypatch):
-    repository = SimpleNamespace(
-        upsert_knowledge_record=MagicMock(),
-        get_knowledge_info_by_tenant_and_source=MagicMock(),
-        delete_knowledge_record=MagicMock(),
-    )
-    monkeypatch.setitem(
-        sys.modules, "management.db.knowledge_base.repository", repository
-    )
     factory = MagicMock()
     monkeypatch.setitem(
         sys.modules,

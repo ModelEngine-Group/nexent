@@ -15,10 +15,10 @@ from test.common.test_mocks import setup_common_mocks, patch_minio_client_initia
 mocks = setup_common_mocks()
 
 # Mock the specific database modules that datamate_service imports
-knowledge_db_mock = MagicMock()
-knowledge_db_mock.upsert_knowledge_record = MagicMock()
-knowledge_db_mock.get_knowledge_info_by_tenant_and_source = MagicMock()
-knowledge_db_mock.delete_knowledge_record = MagicMock()
+catalog_mock = MagicMock()
+catalog_mock.upsert_datamate_record = MagicMock()
+catalog_mock.list_datamate_records = MagicMock()
+catalog_mock.delete_datamate_record = MagicMock()
 
 # Mock database client and models
 database_client_mock = MagicMock()
@@ -70,7 +70,7 @@ sqlalchemy_mock.exc = sqlalchemy_exc_mock
 sqlalchemy_mock.sql = sqlalchemy_sql_mock
 
 # Set up sys.modules mocks
-sys.modules['management.db.knowledge_base.repository'] = knowledge_db_mock
+
 sys.modules['infrastructure.rdb.client'] = database_client_mock
 sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
@@ -89,6 +89,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_exc_mock
 sys.modules['sqlalchemy.sql'] = sqlalchemy_sql_mock
 sys.modules['management.services.knowledge_base.providers.configuration'] = MagicMock()
+sys.modules['management.services.knowledge_base.providers.catalog'] = catalog_mock
 
 # Patch storage factory before importing the module under test
 with patch_minio_client_initialization():
@@ -292,12 +293,12 @@ async def test_fetch_datamate_knowledge_base_file_list_failure(monkeypatch):
 async def test_create_datamate_knowledge_records_success(monkeypatch):
     """Test _create_datamate_knowledge_records function with successful record creation."""
     # Reset mock state from previous tests
-    knowledge_db_mock.upsert_knowledge_record.side_effect = None
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    catalog_mock.upsert_datamate_record.side_effect = None
+    catalog_mock.upsert_datamate_record.reset_mock()
 
     # Mock upsert_knowledge_record
     mock_created_record = {"id": "record1", "index_name": "kb1"}
-    knowledge_db_mock.upsert_knowledge_record.return_value = mock_created_record
+    catalog_mock.upsert_datamate_record.return_value = mock_created_record
 
     result = await _create_datamate_knowledge_records(
         knowledge_base_ids=["kb1", "kb2"],
@@ -312,10 +313,10 @@ async def test_create_datamate_knowledge_records_success(monkeypatch):
     assert result[1] == mock_created_record
 
     # Verify upsert_knowledge_record was called twice
-    assert knowledge_db_mock.upsert_knowledge_record.call_count == 2
+    assert catalog_mock.upsert_datamate_record.call_count == 2
 
     # Check the call arguments for first record
-    first_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[0][0][0]
+    first_call_args = catalog_mock.upsert_datamate_record.call_args_list[0][0][0]
     assert first_call_args["index_name"] == "kb1"
     assert first_call_args["knowledge_name"] == "Knowledge Base 1"
     assert first_call_args["tenant_id"] == "tenant1"
@@ -327,10 +328,10 @@ async def test_create_datamate_knowledge_records_success(monkeypatch):
 async def test_create_datamate_knowledge_records_partial_failure(monkeypatch):
     """Test _create_datamate_knowledge_records function with partial failure."""
     # Reset mock state from previous tests
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    catalog_mock.upsert_datamate_record.reset_mock()
 
     # Mock upsert_knowledge_record to fail on second call
-    knowledge_db_mock.upsert_knowledge_record.side_effect = [
+    catalog_mock.upsert_datamate_record.side_effect = [
         {"id": "record1", "index_name": "kb1"},  # First call succeeds
         Exception("Database error")  # Second call fails
     ]
@@ -348,16 +349,16 @@ async def test_create_datamate_knowledge_records_partial_failure(monkeypatch):
     assert result[0]["id"] == "record1"
 
     # Verify upsert_knowledge_record was called twice (second failed but didn't crash)
-    assert knowledge_db_mock.upsert_knowledge_record.call_count == 2
+    assert catalog_mock.upsert_datamate_record.call_count == 2
 
 
 @pytest.mark.asyncio
 async def test_sync_datamate_knowledge_bases_success(monkeypatch, mock_datamate_sync_setup):
     """Test sync_datamate_knowledge_bases_and_create_records with successful sync."""
     # Reset mock state from previous tests
-    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
-    knowledge_db_mock.delete_knowledge_record.reset_mock()
+    catalog_mock.list_datamate_records.reset_mock()
+    catalog_mock.upsert_datamate_record.reset_mock()
+    catalog_mock.delete_datamate_record.reset_mock()
 
     # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
@@ -378,11 +379,11 @@ async def test_sync_datamate_knowledge_bases_success(monkeypatch, mock_datamate_
 
     # Mock database functions that are imported directly
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         MagicMock(return_value=[])
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         MagicMock(return_value=True)
     )
 
@@ -410,9 +411,9 @@ async def test_sync_datamate_knowledge_bases_success(monkeypatch, mock_datamate_
 async def test_sync_datamate_knowledge_bases_no_indices(monkeypatch, mock_datamate_sync_setup):
     """Test sync_datamate_knowledge_bases_and_create_records when no knowledge bases exist."""
     # Reset mock state from previous tests
-    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
-    knowledge_db_mock.delete_knowledge_record.reset_mock()
+    catalog_mock.list_datamate_records.reset_mock()
+    catalog_mock.upsert_datamate_record.reset_mock()
+    catalog_mock.delete_datamate_record.reset_mock()
 
     # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
@@ -437,9 +438,9 @@ async def test_sync_datamate_knowledge_bases_no_indices(monkeypatch, mock_datama
 async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_datamate_sync_setup):
     """Test sync_datamate_knowledge_bases_and_create_records with soft deletions."""
     # Reset mock state from previous tests
-    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
-    knowledge_db_mock.delete_knowledge_record.reset_mock()
+    catalog_mock.list_datamate_records.reset_mock()
+    catalog_mock.upsert_datamate_record.reset_mock()
+    catalog_mock.delete_datamate_record.reset_mock()
 
     # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
@@ -463,11 +464,11 @@ async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_da
     mock_delete_record = MagicMock(return_value=True)
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         mock_get_knowledge_info
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         mock_delete_record
     )
 
@@ -485,7 +486,8 @@ async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_da
     # kb2 should be deleted
     mock_delete_record.assert_called_once_with({
         "index_name": "kb2",
-        "user_id": "user1"
+        "user_id": "user1",
+        "tenant_id": "tenant1",
     })
 
 
@@ -589,9 +591,9 @@ async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
 async def test_sync_datamate_knowledge_bases_with_custom_datamate_url(monkeypatch, mock_datamate_sync_setup):
     """Test sync_datamate_knowledge_bases_and_create_records with custom datamate_url from request."""
     # Reset mock state from previous tests
-    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
-    knowledge_db_mock.delete_knowledge_record.reset_mock()
+    catalog_mock.list_datamate_records.reset_mock()
+    catalog_mock.upsert_datamate_record.reset_mock()
+    catalog_mock.delete_datamate_record.reset_mock()
 
     # Custom datamate URL provided in request - should be used directly
     custom_datamate_url = "http://custom-datamate.example.com:8080"
@@ -620,11 +622,11 @@ async def test_sync_datamate_knowledge_bases_with_custom_datamate_url(monkeypatc
 
     # Mock database functions that are imported directly
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         MagicMock(return_value=[])
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         MagicMock(return_value=True)
     )
 
@@ -689,11 +691,11 @@ async def test_sync_datamate_knowledge_bases_with_none_datamate_url(monkeypatch)
 
     # Mock database functions
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         MagicMock(return_value=[])
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         MagicMock(return_value=True)
     )
 
@@ -756,11 +758,11 @@ async def test_sync_datamate_knowledge_bases_with_empty_datamate_url(monkeypatch
 
     # Mock database functions
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         MagicMock(return_value=[])
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         MagicMock(return_value=True)
     )
 
@@ -819,11 +821,11 @@ async def test_sync_datamate_knowledge_bases_with_https_datamate_url(monkeypatch
 
     # Mock database functions
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.get_knowledge_info_by_tenant_and_source",
+        "management.services.knowledge_base.providers.datamate.list_datamate_records",
         MagicMock(return_value=[])
     )
     monkeypatch.setattr(
-        "management.services.knowledge_base.providers.datamate.delete_knowledge_record",
+        "management.services.knowledge_base.providers.datamate.delete_datamate_record",
         MagicMock(return_value=True)
     )
 

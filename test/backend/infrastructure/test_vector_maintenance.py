@@ -34,7 +34,9 @@ def test_dimensionless_binding_rejects_vector_operations_before_transport(mainte
     with pytest.raises(CapabilityUnsupported):
         operation(port)
     factory.assert_not_called()
-    assert port.capabilities.supported == {"vector.count", "vector.delete", "vector.collection.exists"}
+    assert port.capabilities.supported == {
+        "vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload",
+    }
 
 
 def test_dimensionless_binding_counts_and_deletes_with_the_same_scope(maintenance):
