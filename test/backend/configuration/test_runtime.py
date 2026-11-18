@@ -5,6 +5,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
@@ -23,6 +24,24 @@ async def test_refresh_rejects_invalid_snapshot_and_retains_last_valid_value():
     assert await runtime.refresh() is True
     assert await runtime.refresh() is False
     assert runtime.get_snapshot().to_dict() == EXPECTED_DEFAULTS
+
+
+async def test_refresh_database_timeout_retains_snapshot_and_retries():
+    loader = AsyncMock(
+        side_effect=[
+            dict(EXPECTED_DEFAULTS),
+            OperationalError("SELECT", {}, RuntimeError("statement timeout")),
+            {**EXPECTED_DEFAULTS, "MAX_TENANT_COUNT": 7},
+        ]
+    )
+    runtime = _runtime(loader=loader)
+
+    assert await runtime.refresh() is True
+    assert await runtime.refresh() is False
+    assert runtime.get_snapshot().to_dict() == EXPECTED_DEFAULTS
+    assert await runtime.refresh() is True
+    assert runtime.get_snapshot().get("MAX_TENANT_COUNT") == 7
+    assert loader.await_count == 3
 
 
 async def test_getter_is_local_and_does_not_call_loader_or_redis():

@@ -61,6 +61,7 @@ change:
     - Validate exactly nineteen typed positive integer, finite positive number and boolean settings without environment fallback.
     - Detect missing, duplicate and invalid stored rows; merge and persist changed keys in one locked transaction.
     - Keep getters network-free, coalesce notifications, serialize refresh, retain the last valid snapshot and close owned resources.
+    - Bound configuration driver connection, SQL statement and lock waits; timeout failures retain the last valid snapshot and permit subsequent retries.
     - Own an OPS ThreadManager in lifespan and route configuration database/Redis I/O through one bounded control-io entry.
     - Enforce explicit operations read/update authorization for OPS and SU plus safe 400/401/403/422/503 API responses, including unavailable recommendations.
     - Preserve drafts across filtering, background queries, notification-degraded saves and edits made during a save.

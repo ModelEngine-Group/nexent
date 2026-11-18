@@ -19,6 +19,7 @@ import redis
 from management.configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
 from management.configuration.repository import SystemConfigurationRepository
 from management.configuration.runtime import CONFIGURATION_CHANNEL
+from psycopg2.extensions import parse_dsn
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
@@ -491,3 +492,51 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
             "mcp_tool_timeout_seconds": 60,
             "parallel_timeout_seconds": 120,
         }
+
+
+@pytest.mark.case_id("SYS-CONFIG-HOT-REFRESH-D3-001")
+@pytest.mark.stage("D3")
+@pytest.mark.asyncio
+async def test_database_lock_timeout_preserves_snapshot_and_recovers(monkeypatch):
+    from management.configuration import database as database_module
+    from management.configuration.database import ConfigurationDatabase
+    from management.configuration.runtime import SystemConfigurationRuntime
+
+    parameters = parse_dsn(DATABASE_URL)
+    for name, value in {
+        "POSTGRES_HOST": parameters["host"],
+        "POSTGRES_PORT": parameters["port"],
+        "POSTGRES_USER": parameters["user"],
+        "POSTGRES_DB": parameters["dbname"],
+        "NEXENT_POSTGRES_PASSWORD": parameters.get("password"),
+    }.items():
+        monkeypatch.setattr(database_module, name, value)
+
+    database = ConfigurationDatabase()
+    repository = SystemConfigurationRepository()
+
+    async def loader():
+        with database.session() as session:
+            return repository.load_snapshot(session, read_only=True).values
+
+    runtime = SystemConfigurationRuntime(loader=loader)
+    lock_connection = psycopg2.connect(DATABASE_URL)
+    try:
+        assert await runtime.refresh() is True
+        with lock_connection.cursor() as cursor:
+            cursor.execute(
+                "LOCK TABLE nexent.sys_configuration_t IN ACCESS EXCLUSIVE MODE"
+            )
+
+        started = time.monotonic()
+        assert await runtime.refresh() is False
+        elapsed = time.monotonic() - started
+        assert 4 <= elapsed < 15
+        assert runtime.get_snapshot().to_dict() == DEFAULT_CATALOG.defaults
+
+        lock_connection.rollback()
+        assert await runtime.refresh() is True
+    finally:
+        lock_connection.rollback()
+        lock_connection.close()
+        database.dispose()

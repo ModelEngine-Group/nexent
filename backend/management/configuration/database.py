@@ -18,6 +18,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 logger = logging.getLogger(__name__)
 
+CONFIGURATION_CONNECT_TIMEOUT_SECONDS = 5
+CONFIGURATION_STATEMENT_TIMEOUT_MS = 15_000
+CONFIGURATION_LOCK_TIMEOUT_MS = 5_000
+
 
 class ConfigurationDatabase:
     """Create connections lazily and own their commit, rollback and disposal."""
@@ -40,6 +44,12 @@ class ConfigurationDatabase:
                             "database": POSTGRES_DB,
                             "port": POSTGRES_PORT,
                             "client_encoding": "utf8",
+                            "connect_timeout": CONFIGURATION_CONNECT_TIMEOUT_SECONDS,
+                            "options": (
+                                "-c "
+                                f"statement_timeout={CONFIGURATION_STATEMENT_TIMEOUT_MS} "
+                                f"-c lock_timeout={CONFIGURATION_LOCK_TIMEOUT_MS}"
+                            ),
                         },
                         hide_parameters=True,
                         pool_pre_ping=True,

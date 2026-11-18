@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_locked_batch_writes_and_read_only_consumer_role]
   AC-03: [test_independent_consumers_reconcile_duplicate_and_invalid_notifications]
   AC-04: [test_subsequent_business_checks_use_refreshed_snapshot]
+  AC-05: [test_database_lock_timeout_preserves_snapshot_and_recovers]
 preparation:
   families: []
   anchors: false

@@ -65,3 +65,26 @@ def test_lazy_engine_creation_and_dispose(mocker):
     engine.dispose.assert_called_once_with()
     assert database._engine is None
     assert database._session_factory is None
+
+
+def test_engine_bounds_connection_statement_and_lock_waits(mocker):
+    from management.configuration.database import ConfigurationDatabase
+
+    session = Mock()
+    create_engine = mocker.patch(
+        "management.configuration.database.create_engine",
+        return_value=Mock(),
+    )
+    mocker.patch(
+        "management.configuration.database.sessionmaker",
+        return_value=Mock(return_value=session),
+    )
+    database = ConfigurationDatabase()
+
+    with database.session():
+        pass
+
+    connect_args = create_engine.call_args.kwargs["connect_args"]
+    assert connect_args["connect_timeout"] == 5
+    assert "statement_timeout=15000" in connect_args["options"]
+    assert "lock_timeout=5000" in connect_args["options"]
