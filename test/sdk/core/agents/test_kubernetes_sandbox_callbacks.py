@@ -16,7 +16,7 @@ def registry():
 
 
 def test_fixed_bridge_never_starts_a_listener_and_restores_context(registry, mocker):
-    listener = mocker.patch('nexent.core.agents.sandbox.ThreadingHTTPServer')
+    listener = mocker.patch('nexent.core.agents.sandbox.execution.ThreadingHTTPServer')
     bridge = _ToolBridge(logging.getLogger(__name__), registry=registry,
                          endpoint='http://10.0.0.1:5014/internal/sandbox/tool-invoke')
     value = ContextVar('value', default='missing')

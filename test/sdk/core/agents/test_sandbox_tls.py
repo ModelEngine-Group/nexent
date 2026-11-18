@@ -14,9 +14,9 @@ from unittest.mock import Mock
 
 import pytest
 from cryptography import x509
-from nexent.core.agents.sandbox.execution import execution as sandbox
-from nexent.core.agents.sandbox.execution import tls as tls
-from nexent.core.agents.sandbox.execution import tls_bootstrap as bootstrap
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.sandbox import tls
+from nexent.core.agents.sandbox import tls_bootstrap as bootstrap
 from nexent.core.agents.sandbox.tls_bootstrap import generate_identity
 from requests.exceptions import SSLError
 

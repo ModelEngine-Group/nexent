@@ -136,3 +136,35 @@ def test_observed_exit_releases_even_if_final_generation_check_fails(process):
     lifetime.finish.assert_called_once_with(lifetime.begin.return_value)
     lifetime.unknown.assert_not_called()
     ws.close.assert_called_once()
+
+
+def test_streamed_channels_are_collected_before_definitive_exit(process):
+    adapter, _, ws, _ = process
+    ws.is_open.side_effect = [True, False]
+    ws.read_stdout.side_effect = [b'first', b'last']
+    ws.read_stderr.side_effect = [b'warning', b'']
+    result = adapter.run(['true'], cwd='/tmp', env={}, timeout_seconds=1)
+    assert result.stdout == b'firstlast' and result.stderr == b'warning'
+    ws.update.assert_called_once()
+    ws.close.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', ['deadline', 'output_limit'])
+def test_active_stream_bounds_leave_execution_unknown_without_replay(process, monkeypatch, failure):
+    import nexent.core.agents.sandbox_kubernetes_exec as module
+
+    adapter, _, ws, stream = process
+    lifetime = adapter.run_lifecycle = Mock()
+    ws.is_open.return_value = True
+    if failure == 'deadline':
+        monkeypatch.setattr(module.time, 'monotonic', Mock(side_effect=[0, 10]))
+        expected = TimeoutError
+    else:
+        ws.read_stdout.return_value = b'x' * (16 * 1024 * 1024 + 1)
+        expected = RuntimeError
+    with pytest.raises(expected):
+        adapter.run(['true'], cwd='/tmp', env={}, timeout_seconds=1)
+    lifetime.unknown.assert_called_once_with(lifetime.begin.return_value)
+    lifetime.finish.assert_not_called()
+    assert stream.call_count == 1
+    ws.close.assert_called_once()

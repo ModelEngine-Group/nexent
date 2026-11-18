@@ -987,6 +987,51 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
     assert result[0] == "hello world"
 
 
+@pytest.mark.parametrize('conversation_id', [None, -123])
+def test_distributed_evaluation_worker_retains_exact_admission_through_finalization(service_module, monkeypatch, conversation_id):
+    import asyncio
+    sandbox_runtime = types.SimpleNamespace(begin_owned_agent_admission=None, finish_automation_admission=None)
+    monkeypatch.setitem(sys.modules, 'runtime.sandbox_runtime', sandbox_runtime)
+
+    module = sys.modules[service_module._run_agent_to_final_answer.__module__]
+    request = types.SimpleNamespace(conversation_id=conversation_id or 0)
+    monkeypatch.setattr(module, 'AgentRequest', lambda **kwargs: request)
+    monkeypatch.setattr(module, 'distributed_run_options', lambda *args, **kwargs: {'tenant_id': 'tenant'})
+    info = MagicMock()
+    info.observer.get_cached_message.return_value = []
+    prepare = AsyncMock(return_value=(info, None))
+    monkeypatch.setattr(module, 'prepare_agent_run', prepare)
+    admission = types.SimpleNamespace(run_id='a' * 32, reservation_token='exact-token',
+        execution=types.SimpleNamespace(future=object()), deferred_run=object(), lease=object())
+    begin, finish = AsyncMock(return_value=admission), MagicMock()
+    monkeypatch.setattr(sandbox_runtime, 'begin_owned_agent_admission', begin)
+    monkeypatch.setattr(sandbox_runtime, 'finish_automation_admission', finish)
+    monkeypatch.setattr(module, 'bind_run_reservation', MagicMock())
+    associate = MagicMock()
+    monkeypatch.setattr(module, 'associate_run_request', associate)
+    state = types.SimpleNamespace(reset_stream_async=AsyncMock())
+    monkeypatch.setitem(sys.modules, 'management.services.agent.run_state', types.SimpleNamespace(runtime_state_service=state))
+    async def coordinated(_name, function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(module, 'runtime_coordination_call', coordinated)
+    async def stream(_info, **kwargs):
+        assert kwargs['execution'] is admission.execution
+        assert kwargs['deferred_run'] is admission.deferred_run
+        finish.assert_not_called()
+        yield json.dumps({'type': 'final_answer', 'content': 'answer'})
+    monkeypatch.setattr(module, 'agent_run', stream)
+    result = asyncio.run(module._run_agent_to_final_answer(1, 'tenant', 'user', 'query', 1,
+        conversation_id=conversation_id, evaluation_id=19, evaluation_case_id=23))
+    assert result[0] == 'answer'
+    assert request._runtime_execution_run_id == admission.run_id
+    assert prepare.await_args.kwargs['reservation_token'] == 'exact-token'
+    associate.assert_called_once_with(request, evaluation_id=19, evaluation_case_id=23)
+    finish.assert_called_once_with(admission)
+    if conversation_id is None:
+        assert request._debug_run_id.startswith('trial:')
+        assert begin.await_args.args[2] == request._debug_run_id
+
+
 def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
     first = service_module._evaluation_conversation_id(10, 20)
     second = service_module._evaluation_conversation_id(10, 21)

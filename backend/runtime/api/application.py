@@ -119,8 +119,6 @@ async def runtime_lifespan(_app):
                     )
                 else:
                     sandbox_pool.shutdown(logger)
-        except Exception:
-            logger.warning('Runtime resource cleanup was not fully confirmed', exc_info=True)
         finally:
             try:
                 if local_trajectory_processor is not None:

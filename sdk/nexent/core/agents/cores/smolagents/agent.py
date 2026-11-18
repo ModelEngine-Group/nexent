@@ -426,7 +426,7 @@ class NexentAgent(AgentResources):
                                 )
                                 runner_type = SandboxSkillScriptRunner
                                 runner_options = {}
-                                if self.sandbox_config.level == SandboxLevel.KUBERNETES:
+                                if getattr(python_executor, "_nexent_backend", None) == "kubernetes":
                                     from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
 
                                     runner_type = KubernetesSkillScriptRunner

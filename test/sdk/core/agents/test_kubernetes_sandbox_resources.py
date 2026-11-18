@@ -119,3 +119,105 @@ def test_shutdown_deletes_uid_matched_resources_and_not_claim(resources):
     assert api.delete_namespaced_pod.call_args.kwargs['body']['preconditions']['uid'] == 'pod-uid'
     assert api.delete_namespaced_service.call_args.kwargs['body']['preconditions']['uid'] == 'service-uid'
     api.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+
+@pytest.mark.parametrize('proved', [False, True])
+def test_shutdown_reports_retirement_only_after_execution_termination(resources, monkeypatch, proved):
+    import nexent.core.agents.sandbox_kubernetes as module
+
+    api, owner, profile, backend = resources
+    pod, service = backend.manifests(owner, profile)
+    pod, service = deepcopy(pod), deepcopy(service)
+    pod['metadata']['uid'], service['metadata']['uid'] = 'pod-uid', 'service-uid'
+    api.read_namespaced_pod.return_value, api.read_namespaced_service.return_value = pod, service
+    events, connection = Mock(), Mock(container_id='cid')
+    backend.resource_events = events
+    backend._connections[owner.key] = connection
+    monkeypatch.setattr(module, 'wait_for_sandbox_termination', Mock(return_value=proved))
+    if proved:
+        backend.close_owner(owner, profile)
+        events.terminated.assert_called_once_with(owner, 'pod-uid')
+    else:
+        with pytest.raises(RuntimeError, match='termination is unproved'):
+            backend.close_owner(owner, profile)
+        events.terminated.assert_not_called()
+    connection.close.assert_called_once()
+    api.delete_namespaced_service.assert_called_once()
+    api.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+
+@pytest.mark.parametrize('status,missing_fails', [(404, False), (404, True), (403, False)])
+def test_shutdown_preserves_ownership_failure_even_when_objects_are_missing(resources, status, missing_fails):
+    api, owner, profile, backend = resources
+    events = backend.resource_events = Mock()
+    api.read_namespaced_pod.side_effect = ApiException(status=status)
+    api.read_namespaced_service.side_effect = ApiException(status=status)
+    if missing_fails:
+        events.missing.side_effect = RuntimeError('unknown execution')
+    if status == 403 or missing_fails:
+        with pytest.raises((ApiException, RuntimeError)):
+            backend.close_owner(owner, profile)
+    else:
+        backend.close_owner(owner, profile)
+        assert [call.args[1] for call in events.missing.call_args_list] == ['pod', 'service']
+    api.delete_namespaced_pod.assert_not_called()
+    api.delete_namespaced_service.assert_not_called()
+
+
+def test_expired_shutdown_deadline_does_not_delete_resources(resources):
+    api, owner, profile, backend = resources
+    with pytest.raises(TimeoutError):
+        backend.close_owner(owner, profile, deadline=0)
+    api.delete_namespaced_pod.assert_not_called()
+    assert not backend._lock.locked()
+
+
+@pytest.mark.parametrize('failure', ['generation', 'profile', 'closing'])
+def test_cached_gateway_conflicts_are_not_adopted_or_recreated(resources, failure):
+    from concurrent.futures import CancelledError
+    from nexent.core.agents.sandbox_contracts import SandboxGenerationChangedError
+
+    api, owner, profile, backend = resources
+    existing = Mock(owner=owner, profile=profile, assert_generation=Mock())
+    backend._connections[owner.key] = existing
+    if failure == 'generation':
+        existing.assert_generation.side_effect = SandboxGenerationChangedError('changed')
+    elif failure == 'profile':
+        existing.profile = object()
+    else:
+        backend._closed = True
+    with pytest.raises((RuntimeError, CancelledError)):
+        backend.ensure_system(owner, profile)
+    if failure == 'generation':
+        existing.close.assert_called_once()
+        assert owner.key not in backend._connections
+    api.create_namespaced_pod.assert_not_called()
+
+
+@pytest.mark.parametrize('safe_to_fallback', [False, True])
+def test_workspace_preflight_fallback_requires_unused_protected_owner(resources, safe_to_fallback):
+    from nexent.core.agents.sandbox_contracts import SandboxPreExecutionError
+
+    api, owner, profile, backend = resources
+    backend.verify_workspace = Mock(side_effect=OSError('workspace unavailable'))
+    backend.resource_events = Mock()
+    backend.resource_events.permits_pre_execution_fallback.return_value = safe_to_fallback
+    with pytest.raises(SandboxPreExecutionError if safe_to_fallback else OSError):
+        backend.ensure_system(owner, profile)
+    backend.resource_events.creation_intent.assert_not_called()
+    api.create_namespaced_pod.assert_not_called()
+
+
+@pytest.mark.parametrize('status,kernels', [(401, []), (200, {}), (200, [{}])])
+def test_pinned_readiness_rejects_unexpected_service_response(resources, status, kernels):
+    import time
+
+    _, _, _, backend = resources
+    connection = Mock(assert_generation=Mock())
+    connection.base_url = 'https://owned'
+    response = connection.tls_client.http.get.return_value
+    response.status_code, response.json.return_value = status, kernels
+    with pytest.raises(RuntimeError):
+        backend._wait_pinned_jupyter(connection, time.monotonic() + 10, lambda: None)
+    response.close.assert_called_once()
+    connection.tls_client.http.get.assert_called_once()

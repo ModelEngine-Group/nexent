@@ -27,6 +27,7 @@ from smolagents.models import ChatMessage, Model
 from smolagents.tools import Tool
 
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.context.budget import extract_message_text
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope
@@ -173,7 +174,7 @@ def probe_w01(owned, promoted, *, security=False, files=False):
         def generate(self, messages, **kwargs):
             pod_counts.append(len(system_pods()))
             step = len(pod_counts)
-            history = html.unescape(str(messages))
+            history = html.unescape('\n'.join(extract_message_text(message) for message in messages))
             if step == 1:
                 response = '<code>skill_text = read_skill_md(skill_name="ksm-review")\nprint(skill_text)</code>'
             elif step == 2 and promoted:
@@ -228,7 +229,10 @@ def probe_w01(owned, promoted, *, security=False, files=False):
         model_name='controlled-w01', tools=[tool], max_steps=3))
     factory.set_agent(agent)
     try:
-        assert output in str(agent.run('W01 controlled invocation'))
+        answer = str(agent.run('W01 controlled invocation'))
+        assert output in answer, {'answer': answer, 'pod_counts': pod_counts,
+            'errors': [str(step.error)[:400] for step in agent.memory.steps if getattr(step, 'error', None)],
+            'observations': [str(step.observations)[:600] for step in agent.memory.steps if getattr(step, 'observations', None)]}
         assert pod_counts == ([0, 0, 1] if promoted else [0, 0])
         assert tool_calls == ['read_skill_md']
         pods = system_pods()

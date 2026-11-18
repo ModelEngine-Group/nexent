@@ -3,6 +3,7 @@ import asyncio
 import importlib
 import sys
 import types
+from unittest.mock import AsyncMock, Mock
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -79,6 +80,100 @@ def _base_task():
         "consecutive_failures": 0,
         "status": "ACTIVE",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['completed', 'failed', 'remote_cancel', 'busy'])
+async def test_distributed_automation_owns_admission_until_business_finalization(monkeypatch, outcome):
+    from management.services.agent.lifecycle import AgentRunAlreadyActiveError
+    from management.services.agent.run_state import runtime_state_service
+    from runtime import sandbox_runtime
+
+    module = _load_runner_with_stubs(monkeypatch)
+    monkeypatch.setattr(module, 'uses_distributed_runtime', lambda: True)
+    admission = types.SimpleNamespace(lease=object(), run_id='a' * 32)
+    begin, finish = AsyncMock(return_value=admission), Mock()
+    if outcome == 'busy':
+        begin.side_effect = AgentRunAlreadyActiveError('already owned')
+    coordinator = Mock()
+    monkeypatch.setattr(sandbox_runtime, 'begin_automation_admission', begin)
+    monkeypatch.setattr(sandbox_runtime, 'finish_automation_admission', finish)
+    monkeypatch.setattr(sandbox_runtime, 'get_coordinator', lambda: coordinator)
+    monkeypatch.setattr(runtime_state_service, 'is_cancelled_async', AsyncMock(return_value=outcome == 'remote_cancel'))
+    async def coordinated(name, function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(module, 'runtime_coordination_call', coordinated)
+    runner = module.AgentAutomationRunner()
+    async def business(*args, **kwargs):
+        if outcome == 'busy':
+            assert kwargs == {'force_busy': True}
+        else:
+            assert kwargs['runtime_admission'] is admission
+            finish.assert_not_called()
+            await asyncio.sleep(0.01)
+        if outcome == 'failed':
+            raise RuntimeError('business failed')
+        return {'status': 'COMPLETED'}
+    monkeypatch.setattr(runner, '_execute_task_impl', business)
+    task = asyncio.create_task(runner.execute_task(_base_task()))
+    if outcome == 'remote_cancel':
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    elif outcome == 'failed':
+        with pytest.raises(RuntimeError, match='business failed'):
+            await task
+    else:
+        assert await task == {'status': 'COMPLETED'}
+    assert finish.call_count == int(outcome != 'busy')
+    if outcome != 'busy':
+        finish.assert_called_once_with(admission)
+    assert not any(task.get_name().startswith('automation-runtime-cancel-') for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('activation_fails', [False, True])
+async def test_automation_association_and_activation_precede_agent_execution(monkeypatch, activation_fails):
+    from runtime import sandbox_runtime
+
+    module = _load_runner_with_stubs(monkeypatch)
+    task = _base_task()
+    run = {'run_id': 42}
+    monkeypatch.setattr(module.agent_automation_db, 'has_active_run_for_conversation', lambda *_: False)
+    monkeypatch.setattr(module.agent_automation_db, 'create_run', lambda *args, **kwargs: run)
+    coordinator = Mock()
+    if activation_fails:
+        coordinator.activate.side_effect = RuntimeError('lease lost')
+    monkeypatch.setattr(sandbox_runtime, 'get_coordinator', lambda: coordinator)
+    async def coordinated(name, function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(module, 'runtime_coordination_call', coordinated)
+    runner = module.AgentAutomationRunner()
+    active = AsyncMock(return_value={'status': 'COMPLETED'})
+    monkeypatch.setattr(runner, '_execute_active_run', active)
+    failed = Mock(return_value={'status': 'FAILED'})
+    monkeypatch.setattr(runner, '_fail_run', failed)
+    admission = types.SimpleNamespace(lease=object())
+    result = await runner._execute_task_impl(task, 'MANUAL', lease_owner='lock-a', runtime_admission=admission)
+    coordinator.associate.assert_called_once_with(admission.lease, automation_run_id=42,
+        automation_task_id=task['task_id'], automation_lock_owner='lock-a')
+    coordinator.activate.assert_called_once_with(admission.lease)
+    assert active.await_count == int(not activation_fails)
+    assert result['status'] == ('FAILED' if activation_fails else 'COMPLETED')
+    if activation_fails:
+        assert failed.call_args.args[2] == 'AUTOMATION_COORDINATION_LOST'
+
+
+def test_distributed_automation_cancel_recovers_trusted_tenant(monkeypatch):
+    module = _load_runner_with_stubs(monkeypatch)
+    monkeypatch.setattr(module, 'uses_distributed_runtime', lambda: True)
+    monkeypatch.setattr(module.agent_automation_db, 'get_task_by_conversation', Mock(return_value={'tenant_id': 'tenant'}))
+    stop = Mock()
+    monkeypatch.setattr(module, 'stop_agent_tasks', stop)
+    runner = module.AgentAutomationRunner()
+    runner.cancel_for_conversation(7, 'user')
+    runner.cancel_for_conversation(7, 'user', 42, tenant_id='tenant')
+    assert stop.call_args_list[0].kwargs == {'tenant_id': 'tenant'}
+    assert stop.call_args_list[1].kwargs == {'tenant_id': 'tenant', 'expected_generation': '42'}
 
 
 def test_scheduled_task_state_update_is_fenced_by_lease_owner(monkeypatch):

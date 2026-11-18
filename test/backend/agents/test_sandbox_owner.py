@@ -106,3 +106,79 @@ def test_only_exact_terminated_container_facts_prove_remote_owner_death(facts, c
             }]
         api.read_namespaced_pod.return_value = pod
     assert observer.process_stopped(store.read(owner.epoch)) is stopped
+
+
+@pytest.mark.parametrize('mutation', [
+    {'version': 2}, {'process_stopped_at': -1}, {'process': {}},
+    {'resource_state': 'OTHER'}, {'profile': ''},
+    {'resource_state': 'CREATING'},
+    {'resource_state': 'BOUND', 'pod_name': 'sandbox', 'profile': 'digest'},
+    {'resource_state': 'READY', 'pod_name': 'sandbox', 'profile': 'digest', 'pod_uid': 'uid'},
+])
+def test_invalid_owner_evidence_cannot_enable_execution(facts, mutation):
+    store, owner, _ = facts
+    fact = store.read(owner.epoch)
+    fact.update(mutation)
+    with pytest.raises(SandboxCoordinationUnknown):
+        SandboxOwnerFacts.validate(fact)
+
+
+def test_owner_and_resource_events_require_the_exact_epoch(facts):
+    store, owner, process = facts
+    assert store.permits_pre_execution_fallback(owner)
+    with pytest.raises(SandboxCoordinationUnknown, match='another Runtime'):
+        store.permits_pre_execution_fallback(replace(owner, epoch='foreign'))
+    store.missing(owner, 'service')
+    store.missing(owner, 'pod')
+    store.creation_intent(owner, SystemSandboxProfile('image:tag', 'claim'), 'sandbox')
+    assert not store.permits_pre_execution_fallback(owner)
+    with pytest.raises(SandboxCoordinationUnknown, match='immutable'):
+        store.creation_intent(owner, SystemSandboxProfile('image:other', 'claim'), 'sandbox')
+    with pytest.raises(ValueError, match='concrete container'):
+        store.observe_pod(owner, 'pod', ready=True)
+    with pytest.raises(SandboxCoordinationUnknown, match='does not prove'):
+        store.missing(owner, 'pod')
+    store.record_process_stopped()
+    store.record_process_stopped()
+    with pytest.raises(SandboxCoordinationUnknown, match='cannot restart'):
+        store.initialize(process)
+
+
+def test_missing_owner_fact_cannot_authorize_mutation_and_mismatch_cannot_be_read(facts):
+    store, owner, _ = facts
+    path = store.path(owner.epoch)
+    fact = store.read(owner.epoch)
+    fact['owner'] = {**fact['owner'], 'epoch': 'foreign'}
+    store.journal._write(path, fact)
+    with pytest.raises(SandboxCoordinationUnknown, match='identity mismatch'):
+        store.read(owner.epoch)
+    path.unlink()
+    with pytest.raises(SandboxCoordinationUnknown, match='must exist'):
+        store.permits_pre_execution_fallback(owner)
+
+
+@pytest.mark.parametrize('condition', ['recorded_stopped', 'boot_changed', 'unreadable_proc'])
+def test_process_observation_requires_direct_evidence_or_retains_unknown(facts, monkeypatch, condition):
+    import runtime.sandbox_owner as module
+    store, owner, process = facts
+    current = dict(process)
+    if condition == 'recorded_stopped':
+        store.record_process_stopped()
+    elif condition == 'boot_changed':
+        current['boot_id'] = 'new-boot'
+    else:
+        monkeypatch.setattr(module, 'process_start_ticks', Mock(side_effect=PermissionError('denied')))
+    observer = SandboxOwnerObserver(Mock(), replace(owner, epoch='new'), current)
+    assert observer.process_stopped(store.read(owner.epoch)) is (condition != 'unreadable_proc')
+
+
+def test_proc_identity_handles_parentheses_and_rejects_invalid_pid(monkeypatch):
+    import runtime.sandbox_owner as module
+    path = Mock()
+    path.read_text.side_effect = ['123 (runtime (worker)) ' + ' '.join(['S'] + ['0'] * 18 + ['42']), 'boot\n']
+    monkeypatch.setattr(module, 'Path', Mock(return_value=path))
+    with pytest.raises(ValueError):
+        module.process_start_ticks(0)
+    identity = module.process_identity('container', 'runtime')
+    assert identity['start_ticks'] == '42' and identity['boot_id'] == 'boot'
+    assert identity['container_id'] == 'container' and identity['container_name'] == 'runtime'

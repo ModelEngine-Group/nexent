@@ -44,6 +44,11 @@
         "test/backend/agents/test_owned_evaluation_admission.py",
         "test/backend/agents/test_runtime_distributed_admission.py",
         "test/backend/agents/test_sandbox_coordination.py",
+        "test/backend/agents/test_sandbox_coordination_boundaries.py",
+        "test/backend/agents/test_sandbox_journal_integrity.py",
+        "test/backend/agents/test_sandbox_runtime_wiring.py",
+        "test/backend/agents/test_runtime_state_protocol.py",
+        "test/backend/agents/test_runtime_execution_identity.py",
         "test/backend/agents/test_sandbox_deployment_config.py",
         "test/backend/agents/test_sandbox_owner.py",
         "test/backend/agents/test_sandbox_recovery.py",
@@ -51,6 +56,10 @@
         "test/backend/agents/test_sandbox_stream_state.py",
         "test/backend/app/test_agent_evaluation_runtime_app.py",
         "test/backend/services/test_agent_automation_scheduler.py",
+        "test/backend/services/test_agent_automation_runner.py",
+        "test/backend/services/test_agent_evaluation_service.py",
+        "test/backend/services/test_agent_run_identity.py",
+        "test/backend/utils/test_trajectory_lifespan.py",
         "test/backend/services/test_agent_subscription_lifecycle.py",
         "test/backend/app/test_health_app.py",
         "test/backend/apps/test_sandbox_callbacks.py",
@@ -63,6 +72,9 @@
         "test/sdk/core/agents/test_kubernetes_sandbox_resources.py",
         "test/sdk/core/agents/test_kubernetes_sandbox_runner.py",
         "test/sdk/core/agents/test_kubernetes_sandbox_startup.py",
+        "test/sdk/core/agents/test_kubernetes_termination_proof.py",
+        "test/sdk/core/agents/test_jiuwen_runtime_lifecycle.py",
+        "test/sdk/core/agents/test_nexent_agent_sandbox_construction.py",
         "test/sdk/core/agents/test_sandbox_channel_readiness.py",
         "test/sdk/core/agents/test_subagent_resource_ownership.py",
         "test/sdk/scheduler/test_core.py",
@@ -76,10 +88,11 @@
         "Owner/run workspace permissions, protected exact associations and scoped cleanup.",
         "Kernel/script compatibility, callback authentication/context lifetime and no replay.",
         "Redis compare-token admission/renewal/generation, both recovery paths and existing shutdown compatibility; graceful drain removed by user.",
-        "Keep reservation while real native children, callbacks, kernels or uncertain script exec can still act; definitive exit releases only its own holder."
+        "Keep reservation while real native children, callbacks, kernels or uncertain script exec can still act; definitive exit releases only its own holder.",
+        "Preserve develop's Jiuwen tool cancellation lifetime, returned awaitables and explicit local fallback mapping; choose script runner from the actual executor backend."
       ],
       "reason": "Existing Docker SAI/TFP tests do not exercise Kubernetes, distributed reservation or coordination failure. Keep isolated tests in UT; no duplicate new D1."
     },
-    "notes": "Primary responsibility sandbox. User confirmed single-node Docker Desktop validation on 2026-11-12; multi-node/CSI is outside this delivery scope. Same-node two-Runtime lifecycle proof remains required. The real NetworkPolicy negative probe FAILED: denied Pod HTTP still returned 200. No CNI change is authorized. The remaining D3-D5 still require owned preparation, fixed scripts, bindings and full acceptance evidence. Full-tree validator also has three pre-existing unrelated AIDP errors. No passing formal acceptance is claimed. On 2026-11-13 the user removed graceful scale-in/restart completion: restore uvicorn.run, remove dedicated drain/preStop/credential and scheduler pause/deadline, retire KSM-DRAIN-D2-001. Preserve live-run ownership and coordination failure protection. Historical drain passes are not current acceptance."
+    "notes": "Primary responsibility sandbox. Integrated a2f137126 then be2e2caa8 onto develop 3bcd558ac on 2026-11-18, adapting to the split SDK, Jiuwen and trajectory lifecycle. SYSTEM is the supported Kubernetes scope; SESSION and actual Runtime autoscaling joint acceptance remain future work. Single-node Docker Desktop verification does not establish multi-node/CSI behavior. The earlier real NetworkPolicy negative probe failed because denied Pod HTTP still returned 200; no CNI change is authorized and network enforcement is not accepted. Owned D3-D5 implementations and preparation/cleanup bindings now exist. Five corresponding assets are registered in the external V5 suite, including PW-KSM-DOWNLOAD-001; structural registration is separate from business execution. Full-tree strict validation has the same four unrelated NB issues as the complete develop baseline. Current integration execution evidence and remaining acceptance gaps are recorded in the external PR report. The user removed graceful scale-in/restart completion on 2026-11-13; keep KSM-DRAIN-D2-001 retired and preserve live-run ownership and coordination failure protection. Historical drain passes are not current acceptance."
   }
 }

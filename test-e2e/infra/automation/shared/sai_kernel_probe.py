@@ -16,12 +16,12 @@ from pathlib import Path
 import nexent.core.agents.sandbox as sandbox_package
 from nexent.core.agents.contracts import config as agent_configuration, run as agent_running
 from nexent.core.agents.cores.smolagents import agent as nexent_agent
-from nexent.core.agents.sandbox.execution import execution as sandbox
+from nexent.core.agents.sandbox import execution as sandbox
 from nexent.core.agents.resources import subagents as subagent_wrapper
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
-from nexent.core.agents.sandbox.execution import execution, config, compatibility, tls
+from nexent.core.agents.sandbox import execution, config, compatibility, tls
 from nexent.core.concurrency import LanePolicy, ThreadManager, cancellation
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.concurrency.context import (

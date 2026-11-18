@@ -144,3 +144,146 @@ def test_retired_resource_still_retries_exact_service_cleanup(recovery):
     assert engine.recover()['recovered_runs'] == 1
     api.read_namespaced_pod.assert_not_called()
     assert api.delete_namespaced_service.call_args.kwargs['body'] == {'preconditions': {'uid': 'service-uid'}}
+
+
+def declared_resource(facts, *, observed=True):
+    from nexent.core.agents.sandbox_contracts import SystemSandboxProfile
+
+    profile = SystemSandboxProfile('image:tag', 'claim')
+    facts.creation_intent(facts.owner, profile, 'sandbox-name')
+    if observed:
+        facts.observe_pod(facts.owner, 'sandbox-uid', 'sandbox-cid', ready=True)
+    return {'metadata': {'name': 'sandbox-name', 'uid': 'sandbox-uid',
+        'annotations': {'nexent.ai/epoch': facts.owner.epoch, 'nexent.ai/profile': profile.fingerprint},
+        'ownerReferences': [{'kind': 'Pod', 'name': facts.owner.pod_name, 'uid': facts.owner.pod_uid}]}}
+
+
+@pytest.mark.parametrize('observed', [False, True])
+@pytest.mark.parametrize('terminated', [False, True])
+def test_resource_retirement_waits_for_exact_termination_before_service_delete(recovery, monkeypatch, observed, terminated):
+    import time
+    from kubernetes.client.exceptions import ApiException
+    import runtime.sandbox_recovery as module
+
+    engine, record, facts, observer, api, fail = recovery
+    api.read_namespaced_pod.return_value = declared_resource(facts, observed=observed)
+    api.read_namespaced_service.side_effect = ApiException(status=404)
+    wait = Mock(return_value=terminated)
+    monkeypatch.setattr(module, 'wait_for_sandbox_termination', wait)
+    assert engine._retire_resource(facts, facts.read(facts.owner.epoch), time.monotonic() + 10) is terminated
+    assert api.delete_namespaced_pod.call_args.kwargs['body']['preconditions'] == {'uid': 'sandbox-uid'}
+    assert facts.read(facts.owner.epoch)['resource_state'] == ('TERMINATED' if terminated else 'READY' if observed else 'BOUND')
+    assert api.read_namespaced_service.call_count == int(terminated)
+
+
+@pytest.mark.parametrize('conflict', ['uid', 'name', 'epoch', 'profile', 'owner'])
+def test_resource_conflict_never_deletes_or_fails_business(recovery, conflict):
+    import time
+    engine, record, facts, observer, api, fail = recovery
+    pod = declared_resource(facts)
+    if conflict in {'uid', 'name'}:
+        pod['metadata'][conflict] = 'foreign'
+    elif conflict == 'owner':
+        pod['metadata']['ownerReferences'][0]['uid'] = 'foreign'
+    else:
+        pod['metadata']['annotations']['nexent.ai/' + conflict] = 'foreign'
+    api.read_namespaced_pod.return_value = pod
+    with pytest.raises(SandboxCoordinationUnknown):
+        engine._retire_resource(facts, facts.read(facts.owner.epoch), time.monotonic() + 10)
+    api.delete_namespaced_pod.assert_not_called()
+    fail.assert_not_called()
+
+
+def test_expired_retirement_deadline_preserves_resource(recovery):
+    engine, record, facts, observer, api, fail = recovery
+    api.read_namespaced_pod.return_value = declared_resource(facts)
+    assert not engine._retire_resource(facts, facts.read(facts.owner.epoch), 0)
+    api.delete_namespaced_pod.assert_not_called()
+
+
+def test_recovery_cleanup_is_exact_and_preserves_peer_workspace(recovery):
+    from runtime.sandbox_workspace import KubernetesWorkspace
+
+    engine, record, facts, observer, api, fail = recovery
+    assert not engine._cleanup_workspace(record)
+    actual = KubernetesWorkspace(engine.workspace_root, facts.owner, execution_gid=1000).run_path(
+        record.tenant_id, record.user_id, record.run_id)
+    record.workspace_path = str(actual.parent / 'wrong')
+    with pytest.raises(SandboxCoordinationUnknown, match='protected business identity'):
+        engine._cleanup_workspace(record)
+    record.workspace_path = str(actual)
+    assert not engine._cleanup_workspace(record)
+    actual.parent.mkdir(parents=True)
+    actual.write_text('not a directory')
+    with pytest.raises(SandboxCoordinationUnknown, match='not a directory'):
+        engine._cleanup_workspace(record)
+    actual.unlink()
+    actual.mkdir()
+    (actual / 'output').write_text('owned')
+    peer = actual.with_name('peer')
+    peer.mkdir()
+    (peer / 'keep').write_text('PEER_KEEP')
+    assert engine._cleanup_workspace(record)
+    assert not actual.exists() and (peer / 'keep').read_text() == 'PEER_KEEP'
+
+
+def test_terminal_collection_keeps_newer_current_pointer_and_owner_evidence(recovery):
+    import time
+    engine, record, facts, observer, api, fail = recovery
+    record.phase, record.updated_at = 'TERMINAL', 0
+    engine.journal.write_run(record)
+    newer = replace(record, run_id='c' * 32, phase='ACTIVE')
+    engine.journal.publish(newer)
+    engine.retention_seconds = 0
+    engine._collect_terminal(record)
+    assert engine.journal.read_run(record.run_id) is None
+    assert engine.journal.read_current(record.business_key).run_id == newer.run_id
+    facts.record_process_stopped()
+    engine._collect_owner_facts([facts], time.monotonic() + 10)
+    assert facts.read(facts.owner.epoch) is not None
+    (engine.journal.root / 'runs' / (newer.run_id + '.json')).unlink()
+    engine._collect_owner_facts([facts], time.monotonic() + 10)
+    assert facts.read(facts.owner.epoch) is None
+
+
+def test_recent_terminal_run_is_retained_and_active_run_cannot_be_collected(recovery):
+    engine, record, facts, observer, api, fail = recovery
+    engine._collect_terminal(record)
+    assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+    record.phase = 'TERMINAL'
+    engine.journal.write_run(record)
+    engine._collect_terminal(record)
+    assert engine.journal.read_run(record.run_id) is not None
+
+
+def test_corrupt_association_keeps_owner_fact_for_manual_reconciliation(recovery):
+    import time
+    engine, record, facts, observer, api, fail = recovery
+    path = engine.journal.root / 'runs' / (record.run_id + '.json')
+    path.write_text('{broken')
+    facts.record_process_stopped()
+    engine.retention_seconds = 0
+    engine._collect_owner_facts([facts], time.monotonic() + 10)
+    assert facts.read(facts.owner.epoch) is not None
+    assert engine.recover()['recovered_runs'] == 0
+    fail.assert_not_called()
+
+
+def test_startup_does_not_probe_another_replica_or_accept_unbounded_deadline(recovery):
+    engine, record, facts, observer, api, fail = recovery
+    assert engine.recover(startup=True)['recovered_runs'] == 0
+    observer.process_stopped.assert_not_called()
+    engine.coordinator.owner = replace(facts.owner, epoch='new')
+    with pytest.raises(SandboxCoordinationUnknown, match='deadline exceeded'):
+        engine.recover(startup=True, deadline=0)
+    assert engine.recover(deadline=0)['recovered_runs'] == 0
+
+
+def test_recovery_loop_survives_transient_failure_and_stops_on_event(recovery, monkeypatch):
+    engine, *_ = recovery
+    event = Mock()
+    event.wait.side_effect = [False, False, True]
+    recover = Mock(side_effect=[OSError('API unavailable'), {}])
+    monkeypatch.setattr(engine, 'recover', recover)
+    engine.recovery_loop(event)
+    assert recover.call_count == 2

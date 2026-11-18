@@ -8,7 +8,7 @@ from concurrent.futures import CancelledError
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents.sandbox.execution import execution as sb
+from nexent.core.agents.sandbox import execution as sb
 from websocket import (
     ABNF,
     WebSocketBadStatusException,

@@ -119,7 +119,7 @@ def run_owned_runtime_probe(repo, evidence, *, scenario='core', runtime_overlay=
             api.create_namespaced_service(namespace, {'metadata': {'name': 'redis'}, 'spec': {
                 'selector': {'app': 'redis'}, 'ports': [{'port': 6379, 'targetPort': 6379}]}})
             api.create_namespaced_pod(namespace, {'metadata': {'name': 'redis', 'labels': {'app': 'redis'}},
-                'spec': {'restartPolicy': 'Never', 'automountServiceAccountToken': False,
+                'spec': {'restartPolicy': 'Never', 'serviceAccountName': 'runtime', 'automountServiceAccountToken': False,
                     'containers': [{'name': 'redis', 'image': 'redis:alpine', 'imagePullPolicy': 'IfNotPresent',
                         'args': ['redis-server', '--save', '', '--appendonly', 'no'],
                         'resources': {'limits': {'memory': '128Mi', 'cpu': '0.5'}}}]}})
@@ -128,7 +128,7 @@ def run_owned_runtime_probe(repo, evidence, *, scenario='core', runtime_overlay=
                 api.create_namespaced_service(namespace, {'metadata': {'name': 'minio'}, 'spec': {
                     'selector': {'app': 'minio'}, 'ports': [{'port': 9000, 'targetPort': 9000}]}})
                 api.create_namespaced_pod(namespace, {'metadata': {'name': 'minio', 'labels': {'app': 'minio'}},
-                    'spec': {'restartPolicy': 'Never', 'automountServiceAccountToken': False,
+                    'spec': {'restartPolicy': 'Never', 'serviceAccountName': 'runtime', 'automountServiceAccountToken': False,
                         'containers': [{'name': 'minio',
                             'image': 'quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z',
                             'imagePullPolicy': 'IfNotPresent', 'args': ['server', '/data'],

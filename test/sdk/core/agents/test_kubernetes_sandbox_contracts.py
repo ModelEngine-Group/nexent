@@ -38,7 +38,7 @@ def test_incomplete_owner_is_rejected(field, value):
 
 @pytest.mark.parametrize('failure_policy', ['error', 'local'])
 def test_unimplemented_backend_never_constructs_pool_or_local_executor(monkeypatch, failure_policy):
-    from nexent.core.agents import sandbox
+    from nexent.core.agents.sandbox import execution as sandbox
     pool = Mock(side_effect=AssertionError('Pool must not start'))
     local = Mock(side_effect=AssertionError('Local fallback must not start'))
     monkeypatch.setattr(sandbox.SandboxPoolManager, 'get_instance', pool)

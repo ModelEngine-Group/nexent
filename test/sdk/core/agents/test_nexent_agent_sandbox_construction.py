@@ -12,7 +12,7 @@ from nexent.core.agents.resources import workspace as workspace_resources
 import pytest
 
 from nexent.core.agents.cores.smolagents import agent as agent_module
-from nexent.core.agents.sandbox.execution import execution as sandbox
+from nexent.core.agents.sandbox import execution as sandbox
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.utils.observer import MessageObserver
@@ -118,8 +118,10 @@ def test_cleanup_failure_does_not_hide_construction_failure(construction, caplog
     assert 'Failed to release sandbox resources' in caplog.text
 
 
-def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
+@pytest.mark.parametrize("level", [sandbox.SandboxLevel.DOCKER, sandbox.SandboxLevel.KUBERNETES])
+def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker, level):
     c = construction
+    c.factory.sandbox_config.level = level
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool')

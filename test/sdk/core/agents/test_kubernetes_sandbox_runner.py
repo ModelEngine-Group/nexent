@@ -85,3 +85,34 @@ def test_cleanup_is_limited_to_this_invocation(runner):
     instance, _, _, access, run = runner
     instance.cleanup()
     access.cleanup_skills.assert_called_once_with(str(run), instance._invocation)
+
+
+def test_runner_rejects_unscoped_staging_and_nonwritable_outputs(runner):
+    instance, _, process, _, _ = runner
+    with pytest.raises(ValueError, match='staging root'):
+        instance._stage_skill_directory('/source', 'skill', '/foreign')
+    with pytest.raises(ValueError, match='output directory'):
+        instance._ensure_output_directory('/foreign')
+    process.run.return_value = ScriptProcessResult(b'', b'denied', 1)
+    with pytest.raises(PermissionError, match='not writable'):
+        instance._ensure_output_directory(instance._workspace_path + '/outputs')
+
+
+def test_online_store_is_seeded_once_per_invocation_and_removed_at_cleanup(runner):
+    instance, _, process, access, run = runner
+    instance._ensure_network_pnpm_store(instance._workspace_path)
+    store = instance._pnpm_store_path
+    instance._ensure_network_pnpm_store(instance._workspace_path)
+    assert process.run.call_count == 1
+    assert store.startswith('/tmp/nexent-pnpm-stores/') and len(store.rsplit('/', 1)[1]) == 24
+    instance.cleanup()
+    assert process.run.call_args.args[0] == ['rm', '-rf', '--', store]
+    access.cleanup_skills.assert_called_once_with(str(run), instance._invocation)
+
+
+def test_failed_store_seed_is_not_marked_ready(runner):
+    instance, _, process, _, _ = runner
+    process.run.return_value = ScriptProcessResult(b'', b'seed failed', 1)
+    with pytest.raises(RuntimeError, match='prepare nonroot'):
+        instance._ensure_network_pnpm_store(instance._workspace_path)
+    assert not instance._pnpm_store_seeded

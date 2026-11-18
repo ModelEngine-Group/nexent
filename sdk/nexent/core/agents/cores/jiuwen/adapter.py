@@ -364,18 +364,37 @@ class JiuwenAdapter(AgentCoreAdapter):
         }
         card.properties = properties
 
+    @contextmanager
+    def _runtime_tool_lifetime(self):
+        lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+        holder = lifecycle.begin("callback") if lifecycle is not None else None
+        try:
+            yield
+        finally:
+            if holder is not None:
+                lifecycle.finish(holder)
+
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
-            with self._observe_tool(name, arguments):
+            with self._observe_tool(name, arguments), self._runtime_tool_lifetime():
                 if inspect.iscoroutinefunction(forward):
                     result = await forward(**arguments)
                 else:
-                    execution = self.manager.submit(
-                        lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
-                        forward, **arguments,
-                    )
+                    lifecycle = self.run_info.__dict__.get("_runtime_run_lifecycle")
+                    worker_holder = lifecycle.begin("callback") if lifecycle is not None else None
+                    try:
+                        execution = self.manager.submit(
+                            lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
+                            forward, **arguments,
+                        )
+                    except BaseException:
+                        if worker_holder is not None:
+                            lifecycle.finish(worker_holder)
+                        raise
+                    if worker_holder is not None:
+                        execution.future.add_done_callback(lambda _: lifecycle.finish(worker_holder))
                     self._tool_executions.append(execution)
                     try:
                         if lane == "control-io":
@@ -571,9 +590,15 @@ class JiuwenAdapter(AgentCoreAdapter):
         executor = build_python_executor(config, logger, host_tools_exist=True, cancellation_scope=self.scope)
         self.resources._sandbox_executors.append(executor)
         self.resources.agent.python_executor = executor
+        if getattr(executor, "_nexent_backend", None) == "local":
+            self.resources.workspace_mapping = None
+            for tool in self.business_tools.values():
+                if getattr(tool, "workspace_mapping", None) is not None:
+                    tool.workspace_mapping = None
+            return
         runner_type = SandboxSkillScriptRunner
         runner_options = {}
-        if config.level == SandboxLevel.KUBERNETES:
+        if getattr(executor, "_nexent_backend", None) == "kubernetes":
             from nexent.core.agents.sandbox_kubernetes_runner import KubernetesSkillScriptRunner
 
             runner_type = KubernetesSkillScriptRunner
