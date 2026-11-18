@@ -49,7 +49,7 @@ from management.services.memory.records import (
     get_tenant_embedding_status,
 )
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import get_current_user_id
+from gateway.authentication.auth import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
 logger.setLevel(logging.INFO)
@@ -85,8 +85,8 @@ def update_tenant_memory_switch(
     request: TenantMemorySettingsRequest,
     authorization: Optional[str] = Header(None),
 ):
-    user_id, tenant_id = get_current_user_id(authorization)
-    if not _can_edit_tenant_memory(user_id):
+    user_id, tenant_id, roles = get_current_user_context(authorization)
+    if not has_any_role(roles, {"ADMIN"}):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Tenant memory settings require the ADMIN role")
     upsert_single_tenant_setting(
         tenant_id, TENANT_MEMORY_SWITCH_KEY, "Y" if request.enabled else "N", user_id,
