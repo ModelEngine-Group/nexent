@@ -126,6 +126,7 @@ export async function prepareControls(page: Page, histories: Array<Record<string
         message: [], workbench_config: resources.get(id), workbench_config_version: 1 }] });
     }
     if (path === "/api/conversation/generate_title") return json({ code: 0, data: "Fixture conversation" });
+    if (path === "/api/conversation/creator_histories") return json({ code: 0, data: { items: [], total: 0 } });
     if (path === "/api/agent/search_info") return json(state.draft);
     if (path === "/api/agent/update") return json({ status: "success", agent_id: 42 });
     if (path === "/api/agent/published_list") return json([{ ...state.draft, id: "42", current_version_no: 1 }]);
