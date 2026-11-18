@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from nexent.scheduler import is_valid_cron_expression
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictBool, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +27,10 @@ class MemoryAgentShareMode(str, Enum):
     @classmethod
     def default(cls) -> "MemoryAgentShareMode":
         return cls.NEVER
+
+
+class TenantMemorySettingsRequest(BaseModel):
+    enabled: StrictBool
 
 
 class DreamingRunRequest(BaseModel):

@@ -20,6 +20,10 @@ from nexent.memory.dreaming import (
     select_candidates,
     units_from_decisions,
 )
+from management.services.memory.access import (
+    dreaming_allowed, memory_allowed_for_config, source_agent_allows_memory,
+)
+from management.services.configuration.user.memory import get_user_configs
 from management.services.memory.records import get_memory_record_service
 
 logger = logging.getLogger("memory_dreaming_service")
@@ -36,6 +40,10 @@ class DreamingRunError(RuntimeError):
 
 class DreamingConflictError(RuntimeError):
     pass
+
+
+class DreamingDisabledError(RuntimeError):
+    """Policy changed before a Dreaming publication could be committed."""
 
 
 class MemoryDreamingService:
@@ -76,12 +84,21 @@ class MemoryDreamingService:
         return by_id
 
     @staticmethod
-    def _source_records(tenant_id, user_id, agent_id):
+    def _eligible_source_records(tenant_id, user_id, agent_id):
         records = memory_record_db.list_memory_records(
             tenant_id, user_id=user_id, agent_id=None if agent_id == USER_DREAMING_SCOPE else agent_id,
             layer="agent", memory_type="short_term", status="active", limit=None,
         )
-        return records
+        config = get_user_configs(user_id)
+        allowed = {}
+        for record in records:
+            source = str(record.get("agent_id") or "")
+            if source not in allowed:
+                allowed[source] = (
+                    memory_allowed_for_config(config, source)
+                    and source_agent_allows_memory(tenant_id, source)
+                )
+        return [record for record in records if allowed[str(record.get("agent_id") or "")]]
 
     def _run_rem(
         self, tenant_id: str, records: List[dict], stats: Dict[int, Dict[str, Any]],
@@ -180,6 +197,21 @@ class MemoryDreamingService:
             agent_id=agent_id,
             backoff_base_seconds=DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS,
         )
+        if not dreaming_allowed(tenant_id, user_id):
+            raise DreamingDisabledError
+        new_evidence_ids = {str(evidence_id) for unit in new_units for evidence_id in unit.evidence_ids}
+        source_ids = {
+            str(decision.candidate.agent_id)
+            for decision in decisions
+            if str(decision.candidate.memory_id) in new_evidence_ids
+        }
+        user_config = get_user_configs(user_id)
+        if any(
+            not memory_allowed_for_config(user_config, source_id)
+            or not source_agent_allows_memory(tenant_id, source_id)
+            for source_id in source_ids
+        ):
+            raise DreamingDisabledError
         version = memory_long_term_db.create_and_activate(
             tenant_id=tenant_id,
             scope="user",
@@ -269,7 +301,9 @@ class MemoryDreamingService:
                 )
                 return result
             try:
-                records = self._source_records(tenant_id, user_id, agent_id)
+                if not dreaming_allowed(tenant_id, user_id):
+                    raise DreamingDisabledError
+                records = self._eligible_source_records(tenant_id, user_id, agent_id)
                 stats = self._run_light(tenant_id, user_id, agent_id, window_days, records)
                 memory_dreaming_db.update_audit(
                     run_id,
@@ -378,6 +412,9 @@ class MemoryDreamingService:
                     ),
                 )
                 return result
+            except DreamingDisabledError:
+                memory_dreaming_db.finish_audit(run_id, status="skipped", reason="memory_disabled")
+                return {"run_id": run_id, "status": "skipped", "reason": "memory_disabled"}
             except Exception as exc:
                 logger.exception(
                     "Dreaming failed for tenant=%s user=%s agent=%s run=%s",

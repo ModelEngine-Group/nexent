@@ -78,6 +78,7 @@ import {
   validatePassword as validatePasswordUtil,
 } from "@/lib/utils";
 import ProjectConfigTab from "./resources/projectConfig";
+import TenantMemorySettingsTab from "./resources/TenantMemorySettingsTab";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 // Default page size for pagination
@@ -1389,6 +1390,20 @@ export default function UserManageComp() {
                           label: t("tenantResources.tabs.agents") || "Agents",
                           children: <AgentList tenantId={tenantId} readOnly={readOnly} />,
                         },
+                        ...(tenantId === user?.tenantId
+                          ? [
+                              {
+                                key: "memory",
+                                label: t("tenantResources.tabs.memory"),
+                                children: (
+                                  <TenantMemorySettingsTab
+                                    userId={user.id}
+                                    tenantId={tenantId}
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
                         {
                           key: "mcp",
                           label: t("tenantResources.tabs.mcp") || "MCP",

@@ -4848,6 +4848,7 @@
   "agentRepository.copy.skillDuplicate.useExisting": "使用本地同名技能",
   "repository.mine.applyModal.sharedFields": "选择要共享的配置信息",
   "tenantResources.tabs.apiKeys": "API Key",
+  "tenantResources.tabs.memory": "记忆设置",
   "tenantResources.apiKeys.key": "API Key",
   "tenantResources.apiKeys.creatorEmail": "创建人邮箱",
   "tenantResources.apiKeys.ownerEmail": "所属用户邮箱",
@@ -6816,5 +6817,13 @@
   "ops.readOnly": "当前为只读模式",
   "dreaming.reason.no_candidates": "近期没有可用于整理的智能体记忆。",
   "dreaming.reason.no_eligible_candidates": "没有记忆达到晋升门槛。",
-  "dreaming.reason.no_new_evidence": "现有版本已包含可用证据。"
+  "dreaming.reason.no_new_evidence": "现有版本已包含可用证据。",
+  "memory.manager.agentAutomaticMemory": "此智能体的自动记忆",
+  "memory.manager.agentAutomaticMemoryHint": "设置对保存的智能体版本生效，同时受租户和个人设置约束。",
+  "memory.manager.tenantAutomaticMemory": "租户自动记忆",
+  "memory.manager.tenantAutomaticMemoryHint": "控制此租户所有会话的自动记忆。",
+  "memory.manager.personalMemoryDisabledHint": "当前用户已关闭个人记忆，该用户的会话不会使用自动记忆。",
+  "memory.manager.tenantMemoryDisabledHint": "租户已关闭自动记忆，请联系租户管理员开启。",
+  "memory.manager.tenantMemoryLoadError": "无法加载租户记忆设置。",
+  "dreaming.reason.memory_disabled": "自动记忆已关闭。"
 }

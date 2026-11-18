@@ -639,6 +639,11 @@ from management.services.model.run_budget import _resolve_context_budget
 from management.services.agent.preparation.compiler import _get_external_provider_service_for_search
 
 
+@pytest.fixture(autouse=True)
+def default_tenant_memory_policy(monkeypatch):
+    monkeypatch.setattr(preparation_compiler, "tenant_memory_enabled", lambda _tenant_id: True)
+
+
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
     service = object()
     factory = MagicMock(return_value=service)

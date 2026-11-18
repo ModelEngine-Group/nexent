@@ -346,6 +346,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "allow_mcp_header_passthrough": bool(
                 getattr(new_agent, "allow_mcp_header_passthrough", False)
             ),
+            "enable_memory": getattr(new_agent, "enable_memory", True),
             "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,

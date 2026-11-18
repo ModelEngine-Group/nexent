@@ -175,6 +175,7 @@ async def preflight_mcp_header_passthrough(
         tenant_id=tenant_id,
         user_id=user_id or "preflight",
         version_no=version_no_int,
+        allow_memory_search=False,
     )
 
     # Fetch remote MCP server list and resolve the used URLs the same way

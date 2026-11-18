@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -19,6 +21,7 @@ import {
   Tag,
   Tooltip,
   Typography,
+  theme,
   type TableProps,
 } from "antd";
 import type { Dayjs } from "dayjs";
@@ -37,6 +40,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { useTenantMemorySettings } from "@/hooks/memory/useTenantMemorySettings";
 import { DreamingConfigCards } from "./DreamingConfigCards";
 import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
 import { ProviderConfigCard } from "./ProviderConfigCard";
@@ -124,6 +128,7 @@ const initialLoadingByScope: Record<MemoryScope, boolean> = {
 
 export function MemoryManager() {
   const { message, modal } = App.useApp();
+  const { token } = theme.useToken();
   const { t } = useTranslation("common");
   const [activeTab, setActiveTab] = useState<TabKey>("base");
   const [recordsByScope, setRecordsByScope] = useState(emptyRecordsByScope);
@@ -137,6 +142,14 @@ export function MemoryManager() {
   >(null);
   const [loadingByScope, setLoadingByScope] = useState(initialLoadingByScope);
   const [configLoading, setConfigLoading] = useState(true);
+  const { data: tenantMemory, isError: tenantMemoryError } =
+    useTenantMemorySettings();
+  const tenantMemoryDisabled = tenantMemory?.enabled === false;
+  const tenantMemoryHint = tenantMemoryDisabled
+    ? t("memory.manager.tenantMemoryDisabledHint")
+    : tenantMemoryError
+      ? t("memory.manager.tenantMemoryLoadError")
+      : undefined;
   const [savingConfig, setSavingConfig] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<MemoryRecord | null>(null);
@@ -182,7 +195,7 @@ export function MemoryManager() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [message, t]);
 
   useEffect(() => {
     void refreshRecords("agent");
@@ -425,9 +438,7 @@ export function MemoryManager() {
       width: 130,
       render: (value: MemoryType) => (
         <Tag color={typeMap[value]?.color}>
-          {typeMap[value]
-            ? t(typeMap[value].labelKey)
-            : value}
+          {typeMap[value] ? t(typeMap[value].labelKey) : value}
         </Tag>
       ),
     },
@@ -438,9 +449,7 @@ export function MemoryManager() {
       width: 110,
       render: (value: MemoryStatus) => (
         <Tag color={statusMap[value]?.color}>
-          {statusMap[value]
-            ? t(statusMap[value].labelKey)
-            : value}
+          {statusMap[value] ? t(statusMap[value].labelKey) : value}
         </Tag>
       ),
     },
@@ -510,18 +519,43 @@ export function MemoryManager() {
                 <Text type="secondary" className="memory-setting-description">
                   {t("memoryManageModal.memoryAbilityDescription")}
                 </Text>
+                {tenantMemoryHint && (
+                  <Text
+                    id="personal-memory-tenant-status"
+                    type="secondary"
+                    className="memory-setting-description"
+                  >
+                    {tenantMemoryHint}
+                  </Text>
+                )}
               </div>
             </Flex>
             <Switch
+              aria-label={t("memoryManageModal.memoryAbility")}
+              aria-describedby={
+                tenantMemoryHint ? "personal-memory-tenant-status" : undefined
+              }
               checked={config.memoryEnabled}
+              disabled={tenantMemory?.enabled !== true || tenantMemoryError}
+              style={
+                tenantMemoryDisabled && config.memoryEnabled
+                  ? { backgroundColor: token.colorTextTertiary }
+                  : undefined
+              }
               loading={savingConfig}
               onChange={updateMemoryEnabled}
             />
           </Flex>
         </Card>
-        <DreamingConfigCards />
+        <DreamingConfigCards
+          memoryAllowed={
+            config.memoryEnabled && tenantMemory?.enabled !== false
+          }
+        />
         <ProviderConfigCard
-          memoryEnabled={config.memoryEnabled}
+          memoryEnabled={
+            config.memoryEnabled && tenantMemory?.enabled !== false
+          }
           topK={config.externalProviderTopK}
           savingTopK={savingConfig}
           onTopKChange={(value) =>

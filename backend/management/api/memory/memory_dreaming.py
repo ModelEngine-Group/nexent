@@ -26,6 +26,7 @@ from management.services.automation.scheduler import (
     compute_next_fire_at,
     is_valid_cron_expression,
 )
+from management.services.memory.access import dreaming_allowed
 from management.services.memory.dreaming.service import (
     DreamingConflictError,
     DreamingRunError,
@@ -165,6 +166,8 @@ def run_dreaming(
         payload.target_user_id,
         tenant_capability="EDIT_TENANT",
     )
+    if not dreaming_allowed(tenant_id, user_id):
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Automatic memory or Dreaming is disabled")
     try:
         run_id = memory_dreaming_db.create_audit(
             tenant_id,
