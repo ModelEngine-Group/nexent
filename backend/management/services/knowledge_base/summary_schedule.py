@@ -41,6 +41,15 @@ class SummaryScheduleJournal:
             raise NotFound()
         return row
 
+    def prepare(self, knowledge_id, *, context):
+        """Read an enabled schedule only after verifying its actual issuer's current edit grant."""
+        row = self.record(knowledge_id, context=context)
+        if row['summary_frequency'] is None or row['summary_schedule'] is None:
+            return None
+        self._schedule(row)
+        self._grant(row, context)
+        return row
+
     @staticmethod
     def _patch(port, row, values, context):
         result = port.patch(SUMMARY_DATASET, row['knowledge_id'], FieldPatch(set_values=values),

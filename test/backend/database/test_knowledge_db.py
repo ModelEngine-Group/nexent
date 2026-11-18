@@ -56,7 +56,7 @@ minio_config_mock.validate = MagicMock()
 # Use additional context manager to ensure MinioClient is properly mocked during import
 with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_last_summary_time, update_last_doc_update_time, get_knowledge_bases_for_auto_summary
+    from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_last_summary_time, update_last_doc_update_time
 
 
 # Add project root to Python path
@@ -2365,7 +2365,7 @@ def test_get_index_name_by_knowledge_name_fallback_to_index_name(monkeypatch, mo
 
 
 
-def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
+def test_update_last_times(monkeypatch, mock_session):
     session, query = mock_session
     rec = MockKnowledgeRecord(index_name="idx-1")
     mock_filter = MagicMock()
@@ -2383,8 +2383,6 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
     update_last_doc_update_time("idx-1")
     session.commit.assert_called()
 
-    rows = get_knowledge_bases_for_auto_summary()
-    assert rows == [{"index_name": "idx-1"}]
 
 
 @pytest.mark.parametrize(
@@ -2404,7 +2402,6 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
         ("get_knowledge_name_map_by_index_names", (["i1"], "t1"), {}),
         ("update_last_summary_time", ("i1",), {}),
         ("update_last_doc_update_time", ("i1",), {}),
-        ("get_knowledge_bases_for_auto_summary", tuple(), {}),
         ("get_knowledge_info_by_ids_and_tenant", ([1], "t1"), {}),
     ],
 )

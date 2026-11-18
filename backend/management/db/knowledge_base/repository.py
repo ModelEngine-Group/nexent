@@ -744,8 +744,6 @@ def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str
         raise
 
 
-
-
 def update_last_summary_time(index_name: str):
     """Update last_summary_time to now after a successful summary generation."""
 
@@ -779,19 +777,4 @@ def update_last_doc_update_time(index_name: str):
                 session.commit()
     except SQLAlchemyError:
         logger.exception("Update last doc update time error")
-        raise
-
-
-def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
-    """Query all knowledge bases with non-null summary_frequency."""
-    try:
-        with get_db_session() as session:
-            records = (
-                session.query(KnowledgeRecord)
-                .filter(KnowledgeRecord.summary_frequency.isnot(None), KnowledgeRecord.delete_flag != "Y")
-                .all()
-            )
-            return [as_dict(record) for record in records]
-    except SQLAlchemyError:
-        logger.exception("Get knowledge bases error")
         raise

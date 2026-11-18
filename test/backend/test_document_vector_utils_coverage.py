@@ -58,99 +58,8 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
-from management.services.knowledge_base.summary import get_documents_from_es, process_documents_for_clustering, extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries
+from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries
 from management.services.knowledge_base.clustering import analyze_cluster_coherence, calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, merge_duplicate_documents_in_clusters
-
-
-class TestGetDocumentsFromES:
-    """Test Elasticsearch document retrieval"""
-    
-    def test_get_documents_from_es_success(self):
-        """Test successful document retrieval from ES"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.return_value = {
-            'aggregations': {
-                'unique_documents': {
-                    'buckets': [
-                        {'key': '/path/doc1.pdf', 'doc_count': 3},
-                        {'key': '/path/doc2.pdf', 'doc_count': 2}
-                    ]
-                }
-            },
-            'hits': {
-                'hits': [
-                    {
-                        '_source': {
-                            'filename': 'doc1.pdf',
-                            'content': 'test content',
-                            'embedding': [0.1, 0.2, 0.3],
-                            'file_size': 1000
-                        }
-                    }
-                ]
-            }
-        }
-        
-        result = get_documents_from_es('test_index', mock_vdb_core, sample_doc_count=10)
-        assert isinstance(result, dict)
-        assert mock_vdb_core.search.called
-    
-    def test_get_documents_from_es_empty(self):
-        """Test ES retrieval with no documents"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.return_value = {
-            'aggregations': {
-                'unique_documents': {
-                    'buckets': []
-                }
-            }
-        }
-        
-        result = get_documents_from_es('test_index', mock_vdb_core)
-        assert result == {}
-    
-    def test_get_documents_from_es_error(self):
-        """Test ES retrieval error handling"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.side_effect = Exception("ES error")
-        
-        with pytest.raises(Exception, match="Failed to retrieve documents from Elasticsearch"):
-            get_documents_from_es('test_index', mock_vdb_core)
-
-
-class TestProcessDocumentsForClustering:
-    """Test document processing for clustering"""
-    
-    @patch('management.services.knowledge_base.summary.get_documents_from_es')
-    @patch('management.services.knowledge_base.summary.calculate_document_embedding')
-    def test_process_documents_success(self, mock_calc_emb, mock_get_docs):
-        """Test successful document processing"""
-        mock_get_docs.return_value = {
-            'doc1': {
-                'chunks': [{'embedding': [0.1, 0.2, 0.3]}],
-                'filename': 'test.pdf'
-            }
-        }
-        mock_calc_emb.return_value = np.array([0.1, 0.2, 0.3])
-        
-        mock_vdb_core = MagicMock()
-        docs, embeddings = process_documents_for_clustering('test_index', mock_vdb_core)
-        
-        assert isinstance(docs, dict)
-        assert isinstance(embeddings, dict)
-        assert 'doc1' in docs
-        assert 'doc1' in embeddings
-    
-    @patch('management.services.knowledge_base.summary.get_documents_from_es')
-    def test_process_documents_empty(self, mock_get_docs):
-        """Test processing with no documents"""
-        mock_get_docs.return_value = {}
-        
-        mock_vdb_core = MagicMock()
-        docs, embeddings = process_documents_for_clustering('test_index', mock_vdb_core)
-        
-        assert docs == {}
-        assert embeddings == {}
 
 
 class TestExtractClusterContent:
@@ -319,64 +228,15 @@ class TestMergeClusterSummaries:
 
 class TestAdditionalCoverage:
     """Test additional coverage for uncovered code paths"""
-    
-    def test_get_documents_from_es_non_list_documents(self):
-        """Test ES retrieval when all_documents is not a list"""
-        mock_vdb_core = MagicMock()
-        
-        # Mock the first search call to return a tuple instead of list
-        mock_vdb_core.client.search.side_effect = [
-            {
-                'aggregations': {
-                    'unique_documents': {
-                        'buckets': (  # This will trigger the isinstance check
-                            {'key': '/path/doc1.pdf', 'doc_count': 3},
-                        )
-                    }
-                }
-            },
-            {
-                'hits': {
-                    'hits': [
-                        {
-                            '_source': {
-                                'filename': 'doc1.pdf',
-                                'content': 'test content',
-                                'embedding': [0.1, 0.2, 0.3],
-                                'file_size': 1000
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-        
-        result = get_documents_from_es('test_index', mock_vdb_core)
-        assert isinstance(result, dict)
-    
-    def test_get_documents_from_es_no_chunks(self):
-        """Test ES retrieval when document has no chunks"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.client.search.side_effect = [
-            {
-                'aggregations': {
-                    'unique_documents': {
-                        'buckets': [
-                            {'key': '/path/doc1.pdf', 'doc_count': 0}
-                        ]
-                    }
-                }
-            },
-            {
-                'hits': {
-                    'hits': []  # No chunks
-                }
-            }
-        ]
-        
-        result = get_documents_from_es('test_index', mock_vdb_core)
-        assert result == {}  # Should return empty dict when no chunks
-    
+
+    def test_document_embeddings_without_vectors(self):
+        """Keep the former processing helper's unusable-embedding regression."""
+        from management.services.knowledge_base.summary import document_embeddings
+
+        with patch('management.services.knowledge_base.summary.calculate_document_embedding', return_value=None):
+            assert document_embeddings({'doc1': {'chunks': [{'content': 'one'}]}}) == {}
+
+
     def test_calculate_document_embedding_exception(self):
         """Test calculate_document_embedding with exception"""
         chunks = [
@@ -429,49 +289,8 @@ class TestAdditionalCoverage:
             
             with pytest.raises(Exception, match="Failed to cluster documents"):
                 kmeans_cluster_documents(doc_embeddings)
-    
-    def test_process_documents_for_clustering_exception(self):
-        """Test process_documents_for_clustering with exception"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.side_effect = Exception("ES error")
-        
-        with pytest.raises(Exception, match="Failed to process documents"):
-            process_documents_for_clustering('test_index', mock_vdb_core)
-    
-    def test_process_documents_for_clustering_no_embeddings(self):
-        """Test process_documents_for_clustering when some documents fail embedding calculation"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.return_value = {
-            'aggregations': {
-                'unique_documents': {
-                    'buckets': [
-                        {'key': '/path/doc1.pdf', 'doc_count': 1}
-                    ]
-                }
-            },
-            'hits': {
-                'hits': [
-                    {
-                        '_source': {
-                            'filename': 'doc1.pdf',
-                            'content': 'test content',
-                            'embedding': [0.1, 0.2, 0.3],
-                            'file_size': 1000
-                        }
-                    }
-                ]
-            }
-        }
-        
-        # Mock calculate_document_embedding to return None
-        with patch('management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc:
-            mock_calc.return_value = None
-            
-            docs, embeddings = process_documents_for_clustering('test_index', mock_vdb_core)
-            assert isinstance(docs, dict)
-            assert isinstance(embeddings, dict)
-            assert len(embeddings) == 0  # No successful embeddings
-    
+
+
     def test_extract_representative_chunks_smart_import_error(self):
         """Test extract_representative_chunks_smart with ImportError"""
         chunks = [
@@ -619,4 +438,3 @@ class TestAdditionalCoverage:
                 result = summarize_clusters_map_reduce(document_samples, clusters)
                 assert isinstance(result, dict)
                 assert 0 in result
-

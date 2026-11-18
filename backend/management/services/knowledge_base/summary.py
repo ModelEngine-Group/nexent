@@ -3,10 +3,8 @@
 """Knowledge document summary."""
 
 import logging
-import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import numpy as np
 from contracts.agentos_knowledge import KnowledgeSampleResult
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import RuntimeUpstreamError
@@ -17,7 +15,6 @@ from management.services.knowledge_base.clustering import (
 )
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.document import compose_document_cluster_summary
-from nexent.vector_database.base import VectorDatabaseCore
 
 logger = logging.getLogger(__name__)
 
@@ -45,135 +42,6 @@ def sample_documents_for_clustering(sample: KnowledgeSampleResult):
             'filename': document.filename or 'unknown', 'chunk_count': len(document.chunks), 'file_size': 0,
             'chunks': [chunk.model_dump() for chunk in document.chunks]}
     return documents, document_embeddings(documents)
-
-
-def get_documents_from_es(
-    index_name: str, vdb_core: VectorDatabaseCore, sample_doc_count: int = 200
-) -> Dict[str, Dict]:
-    """
-    Get document samples from Elasticsearch, aggregated by path_or_url
-
-    Args:
-        index_name: Name of the index to query
-        vdb_core: VectorDatabaseCore instance
-        sample_doc_count: Number of documents to sample
-
-    Returns:
-        Dictionary mapping document IDs to document information with chunks
-    """
-    try:
-        # Step 1: Aggregate unique documents by path_or_url
-        agg_query = {
-            "size": 0,
-            "aggs": {
-                "unique_documents": {
-                    "terms": {
-                        "field": "path_or_url",
-                        "size": 10000,  # Get all unique documents
-                    }
-                }
-            },
-        }
-
-        logger.info(f"Fetching unique documents from index {index_name}")
-        agg_response = vdb_core.search(index_name=index_name, query=agg_query)
-        all_documents = agg_response["aggregations"]["unique_documents"]["buckets"]
-
-        if not all_documents:
-            logger.warning(f"No documents found in index {index_name}")
-            return {}
-
-        # Step 2: Random sample documents
-        sample_count = min(sample_doc_count, len(all_documents))
-        # Ensure all_documents is a list for random.sample
-        if not isinstance(all_documents, list):
-            all_documents = list(all_documents)
-        sampled_docs = random.sample(all_documents, sample_count)
-
-        logger.info(
-            f"Sampled {sample_count} documents from {len(all_documents)} total documents"
-        )
-
-        # Step 3: Get all chunks for each sampled document
-        document_samples = {}
-        for doc_bucket in sampled_docs:
-            path_or_url = doc_bucket["key"]
-            chunk_count = doc_bucket["doc_count"]
-
-            # Get all chunks for this document
-            chunks_query = {
-                "query": {"term": {"path_or_url": path_or_url}},
-                "size": chunk_count,  # Get all chunks
-                "sort": [
-                    {
-                        "create_time": {
-                            "order": "asc",
-                            "missing": "_last",  # Put documents without create_time at the end
-                        }
-                    }
-                ],
-            }
-
-            chunks_response = vdb_core.search(index_name=index_name, query=chunks_query)
-            chunks = [hit["_source"] for hit in chunks_response["hits"]["hits"]]
-
-            # Build document object
-            if chunks:
-                doc_id = f"doc_{len(document_samples):04d}"
-                document_samples[doc_id] = {
-                    "doc_id": doc_id,
-                    "path_or_url": path_or_url,
-                    "filename": chunks[0].get("filename", "unknown"),
-                    "chunk_count": chunk_count,
-                    "chunks": chunks,
-                    "file_size": chunks[0].get("file_size", 0),
-                }
-
-        logger.info(
-            f"Successfully retrieved {len(document_samples)} documents with chunks"
-        )
-        return document_samples
-
-    except Exception as e:
-        logger.error(f"Error retrieving documents from ES: {str(e)}", exc_info=True)
-        raise Exception(f"Failed to retrieve documents from Elasticsearch: {str(e)}")
-
-
-def process_documents_for_clustering(
-    index_name: str, vdb_core, sample_doc_count: int = 200
-) -> Tuple[Dict[str, Dict], Dict[str, np.ndarray]]:
-    """
-    Complete workflow: Get documents from ES and calculate their embeddings
-
-    Args:
-        index_name: Name of the index to query
-        vdb_core: ElasticSearchCore instance
-        sample_doc_count: Number of documents to sample
-
-    Returns:
-        Tuple of (document_samples dict, doc_embeddings dict)
-    """
-    try:
-        # Step 1: Get documents from ES
-        document_samples = get_documents_from_es(index_name, vdb_core, sample_doc_count)
-
-        if not document_samples:
-            logger.warning("No documents retrieved from ES")
-            return {}, {}
-
-        # Step 2: Calculate document-level embeddings
-        doc_embeddings = document_embeddings(document_samples)
-
-        logger.info(
-            f"Successfully calculated embeddings for {len(doc_embeddings)} documents"
-        )
-        return document_samples, doc_embeddings
-
-    except Exception as e:
-        logger.error(
-            f"Error processing documents for clustering: {str(e)}", exc_info=True
-        )
-        raise Exception(f"Failed to process documents: {str(e)}")
 
 
 def summarize_document(

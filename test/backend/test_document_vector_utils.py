@@ -60,7 +60,7 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: No
 patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 from management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
-from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering
+from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries
 
 
 class TestDocumentEmbedding:
@@ -405,101 +405,6 @@ class TestMergeClusterSummaries:
         assert "<p>" in result  # Should use HTML p tags
 
 
-class TestGetDocumentsFromEs:
-    """Test ES document retrieval"""
-
-    def test_get_documents_from_es_mock(self):
-        """Test ES document retrieval with mocked VectorDatabaseCore search"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.search.return_value = {
-            'hits': {
-                'hits': [
-                    {
-                        '_source': {
-                            'path_or_url': '/path/doc1.pdf',
-                            'filename': 'doc1.pdf',
-                            'content': 'Content 1',
-                            'embedding': [1.0, 2.0, 3.0],
-                            'create_time': '2024-01-01T00:00:00'
-                        }
-                    }
-                ]
-            },
-            'aggregations': {
-                'unique_documents': {
-                    'buckets': [
-                        {
-                            'key': '/path/doc1.pdf',
-                            'doc_count': 1
-                        }
-                    ]
-                }
-            }
-        }
-
-        result = get_documents_from_es(
-            'test_index', mock_vdb_core, sample_doc_count=10)
-
-        assert isinstance(result, dict)
-        assert len(result) > 0
-        # Check that we have document data
-        first_doc = list(result.values())[0]
-        assert 'chunks' in first_doc
-        
-        # Verify that sort parameter is included in the query
-        call_args = mock_vdb_core.search.call_args
-        if call_args:
-            query_body = call_args[1].get('body') or call_args[0][1] if len(call_args[0]) > 1 else None
-            if query_body and 'sort' in query_body:
-                sort_config = query_body['sort']
-                assert isinstance(sort_config, list)
-                # Should have create_time sort
-                assert any('create_time' in str(sort_item) for sort_item in sort_config)
-
-
-class TestProcessDocumentsForClustering:
-    """Test document processing for clustering"""
-
-    def test_process_documents_for_clustering_mock(self):
-        """Test document processing with mocked functions"""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.client.search.return_value = {
-            'hits': {
-                'hits': [
-                    {
-                        '_source': {
-                            'path_or_url': '/path/doc1.pdf',
-                            'filename': 'doc1.pdf',
-                            'content': 'Content 1',
-                            'embedding': [1.0, 2.0, 3.0]
-                        }
-                    }
-                ]
-            },
-            'aggregations': {
-                'unique_documents': {
-                    'buckets': [
-                        {
-                            'key': '/path/doc1.pdf',
-                            'doc_count': 1
-                        }
-                    ]
-                }
-            }
-        }
-
-        with patch('management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc_embedding:
-            mock_calc_embedding.return_value = np.array([1.0, 2.0, 3.0])
-
-            documents, embeddings = process_documents_for_clustering(
-                'test_index', mock_vdb_core, sample_doc_count=10
-            )
-
-            assert isinstance(documents, dict)
-            assert isinstance(embeddings, dict)
-            assert len(documents) == len(embeddings)
-
-
 class TestAnalyzeClusterCoherence:
     """Test cluster coherence analysis"""
 
@@ -593,4 +498,3 @@ class TestMergeDuplicateDocumentsInClusters:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

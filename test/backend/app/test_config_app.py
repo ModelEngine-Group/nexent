@@ -354,6 +354,18 @@ class TestConfigAppRouterConfiguration:
             ingestion_lifespan=ingestion_lifespan,
         ))
 
+        @asynccontextmanager
+        async def summary_lifespan(app):
+            ingestion_events.append("summary-start")
+            try:
+                yield
+            finally:
+                ingestion_events.append("summary-stop")
+
+        monkeypatch.setitem(sys.modules, "management.services.knowledge_base.summary_dispatch", types.SimpleNamespace(
+            summary_lifespan=summary_lifespan,
+        ))
+
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
@@ -400,7 +412,7 @@ class TestConfigAppRouterConfiguration:
 
         assert config_app.app.lifespan is config_app.config_lifespan
         assert prepared_events == ["start", "stop"]
-        assert ingestion_events == ["cleanse-start", "ingestion-start", "ingestion-stop", "cleanse-stop"]
+        assert ingestion_events == ["cleanse-start", "ingestion-start", "summary-start", "summary-stop", "ingestion-stop", "cleanse-stop"]
         migration.migrate_legacy_outlets.assert_called_once_with()
         concurrency_module.run_blocking.assert_awaited_once_with(
             "model-outlet-upgrade", migration.migrate_legacy_outlets
