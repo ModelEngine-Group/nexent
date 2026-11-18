@@ -21,6 +21,7 @@ import { getEffectiveRoutePath } from "@/lib/auth";
 import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
 import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
 import { RouteTransitionContent } from "@/components/navigation/RouteTransitionContent";
+import { UploadCenterProvider } from "@/components/upload-center/UploadCenterProvider";
 
 const { Sider, Content } = Layout;
 
@@ -98,50 +99,52 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Layout style={layoutStyle}>
-      <QuotaWarningMonitor />
-      <MemoryEmbeddingMonitor />
+    <UploadCenterProvider>
+      <Layout style={layoutStyle}>
+        <QuotaWarningMonitor />
+        <MemoryEmbeddingMonitor />
 
-      <Sider
-        style={siderStyle}
-        width={sidebarWidth}
-        collapsedWidth={SIDER_CONFIG.WIDTH}
-        trigger={null}
-        className="!bg-[#f0f0f0]"
-      >
-        <SideNavigation
-          onPinnedChange={setSidebarPinned}
-          onNavigate={navigate}
-          isNavigating={isNavigating}
-        />
-      </Sider>
+        <Sider
+          style={siderStyle}
+          width={sidebarWidth}
+          collapsedWidth={SIDER_CONFIG.WIDTH}
+          trigger={null}
+          className="!bg-[#f0f0f0]"
+        >
+          <SideNavigation
+            onPinnedChange={setSidebarPinned}
+            onNavigate={navigate}
+            isNavigating={isNavigating}
+          />
+        </Sider>
 
-      <Layout
-        className="transition-[margin-left] duration-[180ms] motion-reduce:transition-none"
-        style={{
-          minHeight: "100vh",
-          marginLeft: `${sidebarWidth}px`,
-        }}
-      >
-        <Content ref={contentRef} style={contentStyle}>
-          <RouteTransitionContent
-            pendingPath={isNavigating ? targetPath : null}
-          >
-            {isHomePage ||
-            isOAuthCompletePage ||
-            isSharePage ||
-            isAuthorized ? (
-              children
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Spin />
-              </div>
-            )}
-          </RouteTransitionContent>
-        </Content>
+        <Layout
+          className="transition-[margin-left] duration-[180ms] motion-reduce:transition-none"
+          style={{
+            minHeight: "100vh",
+            marginLeft: `${sidebarWidth}px`,
+          }}
+        >
+          <Content ref={contentRef} style={contentStyle}>
+            <RouteTransitionContent
+              pendingPath={isNavigating ? targetPath : null}
+            >
+              {isHomePage ||
+              isOAuthCompletePage ||
+              isSharePage ||
+              isAuthorized ? (
+                children
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <Spin />
+                </div>
+              )}
+            </RouteTransitionContent>
+          </Content>
+        </Layout>
+
+        {!isSpeedMode && <AuthDialogs />}
       </Layout>
-
-      {!isSpeedMode && <AuthDialogs />}
-    </Layout>
+    </UploadCenterProvider>
   );
 }

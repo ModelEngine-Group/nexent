@@ -1,0 +1,269 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  display: flex;
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgb(15 23 42 / 18%);
+  color: #1f1f1f;
+  font-size: 13px;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fafafa;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.header.dragging {
+  cursor: grabbing;
+}
+
+.headerTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.summary {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px 4px;
+  color: #595959;
+  font-size: 12px;
+}
+
+.progressRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.progressRow :global(.ant-progress) {
+  flex: 1;
+  margin: 0;
+}
+
+.percent {
+  width: 36px;
+  color: #6b7280;
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.searchRow {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.searchRow :global(.ant-input-affix-wrapper) {
+  flex: 1;
+}
+
+.filteredCount {
+  flex: none;
+  color: #8c8c8c;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fileList {
+  min-height: 120px;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 12px;
+}
+
+.fileRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fileIcon {
+  margin-top: 3px;
+  color: #1677ff;
+}
+
+.fileText {
+  min-width: 0;
+  flex: 1;
+}
+
+.fileName {
+  overflow: hidden;
+  color: #1f1f1f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta,
+.fileError {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.fileMeta {
+  color: #8c8c8c;
+}
+
+.fileError {
+  color: #d4380d;
+}
+
+.status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.empty {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.footer :global(.ant-pagination) {
+  margin: 0;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refreshHint {
+  flex: none;
+  padding: 4px 12px 8px;
+  color: #a3a3a3;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.minimized {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 270px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 16%);
+  color: #1f1f1f;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  text-align: left;
+}
+
+.minimized.dragging {
+  cursor: grabbing;
+}
+
+.minimizedIcon {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #eaf3ff;
+  color: #1677ff;
+}
+
+.minimizedText {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.minimizedMeta {
+  overflow: hidden;
+  color: #8c8c8c;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .panel {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    max-height: 75vh;
+  }
+
+  .minimized {
+    right: 12px;
+    bottom: 12px;
+    min-width: 0;
+    width: calc(100vw - 24px);
+  }
+}

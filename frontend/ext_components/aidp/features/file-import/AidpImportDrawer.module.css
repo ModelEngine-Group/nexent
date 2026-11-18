@@ -29,41 +29,71 @@
 }
 
 .dropzone {
+  display: flex;
   min-height: 160px;
   flex: none;
-}
-
-.dropzone :global(.ant-upload.ant-upload-drag) {
-  min-height: 160px;
-  height: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 12px 20px;
   border: 1px dashed #c9c9c9;
   border-radius: 4px;
   background: #fff;
-  transition: border-color 0.2s ease;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 
-.dropzone :global(.ant-upload.ant-upload-drag:hover) {
+.dropzone:hover,
+.dropzoneActive {
   border-color: #1677ff;
 }
 
-.dropzone :global(.ant-upload-btn) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 160px;
-  padding: 12px 20px !important;
+.dropzoneActive {
+  background: #f5faff;
 }
 
-.dropzone :global(.ant-upload-drag-container) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.targetSection {
+  flex: none;
+  margin-bottom: 12px;
 }
 
-.dropzoneContent {
-  width: 100%;
-  color: #595959;
-  text-align: center;
+.targetLabel {
+  display: block;
+  margin-bottom: 6px;
+  color: #1f1f1f;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.required {
+  margin-right: 4px;
+  color: #e02128;
+}
+
+.targetRow {
+  display: flex;
+  gap: 8px;
+}
+
+.targetRow :global(.ant-input) {
+  flex: 1;
+}
+
+.targetHint {
+  margin-top: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.pickerActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .dropzoneIcon {
@@ -205,6 +235,10 @@
   font-size: 12px;
   line-height: 18px;
   text-align: right;
+}
+
+.hierarchyNote {
+  margin-left: 8px;
 }
 
 .footer,

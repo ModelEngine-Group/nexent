@@ -181,6 +181,27 @@ def _get_doc_history_path(kds_id: str, tenant_id: str | None = None) -> str:
     )
 
 
+def _get_folders_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-base scoped folder collection API path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/Folders"
+    )
+
+
+def _get_folder_tree_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the lazy, one-level folder tree API path."""
+    return f"{_get_folders_path(kds_id, tenant_id)}/Tree"
+
+
+def _get_knowledge_files_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-file collection API path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/KnowledgeFiles"
+    )
+
+
 def _get_ocr_annotate_path(
     kds_id: str, file_uuid: str, tenant_id: str | None = None
 ) -> str:
@@ -329,6 +350,25 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
     out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
     return out
+
+
+def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a folder-tree file without inventing a creation time.
+
+    ``_normalize_aidp_doc`` falls back to ``update_time`` for rows that only
+    report an update timestamp, which is right for the legacy file list but
+    wrong for the new "created at" column. Folder/Files only guarantees a
+    creation time when one of its explicit fields is present; otherwise the
+    UI must render an unknown value rather than relabel the update time.
+    """
+    normalized = _normalize_aidp_doc(raw)
+    has_creation_source = any(
+        raw.get(key) not in (None, "", False)
+        for key in ("first_upload_time", "create_time", "created_at")
+    )
+    if not has_creation_source:
+        normalized["created_at"] = None
+    return normalized
 
 
 def _normalize_doc_status(value: Any) -> str | None:
@@ -514,6 +554,260 @@ def _compute_retry_wait(response: httpx.Response, attempt: int) -> float:
         except (TypeError, ValueError):
             pass
     return _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
+
+
+def _request_aidp_json(
+    server_url: str,
+    api_key: str,
+    method: str,
+    path: str,
+    *,
+    context: str,
+    params: Dict[str, Any] | None = None,
+    json_body: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Run one AIDP JSON request and translate transport/HTTP faults.
+
+    Folder and knowledge-file path operations share the same small contract:
+    JSON in, JSON (or an empty body for 204) out. Only the URL and body differ,
+    so they go through one helper instead of repeating the error mapping.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    request_url = urljoin(f"{normalized_url}/", path.lstrip("/"))
+    logger.info("AIDP %s request to %s", method, request_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.request(
+                method,
+                request_url,
+                headers=headers,
+                params=params,
+                json=json_body,
+            ),
+            context=context,
+        )
+        response.raise_for_status()
+        if response.status_code == 204 or not response.content:
+            return {}
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        _raise_aidp_http_error(e, context)
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def get_aidp_folder_tree_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    folder_path: str,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    file_type: str | None = None,
+    file_status: str | None = None,
+) -> Dict[str, Any]:
+    """Read one level of the AIDP folder tree with a paginated file list.
+
+    AIDP returns the direct subfolders plus the current folder's files; the
+    files are server-side paginated. Every query parameter is forwarded so
+    filtering stays upstream rather than becoming a client-side page filter.
+    """
+    params: Dict[str, Any] = {
+        "folder_path": folder_path,
+        "page": page,
+        "page_size": page_size,
+    }
+    if keyword and keyword.strip():
+        params["keyword"] = keyword.strip()
+    if file_type and file_type.strip():
+        params["file_type"] = file_type.strip()
+    if file_status and file_status.strip():
+        params["file_status"] = file_status.strip()
+
+    result = _request_aidp_json(
+        server_url,
+        api_key,
+        "GET",
+        _get_folder_tree_path(kds_id),
+        context=f"folder-tree:{kds_id}",
+        params=params,
+    )
+
+    folders = result.get("folders")
+    result["folders"] = [
+        folder for folder in folders if isinstance(folder, dict)
+    ] if isinstance(folders, list) else []
+
+    files = result.get("files") if isinstance(result.get("files"), dict) else {}
+    value = files.get("value")
+    files["value"] = [
+        _normalize_folder_tree_file(item) if isinstance(item, dict) else item
+        for item in value
+    ] if isinstance(value, list) else []
+    files["page"] = int(files.get("page") or page)
+    files["page_size"] = int(files.get("page_size") or page_size)
+    files["total"] = int(files.get("total") or 0)
+    result["files"] = files
+    result["folder_path"] = str(result.get("folder_path") or folder_path)
+    return result
+
+
+def create_aidp_folder_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    parent_folder: str,
+    folder_name: str,
+) -> Dict[str, Any]:
+    """Create one AIDP folder below ``parent_folder``."""
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "POST",
+        _get_folders_path(kds_id),
+        context=f"create-folder:{kds_id}",
+        json_body={
+            "parent_folder": parent_folder,
+            "folder_name": folder_name,
+        },
+    )
+
+
+def rename_aidp_folder_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    parent_folder: str,
+    old_folder_name: str,
+    new_folder_name: str,
+) -> Dict[str, Any]:
+    """Rename one AIDP folder inside its current parent folder."""
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "PATCH",
+        _get_folders_path(kds_id),
+        context=f"rename-folder:{kds_id}",
+        json_body={
+            "parent_folder": parent_folder,
+            "old_folder_name": old_folder_name,
+            "new_folder_name": new_folder_name,
+        },
+    )
+
+
+def delete_aidp_folder_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    folder_path: str,
+) -> None:
+    """Delete one AIDP folder. AIDP only accepts empty folders."""
+    _request_aidp_json(
+        server_url,
+        api_key,
+        "DELETE",
+        _get_folders_path(kds_id),
+        context=f"delete-folder:{kds_id}",
+        params={"folder_path": folder_path},
+    )
+
+
+def move_aidp_folder_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    parent_folder: str,
+    folder_name: str,
+    target_folder: str,
+) -> Dict[str, Any]:
+    """Move one AIDP folder below ``target_folder``."""
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_folders_path(kds_id)}/Move",
+        context=f"move-folder:{kds_id}",
+        json_body={
+            "parent_folder": parent_folder,
+            "folder_name": folder_name,
+            "target_folder": target_folder,
+        },
+    )
+
+
+def move_aidp_files_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+    target_folder: str,
+) -> Dict[str, Any]:
+    """Move knowledge files to one target folder, returning per-file outcomes."""
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_knowledge_files_path(kds_id)}/Move",
+        context=f"move-files:{kds_id}",
+        json_body={
+            "file_uuids": file_uuids,
+            "target_folder": target_folder,
+        },
+    )
+
+
+def rename_aidp_file_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+    new_file_name: str,
+) -> Dict[str, Any]:
+    """Rename one knowledge file and return its new logical path."""
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "PATCH",
+        _get_knowledge_files_path(kds_id),
+        context=f"rename-file:{kds_id}",
+        json_body={
+            "file_uuid": file_uuid,
+            "new_file_name": new_file_name,
+        },
+    )
 
 
 def fetch_aidp_knowledge_bases_impl(
@@ -1366,17 +1660,33 @@ def upload_aidp_docs_impl(
     api_key: str,
     kds_id: str,
     files: List[Any],
+    target_folder: str | None = None,
+    relative_paths: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """Upload documents to a knowledge base via AIDP API."""
+    """Upload documents to a knowledge base via AIDP API.
+
+    ``target_folder``/``relative_paths`` address the documented directory
+    upload: each file keeps its position relative to the selected folder, so a
+    whole-directory upload preserves its subdirectories. Both are omitted for
+    the legacy root upload, keeping the previous request shape unchanged.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
         "Authorization": f"Bearer {api_key}",
     }
 
-    upload_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Upload"
+    upload_path = f"{_get_knowledge_files_path(kds_id)}/Upload"
     upload_url = urljoin(f"{normalized_url}/", upload_path)
     logger.info("Uploading documents to AIDP knowledge base at %s", upload_url)
+
+    form_data = None
+    if target_folder is not None:
+        form_data = {
+            "target_folder": target_folder,
+            "relative_paths": relative_paths
+            or [f.filename or "unknown" for f in files],
+        }
 
     try:
         client = http_client_manager.get_sync_client(
@@ -1391,7 +1701,12 @@ def upload_aidp_docs_impl(
             ("files", (f.filename, f.file, f.content_type or "application/octet-stream"))
             for f in files
         ]
-        response = client.post(upload_url, headers=headers, files=file_tuples)
+        response = client.post(
+            upload_url,
+            headers=headers,
+            files=file_tuples,
+            data=form_data,
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):

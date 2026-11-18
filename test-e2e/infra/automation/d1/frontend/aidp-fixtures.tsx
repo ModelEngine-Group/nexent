@@ -21,6 +21,7 @@ import type {
   AidpDocumentItem,
   AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
+import { UploadCenterProvider } from "@/components/upload-center/UploadCenterProvider";
 
 const context = vi.hoisted(() => ({
   user: { id: "owner-a", tenantId: "tenant-a", role: "USER" } as {
@@ -171,6 +172,16 @@ export const filesResponse = (items = [file], total = items.length) => ({
   total_reliable: true,
   has_more: false,
 });
+export const folderTreeResponse = (
+  folders: Array<{ folder_name: string; is_empty?: boolean }> = [],
+  items = [file],
+  total = items.length,
+  pageSize = 10,
+) => ({
+  folder_path: "/",
+  folders,
+  files: { page: 1, page_size: pageSize, total, value: items },
+});
 export const uploadTasksResponse = () => ({
   value: [],
   total_count: 0,
@@ -226,7 +237,9 @@ export function mount(
         theme={{ token: { motion: false } }}
       >
         <App>
-          <QueryClientProvider client={client}>{child}</QueryClientProvider>
+          <QueryClientProvider client={client}>
+            <UploadCenterProvider>{child}</UploadCenterProvider>
+          </QueryClientProvider>
         </App>
       </ConfigProvider>
     </I18nextProvider>
@@ -354,10 +367,10 @@ beforeEach(() => {
       return reply(listResponse());
     if (request.url.pathname === base + "/kb-a") return reply(kb);
     if (
-      request.url.pathname === base + "/kb-a/files" &&
+      request.url.pathname === base + "/kb-a/folders/tree" &&
       request.method === "GET"
     )
-      return reply(filesResponse());
+      return reply(folderTreeResponse());
     if (
       request.url.pathname === base + "/kb-a/upload-tasks" &&
       request.method === "GET"

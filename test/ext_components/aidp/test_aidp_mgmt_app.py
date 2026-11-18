@@ -2975,6 +2975,256 @@ class TestDeleteKnowledgeBaseFailure:
         mock_soft.assert_not_called()
 
 
+class TestFolderAndFilePathRoutes:
+    """Folder tree/CRUD and file path operations forward the documented contract."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_edit(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        monkeypatch.setattr(
+            aidp_mgmt_app.perms,
+            "require_permission",
+            lambda *a, **kw: MagicMock(permission="EDIT"),
+        )
+
+    def test_folder_tree_forwards_path_paging_and_search(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        captured = {}
+
+        def fake_tree(server_url, api_key, kds_id, folder_path, page, page_size,
+                      keyword, file_type, file_status):
+            captured.update(
+                server_url=server_url,
+                kds_id=kds_id,
+                folder_path=folder_path,
+                page=page,
+                page_size=page_size,
+                keyword=keyword,
+                file_type=file_type,
+                file_status=file_status,
+            )
+            return {
+                "folder_path": folder_path,
+                "folders": [{"folder_name": "子目录", "is_empty": True}],
+                "files": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total": 1,
+                    "value": [{"file_uuid": "u-1", "file_name": "a.pdf"}],
+                },
+            }
+
+        monkeypatch.setattr(aidp_mgmt_app, "get_aidp_folder_tree_impl", fake_tree)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/tree",
+            params={
+                "folder_path": "/docs/",
+                "page": 2,
+                "page_size": 20,
+                "keyword": "制度",
+                "file_type": "pdf",
+                "file_status": "1",
+            },
+            headers=_bearer(),
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["folder_path"] == "/docs"
+        assert body["folders"] == [{"folder_name": "子目录", "is_empty": True}]
+        assert body["files"]["total"] == 1
+        assert captured == {
+            "server_url": SERVER_URL,
+            "kds_id": "kb-1",
+            "folder_path": "/docs",
+            "page": 2,
+            "page_size": 20,
+            "keyword": "制度",
+            "file_type": "pdf",
+            "file_status": "1",
+        }
+
+    def test_folder_crud_routes_forward_the_path_contract(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        calls = []
+
+        def record(name):
+            def inner(*args):
+                calls.append((name, *args))
+                return {"folder_path": "/docs/new"}
+
+            return inner
+
+        monkeypatch.setattr(aidp_mgmt_app, "create_aidp_folder_impl", record("create"))
+        monkeypatch.setattr(aidp_mgmt_app, "rename_aidp_folder_impl", record("rename"))
+        monkeypatch.setattr(aidp_mgmt_app, "move_aidp_folder_impl", record("move"))
+        monkeypatch.setattr(
+            aidp_mgmt_app,
+            "delete_aidp_folder_impl",
+            lambda *args: calls.append(("delete", *args)),
+        )
+        client = _client()
+
+        created = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={"parent_folder": "/docs", "folder_name": "new"},
+        )
+        renamed = client.patch(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "old_folder_name": "new",
+                "new_folder_name": "renamed",
+            },
+        )
+        moved = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/move",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "folder_name": "renamed",
+                "target_folder": "/archive",
+            },
+        )
+        deleted = client.delete(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            params={"folder_path": "/docs/renamed"},
+        )
+
+        assert created.status_code == HTTPStatus.OK
+        assert renamed.status_code == HTTPStatus.OK
+        assert moved.status_code == HTTPStatus.OK
+        assert deleted.status_code == HTTPStatus.NO_CONTENT
+        assert calls == [
+            ("create", SERVER_URL, API_KEY, "kb-1", "/docs", "new"),
+            ("rename", SERVER_URL, API_KEY, "kb-1", "/docs", "new", "renamed"),
+            ("move", SERVER_URL, API_KEY, "kb-1", "/docs", "renamed", "/archive"),
+            ("delete", SERVER_URL, API_KEY, "kb-1", "/docs/renamed"),
+        ]
+
+    def test_file_move_and_rename_forward_per_file_objects(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        captured = {}
+        monkeypatch.setattr(
+            aidp_mgmt_app,
+            "move_aidp_files_impl",
+            lambda *args: captured.setdefault("move", args) or {"summary": {}},
+        )
+        monkeypatch.setattr(
+            aidp_mgmt_app,
+            "rename_aidp_file_impl",
+            lambda *args: captured.setdefault("rename", args) or {"file_path": "/docs/b.pdf"},
+        )
+        client = _client()
+
+        moved = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/files/move",
+            headers=_bearer(),
+            json={
+                "file_uuids": ["11111111-1111-4111-8111-111111111111"],
+                "target_folder": "/docs",
+            },
+        )
+        renamed = client.patch(
+            "/aidp-mgmt/knowledge-bases/kb-1/files",
+            headers=_bearer(),
+            json={
+                "file_uuid": "11111111-1111-4111-8111-111111111111",
+                "new_file_name": "b.pdf",
+            },
+        )
+
+        assert moved.status_code == HTTPStatus.OK
+        assert renamed.status_code == HTTPStatus.OK
+        assert captured["move"] == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            ["11111111-1111-4111-8111-111111111111"],
+            "/docs",
+        )
+        assert captured["rename"] == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            "11111111-1111-4111-8111-111111111111",
+            "b.pdf",
+        )
+
+    def test_upload_forwards_target_folder_and_relative_paths(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        captured = {}
+
+        def fake_upload(server_url, api_key, kds_id, files, target_folder, relative_paths):
+            captured.update(
+                kds_id=kds_id,
+                target_folder=target_folder,
+                relative_paths=relative_paths,
+                names=[file.filename for file in files],
+            )
+            return {
+                "summary": {"total": 2, "success": 2, "failed": 0},
+                "success_list": [],
+                "failed_list": [],
+            }
+
+        monkeypatch.setattr(aidp_mgmt_app, "upload_aidp_docs_impl", fake_upload)
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases/kb-1/documents",
+            headers=_bearer(),
+            data={
+                "target_folder": "/docs/",
+                "relative_paths": ["合同/2026/a.txt", "b.txt"],
+            },
+            files=[
+                ("files", ("a.txt", b"a", "text/plain")),
+                ("files", ("b.txt", b"b", "text/plain")),
+            ],
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        assert captured == {
+            "kds_id": "kb-1",
+            "target_folder": "/docs",
+            "relative_paths": ["合同/2026/a.txt", "b.txt"],
+            "names": ["a.txt", "b.txt"],
+        }
+
+    def test_folder_path_validation_rejects_traversal(self):
+        client = _client()
+        tree = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/tree",
+            headers=_bearer(),
+            params={"folder_path": "/docs/../secret"},
+        )
+        create = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={"parent_folder": "/docs", "folder_name": "../escape"},
+        )
+        self_move = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/move",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "folder_name": "a",
+                "target_folder": "/docs/a/child",
+            },
+        )
+
+        assert tree.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert create.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert self_move.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 
 

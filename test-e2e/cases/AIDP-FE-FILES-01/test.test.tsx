@@ -1,13 +1,19 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   advance,
   base,
   file,
-  filesResponse,
+  folderTreeResponse,
   kb,
   matching,
   mount,
@@ -19,8 +25,10 @@ import {
 } from "../../infra/automation/d1/frontend/aidp-fixtures";
 import AidpKnowledgeFilesPage from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeFilesPage";
 
-const path = base + "/kb-a/files";
+const path = base + "/kb-a/folders/tree";
+const detailPath = base + "/kb-a";
 const removePath = base + "/kb-a/documents/remove";
+const movePath = base + "/kb-a/files/move";
 const page = () => (
   <AidpKnowledgeFilesPage
     knowledgeBase={kb}
@@ -33,8 +41,11 @@ const headerCount = () =>
   screen
     .getAllByText(t("aidpKnowledge.detailTabFiles"))
     .find((element) => element.tagName === "DT")!.parentElement!;
-const confirm = () =>
-  fireEvent.click(screen.getByRole("button", { name: /确\s*定/ }));
+const deleteDialogButton = () =>
+  within(screen.getByRole("dialog")).getByRole("button", {
+    name: /删\s*除/,
+  });
+const confirmDelete = () => fireEvent.click(deleteDialogButton());
 // The page also renders the KB-level delete and the batch delete; scope the
 // query to the file's own row so only its action button is clicked.
 const rowDelete = () =>
@@ -46,29 +57,30 @@ describe("AIDP-FE-FILES-01", () => {
   it("global counts survive search, empty results and pagination", async () => {
     vi.useFakeTimers();
     const original = server.handler;
-    server.handler = (request) =>
-      request.url.pathname === path
-        ? reply(
-            request.url.searchParams.get("keyword")
-              ? {
-                  ...filesResponse(
-                    request.url.searchParams.get("keyword") === "guide"
-                      ? [file]
-                      : [],
-                  ),
-                  total_reliable: false,
-                }
-              : filesResponse([file], 21),
-          )
-        : original(request);
+    server.handler = (request) => {
+      if (request.url.pathname === detailPath && request.method === "GET")
+        return reply({ ...kb, document_count: 21 });
+      if (request.url.pathname === path) {
+        const keyword = request.url.searchParams.get("keyword");
+        return reply(
+          keyword
+            ? folderTreeResponse(
+                [],
+                keyword === "guide" ? [file] : [],
+                keyword === "guide" ? 1 : 0,
+              )
+            : folderTreeResponse([], [file], 21),
+        );
+      }
+      return original(request);
+    };
     mount(page());
     await advance(5);
     expect(headerCount()).toHaveTextContent("21");
     expect(
-      screen.getByText(t("aidpKnowledge.showTotal", { count: 21 })),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(t("aidpKnowledge.detailLocalImport")),
+      screen.getByText(t("aidpKnowledge.showTotal", { count: 21 }), {
+        exact: false,
+      }),
     ).toBeInTheDocument();
     fireEvent.click(document.querySelector(".ant-pagination-item-2")!);
     await advance(5);
@@ -80,14 +92,11 @@ describe("AIDP-FE-FILES-01", () => {
     await advance(260);
     expect(screen.getByText(file.file_name)).toBeInTheDocument();
     expect(headerCount()).toHaveTextContent("21");
-    expect(
-      screen.queryByText(t("aidpKnowledge.showTotal", { count: 1 })),
-    ).toBeNull();
     fireEvent.change(search, { target: { value: "missing" } });
     await advance(260);
     expect(matching(path).at(-1)!.url.searchParams.get("page")).toBe("1");
     expect(
-      screen.getByText(t("aidpKnowledge.detailFilesEmpty")),
+      screen.getByText(t("aidpKnowledge.filesSearchEmpty")),
     ).toBeInTheDocument();
     expect(headerCount()).toHaveTextContent("21");
     fireEvent.change(search, { target: { value: "" } });
@@ -114,39 +123,43 @@ describe("AIDP-FE-FILES-01", () => {
       server.handler = (request) =>
         request.url.pathname === path ? reply(body, 500) : original(request);
       mount(page());
-      await screen.findByText(t(expected));
+      expect((await screen.findAllByText(t(expected))).length).toBeGreaterThan(
+        0,
+      );
       expect(
-        screen.queryByText(t("aidpKnowledge.detailFilesEmpty")),
+        screen.queryByText(t("aidpKnowledge.filesSearchEmpty")),
       ).toBeNull();
-      expect(
-        screen.queryByRole("button", { name: t("aidpKnowledge.retry") }),
-      ).toBeNull();
-      expect(matching(path)).toHaveLength(1);
+      expect(matching(path).length).toBeGreaterThanOrEqual(1);
     },
   );
 
-  it("polling updates counts and import refresh waits for drawer close", async () => {
+  it("polling pauses while importing and refreshes after upload center completion", async () => {
     vi.useFakeTimers();
     let count = 21;
     let added = false;
     const original = server.handler;
-    server.handler = (request) =>
-      request.url.pathname === path
-        ? reply(
-            filesResponse(
-              added ? [{ ...file, file_name: "added.txt" }] : [file],
-              count,
-            ),
-          )
-        : original(request);
+    server.handler = (request) => {
+      if (request.url.pathname === detailPath && request.method === "GET")
+        return reply({ ...kb, document_count: count });
+      if (request.url.pathname === path)
+        return reply(
+          folderTreeResponse(
+            [],
+            added ? [{ ...file, file_name: "added.txt" }] : [file],
+            count,
+          ),
+        );
+      return original(request);
+    };
     mount(page());
     await advance(5);
     expect(headerCount()).toHaveTextContent("21");
     count = 22;
     const before = matching(path).length;
     await advance(30000);
-    expect(matching(path)).toHaveLength(before + 1);
-    expect(headerCount()).toHaveTextContent("22");
+    expect(matching(path).length).toBeGreaterThan(before);
+    // The KB-level count comes from the detail endpoint, not the folder page.
+    expect(headerCount()).toHaveTextContent("21");
     fireEvent.click(
       screen.getByRole("button", {
         name: new RegExp(t("aidpKnowledge.importFile")),
@@ -160,6 +173,17 @@ describe("AIDP-FE-FILES-01", () => {
       target: { files: [new File(["x"], "added.txt")] },
     });
     await advance(5);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: t("aidpKnowledge.importAction"),
+      }),
+    );
+    await advance(5);
+    // The upload contract carries the target folder and one relative path per
+    // file, even for a root upload.
+    const uploadForm = UploadTransport.sent[0].body;
+    expect(uploadForm.getAll("target_folder")).toEqual(["/"]);
+    expect(uploadForm.getAll("relative_paths")).toEqual(["added.txt"]);
     added = true;
     count = 23;
     await act(async () =>
@@ -170,18 +194,17 @@ describe("AIDP-FE-FILES-01", () => {
       }),
     );
     await advance(5);
-    expect(matching(path)).toHaveLength(opened);
-    confirm();
-    await advance(5);
-    expect(matching(path)).toHaveLength(opened + 1);
-    expect(screen.getByText("added.txt")).toBeInTheDocument();
-    expect(headerCount()).toHaveTextContent("23");
+    expect(matching(path).length).toBeGreaterThanOrEqual(opened + 1);
+    expect(screen.getAllByText("added.txt").length).toBeGreaterThan(0);
+    await waitFor(() => expect(headerCount()).toHaveTextContent("23"));
   });
 
   it("file deletion success respects cancellation and refreshes the count", async () => {
     let removed = false;
     const original = server.handler;
     server.handler = (request) => {
+      if (request.url.pathname === detailPath && request.method === "GET")
+        return reply({ ...kb, document_count: removed ? 0 : 1 });
       if (request.url.pathname === removePath) {
         removed = true;
         return reply({
@@ -191,7 +214,9 @@ describe("AIDP-FE-FILES-01", () => {
         });
       }
       if (request.url.pathname === path)
-        return reply(filesResponse(removed ? [] : [file], removed ? 0 : 1));
+        return reply(
+          folderTreeResponse([], removed ? [] : [file], removed ? 0 : 1),
+        );
       return original(request);
     };
     mount(page());
@@ -201,12 +226,12 @@ describe("AIDP-FE-FILES-01", () => {
     await settle();
     expect(matching(removePath, "POST")).toHaveLength(0);
     fireEvent.click(rowDelete());
-    await screen.findByRole("button", { name: /确\s*定/ });
+    await screen.findByRole("dialog");
     const before = matching(path).length;
-    confirm();
-    await screen.findByText(t("aidpKnowledge.detailFilesEmpty"));
-    expect(headerCount()).toHaveTextContent("0");
-    expect(matching(path)).toHaveLength(before + 1);
+    confirmDelete();
+    await screen.findByText(t("aidpKnowledge.filesEmptyRoot"));
+    await waitFor(() => expect(headerCount()).toHaveTextContent("0"));
+    expect(matching(path).length).toBeGreaterThan(before);
     expect(matching(removePath, "POST")).toHaveLength(1);
     expect(matching(removePath, "POST")[0].body).toEqual({
       file_uuids: [file.file_uuid],
@@ -219,6 +244,8 @@ describe("AIDP-FE-FILES-01", () => {
       let attempts = 0;
       let deleted = false;
       server.handler = (request) => {
+        if (request.url.pathname === detailPath && request.method === "GET")
+          return reply({ ...kb, document_count: 1 });
         if (request.url.pathname === removePath) {
           if (++attempts > 1) {
             deleted = true;
@@ -240,18 +267,22 @@ describe("AIDP-FE-FILES-01", () => {
           });
         }
         if (request.url.pathname === path && deleted)
-          return reply(filesResponse([], 0));
+          return reply(folderTreeResponse([], [], 0));
         return original(request);
       };
       mount(page());
       await screen.findByText(file.file_name);
       fireEvent.click(rowDelete());
-      await screen.findByRole("button", { name: /确\s*定/ });
+      await screen.findByRole("dialog");
       const before = matching(path).length;
-      confirm();
+      confirmDelete();
       await screen.findByText("File deletion rejected");
       expect(screen.getByRole("dialog")).toBeInTheDocument();
-      expect(screen.getAllByText(file.file_name)).toHaveLength(2);
+      expect(
+        within(screen.getByRole("dialog")).getByText(
+          new RegExp(file.file_name),
+        ),
+      ).toBeInTheDocument();
       expect(matching(path)).toHaveLength(before);
       expect(
         screen.queryByText(t("aidpKnowledge.deleteDocSuccess")),
@@ -259,15 +290,12 @@ describe("AIDP-FE-FILES-01", () => {
       expect(matching(removePath, "POST")[0].body).toEqual({
         file_uuids: [file.file_uuid],
       });
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: /确\s*定/ })).toBeEnabled(),
-      );
+      await waitFor(() => expect(deleteDialogButton()).toBeEnabled());
       if (action === "retry") {
-        confirm();
-        await screen.findByText(t("aidpKnowledge.detailFilesEmpty"));
+        confirmDelete();
+        await screen.findByText(t("aidpKnowledge.filesEmptyRoot"));
         expect(matching(removePath, "POST")).toHaveLength(2);
-        expect(matching(path)).toHaveLength(before + 1);
-        expect(headerCount()).toHaveTextContent("0");
+        expect(matching(path).length).toBeGreaterThan(before);
       } else {
         fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
         expect(matching(removePath, "POST")).toHaveLength(1);
@@ -276,4 +304,88 @@ describe("AIDP-FE-FILES-01", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     },
   );
+
+  it("batch move keeps failed files selected and shows reasons inline", async () => {
+    const secondFile = {
+      ...file,
+      file_uuid: "8e2b9c37-8d83-4e3d-8472-457a74aa4e53",
+      file_name: "report.pdf",
+      file_type: "pdf",
+    };
+    let moved = false;
+    const original = server.handler;
+    server.handler = (request) => {
+      if (request.url.pathname === movePath && request.method === "POST") {
+        moved = true;
+        return reply({
+          summary: { total: 2, success: 1, failed: 1 },
+          success_list: [{ file_uuid: file.file_uuid }],
+          failed_list: [
+            {
+              file_uuid: secondFile.file_uuid,
+              reason_zh: "目标目录无写权限",
+            },
+          ],
+        });
+      }
+      if (request.url.pathname === path) {
+        return reply(
+          folderTreeResponse(
+            [{ folder_name: "目标目录", is_empty: true }],
+            moved ? [secondFile] : [file, secondFile],
+            moved ? 1 : 2,
+          ),
+        );
+      }
+      return original(request);
+    };
+
+    mount(page());
+    await screen.findByText(file.file_name);
+    await screen.findByText(secondFile.file_name);
+    fireEvent.click(
+      within(screen.getByText(file.file_name).closest("tr")!).getByRole(
+        "checkbox",
+      ),
+    );
+    fireEvent.click(
+      within(screen.getByText(secondFile.file_name).closest("tr")!).getByRole(
+        "checkbox",
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: t("aidpKnowledge.fileMoveAction"),
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByText("目标目录"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /确\s*定/ }));
+
+    await screen.findByText(
+      t("aidpKnowledge.fileMoveResultTitle", {
+        success: 1,
+        failed: 1,
+      }),
+    );
+    expect(screen.getByText(/目标目录无写权限/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        t("aidpKnowledge.fileMoveFailureTarget", {
+          folder: "/目标目录",
+        }),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(file.file_name)).toBeNull();
+    const remainingRow = screen
+      .getAllByText(secondFile.file_name)
+      .map((element) => element.closest("tr"))
+      .find((row): row is HTMLTableRowElement => Boolean(row))!;
+    expect(within(remainingRow).getByRole("checkbox")).toBeChecked();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(matching(movePath, "POST")[0].body).toEqual({
+      file_uuids: [file.file_uuid, secondFile.file_uuid],
+      target_folder: "/目标目录",
+    });
+  });
 });

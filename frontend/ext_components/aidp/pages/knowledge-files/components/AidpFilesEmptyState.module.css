@@ -1,0 +1,56 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.empty {
+  display: flex;
+  min-height: 340px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  padding: 24px;
+  color: #8c8c8c;
+  text-align: center;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.dropActive {
+  border-color: #1677ff;
+  background: #f5faff;
+}
+
+.illustration,
+.searchIcon {
+  margin-bottom: 8px;
+}
+
+.title {
+  color: #1f1f1f;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.browse {
+  border: 0;
+  background: none;
+  color: #1677ff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 0;
+}
+
+.browse:hover {
+  text-decoration: underline;
+}
+
+.description {
+  max-width: 520px;
+  color: #a3a3a3;
+  font-size: 12px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}

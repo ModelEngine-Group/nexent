@@ -954,6 +954,23 @@ class TestNormalizeAidpDoc:
         assert raw == snapshot
 
 
+class TestNormalizeFolderTreeFile:
+    """Folder/Files must not invent a creation time from update_time."""
+
+    def test_keeps_first_upload_time(self, aidp_service_module):
+        result = aidp_service_module._normalize_folder_tree_file(
+            {"first_upload_time": 1700000000, "update_time": 1700003600}
+        )
+        assert "2023-11-14" in result["created_at"]
+
+    def test_blank_created_at_when_only_update_time_exists(self, aidp_service_module):
+        result = aidp_service_module._normalize_folder_tree_file(
+            {"update_time": 1700003600}
+        )
+        assert result["created_at"] is None
+        assert result["updated_at"] is not None
+
+
 # ---------------------------------------------------------------------------
 # Small gap coverage for existing function tests
 # ---------------------------------------------------------------------------

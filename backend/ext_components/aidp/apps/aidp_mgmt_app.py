@@ -25,8 +25,19 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
@@ -60,8 +71,11 @@ from ext_components.aidp.services.aidp_permission_service import (
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
+    create_aidp_folder_impl,
     create_aidp_kb_impl,
+    delete_aidp_folder_impl,
     delete_aidp_kb_impl,
+    get_aidp_folder_tree_impl,
     get_aidp_graph_template_impl,
     get_aidp_kb_impl,
     get_bound_agents,
@@ -70,7 +84,11 @@ from ext_components.aidp.services.aidp_service import (
     list_aidp_docs_impl,
     list_aidp_models_impl,
     merge_graph_config_update,
+    move_aidp_files_impl,
+    move_aidp_folder_impl,
     remove_aidp_docs_impl,
+    rename_aidp_file_impl,
+    rename_aidp_folder_impl,
     retry_aidp_docs_impl,
     select_aidp_channel,
     stream_aidp_doc_impl,
@@ -81,7 +99,7 @@ from ext_components.aidp.services.aidp_service import (
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.tag.library import TagManagementService
-from nexent.core.concurrency import run_blocking
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -295,6 +313,153 @@ class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
     file_uuid: UUID = Field(..., description="AIDP file UUID")
+
+
+_FOLDER_NAME_MAX_LENGTH = 255
+
+
+def _normalize_folder_path(value: str, *, allow_root: bool = True) -> str:
+    """Validate a knowledge-base-relative folder path.
+
+    The AIDP contract addresses folders by a path relative to the knowledge
+    base root (``/`` for the root itself), never by id. Rejecting malformed
+    input here keeps a bad path from being forwarded as an opaque upstream
+    error and makes the root/name rules explicit at the HTTP boundary.
+    """
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValueError("folder_path is required")
+    if not normalized.startswith("/"):
+        raise ValueError("folder_path must start with '/'")
+    if "\\" in normalized or "//" in normalized:
+        raise ValueError("folder_path contains an invalid separator")
+    if ".." in normalized.split("/"):
+        raise ValueError("folder_path must not contain '..'")
+    if normalized == "/":
+        if not allow_root:
+            raise ValueError("the root folder cannot be used here")
+        return "/"
+    return normalized.rstrip("/")
+
+
+def _normalize_folder_name(value: str) -> str:
+    """Validate one folder name (the path separator is never part of a name)."""
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValueError("folder_name is required")
+    if normalized in {".", ".."}:
+        raise ValueError("folder_name is invalid")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError("folder_name must not contain a path separator")
+    if len(normalized) > _FOLDER_NAME_MAX_LENGTH:
+        raise ValueError(
+            f"folder_name must be at most {_FOLDER_NAME_MAX_LENGTH} characters"
+        )
+    return normalized
+
+
+class CreateAidpFolderRequest(BaseModel):
+    """Create one folder under an existing parent folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_folder: str = Field(..., description="Parent folder path; root is '/'")
+    folder_name: str = Field(..., min_length=1, description="New folder name")
+
+    @field_validator("parent_folder")
+    @classmethod
+    def _validate_parent(cls, value: str) -> str:
+        return _normalize_folder_path(value)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        return _normalize_folder_name(value)
+
+
+class RenameAidpFolderRequest(BaseModel):
+    """Rename one folder inside its current parent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_folder: str = Field(..., description="Parent folder path; root is '/'")
+    old_folder_name: str = Field(..., min_length=1)
+    new_folder_name: str = Field(..., min_length=1)
+
+    @field_validator("parent_folder")
+    @classmethod
+    def _validate_parent(cls, value: str) -> str:
+        return _normalize_folder_path(value)
+
+    @field_validator("old_folder_name", "new_folder_name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        return _normalize_folder_name(value)
+
+
+class MoveAidpFolderRequest(BaseModel):
+    """Move one folder under another folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_folder: str = Field(..., description="Current parent folder path")
+    folder_name: str = Field(..., min_length=1)
+    target_folder: str = Field(..., description="Destination parent folder path")
+
+    @field_validator("parent_folder", "target_folder")
+    @classmethod
+    def _validate_path(cls, value: str) -> str:
+        return _normalize_folder_path(value)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        return _normalize_folder_name(value)
+
+    @model_validator(mode="after")
+    def _reject_self_move(self) -> "MoveAidpFolderRequest":
+        parent_prefix = "" if self.parent_folder == "/" else self.parent_folder
+        source_path = f"{parent_prefix}/{self.folder_name}"
+        if self.target_folder == source_path or self.target_folder.startswith(
+            f"{source_path}/"
+        ):
+            raise ValueError("a folder cannot be moved into itself or its subfolder")
+        return self
+
+
+class MoveAidpFilesRequest(BaseModel):
+    """Move one or more knowledge files into a folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_uuids: List[UUID] = Field(..., min_length=1)
+    target_folder: str = Field(..., description="Destination folder path")
+
+    @field_validator("target_folder")
+    @classmethod
+    def _validate_target(cls, value: str) -> str:
+        return _normalize_folder_path(value)
+
+
+class RenameAidpFileRequest(BaseModel):
+    """Rename one knowledge file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
+    new_file_name: str = Field(..., min_length=1, description="New file name")
+
+    @field_validator("new_file_name")
+    @classmethod
+    def _validate_file_name(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        if not normalized:
+            raise ValueError("new_file_name is required")
+        if "/" in normalized or "\\" in normalized:
+            raise ValueError("new_file_name must not contain a path separator")
+        if len(normalized) > 255:
+            raise ValueError("new_file_name must be at most 255 characters")
+        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -1003,11 +1168,42 @@ async def upload_documents(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
+    target_folder: Annotated[
+        Optional[str],
+        Form(description="Destination folder path; root is '/'"),
+    ] = None,
+    relative_paths: Annotated[
+        Optional[List[str]],
+        Form(description="One relative path per file, preserving directory levels"),
+    ] = None,
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    normalized_target: str | None = None
+    if target_folder is not None:
+        try:
+            normalized_target = _normalize_folder_path(target_folder)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if relative_paths is not None and len(relative_paths) != len(files):
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths must have one entry per uploaded file",
+            )
+
     valid_files, validation_failures = _validate_upload_files(files)
+    # Validation drops files, so the relative paths have to follow the original
+    # upload order instead of being zipped with the shortened list.
+    relative_by_file = {
+        id(file): relative_paths[index] if relative_paths else (file.filename or "unknown")
+        for index, file in enumerate(files)
+    }
+    valid_relative_paths = (
+        [relative_by_file[id(file)] for file in valid_files]
+        if normalized_target is not None
+        else None
+    )
     server_url, api_key = _credentials()
     if valid_files:
         result = await run_blocking(
@@ -1017,6 +1213,8 @@ async def upload_documents(
             api_key,
             kds_id,
             valid_files,
+            normalized_target,
+            valid_relative_paths,
             lane="control-io",
             owner="config",
         )
@@ -1041,6 +1239,194 @@ async def upload_documents(
         "success_list": success_list,
         "failed_list": failed_list,
     }
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/folders/tree")
+async def get_folder_tree(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    folder_path: Annotated[str, Query(description="Folder path; root is '/'")] = "/",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+    file_type: Annotated[str | None, Query(max_length=32)] = None,
+    file_status: Annotated[str | None, Query(max_length=32)] = None,
+) -> JSONResponse:
+    """Read one folder level: direct subfolders plus its paginated files."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    try:
+        normalized_path = _normalize_folder_path(folder_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-folder-tree",
+        get_aidp_folder_tree_impl,
+        server_url,
+        api_key,
+        kds_id,
+        normalized_path,
+        page,
+        page_size,
+        keyword,
+        file_type,
+        file_status,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/folders")
+async def create_folder(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: CreateAidpFolderRequest,
+) -> JSONResponse:
+    """Create one folder below an existing folder."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-create-folder",
+        create_aidp_folder_impl,
+        server_url,
+        api_key,
+        kds_id,
+        body.parent_folder,
+        body.folder_name,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.patch("/knowledge-bases/{kds_id}/folders")
+async def rename_folder(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RenameAidpFolderRequest,
+) -> JSONResponse:
+    """Rename one folder within its current parent."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-rename-folder",
+        rename_aidp_folder_impl,
+        server_url,
+        api_key,
+        kds_id,
+        body.parent_folder,
+        body.old_folder_name,
+        body.new_folder_name,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.delete("/knowledge-bases/{kds_id}/folders")
+async def delete_folder(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    folder_path: Annotated[str, Query(description="Folder path to delete")],
+) -> Response:
+    """Delete one empty folder; AIDP rejects non-empty folders."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    try:
+        normalized_path = _normalize_folder_path(folder_path, allow_root=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    server_url, api_key = _credentials()
+    await run_blocking(
+        "aidp-delete-folder",
+        delete_aidp_folder_impl,
+        server_url,
+        api_key,
+        kds_id,
+        normalized_path,
+        lane="control-io",
+        owner="config",
+    )
+    return Response(status_code=HTTPStatus.NO_CONTENT)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/folders/move")
+async def move_folder(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: MoveAidpFolderRequest,
+) -> JSONResponse:
+    """Move one folder below another folder."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-move-folder",
+        move_aidp_folder_impl,
+        server_url,
+        api_key,
+        kds_id,
+        body.parent_folder,
+        body.folder_name,
+        body.target_folder,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/files/move")
+async def move_files(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: MoveAidpFilesRequest,
+) -> JSONResponse:
+    """Move knowledge files to a folder; AIDP reports per-file outcomes."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-move-files",
+        move_aidp_files_impl,
+        server_url,
+        api_key,
+        kds_id,
+        [str(file_uuid) for file_uuid in body.file_uuids],
+        body.target_folder,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.patch("/knowledge-bases/{kds_id}/files")
+async def rename_file(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RenameAidpFileRequest,
+) -> JSONResponse:
+    """Rename one knowledge file."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-rename-file",
+        rename_aidp_file_impl,
+        server_url,
+        api_key,
+        kds_id,
+        str(body.file_uuid),
+        body.new_file_name,
+        lane="control-io",
+        owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 

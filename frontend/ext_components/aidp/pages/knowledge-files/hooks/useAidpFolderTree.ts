@@ -1,49 +1,51 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import log from "@/lib/logger";
+import { useQuery } from "@tanstack/react-query";
+
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import log from "@/lib/logger";
 
-export const useAidpKnowledgeFiles = (
+/**
+ * One folder level. AIDP paginates the files server-side and returns the
+ * direct subfolders alongside them, so paging/search must stay in this query
+ * rather than filtering a previously loaded page in the browser.
+ */
+export const useAidpFolderTree = (
   id: string,
+  folderPath: string,
   page: number,
   pageSize: number,
   keyword: string,
   pollingPaused = false
 ) => {
   const scope = useAidpQueryScope();
-  const queryClient = useQueryClient();
   return useQuery({
-    queryKey: [...scope.key, "files", id, { page, pageSize, keyword }],
+    queryKey: [
+      ...scope.key,
+      "folder-tree",
+      id,
+      { folderPath, page, pageSize, keyword },
+    ],
     queryFn: async ({ signal }) => {
       try {
-        const result = await aidpKnowledgeService.listIngestedFiles(
+        return await aidpKnowledgeService.getFolderTree(
           id,
+          folderPath,
           page,
           pageSize,
           keyword,
           signal
         );
-        if (!keyword && result.total_reliable) {
-          queryClient.setQueryData<AidpKbDetail>(
-            [...scope.key, "detail", id],
-            (current) =>
-              current && {
-                ...current,
-                document_count: result.total_count,
-              }
-          );
-        }
-        return result;
       } catch (error) {
-        if (!signal.aborted)
-          log.error("Failed to load AIDP knowledge files:", {
+        if (!signal.aborted) {
+          log.error("Failed to load AIDP folder tree:", {
             id,
+            folderPath,
             page,
             error,
           });
+        }
         throw error;
       }
     },
