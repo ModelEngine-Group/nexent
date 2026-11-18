@@ -3,16 +3,15 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
-from fastapi.testclient import TestClient
+import ops_service
 import pytest
-
+from fastapi.testclient import TestClient
 from ops.api.application import create_app
 from ops.lifespan import ops_lifespan
-import ops_service
 
 BACKEND = Path(__file__).resolve().parents[3] / 'backend'
 
@@ -26,14 +25,21 @@ def test_health_follows_application_lifetime():
     assert before.json() == {'status': 'not_ready'}
 
     with client:
+        manager = app.state.thread_manager
+        assert manager.service_name == 'ops'
+        assert manager.state.value == 'running'
         assert client.get('/health/live').status_code == 200
         assert client.get('/health/ready').status_code == 200
         assert client.get('/health/ready').json() == {'status': 'ready'}
-        assert set(client.get('/openapi.json').json()['paths']) == {'/ops/authorization', '/ops/resources', '/ops/scope'}
+        assert set(client.get('/openapi.json').json()['paths']) == {
+            '/system_configurations', '/system_configurations/recommendations',
+            '/ops/authorization', '/ops/resources', '/ops/scope',
+        }
         assert client.get('/ops/authorization').status_code == 401
         assert client.get('/docs').status_code == 200
 
     assert app.state.ready is False
+    assert manager.state.value in {'closed', 'closed_with_stuck'}
     assert client.get('/health/ready').status_code == 503
 
 

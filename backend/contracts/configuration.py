@@ -4,6 +4,8 @@
 import math
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 def validate_deployment_version(value: str) -> str:
     """Reject retired authentication modes instead of silently enabling a bypass."""
@@ -108,6 +110,18 @@ def _resolve_app_version(default: str = "v2.2.1", *, version_file=None) -> str:
         if version is not None:
             return version
     return default
+
+
+class SystemConfigurationChangesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    changes: dict[str, object] = Field(min_length=1, max_length=19)
+
+
+class SystemConfigurationRecommendationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=100)
 
 
 def _require_positive(value, message):

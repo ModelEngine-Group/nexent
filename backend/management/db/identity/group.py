@@ -10,11 +10,8 @@ from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
-from contracts.constants.environment import MAX_GROUPS_PER_TENANT
+from management.configuration.runtime import get_config_snapshot
 from sqlalchemy import text
-
-_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
-
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
     """
@@ -137,11 +134,12 @@ def add_group(
             .count()
         )
         group_count = group_count if isinstance(group_count, int) else 0
-        if group_count >= _GROUP_LIMIT:
-            error = TenantResourceLimitError(f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant")
+        limit = get_config_snapshot().get("MAX_GROUPS_PER_TENANT")
+        if group_count >= limit:
+            error = TenantResourceLimitError(f"Tenant group limit reached: maximum {limit} groups per tenant")
             error.resource = "groups"
             error.scope = "tenant"
-            error.limit = _GROUP_LIMIT
+            error.limit = limit
             error.current_count = group_count
             raise error
         group = TenantGroupInfo(

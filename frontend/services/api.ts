@@ -19,6 +19,7 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  systemConfigurations: `${API_BASE_URL}/system_configurations`,
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     conversation: (id: string) =>
@@ -823,7 +824,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
-      if (params?.lang) queryParams.append("lang", (params as any).lang);
+      if (params?.lang) queryParams.append("lang", params.lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
