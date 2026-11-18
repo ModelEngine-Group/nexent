@@ -1,6 +1,7 @@
 @import "tw-shimmer";
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./semantic-colors.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -56,13 +57,21 @@
 }
 
 @keyframes accordion-down {
-  from { height: 0; }
-  to { height: var(--radix-accordion-content-height); }
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
 }
 
 @keyframes accordion-up {
-  from { height: var(--radix-accordion-content-height); }
-  to { height: 0; }
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 @layer base {
@@ -351,7 +360,8 @@ button svg,
 }
 
 .auto-hide-scrollbars[data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover,
-.auto-hide-scrollbars [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
+.auto-hide-scrollbars
+  [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover) !important;
 }
 
@@ -674,4 +684,34 @@ tr.selected-row > td:first-child::before {
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Keep a visible keyboard focus indicator across native and Ant Design controls. */
+:where(
+  a,
+  button,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  [role="switch"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--color-brand) !important;
+  outline-offset: 2px !important;
+}
+
+:where(.ant-input-affix-wrapper, .ant-input-number):focus-within {
+  outline: 2px solid var(--color-brand) !important;
+  outline-offset: 2px !important;
+}
+
+:where(.ant-input-borderless, .ant-input-number-borderless):focus {
+  outline: 2px solid var(--color-brand) !important;
+  outline-offset: 2px !important;
+}
+
+:where(.ant-segmented-item):focus-within {
+  outline: 2px solid var(--color-brand) !important;
+  outline-offset: 2px !important;
 }

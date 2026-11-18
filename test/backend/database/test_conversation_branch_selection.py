@@ -9,6 +9,14 @@ from contracts.conversation import BranchConversationRequest
 from management.db.conversation.repository import _select_branch_turn_rows
 
 
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.conversation import repository as db
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(db, "get_config_snapshot", lambda: system_config_snapshot())
+
+
 def row(message_id, index, role):
     return SimpleNamespace(message_id=message_id, message_index=index, message_role=role)
 

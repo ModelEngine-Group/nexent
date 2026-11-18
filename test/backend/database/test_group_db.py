@@ -8,6 +8,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 from unittest.mock import MagicMock
 
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.identity import group
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(group, "get_config_snapshot", lambda: system_config_snapshot())
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -1604,7 +1612,9 @@ def test_create_group_rejects_tenant_group_limit(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_GROUP_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(MAX_GROUPS_PER_TENANT=1))
 
     with pytest.raises(ResourceLimitError, match="group limit"):
         module.add_group("tenant-1", "group-2")
@@ -1625,7 +1635,9 @@ def test_group_limit_boundaries(monkeypatch, mock_session, current_count, should
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_GROUP_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(MAX_GROUPS_PER_TENANT=1))
 
     if should_reject:
         with pytest.raises(ResourceLimitError):

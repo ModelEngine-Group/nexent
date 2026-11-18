@@ -189,6 +189,12 @@ export function useAuthorization(): AuthorizationContextType {
   const isSharePage =
     !isOperationsOnly(user) && cleanPath.startsWith("/share/");
 
+  // Personal profile is a self-service page available to every signed-in role.
+  const isUserProfilePage = cleanPath === "/users";
+  const isSystemConfigAlias =
+    cleanPath === "/system-config" &&
+    accessibleRoutes.includes("/ops/configuration");
+
   // Support prefix matching so nested routes such as /evaluation/{id} are
   // covered by /evaluation.
   const isWithinAccessiblePrefix = accessibleRoutes.some(
@@ -196,7 +202,10 @@ export function useAuthorization(): AuthorizationContextType {
   );
 
   const hasAccess =
+    cleanPath === "/" ||
     isSharePage ||
+    isUserProfilePage ||
+    isSystemConfigAlias ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;
 
@@ -224,16 +233,16 @@ export function useAuthorization(): AuthorizationContextType {
         pathname: cleanPath,
         accessibleRoutes,
       });
-      if (user) {
-        openAuthzPromptModal();
-      }
       setTimeout(() => {
+        if (user) {
+          openAuthzPromptModal();
+        }
         router.replace("/");
       }, 0);
       return;
     }
 
-    setLastCheckedPath(pathname);
+    setTimeout(() => setLastCheckedPath(pathname), 0);
   }, [
     pathname,
     isLoading,

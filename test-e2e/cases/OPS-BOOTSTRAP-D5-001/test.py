@@ -3,12 +3,12 @@
 
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
-from urllib.error import URLError
+from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, build_opener
 
 import pytest
@@ -42,12 +42,27 @@ import sys
 
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {
-            'management', 'runtime', 'nexent', 'redis',
-            'elasticsearch', 'minio', 'supabase', 'sqlalchemy', 'psycopg2',
+        allowed_base_imports = {
+            'management', 'management.db', 'management.utils',
+            'management.utils.exception_handlers', 'management.utils.orm',
+            'management.utils.request_context',
+            'management.configuration',
+        }
+        allowed_shared_import = (
+            fullname in allowed_base_imports
+            or fullname.startswith('management.db.')
+            or fullname.startswith('management.configuration.')
+            or fullname == 'nexent' or fullname.startswith('nexent.')
+        )
+        if not allowed_shared_import and fullname.split('.')[0] in {
+            'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
-        if fullname.startswith('infrastructure.') and fullname != 'infrastructure.logging':
+        if fullname.startswith('infrastructure.') and not (
+            fullname == 'infrastructure.logging'
+            or fullname == 'infrastructure.security'
+            or fullname.startswith('infrastructure.security.')
+        ):
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):
@@ -96,7 +111,15 @@ runpy.run_path('ops_service.py', run_name='__main__')
                     assert response.status == 200
                     schema = json.load(response)
                     assert schema['info']['title'] == 'Nexent Operations API'
-                    assert schema['paths'] == {}
+                    assert set(schema['paths']) == {
+                        '/system_configurations', '/system_configurations/recommendations',
+                        '/ops/authorization', '/ops/resources', '/ops/scope',
+                    }
+                try:
+                    opener.open(f'http://127.0.0.1:{port}/system_configurations', timeout=2)
+                    raise AssertionError('Anonymous configuration query must be rejected')
+                except HTTPError as error:
+                    assert error.code == 401
             finally:
                 process.terminate()
                 try:
