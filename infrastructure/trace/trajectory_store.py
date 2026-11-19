@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
 import logging
 import os
@@ -22,6 +21,7 @@ from .trajectory_io import (
     Directory,
     TrajectoryConflict,
     TrajectoryCorrupt,
+    _lock_exclusive,
     digest,
     json_chunks,
     prefix_hash,
@@ -378,7 +378,7 @@ class TrajectoryFileStore:
                 raise TrajectoryConflict("Trajectory execution is already registered")
             fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR | os.O_CREAT | os.O_EXCL)
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _lock_exclusive(fd, blocking=False)
                 os.fsync(fd)
                 os.fsync(directory.fd)
                 meta["runs"].append(
@@ -478,7 +478,7 @@ class TrajectoryFileStore:
                 raise TrajectoryCorrupt("Registered trajectory file is missing") from error
             with os.fdopen(fd, "rb", closefd=True):
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    _lock_exclusive(fd, blocking=False)
                 except BlockingIOError as error:
                     raise TrajectoryConflict("Trajectory execution still has a writer") from error
                 try:
@@ -633,7 +633,7 @@ class TrajectoryFileStore:
                     fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR)
                 try:
                     try:
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        _lock_exclusive(fd, blocking=False)
                     except BlockingIOError:
                         result["pending_runs"] += 1
                         continue
