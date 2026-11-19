@@ -139,7 +139,7 @@
       "copyCount": "{{count, number}} 次"
     },
     "agentCardCopies": "{{formattedCount}} 复制",
-    "skillInstalls": "安装 {{count}} 次",
+    "skillInstalls": "{{count}} 次安装",
     "createFromTemplate": "从模板创建",
     "defaultSort": "综合"
   },
