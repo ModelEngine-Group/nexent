@@ -124,11 +124,13 @@ class ManagedMCPToolCollection:
         async with AsyncExitStack() as stack:
             connections = []
             for parameters in self.server_parameters:
+                transport_parameters = dict(parameters)
+                on_tool_result = transport_parameters.pop("on_tool_result", None)
                 try:
                     connection = await asyncio.wait_for(
                         stack.enter_async_context(
                             session_factory(
-                                parameters,
+                                transport_parameters,
                                 client_session_timeout_seconds=None,
                             )
                         ),
@@ -147,18 +149,27 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append(connection)
+                connections.append((*connection, on_tool_result))
 
             tools = []
-            for session, mcp_tools in connections:
+            for session, mcp_tools, on_tool_result in connections:
                 for mcp_tool in mcp_tools:
 
                     def call_tool(
                         arguments=None,
                         __session=session,
                         __name=mcp_tool.name,
+                        __on_tool_result=on_tool_result,
                     ):
-                        return self._call_tool(__session, __name, arguments)
+                        result = self._call_tool(__session, __name, arguments)
+                        if (
+                            __on_tool_result is not None
+                            and not self._close_requested.is_set()
+                            and not self.cancellation_scope.cancelled
+                            and not result.isError
+                        ):
+                            __on_tool_result(__name, result.meta)
+                        return result
 
                     tools.append(adapter.adapt(call_tool, mcp_tool))
 
@@ -426,6 +437,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
+
+        if callable(mcp_host_item.get("on_tool_result")):
+            result["on_tool_result"] = mcp_host_item["on_tool_result"]
 
         if "httpx_client_factory" in mcp_host_item:
             httpx_client_factory = mcp_host_item["httpx_client_factory"]

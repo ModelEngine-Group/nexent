@@ -318,6 +318,7 @@ class NexentAgent(AgentResources):
 
             enable_clarification = (
                 root_clarification_allowed(self.core_run_info, managed_context=_managed_context)
+                and getattr(self.observer, "manages_requirement_clarification", False) is not True
                 and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )

@@ -383,12 +383,27 @@ def get_capacity_model_records(model_types: set[str], tenant_id: str) -> List[di
 
 
 def get_model_records_by_ids(model_ids: List[int]) -> Dict[int, Dict[str, Any]]:
-    """Load complete frozen profiles and list flags without model credentials."""
+    """Load list metadata and decodable saved profiles without model credentials."""
     if not model_ids:
         return {}
     with get_db_session() as session:
-        columns = [column for column in ModelRecord.__table__.columns if column.key not in {"api_key", "http_headers"}]
-        rows = session.execute(select(*columns).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
+        rows = session.execute(select(
+            ModelRecord.model_id, ModelRecord.tenant_id, ModelRecord.delete_flag,
+            ModelRecord.model_type, ModelRecord.display_name, ModelRecord.model_name,
+            ModelRecord.profile_schema_version, ModelRecord.connect_status,
+            # Agent override projection decodes the saved profile from this batch.
+            ModelRecord.model_factory, ModelRecord.base_url, ModelRecord.ssl_verify,
+            ModelRecord.timeout_seconds, ModelRecord.concurrency_limit,
+            ModelRecord.default_output_reserve_tokens, ModelRecord.tokenizer_family,
+            ModelRecord.capacity_source, ModelRecord.capability_profile_version,
+            ModelRecord.context_window_tokens, ModelRecord.max_input_tokens, ModelRecord.max_output_tokens,
+            ModelRecord.reasoning_supported, ModelRecord.native_tool_call_supported,
+            ModelRecord.structured_output_supported, ModelRecord.temperature_supported, ModelRecord.top_p_supported,
+            ModelRecord.reasoning_controls, ModelRecord.input_modalities, ModelRecord.output_modalities,
+            ModelRecord.temperature, ModelRecord.top_p, ModelRecord.enable_thinking,
+            ModelRecord.reasoning_effort, ModelRecord.reasoning_budget_tokens, ModelRecord.default_max_output_tokens,
+            ModelRecord.protocol_id, ModelRecord.resolved_profile, ModelRecord.extra_params, ModelRecord.config_revision,
+        ).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
         return {row["model_id"]: dict(row) for row in rows}
 
 

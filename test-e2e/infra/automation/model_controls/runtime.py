@@ -146,7 +146,7 @@ def runtime_fixture(monkeypatch):
                     if hasattr(module, "get_current_user_info"):
                         monkeypatch.setattr(module, "get_current_user_info", lambda *a, **k: (owner, tenant, "en"))
                     if hasattr(module, "get_current_user_context"):
-                        monkeypatch.setattr(module, "get_current_user_context", lambda *a, **k: (owner, tenant, "CREATOR"))
+                        monkeypatch.setattr(module, "get_current_user_context", lambda *a, **k: (owner, tenant, "DEV"))
             from permissions import rbac
             old_permissions, old_initialized = rbac._ROLE_PERMISSIONS.copy(), rbac._INITIALIZED
             rbac.init_rbac()

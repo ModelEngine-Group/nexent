@@ -3,7 +3,7 @@
 
 import logging
 from dataclasses import InitVar, dataclass, field
-from typing import Any, Callable, Dict, Mapping
+from typing import Any, Callable, Dict, Literal, Mapping
 
 from ...prompts import load_prompt
 from .policy import PolicyLayers
@@ -29,6 +29,7 @@ class ContextManagerConfig:
     soft_input_budget_tokens: InitVar[int | None] = None
     hard_input_budget_tokens: InitVar[int | None] = None
     execution_history: Any = None
+    execution_result_role: Literal["assistant", "user"] = "assistant"
     keep_recent_steps: int = 4
     enable_long_term_memory_selection: bool = True
 

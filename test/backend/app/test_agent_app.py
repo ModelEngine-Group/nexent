@@ -394,7 +394,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert request.conversation_id is None
+    assert request.conversation_id == 42
     assert request.persist_history is True
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
@@ -633,7 +633,7 @@ async def test_nl2agent_editor_run_uses_persistent_history(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert request.conversation_id is None
+    assert request.conversation_id == 42
     assert request.persist_history is True
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"

@@ -18,6 +18,7 @@ MIGRATED_MODULES = {
     'agent/replay.py',
     'agent/runtime_config.py',
     'conversation/nexent_output.py',
+    'conversation/nl2agent_resource_index.py',
     'conversation/runtime_output.py',
     'knowledge_base/quota_formatting.py',
     'northbound.py',

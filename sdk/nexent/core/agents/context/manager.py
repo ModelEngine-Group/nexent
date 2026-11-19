@@ -687,7 +687,8 @@ class ContextManager:
     def build_context_messages(self, items=None):
         from .rendering import ContextItemRenderer
 
-        return ContextItemRenderer().render(sorted(self._item_source(items), key=lambda item: item.layout_key))
+        renderer = ContextItemRenderer(execution_result_role=self.config.execution_result_role)
+        return renderer.render(sorted(self._item_source(items), key=lambda item: item.layout_key))
 
     def build_system_prompt(self):
         return self.build_context_messages()

@@ -38,6 +38,7 @@ import { message } from "antd";
 import { conversationService } from "@/services/conversationService";
 import { useCreatorHistories } from "@/hooks/chat/useCreatorHistories";
 import { CreatorHistoryToolbar } from "./creator-history-toolbar";
+import { Nl2AgentWorkflowHeader } from "./nl2agent-workflow-progress";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -85,6 +86,7 @@ export const Nl2AgentChatPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation("common");
+  const activeRun = useRef<symbol | null>(null);
   const { modelConfig } = useConfig();
   const historyRef = useRef<{ agentId: number | null; id?: string }>({
     agentId,
@@ -116,6 +118,8 @@ export const Nl2AgentChatPanel = forwardRef<
     () => ({
       async *run(options) {
         if (!modelControls.canSend || restoring) return;
+        const token = Symbol("retrieval-run");
+        activeRun.current = token;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -132,7 +136,12 @@ export const Nl2AgentChatPanel = forwardRef<
                 },
                 agentId,
                 turnModelControls: modelControls.snapshot,
-                onNl2AgentState: onStateEvent,
+                onNl2AgentState: (event: Nl2AgentStateEvent) => {
+                  if (activeRun.current !== token || event.agent_id !== agentId)
+                    return;
+                  if (event.event !== "resource_retrieval_progress")
+                    onStateEvent?.(event);
+                },
                 onNl2AgentStopped: onStopped,
               },
             },
@@ -143,6 +152,9 @@ export const Nl2AgentChatPanel = forwardRef<
             yield* runResult;
           }
         } finally {
+          if (activeRun.current === token) {
+            activeRun.current = null;
+          }
           void history.refresh();
           if (agentId !== null) onRunEnd?.(agentId);
         }
@@ -287,6 +299,7 @@ export const Nl2AgentChatPanel = forwardRef<
             onSelect={selectHistory}
             onNew={newConversation}
           />
+          <Nl2AgentWorkflowHeader agentId={agentId} restoring={restoring} />
           <div className="min-h-0 flex-1 [&>div]:!bg-transparent">
             <Thread
               agent={nl2AgentDisplay}

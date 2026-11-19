@@ -17,6 +17,8 @@ const mock = vi.hoisted(() => ({
   updateToolConfig: vi.fn(),
   saveSkillInstance: vi.fn(),
   searchToolConfig: vi.fn(),
+  fetchSkillById: vi.fn(),
+  fetchSkillInstances: vi.fn(),
   searchAgentInfo: vi.fn(),
   waitForIdle: vi.fn(),
   apply: vi.fn(),
@@ -102,12 +104,32 @@ vi.mock("@/services/agentConfigService", () => ({
   saveSkillInstance: mock.saveSkillInstance,
   searchToolConfig: mock.searchToolConfig,
   searchAgentInfo: mock.searchAgentInfo,
+  fetchSkillById: mock.fetchSkillById,
+  fetchSkillInstances: mock.fetchSkillInstances,
 }));
 vi.mock("@/app/agents/components/capability/tool/ToolConfigModal", () => ({
-  default: () => <div role="dialog">Tool configuration</div>,
+  default: ({ initialParams }: any) => (
+    <div role="dialog">
+      <span>Tool configuration</span>
+      {initialParams.map((param: any) => (
+        <span key={param.name}>
+          {param.name}: {param.value}
+        </span>
+      ))}
+    </div>
+  ),
 }));
 vi.mock("@/app/agents/components/capability/skill/SkillConfigModal", () => ({
-  default: () => <div role="dialog">Skill configuration</div>,
+  default: ({ initialParams }: any) => (
+    <div role="dialog">
+      <span>Skill configuration</span>
+      {initialParams.map((param: any) => (
+        <span key={param.name}>
+          {param.name}: {param.value}
+        </span>
+      ))}
+    </div>
+  ),
 }));
 vi.mock("@/components/resource-picker/KnowledgeDrawer", () => ({
   KnowledgeDrawer: (props: any) => (
@@ -176,7 +198,7 @@ async function choosePolicy() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mock.tools = [];
   mock.editedAgent = undefined;
   mock.knowledgeError = false;
@@ -200,6 +222,129 @@ beforeEach(() => {
 });
 
 describe("NL2A-RESOURCE-D1-001", () => {
+  it.each(["tool", "skill"] as const)(
+    "loads deferred %s configuration before opening from Bind",
+    async (type) => {
+      const params = [
+        { name: "token", type: "string", required: true, value: "default" },
+      ];
+      const item = {
+        ...resource("Custom resource", 2, type),
+        has_config: true,
+      };
+      mock.tools = [
+        {
+          id: "2",
+          name: "Custom resource",
+          source: "local",
+          initParams: params,
+        },
+      ];
+      let resolveLoad!: (value: any) => void;
+      const loading = new Promise((resolve) => {
+        resolveLoad = resolve;
+      });
+      mock.searchToolConfig.mockReturnValue(loading);
+      mock.fetchSkillById.mockReturnValue(loading);
+      mock.fetchSkillInstances.mockResolvedValue({
+        success: true,
+        data: [{ skill_id: "2", config_values: { token: "saved" } }],
+      });
+      render(
+        <InstalledResourceBindingCard
+          payload={{
+            subtype: "installed_resource_binding",
+            agent_id: 42,
+            protocol_version: 2,
+            card_id: "binding",
+            state_version: 1,
+            resources: [item],
+          }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /Bind selected/ }));
+      const loader =
+        type === "tool" ? mock.searchToolConfig : mock.fetchSkillById;
+      await waitFor(() =>
+        expect(loader).toHaveBeenCalledWith(
+          2,
+          ...(type === "tool" ? [42] : []),
+        ),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Bind selected/ }),
+      ).toBeDisabled();
+      expect(mock.updateToolConfig).not.toHaveBeenCalled();
+      expect(mock.saveSkillInstance).not.toHaveBeenCalled();
+      resolveLoad({
+        success: true,
+        data: { params: { token: "saved" }, config_schemas: params },
+      });
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText("token: saved")).toBeInTheDocument();
+      expect(mock.updateToolConfig).not.toHaveBeenCalled();
+      expect(mock.saveSkillInstance).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["tool", "skill"] as const)(
+    "keeps failed %s configuration closed and permits retry",
+    async (type) => {
+      const params = [{ name: "token", type: "string", required: true }];
+      mock.tools = [
+        {
+          id: "2",
+          name: "Custom resource",
+          source: "local",
+          initParams: params,
+        },
+      ];
+      mock.searchToolConfig
+        .mockRejectedValueOnce(new Error("Load failed"))
+        .mockResolvedValue({
+          success: true,
+          data: { params: { token: "saved" } },
+        });
+      mock.fetchSkillById
+        .mockResolvedValueOnce({ success: false })
+        .mockResolvedValue({ success: true, data: { config_schemas: params } });
+      mock.fetchSkillInstances.mockResolvedValue({
+        success: true,
+        data: [{ skill_id: "2", config_values: { token: "saved" } }],
+      });
+      render(
+        <InstalledResourceBindingCard
+          payload={{
+            subtype: "installed_resource_binding",
+            agent_id: 42,
+            protocol_version: 2,
+            card_id: "binding",
+            state_version: 1,
+            resources: [
+              { ...resource("Custom resource", 2, type), has_config: true },
+            ],
+          }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /Bind selected/ }));
+      await screen.findByText(
+        "Failed to load the current resource configuration.",
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Bind selected/ }),
+      ).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: /Bind selected/ }));
+      expect(
+        within(await screen.findByRole("dialog")).getByText("token: saved"),
+      ).toBeInTheDocument();
+      expect(mock.updateToolConfig).not.toHaveBeenCalled();
+      expect(mock.saveSkillInstance).not.toHaveBeenCalled();
+      expect(mock.append).not.toHaveBeenCalled();
+    },
+  );
+
   it("renders three resource types and preserves ordinary Tool and Skill configuration", async () => {
     const param = [{ name: "token", type: "string", required: false }];
     const { container } = show([

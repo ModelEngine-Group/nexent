@@ -14,6 +14,10 @@ from permissions.models import CurrentUser
 from management.services.agent.service import run_agent_stream, stop_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from services.nl2agent_state_service import ResourceStateError
+from contracts.nl2agent_resources import (
+    ResourceInstallationAttemptRequest, ResourceInstallationRequest, ResourceLinkRequest,
+)
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
@@ -206,6 +210,11 @@ async def nl2agent_run_api(
             status_code=HTTPStatus.BAD_REQUEST,
             detail={"code": exc.code, "message": "Agent context is invalid."},
         ) from exc
+    except ResourceStateError as exc:
+        raise HTTPException(
+            status_code=503 if exc.code == "resource_state_unavailable" else 409,
+            detail={"code": exc.code, "retryable": exc.retryable},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -217,6 +226,56 @@ async def nl2agent_run_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="NL2Agent run error.",
         ) from exc
+
+
+async def _run_resource_operation(operation, payload, http_request, authorization):
+    from management.services.agent.authorization import require_agent_draft_edit
+    from services.nl2agent_service import Nl2AgentResourceError
+    from services.nl2agent_state_service import ResourceScope
+
+    user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+    try:
+        require_agent_draft_edit(agent_id=payload.agent_id, tenant_id=tenant_id, user_id=user_id)
+        scope = ResourceScope(tenant_id, user_id, payload.agent_id, str(payload.conversation_id), "")
+        return await operation(scope, payload)
+    except (ResourceStateError, Nl2AgentResourceError) as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "retryable": exc.retryable}) from exc
+    except (AgentDraftEditError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail={"code": "agent_read_only"}) from exc
+
+
+@agent_runtime_router.post("/nl2agent/resource_installations")
+async def nl2agent_resource_installation_details(
+    payload: ResourceInstallationRequest, http_request: Request,
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_agent_create_permission),
+):
+    from services.nl2agent_resource_flow import installation_details
+
+    return await _run_resource_operation(installation_details, payload, http_request, authorization)
+
+
+@agent_runtime_router.post("/nl2agent/resource_links")
+async def nl2agent_resource_link(
+    payload: ResourceLinkRequest, http_request: Request,
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_agent_create_permission),
+):
+    from services.nl2agent_resource_flow import link_installed_resource
+
+    await _run_resource_operation(link_installed_resource, payload, http_request, authorization)
+    return {"status": "success"}
+
+
+@agent_runtime_router.post("/nl2agent/resource_installation_attempts")
+async def nl2agent_resource_installation_attempt(
+    payload: ResourceInstallationAttemptRequest, http_request: Request,
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_agent_create_permission),
+):
+    from services.nl2agent_resource_flow import installation_attempt
+
+    return await _run_resource_operation(installation_attempt, payload, http_request, authorization)
 
 
 @agent_runtime_router.get("/stop/{run_id}")

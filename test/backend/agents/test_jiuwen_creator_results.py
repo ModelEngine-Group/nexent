@@ -16,18 +16,33 @@ from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 from services.nl2agent_service import _Nl2AgentBoundaryObserver
 
 
+@pytest.fixture(autouse=True)
+def isolate_retrieval_progress(mocker):
+    mocker.patch("services.nl2agent_retrieval_progress.read_progress", return_value=[])
+    mocker.patch("services.nl2agent_retrieval_progress.clear_progress")
+
+
 CARD = '<nl2a>\n{"subtype":"requirement_clarification","agent_id":42,"questions":[]}\n</nl2a>'
 STATE = '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":42,"updated_fields":["name"]}</nl2a_state>'
 
 
 def setup_adapter(mode="python_workflow"):
     stop = threading.Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop)
+    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop, agent_id=42, run_id="run", conversation_id="9")
     adapter = JiuwenAdapter(SimpleNamespace(
         agent_config=AgentConfig(name="creator", description="creator", model_name="model", tools=[], response_mode=mode),
-        observer=observer, query="create", stop_event=stop,
+        observer=observer, query="create", stop_event=stop, mcp_host=[{"headers": {"X-Nexent-NL2Agent-Run-ID": "run"}}],
     ))
     return adapter, observer, stop
+
+
+def publish_card(observer):
+    from services.nl2agent_service import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
+
+    observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {NL2AGENT_RECEIPT_KEY: {
+        "event_id": "card-event", "run_id": "run", "conversation_id": "9",
+        "payload": {"subtype": "requirement_clarification", "agent_id": 42, "questions": []},
+    }})
 
 
 def drain(observer):
@@ -41,21 +56,19 @@ def drain(observer):
     lambda text: {"content": [{"type": "text", "text": text}]},
     lambda text: text,
 ])
-def test_successful_workflow_carriers_publish_the_same_card(carrier):
+def test_workflow_text_carriers_cannot_publish_a_trusted_card(carrier):
     adapter, observer, stop = setup_adapter()
     adapter._resource_result(carrier(CARD))
     cards = [event for event in drain(observer) if event["type"] == "nl2a"]
-    assert len(cards) == 1 and json.loads(cards[0]["content"])["agent_id"] == 42
-    assert observer.boundary_reached and observer.turn_complete
-    # A delivered interaction ends this turn without cancelling its producer.
-    assert not stop.is_set()
+    assert cards == []
+    assert not observer.boundary_reached and not stop.is_set()
 
 
 def test_native_mcp_draft_state_is_published_without_ending_the_turn():
     adapter, observer, stop = setup_adapter()
     adapter._resource_result({"result": STATE})
     states = [event for event in drain(observer) if event["type"] == "nl2a_state"]
-    assert len(states) == 1 and json.loads(states[0]["content"])["updated_fields"] == ["name"]
+    assert states == []
     assert not observer.boundary_reached and not stop.is_set()
 
 
@@ -84,7 +97,7 @@ def test_plain_chat_keeps_native_mcp_result_as_data():
 async def test_card_blocks_next_model_prepare_and_tool_dispatch():
     adapter, observer, _stop = setup_adapter()
     from nexent.core.utils.observer import ProcessType
-    observer.add_message("creator", ProcessType.EXECUTION_LOGS, CARD)
+    publish_card(observer)
     assert observer.boundary_reached
     adapter.mcp = None
     adapter.context_bridge = SimpleNamespace(prepare_messages=AsyncMock())
@@ -178,7 +191,7 @@ async def test_waiting_card_drains_worker_cleanup_while_real_stop_still_cancels(
 
     adapter, observer, stop = setup_adapter()
     if interactive:
-        observer.add_message("creator", ProcessType.EXECUTION_LOGS, CARD)
+        publish_card(observer)
     else:
         stop.set()
     future = Future()

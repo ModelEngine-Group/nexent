@@ -2,16 +2,7 @@
 
 "use client";
 
-import {
-  BookOpen,
-  CheckCircle2,
-  HardDrive,
-  Loader2,
-  Plug,
-  Settings2,
-  Sparkles,
-  Target,
-} from "lucide-react";
+import { BookOpen, CheckCircle2, Loader2, Settings2, Target } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { Tool } from "@/types/agentConfig";
@@ -20,10 +11,12 @@ import type { BindingItemState } from "./installed-resource-binding-card";
 import type { Nl2AgentResourceParam } from "./nl2agent-resource-config";
 import { knowledgeToolName } from "./nl2agent-knowledge-config";
 import { Nl2AgentKnowledgePicker } from "./nl2agent-knowledge-picker";
+import { Nl2AgentResourceKindBadge } from "./nl2agent-resource-kind-badge";
 
 interface BindingResourceItemProps {
   item: BindingItemState;
   tool?: Tool;
+  matchedRequirements: string[];
   ui: {
     locked: boolean;
     binding: boolean;
@@ -41,6 +34,7 @@ interface BindingResourceItemProps {
 export function Nl2AgentBindingItem({
   item,
   tool,
+  matchedRequirements,
   ui,
   onToggle,
   onConfigure,
@@ -66,14 +60,6 @@ export function Nl2AgentBindingItem({
     : candidate.source === "MCP_TOOL"
       ? "MCP"
       : "Local";
-  const CategoryIcon =
-    category === "Skill" ? Sparkles : category === "MCP" ? Plug : HardDrive;
-  const categoryStyle =
-    category === "Skill"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-600"
-      : category === "MCP"
-        ? "border-blue-200 bg-blue-50 text-blue-600"
-        : "border-gray-200 bg-gray-100 text-gray-500";
   const configureTitle = loading
     ? t("toolPool.loadingTools", "Loading tools...")
     : isTool && ui.catalogError
@@ -108,12 +94,7 @@ export function Nl2AgentBindingItem({
             >
               {displayName}
             </span>
-            <span
-              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] leading-none ${categoryStyle}`}
-            >
-              <CategoryIcon className="size-3" aria-hidden="true" />
-              {category}
-            </span>
+            <Nl2AgentResourceKindBadge kind={category} />
             {knowledgeName ? (
               <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] leading-none text-amber-600">
                 <BookOpen className="size-3" aria-hidden="true" />
@@ -128,7 +109,9 @@ export function Nl2AgentBindingItem({
                 {t("nl2agent.resourceBinding.bound", "Bound")}
               </span>
             ) : null}
-            {knowledgeName || item.draftParams.length ? (
+            {knowledgeName ||
+            item.resource.has_config ||
+            item.draftParams.length ? (
               <Button
                 type="button"
                 variant={bound ? "ghost" : "outline"}
@@ -199,20 +182,22 @@ export function Nl2AgentBindingItem({
             {candidate.description}
           </p>
         ) : null}
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
-            <Target className="size-3" aria-hidden="true" />
-            {t("nl2agent.resourceBinding.matches", "Matches")}
-          </span>
-          {candidate.requirement_ids.map((id) => (
-            <span
-              key={id}
-              className="max-w-full break-all rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none text-foreground"
-            >
-              {id}
+        {matchedRequirements.length > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Target className="size-3" aria-hidden="true" />
+              {t("nl2agent.resourceBinding.matches", "Matches")}
             </span>
-          ))}
-        </div>
+            {matchedRequirements.map((query) => (
+              <span
+                key={query}
+                className="max-w-full break-words rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground"
+              >
+                {query}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {item.fieldErrors.length ? (
           <p role="alert" className="mt-2 text-xs text-destructive">
             {knowledgeName

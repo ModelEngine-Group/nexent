@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: NL2A-CONFIG-D3-001
+timeout_seconds: 240
+implementations:
+  - framework: pytest
+    file: test_runtime.py
+    selector: test_update_configuration_sections_and_reject_forbidden_patch
+acceptance_bindings:
+  AC-CONFIG-SAVE: [test_update_configuration_sections_and_reject_forbidden_patch]
+  AC-CONFIG-REJECT: [test_update_configuration_sections_and_reject_forbidden_patch]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Agent configuration proof. The local runner supplies a disposable PostgreSQL
+  connection. The case owns its schema, model and MCP listeners, workspace and workers.

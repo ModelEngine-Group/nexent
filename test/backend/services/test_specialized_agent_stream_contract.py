@@ -20,12 +20,16 @@ from services import nl2skill_service as nl2skill_service
 @pytest.mark.asyncio
 async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, kind, use_system_ref):
     module = nl2agent_service if kind == "nl2agent" else nl2skill_service
+    mocker.patch("services.nl2agent_retrieval_progress.read_progress", return_value=[])
+    mocker.patch("services.nl2agent_retrieval_progress.clear_progress")
     request = (
         NL2AgentRunRequest(query="Create an Agent", agent_id=9)
         if kind == "nl2agent" else NL2SkillRunRequest(query="Create a skill")
     )
     stop_event = MagicMock()
-    run_info = SimpleNamespace(stop_event=stop_event, agent_config=SimpleNamespace(agent_id=None))
+    run_info = SimpleNamespace(stop_event=stop_event, agent_config=SimpleNamespace(agent_id=None),
+                               observer=MagicMock(boundary_reached=False),
+                               mcp_host=[{"headers": {"X-Nexent-NL2Agent-Run-ID": "run"}}])
     builder = mocker.patch.object(module, f"build_{kind}_run_info", return_value=run_info)
 
     async def execute(info, **kwargs):
@@ -59,6 +63,8 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
 @pytest.mark.asyncio
 async def test_active_factory_propagates_preparation_failure(mocker, kind):
     module = nl2agent_service if kind == "nl2agent" else nl2skill_service
+    mocker.patch("services.nl2agent_retrieval_progress.read_progress", return_value=[])
+    mocker.patch("services.nl2agent_retrieval_progress.clear_progress")
     request = (
         NL2AgentRunRequest(query="Create", agent_id=9)
         if kind == "nl2agent" else NL2SkillRunRequest(query="Create")

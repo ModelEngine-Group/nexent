@@ -9,26 +9,79 @@ feature:
   description: '智能体配置 / NL2Agent 2.0: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成'
   business_rules:
   - rule_id: F-045-RULE-01
-    description: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成；name
-      字段遵循后端导入和运行时的 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符；支持 Unicode 标识符，不要求 _assistant 后缀，草稿权限、首次命名和重名规则保持不变。
+    description: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成；name 字段遵循后端导入和运行时的 Python 标识符规则，排除 Python 关键字，长度为
+      1–100 字符；支持 Unicode 标识符，不要求 _assistant 后缀，草稿权限、首次命名和重名规则保持不变。
   - rule_id: F-045-RULE-02
-    description: One pending/bound card uses Local/MCP/Skill source tags plus Knowledge;
-      recommendations start selected without recommendation tags; knowledge requires
-      concrete selection. Concrete knowledge suggestions match names/descriptions/summaries
-      within visible catalogs minus direct draft bindings; pending rows show recommended
-      names or empty, bound rows show actual associations. Generic knowledge search
-      prefers the deployment-selected managed tool through scoring; DataMate remains
-      eligible and explicit resource names take precedence.
+    description: One pending/bound card uses Local/MCP/Skill source tags plus Knowledge; recommendations start selected without
+      recommendation tags; knowledge requires concrete selection. Concrete knowledge suggestions match names/descriptions/summaries
+      within visible catalogs minus direct draft bindings; pending rows show recommended names or empty, bound rows show actual
+      associations. Native knowledge tools retain the small lexical score bonus and ordinary recall thresholds. Verified available
+      alternatives rank by retrieval score and stable reference, without keyword, source-name or ready-binding priority.
+      Original source constraints remain capability checks. Recommendations use the authorized available-resource
+      catalog without knowledge-provider queries; knowledge scope is loaded and checked during configuration and binding,
+      and saved configuration readiness is checked before dependent prompt generation.
   - rule_id: F-045-RULE-03
-    description: NL2Agent exposes the unified instruction field as prompt in model
-      tools, context and results; uses prompt throughout backend, SDK and frontend
-      including the physical database prompt column after a one-time column rename.
-      The complete prompt includes responsibilities, constraints, real tool-use rules
-      and necessary examples; local edits preserve unrelated content. Legacy prompt
-      sections are accepted only at external JSON import; internal requests/tools/events
-      use prompt only. Stored marketplace snapshots are migrated once without replacing
-      published content from current drafts.
+    description: NL2Agent exposes the unified instruction field as prompt in model tools, context and results; uses prompt
+      throughout backend, SDK and frontend including the physical database prompt column after a one-time column rename. The
+      complete prompt includes responsibilities, constraints, real tool-use rules and necessary examples; local edits preserve
+      unrelated content. Legacy prompt sections are accepted only at external JSON import; internal requests/tools/events
+      use prompt only. Stored marketplace snapshots are migrated once without replacing published content from current drafts.
+      Empty prompts apply directly; existing prompts require a server-owned preview with local editing and explicit apply of the exact user-approved text. Interrupted confirmations recover under a database operation lock. Cancel, superseded
+      cards and changed generation facts cannot replace the original. Only persisted confirmation may resume dependent full-generation
+      steps.
+  - rule_id: F-045-RULE-04
+    description: Persisted field saves report only the saved fields. Full generation completion requires a separate explicit
+      validation of the authorized draft; failed validation does not change or misreport any prior save. Only the internal
+      MCP result channel may publish a save, completion or interactive card.
+  - rule_id: F-045-RULE-05
+    description: Resource discovery accepts all valid requirements within one search request. An oversized request reports
+      the technical limit so the user can split the input or narrow the scope before continuing.
+  - rule_id: F-045-RULE-06
+    description: Search installable Skill and MCP repository listings beyond the first 300 rows. A repository pagination failure
+      is a search error.
+  - rule_id: F-045-RULE-07
+    description: Requirements and verified coverage belong to an authorized draft and conversation. Binding only uses covered
+      requirements, can return to editable clarification, and requires an explicit current-card action before generation.
+  - rule_id: F-045-RULE-08
+    description: Authorized ordinary configuration changes affect only requested sections of the target draft and preserve
+      unrelated configuration and resource bindings.
+  - rule_id: F-045-RULE-09
+    description: Discover resources through equivalent Chinese and English query routes. Each route independently admits bounded
+      candidates; merge by resource reference using the highest score. Only model-accepted candidates with current evidence
+      establish coverage. Requirement edits invalidate retrieval expressions without changing unchanged coverage. Each lexical route independently searches installed and installable pools, retaining at most three unique references
+      meeting the inclusive 0.50 threshold, with stable reference ordering for ties and no name bypass. New verification batches require one reasoned capability assessment per candidate and accepted must equal all
+      positive assessments; preference never rejects an otherwise qualified alternative. Legacy in-flight batches remain compatible.
+      Assessment evidence persists through card confirmation; only the binding card chooses defaults.
+      Lexical admission uses complete-name similarity or query coverage in capability declarations, never a token-set maximum
+      or configuration metadata alone. Installation, quality and native-tool bonuses apply only after relevance reaches 0.50.
+      The first model turn extracts concise positive action/object queries, preserving source and eligibility constraints in
+      the authoritative requirement; no enumerated generic-word filter is used.
+      Resource retrieval phrases describe reusable capabilities, not runtime search content or business topics. Preserve
+      only explicitly required tools, platforms and data sources as source constraints; retain the original execution
+      content in query and the Agent Prompt.
+      Prepared bilingual capability phrases are the lexical recall routes; do not add the full business request as another
+      route. Legacy calls use their short search_query when provided, otherwise query. The full query remains authoritative
+      for display and verification.
+  - rule_id: F-045-RULE-10
+    description: With tenant embedding configured, union lexical and ES semantic references without comparing scores or truncating
+      lexical matches; otherwise use lexical only. Store each resource as one stable document per model/projection generation
+      in a dedicated ES index without vector TTL. The backend resolves current user-visible resources before ES access and
+      enforces tenant, reference and content-revision filters, then rechecks candidates before disclosure. Update changed
+      vectors, reject stale writes, bound resource preparation to 120 seconds and then start an independent ten-second ES
+      search budget and use authorized lexical fallback on ES/model failure; permission failures never broaden scope. Deduplicate
+      queries and limit actual ES searches across source/filter chunks to eight per recommendation and eight per backend
+      process by default, including cross-loop callers. Queueing shares the phase deadline; cancelled or expired work never
+      starts later and active searches drain before releasing owned clients. Embed Chinese and English expressions separately, apply a configurable raw cosine threshold (initial default 0.5)
+      and strict Top3 per language and pool, then deduplicate all hybrid references before complete independent verification.
+      Empty or fully rejected candidate sets remain uncovered without additional retrieval. Preserve truthful progress and
+      explicit linked-resource verification; names and knowledge preferences cannot bypass recall limits.
+  - rule_id: F-045-RULE-11
+    description: Show fixed NL2Agent steps only after full creation actually starts, not in idle panels or local optimization.
+      Steps and matching details project trusted cards, tool results and saved/completed facts without extra model output;
+      description saves do not hide an active creation. Waiting, errors, skipped steps and replay remain accurate and isolated;
+      no-model fuzzy matching is not semantic failure.
   required_test_stages:
+  - D4
   - D1
   - D3
   source:

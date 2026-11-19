@@ -15,6 +15,7 @@ from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.utils.observer import ProcessType
 from services.nl2agent_service import _Nl2AgentBoundaryObserver
+from tool_collection.mcp.nl2agent_mcp_tools import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
 
 
 @pytest.mark.asyncio
@@ -26,7 +27,9 @@ async def test_boundary_reaches_history_before_worker_cleanup(
     monkeypatch, worker_finished, subtype
 ):
     stop = Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop)
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=stop, agent_id=42, run_id="run", conversation_id="91",
+    )
     future = Future()
     manager = MagicMock()
     manager.submit.return_value = SimpleNamespace(
@@ -71,11 +74,12 @@ async def test_boundary_reaches_history_before_worker_cleanup(
             }
         ],
     }
-    observer.add_message(
-        "creator",
-        ProcessType.EXECUTION_LOGS,
-        "<nl2a>" + json.dumps(payload) + "</nl2a>",
-    )
+    observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {
+        NL2AGENT_RECEIPT_KEY: {
+            "run_id": "run", "conversation_id": "91", "event_id": "card",
+            "payload": payload,
+        },
+    })
     if worker_finished:
         future.set_result(None)
     try:
@@ -101,7 +105,9 @@ async def test_explicit_stop_still_cancels_before_worker_cleanup():
     manager.submit.return_value = SimpleNamespace(
         future=future, execution_id="stop-test"
     )
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop)
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=stop, agent_id=42, run_id="run", conversation_id="91",
+    )
     info = SimpleNamespace(
         observer=observer,
         stop_event=stop,
@@ -118,7 +124,9 @@ async def test_explicit_stop_still_cancels_before_worker_cleanup():
 @pytest.mark.parametrize("max_steps", [1, 3])
 def test_card_boundary_prevents_another_action_or_max_steps_fallback(max_steps):
     stop = Event()
-    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop)
+    observer = _Nl2AgentBoundaryObserver(
+        lang="en", stop_event=stop, agent_id=42, run_id="run", conversation_id="91",
+    )
     agent = object.__new__(CoreAgent)
     agent.observer, agent.stop_event = observer, stop
     agent.enable_planning = False
@@ -131,11 +139,12 @@ def test_card_boundary_prevents_another_action_or_max_steps_fallback(max_steps):
 
     def step(_action):
         calls.append(1)
-        observer.add_message(
-            "creator",
-            ProcessType.EXECUTION_LOGS,
-            '<nl2a>{"subtype":"requirement_clarification","agent_id":42,"questions":[]}</nl2a>',
-        )
+        observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {
+            NL2AGENT_RECEIPT_KEY: {
+                "run_id": "run", "conversation_id": "91", "event_id": "card",
+                "payload": {"subtype": "requirement_clarification", "agent_id": 42, "questions": []},
+            },
+        })
         yield None
 
     agent._step_stream = step

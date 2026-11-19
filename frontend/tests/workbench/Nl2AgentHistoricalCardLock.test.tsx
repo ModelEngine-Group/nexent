@@ -100,6 +100,67 @@ it.each(["clarification", "installation", "binding"])(
   }
 );
 
+it("keeps the binding card focused on resources and places return in the footer", () => {
+  const requirementId = "93acd043ea294c6e9a6041a73443d454";
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <App>
+        <Nl2AgentFlowProvider>
+          <InstalledResourceBindingCard
+            disabled
+            payload={{
+              subtype: "installed_resource_binding",
+              agent_id: 42,
+              protocol_version: 2,
+              card_id: "binding",
+              state_version: 3,
+              requirements: [
+                {
+                  requirement_id: requirementId,
+                  query: "Look up train tickets",
+                  required: true,
+                  coverage_status: "covered",
+                  covered_resources: [],
+                  installable_resources: [],
+                },
+              ],
+              resources: [
+                {
+                  candidate: {
+                    candidate_ref: "skill:17",
+                    resource_type: "skill",
+                    source: "INSTALLED_SKILL",
+                    name: "Train search",
+                    description: "",
+                    requirement_ids: [requirementId],
+                    score: 1,
+                  },
+                  recommendation: "recommended",
+                  is_bound: false,
+                  form_kind: "SKILL_CONFIG",
+                  config: [],
+                },
+              ],
+            }}
+          />
+        </Nl2AgentFlowProvider>
+      </App>
+    </QueryClientProvider>
+  );
+  expect(
+    screen.getByRole("heading", { name: "Resource binding" })
+  ).toBeVisible();
+  expect(screen.getByText("Train search")).toBeVisible();
+  expect(screen.getAllByText("Look up train tickets")).toHaveLength(1);
+  expect(
+    screen.getByText("Look up train tickets").closest("[data-resource-ref]")
+  ).toHaveAttribute("data-resource-ref", "skill:17");
+  expect(screen.queryByText(requirementId)).toBeNull();
+  const back = screen.getByRole("button", { name: "Return to requirements" });
+  expect(back.closest("footer")?.querySelector("button")).toBe(back);
+  expect(back.querySelector("svg.lucide-arrow-left")).not.toBeNull();
+});
+
 it.each(["clarification", "installation", "binding"])(
   "active %s cards retain their generation edit lock",
   (kind) => {

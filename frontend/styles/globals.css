@@ -5,6 +5,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@media (hover: hover) {
+  .nl2agent-requirement-row:not(:hover):not(:focus-within) .nl2agent-requirement-actions {
+    opacity: 0;
+  }
+}
+
 @theme inline {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
@@ -72,6 +78,11 @@
   :root {
     --palette-gray-0: #ffffff;
     --color-bg-3: var(--palette-gray-0);
+    --palette-yellow-05: #FEFCE0;
+    --palette-yellow-80: #614500;
+    --color-success: #09AA71;
+    --color-warning-subtler: var(--palette-yellow-05);
+    --color-warning-bold: var(--palette-yellow-80);
     --navigation-surface: lab(97.0939% -0.108689 -0.749958);
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;

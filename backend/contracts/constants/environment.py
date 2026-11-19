@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, parse_similarity_threshold, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -24,6 +24,9 @@ ES_HOST = os.getenv('ELASTICSEARCH_HOST')
 ES_API_KEY = os.getenv('ELASTICSEARCH_API_KEY')
 ES_PASSWORD = os.getenv('ELASTIC_PASSWORD')
 ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
+NL2AGENT_ES_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_SEARCH_CONCURRENCY', 8)
+NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY = parse_positive_int(os.getenv('NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY'), 'NL2AGENT_ES_PROCESS_SEARCH_CONCURRENCY', 8)
+NL2AGENT_EMBEDDING_MIN_SIMILARITY = parse_similarity_threshold(os.getenv('NL2AGENT_EMBEDDING_MIN_SIMILARITY'), 'NL2AGENT_EMBEDDING_MIN_SIMILARITY', 0.5)
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
@@ -223,6 +226,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
+NL2AGENT_RESOURCE_STATE_TTL_SECONDS = int(os.getenv('NL2AGENT_RESOURCE_STATE_TTL_SECONDS', '7200'))
 REDIS_PORT = int(os.getenv('REDIS_PORT', '6379'))
 RUNTIME_STATE_REDIS_URL = os.getenv('RUNTIME_STATE_REDIS_URL') or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv('RUNTIME_STREAM_TTL_SECONDS', '86400'))
