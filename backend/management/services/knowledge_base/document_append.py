@@ -76,7 +76,8 @@ async def append_documents(index_name, documents, actor, *, reader=None, client=
                 result = await client.append_knowledge_documents(request, actor.user_id, actor.tenant_id)
                 context.remaining()
                 if (not isinstance(result, KnowledgeDocumentsAppended) or result.knowledge_id != grant.knowledge_id
-                    or result.total_submitted != len(selected) or result.total_indexed != len(selected)):
+                    or result.total_submitted != len(selected)
+                    or result.total_skipped > sum(doc.metadata.get("process_source") == "UniversalImageExtractor" for doc in request.documents)):
                     raise Conflict()
                 indexed += result.total_indexed
             try:

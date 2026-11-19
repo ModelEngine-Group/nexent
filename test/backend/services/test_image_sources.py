@@ -59,7 +59,7 @@ def test_object_is_pinned_exact_and_closed(monkeypatch, failure):
     monkeypatch.setattr(module.environment, "MINIO_DEFAULT_BUCKET", "files")
     store = Mock()
     pinned = ObjectRef("files", "attachments/u/a.png", Revision("v1"))
-    store.stat.return_value = SimpleNamespace(ref=pinned)
+    store.stat.return_value = SimpleNamespace(ref=pinned, size=5)
     stream = BytesIO(b"image")
     store.open_read.return_value = stream
     if failure:

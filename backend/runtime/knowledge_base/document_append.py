@@ -1,7 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Infer the complete text batch before appending independently keyed records."""
+"""Infer complete authorized text/image batches before appending keyed records."""
 
 import asyncio
+import base64
 import logging
 import time
 from uuid import uuid4
@@ -15,18 +16,23 @@ from contracts.knowledge_documents import (
     KnowledgeDocumentsAppended,
 )
 from nexent.core.concurrency import run_blocking
+from nexent.core.gateway.modality.embedding.embedding_adapter import _detect_image_mime
 from nexent.storage.errors import (
     Conflict,
     DeadlineExceeded,
     InvalidInput,
     OutcomeUnknown,
+    ScopeDenied,
 )
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_admission import ChunkMutationAdmission
 from runtime.knowledge_base.chunk_creation import ChunkCreationExecutor
 from runtime.knowledge_base.ingestion import embedding_vectors
+from runtime.knowledge_base.worker import cancellable_context
 
 from infrastructure.agent_model_config import normalize_model_revision
+from infrastructure.file_processing.image_sources import read_pinned_object_image
+from infrastructure.object_storage.read_access import validate_s3_url_access
 from infrastructure.rdb.document_embedding_batch import read_document_embedding_batch
 
 logger = logging.getLogger(__name__)
@@ -36,12 +42,53 @@ class KnowledgeDocumentAppender:
     def __init__(self, mutations):
         self.mutations = mutations
 
+    async def _inputs(self, documents, model, actor, *, context):
+        selected = []
+        for document in documents:
+            reference = document.image_ref
+            if reference is not None:
+                try:
+                    validate_s3_url_access(reference.key, actor.user_id, actor.tenant_id)
+                except PermissionError as error:
+                    raise ScopeDenied() from error
+            image = document.metadata.get("process_source") == "UniversalImageExtractor"
+            if image:
+                if model.model_type != "multi_embedding" or reference is None:
+                    continue
+                raw = await run_blocking("knowledge-document-image", read_pinned_object_image, reference,
+                    user_id=actor.user_id, tenant_id=actor.tenant_id, context=context,
+                    lane="control-io", owner="runtime.knowledge_base")
+                context.remaining()
+                if not raw:
+                    continue
+                value = f"data:{_detect_image_mime(raw)};base64," + base64.b64encode(raw).decode("ascii")
+            else:
+                value = document.content
+            selected.append((document, value, image))
+        return selected
+
+    async def _vectors(self, inputs, binding, batch_size, dimensions, actor):
+        vectors = [None] * len(inputs)
+        for image in (False, True):
+            selected = [(index, value) for index, (_, value, is_image) in enumerate(inputs) if is_image == image]
+            for offset in range(0, len(selected), batch_size):
+                group = selected[offset:offset + batch_size]
+                result = await self.mutations.models.invoke(EmbeddingInvocation(
+                    model_id=binding.model_id, expected_revision=binding.revision,
+                    input=[value for _, value in group], input_type="image" if image else "text"), actor)
+                if normalize_model_revision(result.revision) != normalize_model_revision(binding.revision):
+                    raise Conflict()
+                for (index, _), vector in zip(group, embedding_vectors(result.output, len(group), dimensions), strict=True):
+                    vectors[index] = vector
+        return vectors
+
     async def append(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeDocumentsAppend):
             raise InvalidInput()
         request = KnowledgeDocumentsAppend.model_validate(request.model_dump(mode="json"))
         context = context or OperationContext("knowledge-document-append-" + uuid4().hex,
                                               time.monotonic() + self.mutations.operation_seconds)
+        context, cancelled = cancellable_context(context)
         threshold = context.remaining()
         batch = uuid4().hex
         probe = ChunkMutationIntent(knowledge_id=request.knowledge_id, chunk_id="documents-" + batch,
@@ -64,36 +111,34 @@ class KnowledgeDocumentAppender:
                     embedding_batch_size = await run_blocking("knowledge-document-embedding-batch",
                         read_document_embedding_batch, actor, grant.resource_tenant_id, model.model_type,
                         context=context, lane="control-io", owner="runtime.knowledge_base")
-                prepared, vectors = [], []
+                inputs = await self._inputs(request.documents, model, actor, context=context)
+                prepared = []
                 now = int(time.time())
-                for document in request.documents:
+                for document, _, _ in inputs:
                     source = dict(document.metadata)
                     source.pop("content", None)
                     source.pop("embedding", None)
                     if not source.get("id"):
                         source["id"] = f"{now}_{hash(document.content)}"[:20]
                     prepared.append(source)
-                for offset in range(0, len(request.documents), embedding_batch_size):
-                    documents = request.documents[offset:offset + embedding_batch_size]
-                    result = await self.mutations.models.invoke(EmbeddingInvocation(
-                        model_id=binding.model_id, expected_revision=binding.revision,
-                        input=[document.content for document in documents]), actor)
-                    if normalize_model_revision(result.revision) != normalize_model_revision(binding.revision):
-                        raise Conflict()
-                    vectors.extend(embedding_vectors(result.output, len(documents), dimensions))
+                vectors = await self._vectors(inputs, binding, embedding_batch_size, dimensions, actor)
 
                 async def authorized():
                     if await self.mutations._grant(probe, actor) != grant:
                         raise Conflict()
 
                 await authorized()
+                if not inputs:
+                    return KnowledgeDocumentsAppended(knowledge_id=request.knowledge_id,
+                        total_submitted=len(request.documents), total_indexed=0,
+                        total_skipped=len(request.documents), chunk_ids=[])
                 namespace = {} if grant.resource_tenant_id == actor.tenant_id else {"resource_tenant_id": grant.resource_tenant_id}
                 with self.mutations.records(actor, context=context, **namespace) as records:
                     journal = ChunkMutationAdmission(records, request.knowledge_id)
                     executor = ChunkCreationExecutor(journal, self.mutations.models, actor, grant.collection,
                                                      ports=self.mutations.creation_ports)
                     keys = []
-                    for index, (document, source, vector) in enumerate(zip(request.documents, prepared, vectors, strict=True)):
+                    for index, ((document, _, _), source, vector) in enumerate(zip(inputs, prepared, vectors, strict=True)):
                         key = "document-" + uuid4().hex
                         intent = ChunkMutationIntent(knowledge_id=request.knowledge_id, chunk_id=key, operation="create",
                             request_key=f"{batch}:{index}", resource_revision=grant.revision,
@@ -108,8 +153,10 @@ class KnowledgeDocumentAppender:
                         keys.append(key)
                 context.remaining()
                 return KnowledgeDocumentsAppended(knowledge_id=request.knowledge_id, total_submitted=len(request.documents),
-                                                  total_indexed=len(keys), chunk_ids=keys)
+                    total_indexed=len(keys), total_skipped=len(request.documents) - len(inputs), chunk_ids=keys)
         except (TimeoutError, DeadlineExceeded) as error:
             logger.warning("knowledge_document_append_timeout operation_id=%s threshold_seconds=%s exception_type=%s",
                            context.operation_id, threshold, type(error).__name__)
             raise DeadlineExceeded(operation_id=context.operation_id) from error
+        finally:
+            cancelled.set()

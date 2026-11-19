@@ -6,11 +6,14 @@ from nexent.multi_modal.utils import parse_s3_url
 from nexent.storage.errors import InvalidInput, NotFound
 
 from infrastructure.agentos_identity import ServicePrincipal
-from infrastructure.file_processing.image_sources import read_object_image
+from infrastructure.file_processing.image_sources import (
+    pin_object_image,
+    read_object_image,
+)
 from infrastructure.object_storage.read_access import validate_s3_url_access
 
 
-def read_document_image(url, actor, *, context):
+def _authorized_url(url, actor, *, context):
     context.remaining()
     if not isinstance(actor, ServicePrincipal):
         raise InvalidInput()
@@ -25,7 +28,20 @@ def read_document_image(url, actor, *, context):
     if bucket != environment.MINIO_DEFAULT_BUCKET:
         raise InvalidInput()
     validate_s3_url_access(key, actor.user_id, actor.tenant_id)
+    return f"s3://{bucket}/{key}"
+
+
+def read_document_image(url, actor, *, context):
+    address = _authorized_url(url, actor, context=context)
     try:
-        return read_object_image(f"s3://{bucket}/{key}", user_id=actor.user_id, tenant_id=actor.tenant_id, context=context)
+        return read_object_image(address, user_id=actor.user_id, tenant_id=actor.tenant_id, context=context)
+    except NotFound as error:
+        raise FileNotFoundError(f"Unable to fetch file from URL: {url}") from error
+
+
+def pin_document_image(url, actor, *, context):
+    address = _authorized_url(url, actor, context=context)
+    try:
+        return pin_object_image(address, user_id=actor.user_id, tenant_id=actor.tenant_id, context=context)
     except NotFound as error:
         raise FileNotFoundError(f"Unable to fetch file from URL: {url}") from error

@@ -90,6 +90,31 @@ async def test_wrong_receipt_cannot_be_counted_as_success(writer):
     s.touch.assert_not_called()
 
 
+@pytest.mark.parametrize("as_dict", [False, True])
+async def test_confirmed_image_skip_is_counted_without_faking_an_indexed_document(writer, as_dict):
+    s = writer
+    s.client.append_knowledge_documents.side_effect = None
+    s.client.append_knowledge_documents.return_value = KnowledgeDocumentsAppended(
+        knowledge_id=1, total_submitted=2, total_indexed=1, total_skipped=1, chunk_ids=["text"])
+    documents = [KnowledgeDocument(content="text"),
+                 KnowledgeDocument(content="caption", metadata={"process_source": "UniversalImageExtractor"})]
+    if as_dict:
+        documents = [doc.model_dump() for doc in documents]
+    assert await document_append.append_documents("kb", documents, s.actor, reader=s.reader, client=s.client) == 1
+    assert s.touch.call_count == 1
+
+
+async def test_text_cannot_be_hidden_as_a_successful_image_skip(writer):
+    s = writer
+    s.client.append_knowledge_documents.side_effect = None
+    s.client.append_knowledge_documents.return_value = KnowledgeDocumentsAppended(
+        knowledge_id=1, total_submitted=1, total_indexed=0, total_skipped=1, chunk_ids=[])
+    with pytest.raises(Conflict):
+        await document_append.append_documents("kb", [KnowledgeDocument(content="text")], s.actor,
+                                               reader=s.reader, client=s.client)
+    s.touch.assert_not_called()
+
+
 async def test_activity_failure_retains_original_best_effort_semantics_without_replay(writer):
     s = writer
     s.touch.side_effect = RuntimeError("metadata unavailable")

@@ -2,18 +2,19 @@
 """Synchronous append batches preserve document source IDs independently of storage keys."""
 
 from contracts.agentos import ModelReference
-from contracts.agentos_knowledge import Contract, ModelVersion
+from contracts.agentos_knowledge import Contract, ModelVersion, ObjectReference
 from pydantic import Field, JsonValue, model_validator
 
 
 class KnowledgeDocument(Contract):
     content: str
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    image_ref: ObjectReference | None = None
 
     @model_validator(mode="after")
-    def text_document(self):
-        if self.metadata.get("process_source") == "UniversalImageExtractor":
-            raise ValueError("Image documents require a pinned image resource")
+    def image_space(self):
+        if self.image_ref is not None and self.image_ref.space != "files":
+            raise ValueError("Image documents require the files object space")
         return self
 
 
@@ -28,12 +29,13 @@ class KnowledgeDocumentsAppend(Contract):
 class KnowledgeDocumentsAppended(Contract):
     knowledge_id: int = Field(gt=0)
     total_submitted: int = Field(ge=1, le=64)
-    total_indexed: int = Field(ge=1, le=64)
-    chunk_ids: list[str] = Field(min_length=1, max_length=64)
+    total_indexed: int = Field(ge=0, le=64)
+    total_skipped: int = Field(default=0, ge=0, le=64)
+    chunk_ids: list[str] = Field(max_length=64)
 
     @model_validator(mode="after")
     def confirmed_count(self):
-        if (self.total_submitted != self.total_indexed or len(self.chunk_ids) != self.total_indexed
+        if (self.total_submitted != self.total_indexed + self.total_skipped or len(self.chunk_ids) != self.total_indexed
             or len(set(self.chunk_ids)) != len(self.chunk_ids) or any(not key for key in self.chunk_ids)):
             raise ValueError("Expected one confirmed physical key per appended document")
         return self
