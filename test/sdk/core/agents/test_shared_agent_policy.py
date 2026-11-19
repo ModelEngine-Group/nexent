@@ -78,6 +78,7 @@ def test_common_target_contract_rejects_bypass_without_mutating_state(names):
 
 def smolagent():
     agent = object.__new__(CoreAgent)
+    agent.observer = SimpleNamespace(turn_complete=False)
     agent._delegation = SmolagentsDelegation("调用子智能体", [worker()])
     agent._use_structured_outputs_internally = False
     return agent

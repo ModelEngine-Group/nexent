@@ -5,8 +5,8 @@ import json
 import os
 
 import pytest
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from infrastructure.observability.trajectory_reader import JSONReader, read_text
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import JSONReader, read_text
 from ops.services.trajectory.primitives import (
     percentiles,
 )
@@ -79,7 +79,7 @@ def test_full_result_percentiles():
 
 
 def test_parser_resource_limit_is_distinct_from_file_corruption(tmp_path):
-    from infrastructure.observability.trajectory_reader import (
+    from infrastructure.trace.trajectory_reader import (
         TrajectoryReadBudgetExceeded,
     )
 

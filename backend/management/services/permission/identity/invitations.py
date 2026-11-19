@@ -29,7 +29,7 @@ from contracts.roles import (
     normalize_roles,
     roles_from_record,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.group import query_group_ids_by_user, query_groups
 from management.db.identity.invitation import (
     add_invitation,

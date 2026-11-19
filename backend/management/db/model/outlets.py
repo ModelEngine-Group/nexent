@@ -20,7 +20,7 @@ from sqlalchemy import func, insert, inspect, literal_column, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 
 _UNSET = object()

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from nexent.core.concurrency import ManagedTaskSpec
 from ops.services.trajectory.access import Actor
 from ops.services.trajectory.cleanup import cleanup

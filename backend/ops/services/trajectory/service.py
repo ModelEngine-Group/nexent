@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import json
 
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from infrastructure.observability.trajectory_reader import (
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import (
     JSONReader,
     Text,
     TrajectoryReadBudgetExceeded,
     read_text,
 )
-from infrastructure.observability.trajectory_store import business_id
+from infrastructure.trace.trajectory_store import business_id
 
 from .access import authorize
 from .archive import Archive

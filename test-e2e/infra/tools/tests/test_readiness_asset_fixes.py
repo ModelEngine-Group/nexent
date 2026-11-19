@@ -66,3 +66,26 @@ def test_protocol_declares_self_owned_http_fixture_without_shared_factories():
     assert not binding.get("required_assets") and not binding.get("required_mock_services")
     assert binding["acceptance_bindings"]["AC-01"] == [
         "test_wire_channels_and_sources", "test_wire_retry_errors_and_no_invalid_http"]
+
+
+def test_northbound_change_uses_current_ut_without_reviving_removed_helm_suite():
+    path = REPO / "test-e2e/changes/bugs/NB-OTEL-20261111.yaml"
+    change = yaml.safe_load(path.read_text(encoding="utf-8"))["change"]
+    plan = change["traditional_ut"]
+    assert traditional_ut_issues(REPO, plan, "implementation", typed_missing=True) == []
+    assert set(plan["test_selectors"]) == {
+        "test/sdk/monitor/test_http_response_lifecycle.py",
+        "test/backend/services/test_runtime_proxy_telemetry.py",
+    }
+    assert "historical evidence" in change["notes"]
+
+
+def test_telemetry_preparation_does_not_substitute_real_trace_dependencies():
+    path = REPO / "test-e2e/cases/NB-OTEL-D3-001/execution.yaml"
+    binding = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert binding["preparation"] == {
+        "families": [], "anchors": False, "special_assets": False, "d4_groups": []}
+    assert not binding.get("required_mock_services")
+    assert "NEXENT_TEST_CREDENTIALS" in binding["notes"]
+    assert "retains its owned conversations" in binding["notes"]
+    assert set(binding["acceptance_bindings"]) == {"AC-STREAM", "AC-AUTH", "AC-DISCONNECT"}

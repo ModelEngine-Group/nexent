@@ -4,7 +4,7 @@
 import json
 
 from google.protobuf.json_format import ParseDict
-from infrastructure.observability.trajectory_otlp import span_request
+from infrastructure.trace.trajectory_otlp import span_request
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )

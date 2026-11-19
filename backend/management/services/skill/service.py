@@ -9,7 +9,8 @@ import zipfile
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Union
 
-from contracts.constants.environment import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
+from contracts.constants.environment import ROOT_DIR
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
 from management.db.identity.group import query_group_ids_by_user
@@ -566,14 +567,16 @@ class SkillService(SkillArchiveOperations):
         rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Share parsing and persistence while keeping operation-specific policies."""
-        if len(content) > MAX_SKILL_UPLOAD_SIZE_BYTES:
+        limit_mb = get_config_snapshot().get("MAX_SKILL_UPLOAD_SIZE_MB")
+        limit_bytes = limit_mb * 1024 * 1024
+        if len(content) > limit_bytes:
             raise AppException(
                 ErrorCode.FILE_TOO_LARGE,
-                f"Skill upload exceeds the maximum size of {MAX_SKILL_UPLOAD_SIZE_MB} MB",
+                f"Skill upload exceeds the maximum size of {limit_mb} MB",
                 details={
                     "resource": "skill_upload",
-                    "limit_mb": MAX_SKILL_UPLOAD_SIZE_MB,
-                    "limit_bytes": MAX_SKILL_UPLOAD_SIZE_BYTES,
+                    "limit_mb": limit_mb,
+                    "limit_bytes": limit_bytes,
                     "actual_bytes": len(content),
                 },
             )

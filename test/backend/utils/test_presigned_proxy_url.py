@@ -5,7 +5,7 @@
 import pytest
 from fastapi import HTTPException
 
-from management.utils.file_http import build_storage_proxy_url
+from management.api.file.http import build_storage_proxy_url
 
 
 @pytest.mark.parametrize("endpoint", ["https://storage", "https://storage:443/"])

@@ -258,13 +258,16 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'submit', MagicMock(return_value=execution))
     monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'wait_until_started', AsyncMock())
     monkeypatch.setattr(agent_subscription.runtime_state_service, 'reset_stream_async', AsyncMock())
-    monkeypatch.setattr(agent_subscription.streaming_channel_manager, 'get_or_create_channel', AsyncMock(return_value=None))
+    channel = SimpleNamespace(generation=None)
+    monkeypatch.setattr(agent_subscription.streaming_channel_manager, 'get_or_create_channel', AsyncMock(return_value=channel))
 
     async def generate_stream(*_args, **_kwargs):
         yield 'data: {"type": "done"}\n\n'
     monkeypatch.setattr(agent_subscription, 'generate_stream', generate_stream)
     response = await agent_subscription.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
     chunks = [chunk async for chunk in response.body_iterator]
+    assert isinstance(channel.generation, str) and channel.generation
+    assert agent_subscription.runtime_state_service.reset_stream_async.await_args.kwargs["generation"] == channel.generation
     assert workbench.assert_workbench_version.call_count == 2
     workbench.resolve_workbench_config.assert_called_once_with(canonical, tenant_id='tenant-a', is_debug=False, user_id='user-a')
     apply_plan.assert_called_once_with(request, canonical, plan, 'tenant-a')

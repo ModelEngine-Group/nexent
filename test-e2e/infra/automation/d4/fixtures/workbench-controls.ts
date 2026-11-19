@@ -11,6 +11,9 @@ export interface WorkbenchPinServer {
 export async function prepareWorkbench(page: Page, resourceCount = 1, options: { histories?: Array<Record<string, any>>; reasoning?: boolean; longDescriptions?: boolean; modelEffort?: string; agentEffort?: string; pinServer?: WorkbenchPinServer; samplingDefaults?: {temperature:number;top_p:number}; agentSamplingDefaults?: {temperature?:number;top_p?:number} } = {}) {
   const pinServer = options.pinServer ?? { scopes: new Map<string, number[]>(), rejectSave: false };
   const authorization = { permissions: ["agent:create", "skill:create"], userId: "workbench-fixture", tenantId: "workbench-tenant" };
+  // Controlled identity uses the same readable expiry cookie as a BFF login.
+  await page.context().addCookies([{ name: "nexent_token_expires_at", value: String(Math.floor(Date.now() / 1000) + 3600), url: process.env.NEXENT_BASE_URL ?? "http://localhost:3031" }]);
+  await page.addInitScript(() => localStorage.setItem("user_info", JSON.stringify({ id: "workbench-fixture", tenantId: "workbench-tenant", email: "fixture@nexent.test", role: "SPEED" })));
   const writes: string[] = [];
   const filters: Array<Record<string, any>> = [];
   const agent = { id: "7", agent_id: 7, name: "Internal Analyst", display_name: "Internal Analyst", description: options.longDescriptions ? "Long resource description ".repeat(80) : "Internal tenant agent", current_version_no: 3, is_available: true, model_ids: options.reasoning ? [1, 2, 3] : [1], model_names: options.reasoning ? ["Fixture Model", "Plain Model", "Automatic Model"] : ["Fixture Model"], model_params_override: options.reasoning || options.agentSamplingDefaults ? { "1": { ...options.agentSamplingDefaults, ...(options.reasoning ? {extra_params: { enable_thinking: false, ...(options.agentEffort ? { reasoning_effort: options.agentEffort } : {}) }} : {}) } } : undefined };
