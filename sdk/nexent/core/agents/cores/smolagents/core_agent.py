@@ -1426,10 +1426,9 @@ Additional Args:
             final_context.memory_messages
             if final_context.memory_messages is not None else input_messages
         )
-        legacy_code_action = (
-            not getattr(self, "enable_protocol_repair_retry", False)
-            and getattr(self, "output_protocol", "code_action") == "code_action"
-        )
+        uses_code_protocol = getattr(self, "output_protocol", "code_action") == "code_action"
+        strict_code_action = uses_code_protocol and getattr(self, "enable_protocol_repair_retry", False)
+        legacy_code_action = uses_code_protocol and not strict_code_action
         use_result_stops = (
             strict_code_action and not self._use_structured_outputs_internally
             and getattr(self.model, "supports_stop_parameter", True) is not False
