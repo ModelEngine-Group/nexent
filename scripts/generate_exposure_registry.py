@@ -48,6 +48,32 @@ SNAPSHOT = REPO_ROOT / "backend" / "gateway" / "exposure" / "registry.json"
 GATE_PACKAGE = "management.api.northbound_gates"
 LEGACY_PREFIXES = ("/nb/a2a/",)  # preserved sections owned elsewhere
 
+# Gate module prefix -> the real microservice the gate lives in. The gateway
+# snapshot must record the true owning service, never a logical alias: a
+# future runtime-side gate (voice etc.) routes directly to the runtime
+# container without ever entering management.
+SERVICE_OWNERSHIP = {
+    "management": "management",
+    "runtime": "runtime",
+    "ops": "ops",
+}
+
+
+def _gate_service(module_name: str) -> str:
+    """Resolve the owning microservice from the gate module path.
+
+    ``management.api.northbound_gates.*`` -> management; a future
+    ``runtime.api.northbound_gates.*`` -> runtime. Fails loud on unknown
+    owners so a new service cannot ride the wrong prefix silently.
+    """
+    root = module_name.split(".", 1)[0]
+    if root not in SERVICE_OWNERSHIP:
+        raise SystemExit(
+            f"[exposure] gate module {module_name} belongs to no known service "
+            f"(known: {sorted(SERVICE_OWNERSHIP)}); add it to SERVICE_OWNERSHIP first"
+        )
+    return SERVICE_OWNERSHIP[root]
+
 
 def _route_id(method: str, path: str, transport: str) -> str:
     digest = hashlib.sha256(f"{method} {path} {transport}".encode()).hexdigest()
@@ -84,6 +110,7 @@ def _collect_gate_rows():
             # Newer FastAPI embeds the router prefix into route.path already;
             # only prepend when it is missing to stay prefix-invariant.
             path = route.path if route.path.startswith(prefix) else prefix + route.path
+            owner = _gate_service(route.endpoint.__module__)
             for method in sorted(route.methods - {"HEAD"}):
                 key = (method, path)
                 if capability in seen_ids:
@@ -110,7 +137,7 @@ def _collect_gate_rows():
                         "method": method,
                         "path": path,
                         "transport": "http",
-                        "target": "northbound",
+                        "target": owner,
                         "source": f"{route.endpoint.__module__}.{route.endpoint.__qualname__}",
                         "route_id": _route_id(method, path, "http"),
                         "capability_id": capability,

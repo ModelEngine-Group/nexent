@@ -57,14 +57,14 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     assert len(public) == 30
     for method, path, _ in public:
         route = registry.match(method, path)
-        assert route and route.target == "northbound", (method, path)
+        assert route and route.target == "management", (method, path)  # real owning service, alias retired
 
 
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
     ("POST", "/api/agent/run", "runtime"), ("GET", "/api/conversation/list", "runtime"),
     ("POST", "/api/file/storage", "runtime"), ("GET", "/api/file/storage", "management"),
-    ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
+    ("POST", "/nb/v1/chat/run", "management"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):

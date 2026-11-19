@@ -80,7 +80,7 @@ def test_enabled_gates_present_dark_gates_absent():
         row = by_key.get((method, path))
         assert row is not None, f"enabled capability {capability} missing a snapshot row"
         assert row["capability_id"] == capability
-        assert row["target"] == "northbound"
+        assert row["target"] == "management"  # real owning service
         assert row["credential_kinds"] == ["api_key"]
     for method, path in DARK_METHOD_PATHS:
         leaked = [r for r in document["routes"] if (r["method"], r["path"]) == (method, path)]
@@ -116,7 +116,7 @@ def test_snapshot_loads_in_gateway_registry():
     document = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     registry = ExposureRegistry(document)
     match = registry.match("DELETE", "/nb/v1/conversations/123")
-    assert match is not None and match.target == "northbound"
+    assert match is not None and match.target == "management"
     dark = registry.match("POST", "/nb/v1/automations/7/pause")
     assert dark is None, "dark capability must not match"
     multi_segment = registry.match("GET", "/nb/v1/file/download/reports/2026/x.pdf")

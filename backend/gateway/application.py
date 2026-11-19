@@ -32,7 +32,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
                        identity_lookup=None):
     settings = load_settings() if settings is None else settings
     targets = dict(upstreams or {"management": settings.management_url, "runtime": settings.runtime_url,
-                                "northbound": settings.northbound_url, "ops": settings.ops_url})
+                                "ops": settings.ops_url})
     authenticate = settings.auth_enabled if authentication is None else authentication
     registry = default_registry() if registry is None else registry
     for target in targets.values():
@@ -101,7 +101,11 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
                 raise IdentityError("Credential policy mismatch")
             if principal is None and "anonymous" not in match.credential_kinds:
                 raise IdentityError("Identity required by exposure policy")
-            audience = "management" if target == "northbound" else target
+            # The snapshot records the real owning service per row; the
+            # identity audience matches it directly. The retired "northbound"
+            # alias had to be translated here — real service names need no
+            # special case.
+            audience = target
             token = sign_identity(principal, audience,
                                   method, connection.url.path, connection.scope["query_string"], key=settings.signing_key())
             headers.append((IDENTITY_HEADER, token))

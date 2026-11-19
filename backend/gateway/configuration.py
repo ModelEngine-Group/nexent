@@ -12,6 +12,9 @@ class GatewaySettings:
     port: int = 5013
     management_url: str = "http://localhost:5010"
     runtime_url: str = "http://localhost:5014"
+    # Retired logical alias kept for deployment compatibility: the snapshot
+    # records real owning services now, and northbound traffic enters the
+    # management process, so this URL is not read by the routing path anymore.
     northbound_url: str = "http://localhost:5010"
     ops_url: str = "http://localhost:5016"
     auth_enabled: bool = True
