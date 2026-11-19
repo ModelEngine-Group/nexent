@@ -57,6 +57,7 @@ change:
     - test/backend/services/test_shared_creator_runtime.py
     - test/backend/deploy/test_ops_chart.py
     - frontend/tests/component/systemConfiguration.test.tsx
+    - frontend/tests/systemConfigI18n.test.mjs
     - frontend/tests/apiProxyRouting.test.mjs
     behaviors:
     - Validate exactly nineteen typed positive integer, finite positive number and boolean settings without environment fallback.
