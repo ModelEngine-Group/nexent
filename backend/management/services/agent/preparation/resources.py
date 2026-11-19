@@ -13,7 +13,8 @@ from infrastructure.a2a_execution import (
     extract_url_from_card as _extract_url_from_card,
     _resolve_scheme_field as _resolve_scheme_field,
 )
-from management.services.knowledge_base.service import ElasticSearchService
+from management.services.knowledge_base.summary_metadata import SummaryMetadata
+from nexent.storage.errors import DeadlineExceeded, OperationCancelled
 from nexent.core.agents.agent_model import ExternalA2AAgentConfig, ToolConfig
 
 logger = logging.getLogger("create_agent_info")
@@ -22,6 +23,9 @@ logger.setLevel(logging.INFO)
 
 def _build_effective_knowledge_base_summary(
     tool_list: List[ToolConfig],
+    actor,
+    *,
+    context,
     include_empty_message: bool = True,
 ) -> tuple[list[dict[str, str]], bool]:
     """Collect selected summaries without formatting prompt prose."""
@@ -38,7 +42,7 @@ def _build_effective_knowledge_base_summary(
             for index_name in index_names:
                 try:
                     display_name = display_map.get(index_name, index_name)
-                    message = ElasticSearchService().get_summary(index_name=index_name)
+                    message = SummaryMetadata().read(index_name, actor, context=context)
                     summary = message.get("summary", "")
                     summaries.append(
                         {
@@ -47,11 +51,15 @@ def _build_effective_knowledge_base_summary(
                             "summary": str(summary),
                         }
                     )
+                except (DeadlineExceeded, OperationCancelled):
+                    raise
                 except Exception as exc:
                     logger.warning(
                         f"Failed to get summary for knowledge base {index_name}: {exc}"
                     )
             break
+    except (DeadlineExceeded, OperationCancelled):
+        raise
     except Exception as exc:
         logger.error(f"Failed to build knowledge base summary: {exc}")
     return summaries, False

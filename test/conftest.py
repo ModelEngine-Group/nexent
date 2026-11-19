@@ -83,7 +83,8 @@ def _restore_project_package_metadata() -> None:
         )
         package_module.__spec__.submodule_search_locations = [package_path]
 
-    for module_name, module in list(sys.modules.items()):
+    # Managed workers may import modules while pytest repairs package links.
+    for module_name, module in sys.modules.copy().items():
         parent_name, separator, child_name = module_name.rpartition(".")
         if not separator or parent_name not in package_paths:
             continue

@@ -21,6 +21,8 @@ from management.db.agent.repository import (
     search_agent_info_by_agent_id,
 )
 from management.db.model.repository import get_model_by_model_id
+from management.services.knowledge_base.summary_metadata import run_summary_metadata
+from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.context import build_context_inputs
 from management.services.agent.preparation.resources import (
     _build_effective_knowledge_base_summary,
@@ -521,10 +523,10 @@ async def create_agent_config(
     # intersection. Summaries therefore restore semantic routing without
     # expanding beyond the effective per-run knowledge-base whitelist.
     knowledge_base_summaries, knowledge_base_no_indexes = (
-        _build_effective_knowledge_base_summary(
-            tool_list,
+        await run_summary_metadata('routing', lambda context: _build_effective_knowledge_base_summary(
+            tool_list, ServicePrincipal(user_id, tenant_id), context=context,
             include_empty_message=not bool(runtime_knowledge_context),
-        )
+        ))
     )
 
     # This compatibility flag controls compression only. ContextManager remains

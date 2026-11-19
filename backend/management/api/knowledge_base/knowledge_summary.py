@@ -10,11 +10,10 @@ from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 
 from contracts.knowledge import ChangeSummaryRequest, VectorDatabaseType
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, TokenExpiredError
-from management.db.knowledge_base.repository import get_knowledge_record
 from permissions.models import CurrentUser
 from permissions.resource_access import resource_read_tenant
-from management.utils.knowledge_permission import require_knowledge_base_edit_permission
-from management.services.knowledge_base.service import ElasticSearchService
+from management.services.knowledge_base.summary_metadata import read_summary, update_summary
+from infrastructure.agentos_identity import ServicePrincipal
 from management.services.knowledge_base.summary_service import KnowledgeSummaryService
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info, authenticate
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -94,7 +93,7 @@ async def auto_summary(
 
 
 @router.post("/{index_name}/summary")
-def change_summary(
+async def change_summary(
     index_name: str = Path(..., description="Name of the index to get documents from"),
     change_summary_request: ChangeSummaryRequest = Body(None, description="knowledge base summary"),
     authorization: Optional[str] = Header(None),
@@ -102,32 +101,44 @@ def change_summary(
     """Summary Elasticsearch index_name by user"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         summary_result = change_summary_request.summary_result
-        return ElasticSearchService().change_summary(
-            index_name=index_name, summary_result=summary_result, user_id=user_id
-        )
+        return await update_summary(index_name, summary_result, ServicePrincipal(user_id, tenant_id))
     except HTTPException:
         raise
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=401, detail=str(e))
+    except NotFound:
+        raise HTTPException(status_code=404, detail=f"Knowledge base '{index_name}' not found") from None
+    except ScopeDenied:
+        raise HTTPException(status_code=403, detail="No permission to modify this knowledge base") from None
+    except DeadlineExceeded:
+        raise HTTPException(status_code=500, detail="Knowledge base summary update failed: storage operation timed out") from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Knowledge base summary update failed: {str(e)}")
 
 
 @router.get("/{index_name}/summary")
-def get_summary(
+async def get_summary(
     index_name: str = Path(..., description="Name of the index to get documents from"),
     request: Request = None,
     current_user: CurrentUser = Depends(authenticate),
 ):
     """Get Elasticsearch index_name Summary"""
-    if authorized_tenant := resource_read_tenant(request, user=current_user):
-        if not get_knowledge_record({"index_name": index_name, "tenant_id": authorized_tenant}):
-            raise HTTPException(status_code=404, detail="Knowledge base not found")
     try:
-        # Try to list indices as a health check
-        return ElasticSearchService().get_summary(index_name=index_name)
+        target = resource_read_tenant(request, user=current_user)
+        return await read_summary(index_name, ServicePrincipal(current_user.user_id, current_user.tenant_id), target_tenant=target)
+    except HTTPException:
+        raise
+    except NotFound:
+        if target:
+            raise HTTPException(status_code=404, detail="Knowledge base not found") from None
+        raise HTTPException(status_code=500, detail=(
+            f"Failed to get knowledge base summary: Failed to get summary: Unable to get summary for index {index_name}"
+        )) from None
+    except ScopeDenied:
+        raise HTTPException(status_code=403, detail="No permission to read this knowledge base") from None
+    except DeadlineExceeded:
+        raise HTTPException(status_code=500, detail="Failed to get knowledge base summary: storage operation timed out") from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get knowledge base summary: {str(e)}")

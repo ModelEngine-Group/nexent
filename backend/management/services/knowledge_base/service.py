@@ -15,8 +15,7 @@ Main features include:
 import time
 from typing import Any, Dict, List, Optional
 
-from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
-from fastapi import Body, Depends, Path, Query
+from fastapi import Depends
 from management.services.knowledge_base.common import (
     ALLOWED_CHUNK_FIELDS,
     KnowledgeBaseNeedsModelConfigError,
@@ -63,132 +62,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         except Exception as e:
             raise Exception(f"Health check failed: {str(e)}")
 
-
-    @staticmethod
-    def get_random_documents(
-        index_name: str = Path(
-            ..., description="Name of the index to get documents from"
-        ),
-        batch_size: int = Query(
-            1000, description="Maximum number of documents to retrieve"
-        ),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-    ):
-        """
-        Get random sample of documents from the specified index
-
-        Args:
-            index_name: Name of the index to get documents from
-            batch_size: Maximum number of documents to retrieve, default 1000
-            vdb_core: VectorDatabaseCore instance
-
-        Returns:
-            Dictionary containing total count and sampled documents
-        """
-        try:
-            # Get total document count
-            total_docs = vdb_core.count_documents(index_name)
-
-            # Construct the random sampling query using random_score
-            query = {
-                "size": batch_size,  # Limit return size
-                "query": {
-                    "function_score": {
-                        "query": {"match_all": {}},
-                        "random_score": {
-                            # Use current time as random seed
-                            "seed": int(time.time()),
-                            "field": "_seq_no",
-                        },
-                    }
-                },
-            }
-
-            # Execute the query
-            response = vdb_core.search(index_name=index_name, query=query)
-
-            # Extract and process the sampled documents
-            sampled_docs = []
-            for hit in response["hits"]["hits"]:
-                doc = hit["_source"]
-                doc["_id"] = hit["_id"]  # Add document ID
-                sampled_docs.append(doc)
-
-            return {"total": total_docs, "documents": sampled_docs}
-
-        except Exception as e:
-            raise Exception(
-                f"Error retrieving random documents from index {index_name}: {str(e)}"
-            )
-
-    @staticmethod
-    def change_summary(
-        index_name: str = Path(
-            ..., description="Name of the index to get documents from"
-        ),
-        summary_result: Optional[str] = Body(description="knowledge base summary"),
-        user_id: Optional[str] = Body(
-            None, description="ID of the user delete the knowledge base"
-        ),
-    ):
-        """
-        Update the summary for the specified Elasticsearch index
-
-        Args:
-            index_name: Name of the index to update
-            summary_result: New summary content
-            user_id: ID of the user making the update
-
-        Returns:
-            Dictionary containing status and updated summary information
-        """
-        try:
-            update_data = {
-                "knowledge_describe": summary_result,  # Set the new summary
-                "updated_by": user_id,
-                "index_name": index_name,
-            }
-            update_knowledge_record(update_data)
-            # Update last_summary_time for auto-summary tracking
-            update_last_summary_time(index_name)
-            return {
-                "status": "success",
-                "message": f"Index {index_name} summary updated successfully",
-                "summary": summary_result,
-            }
-        except Exception as e:
-            raise Exception(f"{str(e)}")
-
-    @staticmethod
-    def get_summary(
-        index_name: str = Path(
-            ..., description="Name of the index to get documents from"
-        ),
-    ):
-        """
-        Get the summary for the specified Elasticsearch index
-
-        Args:
-            index_name: Name of the index to get summary from
-
-        Returns:
-            Dictionary containing status and summary information
-        """
-        try:
-            knowledge_record = get_knowledge_record({"index_name": index_name})
-            if knowledge_record:
-                summary_result = knowledge_record["knowledge_describe"]
-                success_msg = f"Index {index_name} summary retrieved successfully"
-                return {
-                    "status": "success",
-                    "message": success_msg,
-                    "summary": summary_result,
-                }
-            error_detail = f"Unable to get summary for index {index_name}"
-            raise Exception(error_detail)
-        except Exception as e:
-            error_msg = f"Failed to get summary: {str(e)}"
-            raise Exception(error_msg)
 
     @staticmethod
     def get_external_file_chunks(

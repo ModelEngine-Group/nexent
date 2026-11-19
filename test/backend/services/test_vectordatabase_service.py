@@ -1310,73 +1310,7 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    def test_get_random_documents(self):
-        """
-        Test retrieving random documents from an index.
 
-        This test verifies that:
-        1. The method gets the total document count in the index
-        2. A random sample of documents is retrieved
-        3. The response contains both the total count and the sampled documents
-        """
-        # Setup
-        self.mock_vdb_core.count_documents.return_value = 100
-
-        search_response = {
-            'hits': {
-                'hits': [
-                    {
-                        '_id': 'doc1',
-                        '_source': {"title": "Doc1", "content": "Content1"}
-                    },
-                    {
-                        '_id': 'doc2',
-                        '_source': {"title": "Doc2", "content": "Content2"}
-                    }
-                ]
-            }
-        }
-        self.mock_vdb_core.search.return_value = search_response
-
-        # Execute
-        result = ElasticSearchService.get_random_documents(
-            index_name="test_index",
-            batch_size=10,
-            vdb_core=self.mock_vdb_core
-        )
-
-        # Assert
-        self.assertEqual(result["total"], 100)
-        self.assertEqual(len(result["documents"]), 2)
-        self.mock_vdb_core.count_documents.assert_called_once_with(
-            "test_index")
-        self.mock_vdb_core.search.assert_called_once()
-
-    @patch('management.services.knowledge_base.service.update_last_summary_time')
-    @patch('management.services.knowledge_base.service.update_knowledge_record')
-    def test_change_summary(self, mock_update_record, mock_update_last_summary):
-        """
-        Test changing the summary of a knowledge base.
-
-        This test verifies that:
-        1. The knowledge record is updated with the new summary
-        2. The response includes a success status and the updated summary
-        3. The update_knowledge_record function is called with correct parameters
-        """
-        # Setup
-        mock_update_record.return_value = True
-
-        # Execute
-        result = self.es_service.change_summary(
-            index_name="test_index",
-            summary_result="Test summary",
-            user_id="test_user"
-        )
-
-        # Assert
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["summary"], "Test summary")
-        mock_update_record.assert_called_once()
 
     @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_success(self, mock_update_record):
@@ -1667,47 +1601,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("not found", str(context.exception))
         mock_update_record.assert_not_called()
 
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    def test_get_summary(self, mock_get_record):
-        """
-        Test retrieving the summary of a knowledge base.
 
-        This test verifies that:
-        1. The knowledge record is retrieved for the specified index
-        2. The summary is extracted from the record
-        3. The response includes a success status and the summary
-        """
-        # Setup
-        mock_get_record.return_value = {
-            "knowledge_describe": "Test summary"
-        }
-
-        # Execute
-        result = self.es_service.get_summary(index_name="test_index")
-
-        # Assert
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["summary"], "Test summary")
-        mock_get_record.assert_called_once_with({'index_name': 'test_index'})
-
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    def test_get_summary_not_found(self, mock_get_record):
-        """
-        Test retrieving a summary when the knowledge record doesn't exist.
-
-        This test verifies that:
-        1. When the knowledge record is not found, an exception is raised
-        2. The exception has the correct status code (500)
-        3. The exception message contains "Unable to get summary"
-        """
-        # Setup
-        mock_get_record.return_value = None
-
-        # Execute and Assert
-        with self.assertRaises(Exception) as context:
-            self.es_service.get_summary(index_name="test_index")
-
-        self.assertIn("Unable to get summary", str(context.exception))
 
     def test_get_index_chunks_filters_fields(self):
         """
@@ -1806,44 +1700,6 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify successful response status - 200
         self.assertIsInstance(result, dict)  # Success response is a dictionary
 
-    def test_get_random_documents_success_status_200(self):
-        """
-        Test get_random_documents method returns status code 200 on success.
-
-        This test verifies that:
-        1. The get_random_documents method successfully retrieves random documents
-        2. The response contains the expected data structure with total and documents
-        3. The method completes without raising exceptions, implying a 200 status code
-        """
-        # Setup
-        self.mock_vdb_core.count_documents.return_value = 100
-
-        search_response = {
-            'hits': {
-                'hits': [
-                    {
-                        '_id': 'doc1',
-                        '_source': {"title": "Doc1", "content": "Content1"}
-                    }
-                ]
-            }
-        }
-        self.mock_vdb_core.search.return_value = search_response
-
-        # Execute
-        result = ElasticSearchService.get_random_documents(
-            index_name="test_index",
-            batch_size=10,
-            vdb_core=self.mock_vdb_core
-        )
-
-        # Assert
-        self.assertEqual(result["total"], 100)
-        self.assertEqual(len(result["documents"]), 1)
-        # Verify successful response status - 200
-        self.assertIsInstance(result, dict)  # Success response is a dictionary
-        self.assertIn("total", result)
-        self.assertIn("documents", result)
 
     def test_semantic_search_success_status_200(self):
         """
@@ -1887,32 +1743,6 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    def test_get_summary_success_status_200(self, mock_get_record):
-        """
-        Test get_summary method returns status code 200 on success.
-
-        This test verifies that:
-        1. The get_summary method successfully retrieves a knowledge base summary
-        2. The response indicates success and contains the summary
-        3. The method completes without raising exceptions, implying a 200 status code
-        """
-        # Setup
-        mock_get_record.return_value = {
-            "knowledge_describe": "This is a test summary for knowledge base"
-        }
-
-        # Execute
-        result = self.es_service.get_summary(index_name="test_index")
-
-        # Assert
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["summary"],
-                         "This is a test summary for knowledge base")
-        # Verify successful response status - 200
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["status"], "success")
-        mock_get_record.assert_called_once_with({'index_name': 'test_index'})
 
 
 
@@ -3274,26 +3104,8 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(len(result["files"]), 1)
 
     # Tests for change_summary exception (lines 1705-1706)
-    @patch('management.services.knowledge_base.service.update_knowledge_record')
-    def test_change_summary_exception(self, mock_update):
-        """Test change_summary handles exception from update_knowledge_record (lines 1705-1706)."""
-        mock_update.side_effect = Exception("Database error")
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.change_summary(
-                index_name="test-index",
-                summary_result="New summary",
-                user_id="user-1"
-            )
-        self.assertIn("Database error", str(ctx.exception))
 
     # Tests for get_summary exception (lines 1727-1729)
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    def test_get_summary_exception(self, mock_get_record):
-        """Test get_summary handles exception (lines 1727-1729)."""
-        mock_get_record.side_effect = Exception("Database error")
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.get_summary(index_name="test-index")
-        self.assertIn("Database error", str(ctx.exception))
 
     # Tests for create_chunk exception (lines 1858-1861)
 
@@ -3404,16 +3216,6 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["files"][0]["chunks"], [])
 
     # Tests for get_random_documents - outer exception (lines 1670-1671)
-    def test_get_random_documents_exception(self):
-        """Test get_random_documents handles outer exception (lines 1670-1671)."""
-        self.mock_vdb_core.count_documents.side_effect = Exception("Connection lost")
-
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.get_random_documents(
-                index_name="test-index",
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertIn("Connection lost", str(ctx.exception))
 
     # Tests for create_chunk - knowledge_record exception (lines 1812-1813)
 
