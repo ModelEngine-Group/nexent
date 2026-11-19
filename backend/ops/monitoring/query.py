@@ -9,6 +9,7 @@ from sqlalchemy import select
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
+from management.utils.serialization import convert_string_to_list
 from ops.monitoring.agent import summarize_agent
 from ops.monitoring.model import summarize
 from ops.monitoring.search import filters
@@ -113,6 +114,73 @@ def read_agents(service, *, tenant, start: date, end: date, groups, agent_id):
     if not rows and status["coverage_state"] != "covered":
         values = dict.fromkeys(values)
     return values, status
+
+
+def agent_catalog(tenant: str | None, agent_id: int | None) -> list[dict]:
+    """Read current configuration once per Agent, excluding published snapshots."""
+    columns = (AgentInfo.tenant_id, AgentInfo.agent_id, AgentInfo.name, AgentInfo.display_name,
+               AgentInfo.model_ids, AgentInfo.group_ids, AgentInfo.current_version_no)
+    statement = select(*columns).where(
+        AgentInfo.delete_flag == "N", AgentInfo.version_no == 0, AgentInfo.tenant_id.is_not(None),
+    )
+    if tenant is not None:
+        statement = statement.where(AgentInfo.tenant_id == tenant)
+    if agent_id is not None:
+        statement = statement.where(AgentInfo.agent_id == agent_id)
+    with get_db_session() as session:
+        inventory = [dict(row) for row in session.execute(statement).mappings()]
+    for item in inventory:
+        item["configured_group_ids"] = convert_string_to_list(item.pop("group_ids"))
+    return inventory
+
+
+def read_agent_views(service, *, tenant, start: date, end: date, groups, agent_id):
+    """Join current inventory to one consistent published Agent snapshot."""
+    inventory = agent_catalog(tenant, agent_id)
+    write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
+    rows, states, published = _read_published_rows(
+        service, tenant=tenant, kind="agent", start=start, end=end,
+        initiator_group_ids=groups, agent_id=agent_id,
+    )
+    tenants = {item["tenant_id"] for item in inventory} | {state["tenant_id"] for state in states}
+    if tenant is not None:
+        tenants.add(tenant)
+    starts = service.store.coverage_starts(tenants, "agent") if published else {}
+    complete = {(state["tenant_id"], state["statistic_date"]) for state in published
+                if state["tenant_id"] in starts and starts[state["tenant_id"]] <=
+                datetime.combine(state["statistic_date"], time.min, tzinfo=service.zone)}
+    all_dates = set(days_inclusive(start, end))
+    by_agent = defaultdict(list)
+    by_date = defaultdict(list)
+    identities = {(item["tenant_id"], item["agent_id"]): {**item, "is_current": True} for item in inventory}
+    for row in rows:
+        key = row["tenant_id"], row["agent_id"]
+        identities.setdefault(key, {"tenant_id": key[0], "agent_id": key[1], "is_current": False})
+        by_agent[key].append(row)
+        by_date[date.fromisoformat(row["statistic_date"])].append(row)
+    items = []
+    for key, metadata in identities.items():
+        covered = all((key[0], day) in complete for day in all_dates)
+        metrics = summarize_agent(by_agent[key]) if covered or key in by_agent else None
+        items.append({**metadata, "metrics": metrics})
+    published_days = {state["statistic_date"] for state in published}
+    history = []
+    for day in sorted(all_dates):
+        covered = bool(tenants) and all((scope, day) in complete for scope in tenants)
+        coverage = "covered" if covered else "partial" if day in published_days else "uncovered"
+        values = summarize_agent(by_date[day])
+        if not by_date[day] and not covered:
+            values = dict.fromkeys(values)
+        history.append({"statistic_date": day, **values, "coverage_state": coverage})
+    coverage = "uncovered"
+    if published:
+        coverage = "covered" if len(complete) == len(tenants) * len(all_dates) else "partial"
+    status = {
+        "data_as_of": min((state["source_snapshot_at"] for state in published), default=None),
+        "coverage_state": coverage,
+        "is_stale": write_failed or any(state["source_revision"] != state["published_source_revision"] for state in states),
+    }
+    return items, len(inventory), history, status
 
 
 def model_rows(rows, inventory, *, covered):

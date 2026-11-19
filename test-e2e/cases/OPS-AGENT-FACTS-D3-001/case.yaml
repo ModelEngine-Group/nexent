@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -51,6 +51,12 @@ case:
   - order: 11
     action: Repeat the query using single-tenant Ops, global Super Admin, unauthorized and missing session contexts.
     expected: Ops reads its own tenant and receives 403 for another tenant. Super Admin can select a tenant or aggregate both. Unauthorized and missing sessions receive 403 and 401 respectively.
+  - order: 12
+    action: Read directory pages, daily trends and rankings for the real run together with controlled zero-use and historical Agent records.
+    expected: Metadata and current count come from the current catalog, published metrics match the summary, search and sort precede pagination, and rankings return the exact top five counts. Overlapping groups count once. Uncovered days and tenants retain unknown metrics.
+  - order: 13
+    action: Request every added view as Ops, Super Admin, a regular user and an unauthenticated client.
+    expected: All views enforce the same tenant boundary and preserve distinct identities across tenants.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -61,11 +67,13 @@ case:
   - The real worker fact is reflected in its published daily row.
   - The Ops summary matches the real run and applies date, group and Agent filters.
   - Ops authorization controls explicit and implicit tenant selection.
+  - Agent directory, trends and rankings agree with published metrics and distinguish current metadata from historical usage.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
   - An Agent aggregate on the end day or a premature switch to an unconfirmed publication.
   - Duplicate counts from matching multiple groups or unauthorized cross-tenant results.
+  - Inflated current totals from published snapshots or lost historical usage for absent catalog entries.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -87,3 +95,8 @@ case:
     steps: [10, 11]
     expected_results: [8, 9]
     forbidden_side_effects: [4]
+  - id: AC-05
+    description: Authorized Agent views join current inventory and published metrics without losing coverage or resource identity.
+    steps: [12, 13]
+    expected_results: [10]
+    forbidden_side_effects: [4, 5]

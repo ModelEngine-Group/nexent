@@ -16,7 +16,9 @@ import httpx
 import pytest
 from elasticsearch import Elasticsearch
 from fastapi import FastAPI
-from sqlalchemy import text
+from sqlalchemy import insert, text
+from sqlalchemy.orm import Session
+from sqlalchemy.schema import CreateSchema
 
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
@@ -57,8 +59,17 @@ def isolated_monitoring(monkeypatch):
 
     tenant = f"agent-sample-{uuid4().hex}"
     store = runtime.control_store()
+    catalog_created = False
+    from management.db.agent.models import AgentInfo
+    from ops.monitoring import query
+
     try:
         store.verify_schema()
+        with store.engine.begin() as connection:
+            connection.execute(CreateSchema(AgentInfo.__table__.schema, if_not_exists=True))
+            AgentInfo.__table__.create(connection)
+        catalog_created = True
+        monkeypatch.setattr(query, "get_db_session", lambda: Session(store.engine))
         with Elasticsearch(es_host, request_timeout=10) as es:
             assert not es.indices.get(index="monitoring-*", allow_no_indices=True)
             assert not es.options(ignore_status=404).indices.get_index_template(
@@ -75,6 +86,8 @@ def isolated_monitoring(monkeypatch):
     finally:
         try:
             with store.engine.begin() as connection:
+                if catalog_created:
+                    AgentInfo.__table__.drop(connection)
                 for table in (BATCH, DAY):
                     connection.execute(text(f"DELETE FROM {table} WHERE tenant_id IN (:tenant, :other)"),
                                        {"tenant": tenant, "other": f"{tenant}-other"})
@@ -259,8 +272,12 @@ def _resume_app(info, tenant, channel, threads, monkeypatch):
 
 async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
     from gateway.authentication import auth
+    from contracts.constants import environment
+
+    monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
+    monkeypatch.setattr(environment, "MONITORING_PROVIDER", "otlp")
     from ops.api import application
-    from ops.monitoring import query
+    from management.db.agent.models import AgentInfo
     from permissions import rbac
 
     other = f"{tenant}-other"
@@ -271,6 +288,8 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         (tenant, day, 21, [99], 600),
         (other, day, 21, [12, 13], 800),
     ]
+    fixtures.extend((tenant, day, number, [12], 100 + number) for number in range(24, 31))
+    fixtures.append((tenant, day, 30, [12], 130))
     for scope, statistic_day, agent_id, groups, duration in fixtures:
         _, fact = _run_across_midnight(scope)
         instant = datetime.combine(statistic_day, time.min, timezone.utc)
@@ -280,6 +299,15 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         ))
         await _wait_for_agent_batch(service, scope)
     service.tick()
+    with service.store.engine.begin() as connection:
+        for scope, number, version, flag in [
+            (tenant, 21, 0, "N"), (tenant, 21, 3, "N"), (tenant, 22, 0, "N"),
+            (tenant, 23, 0, "N"), (tenant, 24, 0, "Y"), (other, 41, 0, "N"),
+        ]:
+            connection.execute(insert(AgentInfo).values(
+                tenant_id=scope, agent_id=number, version_no=version, delete_flag=flag,
+                name=f"internal-{number}", display_name=f"Agent {number}", model_ids=[7], group_ids="12,13",
+            ))
 
     principals = {
         "Bearer ops": ("operator", tenant, "OPS"),
@@ -289,7 +317,6 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
     monkeypatch.setattr(auth, "get_current_user_context", principals.__getitem__)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}, "SU": {"ops.dashboard:read"}})
     monkeypatch.setattr(rbac, "_INITIALIZED", True)
-    monkeypatch.setattr(query, "agent_catalog_tenants", lambda _: {tenant, other})
     monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
     app = application.create_app()
     app.state.monitoring = service
@@ -338,7 +365,75 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         assert all_tenants.json()["data"] == {
             "execution_count": 2, "avg_duration_ms": (duration_ms + 800) / 2, "duration_sample_count": 2,
         }
-    return actual.request.url.raw_path.decode("ascii"), observed
+        views = await _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms)
+    return actual.request.url.raw_path.decode("ascii"), observed, views
+
+
+async def _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms):
+    base = "/ops/v1/monitoring/agents"
+
+    async def get(suffix="", params=None, actor="ops"):
+        headers = {"Authorization": f"Bearer {actor}"} if actor else {}
+        return await client.get(base + suffix, params=params or selection, headers=headers)
+
+    listing = (await get()).json()
+    root, = listing["data"]["items"]
+    assert listing["data"]["current_agent_count"] == listing["data"]["total"] == 1
+    assert root["name"] == "internal-21" and root["display_name"] == "Agent 21"
+    assert root["configured_group_ids"] == [12, 13] and root["model_ids"] == [7]
+    assert root["metrics"] == {"execution_count": 1, "avg_duration_ms": duration_ms, "duration_sample_count": 1}
+    own = {key: value for key, value in selection.items() if key != "agent_id"}
+    full = (await get(params=own)).json()["data"]
+    assert full["current_agent_count"] == 3 and full["total"] == 10
+    by_id = {item["agent_id"]: item for item in full["items"]}
+    assert by_id[23]["metrics"]["execution_count"] == 0 and by_id[23]["metrics"]["avg_duration_ms"] is None
+    assert by_id[24]["is_current"] is False and by_id[24]["metrics"]["execution_count"] == 1
+    ranked = (await get("/rankings", own)).json()["data"]
+    assert [item["agent_id"] for item in ranked] == [30, 21, 22, 24, 25]
+    paged = (await get(params=dict(own, page=2, page_size=2))).json()["data"]
+    assert [item["agent_id"] for item in paged["items"]] == [22, 24]
+    assert paged["total"] == full["total"]
+    for term in ("INTERNAL-21", "AGENT 21"):
+        found = (await get(params=dict(own, search=term))).json()["data"]
+        assert [item["agent_id"] for item in found["items"]] == [21]
+        assert found["current_agent_count"] == 3
+    series = (await get("/trends", dict(selection, start_date=previous.isoformat()))).json()["data"]
+    assert [item["execution_count"] for item in series] == [1, 1]
+    assert [item["avg_duration_ms"] for item in series] == [200, duration_ms]
+    assert all(item["coverage_state"] == "covered" for item in series)
+    for suffix in ("", "/trends", "/rankings"):
+        assert (await get(suffix, dict(selection, tenant_id=other))).status_code == 403
+        assert (await get(suffix, actor="user")).status_code == 403
+        assert (await get(suffix, actor=None)).status_code == 401
+        peer = (await get(suffix, dict(selection, tenant_id=other), "admin")).json()["data"]
+        metrics = peer["items"][0]["metrics"] if suffix == "" else peer[0].get("metrics", peer[0])
+        assert metrics["execution_count"] == 1 and metrics["avg_duration_ms"] == 800
+    global_rows = (await get(actor="admin")).json()["data"]["items"]
+    assert {(item["tenant_id"], item["agent_id"]) for item in global_rows} == {(tenant, 21), (other, 21)}
+    global_series = (await get("/trends", dict(selection, start_date=previous.isoformat()), "admin")).json()["data"]
+    assert [item["coverage_state"] for item in global_series] == ["partial", "covered"]
+    assert [item["execution_count"] for item in global_series] == [1, 2]
+    zero = (await get(params=dict(own, group_ids=[555]))).json()["data"]
+    assert zero["current_agent_count"] == zero["total"] == 3
+    assert all(item["metrics"] == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}
+               for item in zero["items"])
+    missing = (previous - timedelta(days=1)).isoformat()
+    unavailable = (await get("/trends", dict(selection, start_date=missing, end_date=missing))).json()["data"]
+    assert unavailable[0]["execution_count"] is None and unavailable[0]["coverage_state"] == "uncovered"
+    _, update = _run_across_midnight(tenant)
+    instant = datetime.fromisoformat(selection["start_date"]).replace(tzinfo=timezone.utc)
+    emit_fact(dict(update, started_at=instant.isoformat(), ended_at=(instant + timedelta(milliseconds=250)).isoformat(),
+                   duration_ms=250))
+    await _wait_for_agent_batch(service, tenant)
+    stale = (await get()).json()
+    assert stale["is_stale"] and stale["data"]["items"][0]["metrics"] == root["metrics"]
+    service.tick()
+    current = (await get()).json()
+    assert not current["is_stale"]
+    assert current["data"]["items"][0]["metrics"] == {
+        "execution_count": 2, "avg_duration_ms": (duration_ms + 250) / 2, "duration_sample_count": 2,
+    }
+    return {"directory": listing, "rankings": ranked, "trends": series, "after_publication": current}
 
 
 @pytest.mark.asyncio
@@ -455,9 +550,12 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             assert state["source_revision"] == state["published_source_revision"]
             assert daily["execution_count"] == daily["duration_sample_count"] == 1
             assert daily["duration_sum_ms"] == finished["duration_ms"]
-            request_path, response_body = await _verify_ops_query(service, tenant, day, finished["duration_ms"], monkeypatch)
+            request_path, response_body, views = await _verify_ops_query(
+                service, tenant, day, finished["duration_ms"], monkeypatch,
+            )
             record_property("agent_summary_request", request_path)
             record_property("agent_summary_response", json.dumps(response_body))
+            record_property("agent_views_response", json.dumps(views))
         finally:
             release.set()
             worker.cancel()

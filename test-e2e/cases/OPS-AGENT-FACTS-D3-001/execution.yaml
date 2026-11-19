@@ -10,9 +10,10 @@ acceptance_bindings:
   AC-02: [test_real_root_agent_capture_survives_sse_reconnect]
   AC-03: [test_agent_daily_publication_switches_only_after_success, test_real_root_agent_capture_survives_sse_reconnect]
   AC-04: [test_real_root_agent_capture_survives_sse_reconnect]
+  AC-05: [test_real_root_agent_capture_survives_sse_reconnect]
 preparation:
   families: []
   anchors: false
   special_assets: false
   d4_groups: []
-notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace. The case owns and cleans up its model peer, worker, sample tenant rows and monitoring namespace.
+notes: Supply a dedicated migrated database and an empty Elasticsearch monitoring namespace. The case owns and cleans up its model peer, worker, sample tenant rows, isolated current Agent catalog table and monitoring namespace. Current Agent inventory is read through real SQL against that owned table.

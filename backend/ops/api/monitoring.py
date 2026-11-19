@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from contracts.constants.environment import JWT_SECRET
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.model import summarize
-from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_agents, read_models
+from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_agent_views, read_agents, read_models
 from permissions.models import CurrentUser
 from permissions.operations import operations_scope
 
@@ -27,6 +27,7 @@ ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
 Metric = Literal["request_count", "total_tokens", "error_rate", "avg_duration_ms", "avg_ttft_ms",
                  "avg_generation_rate"]
 PositiveResourceId = Annotated[int, Field(gt=0, le=2**31 - 1)]
+AgentMetric = Literal["execution_count", "avg_duration_ms"]
 
 
 class MonitoringSelection(BaseModel):
@@ -154,6 +155,57 @@ def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(age
         logger.warning("Agent monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
     return {"data": values, **status}
+
+
+def _read_agent_views(request, scope, user):
+    tenant = operations_scope(user, scope.tenant_id)
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None:
+        raise HTTPException(503, "Agent monitoring is unavailable")
+    try:
+        return read_agent_views(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+                                groups=scope.group_ids, agent_id=scope.agent_id)
+    except Exception as error:
+        logger.warning("Agent monitoring view failed error=%s", type(error).__name__)
+        raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
+
+
+def _agent_items(items, metric, search="", descending=True):
+    needle = search.casefold()
+    items = [item for item in items if any(needle in (item.get(name) or "").casefold()
+                                         for name in ("name", "display_name"))]
+    items.sort(key=lambda item: (item["tenant_id"], item["agent_id"]))
+    present = [item for item in items if metric_value(item, metric) is not None]
+    missing = [item for item in items if metric_value(item, metric) is None]
+    return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
+
+
+@ops_router.get("/agents", tags=["agent monitoring"])
+def agents(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
+           user: Annotated[CurrentUser, Depends(authenticate)],
+           page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+           search: Annotated[str, Query(max_length=100)] = "", sort_by: AgentMetric = "execution_count",
+           descending: bool = True):
+    items, current_count, _, status = _read_agent_views(request, scope, user)
+    items = _agent_items(items, sort_by, search, descending)
+    start = (page - 1) * page_size
+    return {"data": {"items": items[start:start + page_size], "total": len(items),
+                     "current_agent_count": current_count}, **status}
+
+
+@ops_router.get("/agents/trends", tags=["agent monitoring"])
+def agent_trends(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
+                 user: Annotated[CurrentUser, Depends(authenticate)]):
+    _, _, history, status = _read_agent_views(request, scope, user)
+    return {"data": history, **status}
+
+
+@ops_router.get("/agents/rankings", tags=["agent monitoring"])
+def agent_rankings(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
+                   user: Annotated[CurrentUser, Depends(authenticate)]):
+    items, _, _, status = _read_agent_views(request, scope, user)
+    ordered = _agent_items(items, "execution_count")
+    return {"data": [item for item in ordered if metric_value(item, "execution_count") is not None][:5], **status}
 
 
 class RefreshSelection(BaseModel):

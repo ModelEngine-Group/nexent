@@ -229,6 +229,46 @@ Historical summary backfill is now:
 python -m ops.scripts.backfill_trajectory_summaries
 ```
 
+### Agent directory, trends and rankings
+
+All three routes use the same session authorization, date range, tenant,
+initiating `group_ids` and optional `agent_id` as the Agent summary. They read
+the latest published snapshot on every request. The Web proxy adds `/api`.
+
+| Route | Response `data` |
+| --- | --- |
+| `GET /ops/v1/monitoring/agents` | `items`, `total`, `current_agent_count` |
+| `GET /ops/v1/monitoring/agents/trends` | Daily metrics in ascending date order, with per-day `coverage_state` |
+| `GET /ops/v1/monitoring/agents/rankings` | Exact top five Agents by `execution_count`, descending |
+
+Directory parameters are `search`, `sort_by` (`execution_count` or
+`avg_duration_ms`), `descending` (default true), `page` (default 1) and
+`page_size` (default 20, maximum 100). Search matches either current name or
+display name, case-insensitively. Sort precedes pagination, ties use tenant
+and Agent ID, and unknown metrics sort last in both directions.
+
+Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
+Current metadata includes `name`, `display_name`, `model_ids`,
+`configured_group_ids` and `current_version_no`. Configured groups describe
+the current resource. The historical group filter uses the initiating group
+snapshot of the execution. Active draft rows count once per current Agent,
+independently of date, initiating group and name search. An optional Agent
+selection also scopes this count. Historical usage for an absent catalog
+entry remains in the list with `is_current=false` and without current names.
+
+`metrics` contains `execution_count`, `avg_duration_ms` and
+`duration_sample_count`. Resource metrics are null when the selected tenant
+and dates lack complete coverage and no matching observations are available.
+Complete zero-use resources report zero executions and a null average.
+Trends include every requested date. Unknown dates have null metrics, and
+partially covered days retain their observed values and a `partial` label.
+All responses include `data_as_of`, `coverage_state` and `is_stale`.
+
+```http
+GET /ops/v1/monitoring/agents?start_date=2026-11-19&end_date=2026-11-19&group_ids=12&group_ids=13&page=1&page_size=20&sort_by=execution_count&descending=true
+Authorization: Bearer <session-token>
+```
+
 ## Deployment
 
 Normal Docker and Kubernetes application selection includes ops. Docker ops

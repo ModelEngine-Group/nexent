@@ -6,7 +6,7 @@ feature:
   feature_id: OPS-AGENT-FACTS
   name: Agent monitoring source facts
   status: active
-  description: Write Agent execution observations, publish daily metrics and expose tenant-authorized summary reads.
+  description: Write Agent execution observations, publish daily metrics and expose tenant-authorized summaries, directory pages, trends and rankings.
   business_rules:
   - rule_id: OPS-AGENT-FACTS-RULE-01
     description: A main Agent's start, end and terminal replay share one Elasticsearch document routed by the execution start time.
@@ -16,7 +16,9 @@ feature:
     description: Publish each confirmed execution once on its start day, preserving measured ended-run durations as an integer sum and sample count.
   - rule_id: OPS-AGENT-FACTS-RULE-04
     description: Read execution counts and weighted average durations from published Agent rows with inclusive dates, initiating group and Agent filters, and enforce the Ops tenant scope.
+  - rule_id: OPS-AGENT-FACTS-RULE-05
+    description: Current Agent counts use active draft rows independently of historical date and group filters. Published resource pages, inclusive daily trends and exact top five counts preserve per-tenant identities, known zero, unknown coverage and deterministic ordering.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118]
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119]
     notes: Agent collection contract and shared Ops monitoring pipeline.
