@@ -25,6 +25,9 @@ from management.api.knowledge_base.quota import (
     platform_quota_router,
     tenant_quota_router,
 )
+from management.services.knowledge_base.personal_capacity_access import (
+    PersonalQuotaDenied,
+)
 
 from backend.http.server.app_factory import create_app
 from infrastructure.agentos_identity import ServicePrincipal
@@ -86,13 +89,6 @@ def mock_auth_user():
         yield
 
 
-@pytest.fixture
-def mock_quota_service():
-    """Mock QuotaService instance methods for integration tests."""
-    with patch("management.api.knowledge_base.quota.QuotaService") as mock_class:
-        mock_instance = MagicMock()
-        mock_class.return_value = mock_instance
-        yield mock_instance
 
 
 @pytest.fixture
@@ -133,18 +129,18 @@ def mock_personal_auth():
 class TestGetTenantQuota:
     """Integration tests for GET /tenants/{id}/quota."""
 
-    def test_returns_config_structure(self, client, mock_auth_admin, mock_quota_service, mocker):
-        mock_quota_service.get_hard_limit.return_value = {
+    def test_returns_config_structure(self, client, mock_auth_admin, mocker):
+        hard = {
             "hard_limit_bytes": 100 * GB,
             "hard_limit_readable": "100.0 GB",
             "hard_limit_editable": True,
         }
-        mock_quota_service.get_warning_config.return_value = {
+        warning = {
             "warning_enabled": True,
             "warning_threshold_pct": 80,
             "critical_threshold_pct": 95,
         }
-        mock_quota_service.get_quota_summary.return_value = {
+        quota_summary = {
             "soft_allocated_total_bytes": 0,
             "soft_allocated_readable": "0 B",
             "hard_limit_bytes": 100 * GB,
@@ -154,9 +150,9 @@ class TestGetTenantQuota:
         }
 
         read = mocker.patch.object(quota_app, "read_tenant_quota", return_value={
-            **mock_quota_service.get_hard_limit.return_value,
-            **mock_quota_service.get_warning_config.return_value,
-            "summary": mock_quota_service.get_quota_summary.return_value,
+            **hard,
+            **warning,
+            "summary": quota_summary,
         })
         resp = client.get("/api/tenants/test-tenant/quota")
         assert resp.status_code == 200
@@ -593,10 +589,10 @@ class TestPersonalCapacityAPI:
         assert resp.json()["code"] == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE.value
 
     def test_list_users_allows_admin(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.list_personal_capacity_users.return_value = {
+        mock_personal_management.return_value = {
             "total": 1,
             "page": 1,
             "page_size": 20,
@@ -608,23 +604,26 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["items"][0]["user_id"] == "user-1"
-        mock_quota_service.list_personal_capacity_users.assert_called_once_with(
-            page=1,
-            page_size=20,
-            sort_by="total_bytes",
-            sort_order="desc",
-            keyword=None,
+        mock_personal_management.assert_awaited_once_with(
+            'users', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'), options={
+            "page": 1,
+            "page_size": 20,
+            "sort_by": "total_bytes",
+            "sort_order": "desc",
+            "keyword": None},
         )
 
-    def test_list_users_requires_permission(self, client, mock_personal_auth):
+    def test_list_users_requires_permission(self, client, mock_personal_auth, mock_personal_management):
         mock_personal_auth(permission=False)
+        mock_personal_management.side_effect = PersonalQuotaDenied('Missing required permission: kb.capacity:read')
 
         resp = client.get("/api/capacity/personal/users")
 
         assert resp.status_code == 403
 
-    def test_admin_cannot_view_other_tenant(self, client, mock_personal_auth):
+    def test_admin_cannot_view_other_tenant(self, client, mock_personal_auth, mock_personal_management):
         mock_personal_auth(role="ADMIN", tenant_id="test-tenant")
+        mock_personal_management.side_effect = PersonalQuotaDenied('Cannot access personal KB capacity for another tenant')
 
         resp = client.get(
             "/api/capacity/personal/users",
@@ -636,14 +635,14 @@ class TestPersonalCapacityAPI:
 
     @pytest.mark.parametrize("role", ["SU"])
     def test_su_can_view_other_tenant(
-        self, client, mock_personal_auth, mock_quota_service, role
+        self, client, mock_personal_auth, mock_personal_management, role
     ):
         mock_personal_auth(
             role=role,
             tenant_id="home-tenant",
             user_id="platform-user",
         )
-        mock_quota_service.list_personal_capacity_users.return_value = {
+        mock_personal_management.return_value = {
             "total": 0,
             "page": 1,
             "page_size": 20,
@@ -657,19 +656,20 @@ class TestPersonalCapacityAPI:
         )
 
         assert resp.status_code == 200
-        mock_quota_service.list_personal_capacity_users.assert_called_once_with(
-            page=1,
-            page_size=20,
-            sort_by="total_bytes",
-            sort_order="desc",
-            keyword=None,
+        mock_personal_management.assert_awaited_once_with(
+            'users', 'target-tenant', ServicePrincipal('platform-user', 'home-tenant'), options={
+            "page": 1,
+            "page_size": 20,
+            "sort_by": "total_bytes",
+            "sort_order": "desc",
+            "keyword": None},
         )
 
     def test_list_users_passes_keyword_and_usage_rate_sort(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.list_personal_capacity_users.return_value = {
+        mock_personal_management.return_value = {
             "total": 0,
             "page": 1,
             "page_size": 20,
@@ -687,19 +687,20 @@ class TestPersonalCapacityAPI:
         )
 
         assert resp.status_code == 200
-        mock_quota_service.list_personal_capacity_users.assert_called_once_with(
-            page=1,
-            page_size=20,
-            sort_by="usage_rate",
-            sort_order="asc",
-            keyword="beta",
+        mock_personal_management.assert_awaited_once_with(
+            'users', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'), options={
+            "page": 1,
+            "page_size": 20,
+            "sort_by": "usage_rate",
+            "sort_order": "asc",
+            "keyword": "beta"},
         )
 
     def test_list_users_maps_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.list_personal_capacity_users.side_effect = RuntimeError(
+        mock_personal_management.side_effect = RuntimeError(
             "boom"
         )
 
@@ -709,10 +710,10 @@ class TestPersonalCapacityAPI:
         assert "Error listing personal KB capacity" in resp.json()["message"]
 
     def test_get_user_kbs_allows_admin(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_kb_details.return_value = {
+        mock_personal_management.return_value = {
             "total": 1,
             "page": 1,
             "page_size": 20,
@@ -724,15 +725,15 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["kbs"][0]["kb_id"] == 1
-        mock_quota_service.get_personal_kb_details.assert_called_once_with(
-            "user-1", page=1, page_size=20
+        mock_personal_management.assert_awaited_once_with(
+            'details', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'), subject='user-1', options={'page': 1, 'page_size': 20}
         )
 
     def test_get_summary_allows_admin(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_capacity_summary.return_value = {
+        mock_personal_management.return_value = {
             "user_count": 3,
             "kb_count": 7,
             "total_bytes": 1024,
@@ -743,12 +744,13 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["user_count"] == 3
-        mock_quota_service.get_personal_capacity_summary.assert_called_once_with()
+        mock_personal_management.assert_awaited_once_with('summary', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'))
 
     def test_get_summary_requires_permission(
-        self, client, mock_personal_auth
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth(permission=False)
+        mock_personal_management.side_effect = PersonalQuotaDenied('Missing required permission: kb.capacity:read')
 
         resp = client.get("/api/capacity/personal/summary")
 
@@ -756,14 +758,14 @@ class TestPersonalCapacityAPI:
 
     @pytest.mark.parametrize("role", ["SU"])
     def test_get_summary_su_can_view_other_tenant(
-        self, client, mock_personal_auth, mock_quota_service, role
+        self, client, mock_personal_auth, mock_personal_management, role
     ):
         mock_personal_auth(
             role=role,
             tenant_id="home-tenant",
             user_id="platform-user",
         )
-        mock_quota_service.get_personal_capacity_summary.return_value = {
+        mock_personal_management.return_value = {
             "user_count": 1,
             "kb_count": 2,
         }
@@ -774,7 +776,7 @@ class TestPersonalCapacityAPI:
         )
 
         assert resp.status_code == 200
-        mock_quota_service.get_personal_capacity_summary.assert_called_once_with()
+        mock_personal_management.assert_awaited_once_with('summary', 'target-tenant', ServicePrincipal('platform-user', 'home-tenant'))
 
     def test_set_user_quota_requires_value_or_unlimited(
         self, client, mock_personal_auth, mock_personal_configuration
@@ -948,8 +950,9 @@ class TestPersonalCapacityAPI:
             {'quota_limit_bytes': 4096, 'unlimited': False})
 
 
-    def test_list_users_rejects_unknown_sort_field(self, client, mock_personal_auth):
+    def test_list_users_rejects_unknown_sort_field(self, client, mock_personal_auth, mock_personal_management):
         mock_personal_auth()
+        mock_personal_management.side_effect = ValueError('sort_by must be one of user_name, kb_count, total_bytes, quota_limit_bytes, usage_rate')
 
         response = client.get(
             "/api/capacity/personal/users",
@@ -959,8 +962,9 @@ class TestPersonalCapacityAPI:
         assert response.status_code == 400
         assert "sort_by must be one of" in response.json()["message"]
 
-    def test_list_users_rejects_unknown_sort_order(self, client, mock_personal_auth):
+    def test_list_users_rejects_unknown_sort_order(self, client, mock_personal_auth, mock_personal_management):
         mock_personal_auth()
+        mock_personal_management.side_effect = ValueError('sort_order must be asc or desc')
 
         response = client.get(
             "/api/capacity/personal/users",
@@ -971,10 +975,10 @@ class TestPersonalCapacityAPI:
         assert "sort_order must be asc or desc" in response.json()["message"]
 
     def test_get_user_kbs_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_kb_details.side_effect = RuntimeError("db down")
+        mock_personal_management.side_effect = RuntimeError("db down")
 
         response = client.get("/api/capacity/personal/users/user-1/kbs")
 
@@ -982,10 +986,10 @@ class TestPersonalCapacityAPI:
         assert "Error getting personal KB details" in response.json()["message"]
 
     def test_get_summary_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_management
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_capacity_summary.side_effect = RuntimeError(
+        mock_personal_management.side_effect = RuntimeError(
             "db down"
         )
 
@@ -1150,3 +1154,8 @@ def mock_personal_configuration(mocker):
 @pytest.fixture
 def mock_personal_self_capacity(mocker):
     return mocker.patch.object(quota_app, 'personal_self_capacity', new_callable=AsyncMock)
+
+
+@pytest.fixture
+def mock_personal_management(mocker):
+    return mocker.patch.object(quota_app, 'personal_capacity_operation', new_callable=AsyncMock)

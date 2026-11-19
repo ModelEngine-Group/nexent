@@ -3,12 +3,14 @@
 
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime
 
 from nexent.storage.models import StorageScope
 
 from infrastructure.knowledge_catalog import knowledge as knowledge_table
 from infrastructure.rdb.cleanse_resources import bind_cleanse_resources
 from infrastructure.rdb.composition import close_owned, record_engine
+from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
 from infrastructure.rdb.storage_ledger import LEDGER, ledger_catalog
 from infrastructure.rdb.tenant_config_record import TenantConfig
@@ -22,7 +24,20 @@ CATALOG, CONFIGS = "quota_read_knowledge", "quota_read_configs"
 config_table = TenantConfig.__table__
 
 
-def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False):
+class PersonalCapacityRecordStore(SQLRecordStore):
+    """Keep the existing public catalog date representation at the SI boundary."""
+
+    def _neutral(self, dataset, row):
+        result = super()._neutral(dataset, row)
+        if dataset == CATALOG:
+            for name in ('last_doc_update_time', 'update_time'):
+                value = row.get(name)
+                if isinstance(value, datetime):
+                    result[name] = value.isoformat() + ('Z' if value.tzinfo is None else '')
+        return result
+
+
+def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False, personal=False):
     schemas = []
     knowledge_fields = ("knowledge_id", "tenant_id", "quota_limit_bytes", "delete_flag")
     if usage:
@@ -30,6 +45,8 @@ def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False):
             "index_name", "knowledge_name", "knowledge_sources", "embedding_model_id",
             "created_by", "group_ids", "ingroup_permission",
         )
+    if personal:
+        knowledge_fields += ('last_doc_update_time', 'create_time', 'update_time', 'updated_by')
     for name, table, key, names, active in (
         (
             CATALOG,
@@ -74,12 +91,16 @@ def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False):
         )
     tables = {CATALOG: knowledge_table, CONFIGS: config_table}
     audits = {}
+    if personal:
+        audits[CATALOG] = RecordAudit('create_time', 'update_time', 'created_by', 'updated_by',
+                                    extra_dates=frozenset({'last_doc_update_time'}))
     if usage:
         definition, table, audit = ledger_catalog()
         schemas.append(replace(definition, write_roles=frozenset()))
         tables[LEDGER] = table
         audits[LEDGER] = audit
-    return SQLRecordStore(
+    store = PersonalCapacityRecordStore if personal else SQLRecordStore
+    return store(
         StorageScope("management", tenant_id, actor.user_id, set(tables)),
         DatasetCatalog(tuple(schemas)),
         tables,

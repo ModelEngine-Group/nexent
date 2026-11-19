@@ -2,6 +2,9 @@
 
 from management.services.configuration.tenant.quotas import TenantQuotaPolicy
 from management.services.configuration.user.quotas import PersonalQuotaPolicy
+from management.services.knowledge_base.personal_capacity_projection import (
+    group_storage,
+)
 from management.services.knowledge_base.quota_common import (
     _UNSET,
     ASSET_OWNER_TENANT_ID,
@@ -40,6 +43,7 @@ from management.services.knowledge_base.quota_common import (
     get_tenant_committed_source_bytes,
     get_user_email_map,
     insert_config,
+    invalidate_usage_cache,
     logger,
     logging,
     time,
@@ -47,7 +51,6 @@ from management.services.knowledge_base.quota_common import (
     update_knowledge_record,
 )
 from management.services.knowledge_base.usage import KnowledgeUsageAccounting
-from management.services.knowledge_base.quota_common import invalidate_usage_cache
 
 
 class QuotaService(
@@ -66,8 +69,9 @@ class QuotaService(
 
     def get_kb_soft_quota(self, knowledge_id: int) -> Optional[int]:
         """Get per-KB soft quota in bytes. Returns None if not set."""
-        from infrastructure.rdb.client import get_db_session
         from management.db.models import KnowledgeRecord
+
+        from infrastructure.rdb.client import get_db_session
 
         with get_db_session() as session:
             record = (
@@ -118,7 +122,7 @@ class QuotaService(
         upload_bytes: int,
     ) -> None:
         """Check only the effective user-level personal KB quota."""
-        user_usage = self._aggregate_personal_storage_by_user(
+        user_usage = group_storage(
             usage_data, user_ids={user_id}
         ).get(user_id, {"total_bytes": 0})
         user_usage_bytes = user_usage["total_bytes"]

@@ -10,7 +10,6 @@ from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from contracts.constants.constants import (
-    PERSONAL_KB_CAPACITY_READ_PERMISSION,
     QUOTA_PAYLOAD_DESCRIPTION,
     TARGET_TENANT_ID_DESCRIPTION,
 )
@@ -30,12 +29,14 @@ from management.services.knowledge_base.personal_capacity import personal_self_c
 from management.services.knowledge_base.personal_capacity_access import (
     PersonalQuotaDenied,
 )
+from management.services.knowledge_base.personal_capacity_management import (
+    personal_capacity_operation,
+)
 from management.services.knowledge_base.personal_quota_configuration import (
     InvalidPersonalQuotaPayload,
     personal_quota_configuration,
 )
 from management.services.knowledge_base.platform_quota import PlatformQuotaOverview
-from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.quota_read import read_tenant_quota
 from management.services.knowledge_base.quota_usage import TenantQuotaUsage
 from management.services.knowledge_base.quota_write import (
@@ -48,9 +49,7 @@ from management.services.permission.identity.session import (
     get_current_user_id,
 )
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
-from permissions.depends import require
 from permissions.models import CurrentUser
-from permissions.tenant_scope import resolve_personal_target_tenant
 
 from infrastructure.agentos_identity import ServicePrincipal
 
@@ -490,8 +489,8 @@ async def get_personal_self_capacity(
 
 
 @personal_quota_router.get("/users")
-def list_personal_capacity_users(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
+async def list_personal_capacity_users(
+    current_user: CurrentUser = Depends(authenticate),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
@@ -504,96 +503,80 @@ def list_personal_capacity_users(
 ):
     """List personal KB storage aggregated by user."""
     try:
-        if sort_by not in {
-            "user_name",
-            "kb_count",
-            "total_bytes",
-            "quota_limit_bytes",
-            "usage_rate",
-        }:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail=("sort_by must be one of user_name, kb_count, total_bytes, quota_limit_bytes, usage_rate"),
-            )
-        if sort_order.lower() not in {"asc", "desc"}:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="sort_order must be asc or desc",
-            )
-        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
-        service = QuotaService(target_tenant_id, current_user.user_id)
-        data = service.list_personal_capacity_users(
-            page=page,
-            page_size=page_size,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            keyword=keyword,
-        )
+        target_tenant_id = tenant_id or current_user.tenant_id
+        actor = ServicePrincipal(current_user.user_id, current_user.tenant_id)
+        data = await personal_capacity_operation('users', target_tenant_id, actor, options={
+            "page": page, "page_size": page_size, "sort_by": sort_by, "sort_order": sort_order, "keyword": keyword})
         return JSONResponse(status_code=HTTPStatus.OK, content=data)
     except HTTPException:
         raise
     except AppException:
         raise
+    except PersonalQuotaDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot access personal KB capacity") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error listing personal KB capacity: {exc!s}") from None
     except Exception as exc:
-        logger.exception("Error listing personal KB capacity users")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error listing personal KB capacity: {exc!s}",
-        )
-
+        logger.exception("Error listing personal KB capacity")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error listing personal KB capacity: {exc!s}")
 
 @personal_quota_router.get("/users/{user_id}/kbs")
-def get_personal_capacity_kbs(
+async def get_personal_capacity_kbs(
     user_id: str = Path(..., description="User ID"),
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
+    current_user: CurrentUser = Depends(authenticate),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
 ):
     """List a user's personal KB records with storage details."""
     try:
-        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
-        service = QuotaService(target_tenant_id, current_user.user_id)
-        data = service.get_personal_kb_details(
-            user_id,
-            page=page,
-            page_size=page_size,
-        )
+        target_tenant_id = tenant_id or current_user.tenant_id
+        actor = ServicePrincipal(current_user.user_id, current_user.tenant_id)
+        data = await personal_capacity_operation('details', target_tenant_id, actor, subject=user_id,
+            options={"page": page, "page_size": page_size})
         return JSONResponse(status_code=HTTPStatus.OK, content=data)
     except HTTPException:
         raise
     except AppException:
         raise
+    except PersonalQuotaDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot access personal KB capacity") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting personal KB details: {exc!s}") from None
     except Exception as exc:
-        logger.exception("Error getting personal KB details for user %s", user_id)
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB details: {exc!s}",
-        )
-
+        logger.exception("Error getting personal KB details")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting personal KB details: {exc!s}")
 
 @personal_quota_router.get("/summary")
-def get_personal_capacity_summary(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
+async def get_personal_capacity_summary(
+    current_user: CurrentUser = Depends(authenticate),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Return aggregate personal KB capacity stats for a tenant."""
     try:
-        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
-        service = QuotaService(target_tenant_id, current_user.user_id)
-        data = service.get_personal_capacity_summary()
+        target_tenant_id = tenant_id or current_user.tenant_id
+        actor = ServicePrincipal(current_user.user_id, current_user.tenant_id)
+        data = await personal_capacity_operation('summary', target_tenant_id, actor)
         return JSONResponse(status_code=HTTPStatus.OK, content=data)
     except HTTPException:
         raise
     except AppException:
         raise
+    except PersonalQuotaDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot access personal KB capacity") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting personal KB capacity summary: {exc!s}") from None
     except Exception as exc:
         logger.exception("Error getting personal KB capacity summary")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB capacity summary: {exc!s}",
-        )
-
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting personal KB capacity summary: {exc!s}")
 
 @personal_quota_router.put("/users/{user_id}/quota")
 async def set_personal_user_quota(

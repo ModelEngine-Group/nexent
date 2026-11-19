@@ -37,6 +37,14 @@ class PersonalCapacityReader(PersonalCapacityAccess):
     def read(self, tenant, actor, subject, *, strict=True, context):
         return self._read(tenant, actor, subject, strict=strict, own=False, context=context)
 
+    def authorize_management(self, tenant, actor, *, context):
+        context.remaining()
+        with self.ports(actor, context=context, writable=False) as (identity, permissions, _):
+            self._authorize(identity, permissions, actor, tenant, False, context)
+
+    def read_management(self, tenant, actor, *, subject=None, context):
+        return self._read(tenant, actor, subject, strict=False, own=False, management=True, context=context)
+
     def authorize_self(self, actor, *, context):
         context.remaining()
         with self.ports(actor, context=context, writable=False) as (identity, _, _):
@@ -45,23 +53,23 @@ class PersonalCapacityReader(PersonalCapacityAccess):
     def read_self(self, actor, *, context):
         return self._read(actor.tenant_id, actor, actor.user_id, strict=True, own=True, context=context)
 
-    def _read(self, tenant, actor, subject, *, strict, own, context):
+    def _read(self, tenant, actor, subject, *, strict, own, management=False, context):
         context.remaining()
         with self.ports(actor, context=context, writable=False) as (identity, permissions, open_records):
             def authorize():
                 if own:
                     quota_identity_roles(identity, actor, context=context)
                 else:
-                    self._authorize(identity, permissions, actor, tenant, True, context)
+                    self._authorize(identity, permissions, actor, tenant, not management, context)
 
             authorize()
             records = open_records(tenant)
             require_quota_scope(records, actor, tenant)
             rows, cursor, seen = [], None, set()
-            query = RecordQuery(where=Junction('and', (
-                Comparison('created_by', 'eq', subject), Comparison('ingroup_permission', 'eq', 'PRIVATE'),
-                Comparison('delete_flag', 'ne', 'Y'),
-            )))
+            terms = [Comparison('ingroup_permission', 'eq', 'PRIVATE'), Comparison('delete_flag', 'ne', 'Y')]
+            if subject is not None:
+                terms.append(Comparison('created_by', 'eq', subject))
+            query = RecordQuery(where=Junction('and', tuple(terms)))
             while True:
                 page = records.query(CATALOG, query, PageRequest(limit=500, cursor=cursor), context=context)
                 rows.extend(page.items)
@@ -101,6 +109,33 @@ class PersonalCapacityReader(PersonalCapacityAccess):
                         source = kind
                         break
                 result.update(quota_bytes=value, quota_source=source)
+            if management:
+                subjects = sorted({row['created_by'] for row in rows if row['created_by']})
+                quotas, default = self._configuration(records, subjects, context)
+                result.update(quotas=quotas, default_quota=default)
             authorize()
             context.remaining()
             return result
+
+    def _configuration(self, records, subjects, context):
+        keys = ['PERSONAL_KB_QUOTA_' + subject for subject in subjects] + ['PERSONAL_KB_QUOTA_DEFAULT']
+        configs = {}
+        for start in range(0, len(keys), 500):
+            cursor, seen = None, set()
+            query = RecordQuery(where=Comparison('config_key', 'in', keys[start:start + 500]))
+            while True:
+                page = records.query(CONFIGS, query, PageRequest(limit=500, cursor=cursor), context=context)
+                configs.update((row['config_key'], row['config_value']) for row in page.items)
+                if page.next_cursor is None:
+                    break
+                if page.next_cursor in seen:
+                    raise Conflict()
+                seen.add(page.next_cursor)
+                cursor = page.next_cursor
+        default = parse_personal_quota(configs.get('PERSONAL_KB_QUOTA_DEFAULT'))
+        result = {}
+        for subject in subjects:
+            value = parse_personal_quota(configs.get('PERSONAL_KB_QUOTA_' + subject))
+            result[subject] = (value, 'individual') if value is not None else (
+                (default, 'default') if default is not None else (None, 'unlimited'))
+        return result, default

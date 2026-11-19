@@ -46,8 +46,13 @@ def parse_store_size(size_str) -> int:
 
 def vector_bytes_for_display(size):
     """Preserve the original provider's two-decimal format and quota parsing."""
+    return parse_store_size(vector_size_for_display(size))
+
+
+def vector_size_for_display(size):
+    """Preserve the original provider's public human-readable storage size."""
     for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
         if size < 1024:
-            return parse_store_size(f'{size:.2f} {unit}')
+            return f'{size:.2f} {unit}'
         size /= 1024
-    return parse_store_size(f'{size:.2f} PB')
+    return f'{size:.2f} PB'

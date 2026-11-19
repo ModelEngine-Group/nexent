@@ -26,7 +26,7 @@ def personal_capacity_ports(actor, *, context, writable=False, usage=False):
         owned.append(permissions)
 
         def records(tenant):
-            port = (bind_tenant_quota_records(actor, tenant, engine, usage=True) if usage
+            port = (bind_tenant_quota_records(actor, tenant, engine, usage=True, personal=True) if usage
                     else bind_quota_write_records(actor, tenant, engine, writable=writable))
             owned.append(port)
             return port

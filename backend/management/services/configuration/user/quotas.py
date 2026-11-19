@@ -17,7 +17,6 @@ from management.services.knowledge_base.quota_common import (
     KEY_WARNING_THRESHOLD_PCT,
     MB,
     Any,
-    Dict,
     List,
     Optional,
     PlatformQuotaConflictError,
@@ -32,7 +31,6 @@ from management.services.knowledge_base.quota_common import (
     delete_config_by_tenant_config_id,
     get_committed_bytes_by_kb,
     get_committed_source_bytes_by_paths,
-    get_configs_by_tenant_id_and_keys,
     get_knowledge_info_by_tenant_id,
     get_private_knowledge_info_by_creator,
     get_private_knowledge_info_by_tenant_id,
@@ -85,33 +83,3 @@ class PersonalQuotaPolicy:
         if default is not None:
             return default, "default"
         return None, "unlimited"
-
-    def _get_personal_effective_quota_map(
-        self,
-        user_ids: set[str],
-        default_quota: Any = _UNSET,
-    ) -> Tuple[Dict[str, Tuple[Optional[int], str]], Optional[int]]:
-        """Resolve effective personal quotas for users with one config query."""
-        normalized_user_ids = sorted(user_id for user_id in user_ids if user_id)
-        config_keys = [_personal_quota_key(user_id) for user_id in normalized_user_ids]
-        if default_quota is _UNSET:
-            config_keys.append(KEY_PERSONAL_KB_QUOTA_DEFAULT)
-
-        configs = get_configs_by_tenant_id_and_keys(self.tenant_id, config_keys)
-        resolved_default = (
-            self._parse_quota_value(configs.get(KEY_PERSONAL_KB_QUOTA_DEFAULT))
-            if default_quota is _UNSET
-            else default_quota
-        )
-        resolved: Dict[str, Tuple[Optional[int], str]] = {}
-        for user_id in normalized_user_ids:
-            individual_quota = self._parse_quota_value(
-                configs.get(_personal_quota_key(user_id))
-            )
-            if individual_quota is not None:
-                resolved[user_id] = (individual_quota, "individual")
-            elif resolved_default is not None:
-                resolved[user_id] = (resolved_default, "default")
-            else:
-                resolved[user_id] = (None, "unlimited")
-        return resolved, resolved_default
