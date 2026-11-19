@@ -88,28 +88,48 @@ jobs:
           # test_management_relocation.py / test_gateway_layout.py assert
           # these paths DO NOT EXIST, so leftover dirs turn into hard
           # test failures that have nothing to do with the PR content.
-          # This step chmod-repairs and removes them if we can; anything
-          # still root-owned we leave behind and report (not a test
-          # blocker because pytest never writes to these paths).
+          #
+          # Strategy (two layers):
+          #   1) git clean -ffdx with excludes.  Clears every untracked /
+          #      ignored path that git sees, while skipping the small set
+          #      of known root-owned leftovers (.pytest-tmp, .pytest_cache)
+          #      that actions/checkout default clean: true also cannot
+          #      touch.  Covers all future refactors automatically.
+          #   2) Fallback chmod + rm for the excluded dirs themselves and
+          #      any path git clean could not remove.  Anything still
+          #      root-owned is logged but not a blocker — pytest no
+          #      longer writes to these paths (test/conftest.py moved
+          #      tmp_root outside the repo tree), so they are dead weight.
+          #
+          # Diagnostic: after both passes, print a ls of whatever untracked
+          # junk still remains so the next CI failure tells us exactly
+          # what was left behind.
+          echo "=== Layer 1: git clean -ffdx (excluding known root-owned dirs) ==="
+          git clean -ffdx -e .pytest-tmp -e .pytest_cache 2>&1 | head -50 || true
+          echo ""
+
+          echo "=== Layer 2: chmod + rm fallback for excluded / stubborn paths ==="
           clean_tree() {
             local target="$1"
             [ -e "$target" ] || return 0
-            echo "Removing leftover path: $target"
+            echo "  Removing leftover path: $target"
             find "$target" -type d -exec chmod u+rwx {} + 2>/dev/null || true
             find "$target" -type f -exec chmod u+rw {} + 2>/dev/null || true
-            rm -rf "$target" 2>/dev/null || echo "  (some files still unremovable — non-blocking)"
+            rm -rf "$target" 2>/dev/null || echo "    (some files still unremovable — non-blocking)"
           }
           clean_tree ".pytest-tmp"
-          # Paths asserted absent by test_management_relocation.py /
-          # test_gateway_layout.py / test_service_directory_architecture.py
+          clean_tree ".pytest_cache"
+          # Legacy refactor paths — git clean already handled them on a
+          # clean checkout, but re-assert explicitly if anything was left.
           clean_tree "backend/gateway/api"
-          find backend/utils -maxdepth 1 -type f -name '*.py' \
-              -exec chmod u+rw {} + 2>/dev/null \
-              -exec rm -f {} + 2>/dev/null || true
           clean_tree "backend/services/providers"
-          find backend/management/security -maxdepth 1 -type f -name '*.py' \
-              -exec chmod u+rw {} + 2>/dev/null \
-              -exec rm -f {} + 2>/dev/null || true
+          clean_tree "backend/management/security"
+          clean_tree "backend/utils"
+          echo ""
+
+          echo "=== Remaining untracked files (diagnostic) ==="
+          git clean -ffdxn 2>&1 | head -50 || true
+          echo "=== End diagnostic ==="
 
       - name: Install uv
         # astral-sh/setup-uv@v10.3.3
