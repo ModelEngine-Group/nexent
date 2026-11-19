@@ -108,6 +108,7 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
+  OPS-MCP-TOOL-MONITORING: mcp
   OPS-MODEL-MONITORING: model
   SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
