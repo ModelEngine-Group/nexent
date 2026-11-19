@@ -14,7 +14,7 @@ from contracts.review import (
     ReviewListQuery,
     ReviewSubmissionRequest,
 )
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from management.services.repository.reviews import (
     decide_repository_review,
     get_repository_review,
