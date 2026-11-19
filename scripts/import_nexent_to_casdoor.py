@@ -104,6 +104,7 @@ def mapped_role_name(role, mapping):
 def plan_import(session, tenant, organization, directory, client, journal):
     from sqlalchemy import func
 
+    from contracts.roles import normalize_roles
     from management.db.configuration.models import TenantConfig
     from management.db.identity.models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant
     from management.db.models import UserAccount
@@ -150,20 +151,22 @@ def plan_import(session, tenant, organization, directory, client, journal):
         if row.user_id in binding_ids:
             raise ImportConflict("An active Casdoor binding does not resolve in the target organization")
         email = (row.user_email or "").strip()
-        if (not email or not row.password_login_enabled or row.user_role not in DEFAULT_ROLES
+        roles = normalize_roles(row.user_roles, allow_empty=True)
+        role = roles[0] if roles else None
+        if (not email or not row.password_login_enabled or role not in DEFAULT_ROLES
                 or membership_counts.get(row.user_id) != 1 or (row.source_metadata or {}).get("api_only")):
             skipped += 1
             continue
         saved = staged.get(row.user_id)
         existing = by_name.get(saved["username"]) if saved else None
-        if saved and (saved["email"], saved["role"]) != (email, row.user_role):
+        if saved and (saved["email"], saved["role"]) != (email, role):
             raise ImportConflict("A staged Nexent account changed since the first run")
         if existing:
             detail = directory._request(client, "get-user", params={"id": f"{organization}/{saved['username']}"})
             check_recovery_account(detail, saved, organization)
         if any(not existing or found["id"] != existing["id"] for found in by_email[email.casefold()]):
             raise ImportConflict("A Casdoor email conflict requires explicit account linking before import")
-        accounts[row.user_id] = (email, row.user_role)
+        accounts[row.user_id] = (email, role)
     if len({email.casefold() for email, _ in accounts.values()}) != len(accounts):
         raise ImportConflict("The Nexent tenant has duplicate account emails")
 
@@ -274,6 +277,7 @@ def run(args):
     from consts import const as settings
     from contracts.constants import environment
     from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from management.configuration.runtime import load_system_configuration
     from management.services.permission.identity import casdoor_groups as directory
     from management.services.permission.identity.casdoor_roles import parse_role_map
 
@@ -313,6 +317,7 @@ def run(args):
             raise ImportConflict("The import inputs changed since this recovery file was created")
         if not args.apply or not (accounts or groups):
             return
+        load_system_configuration()
         if journal is None:
             journal = create_journal(args.credentials_file, scope, accounts, group_snapshot, role_names)
         import_users(session, client, organization, args.tenant, accounts, bound, journal, directory, role_names)

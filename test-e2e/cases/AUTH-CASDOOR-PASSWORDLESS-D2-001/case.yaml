@@ -10,30 +10,34 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Prove trusted account completion and login restrictions through real HTTP routes and isolated PostgreSQL, without an external OAuth journey.
+  objective: Prove first-time provisioning, recovery and login restrictions through real HTTP routes and isolated PostgreSQL, without an external OAuth journey.
   preconditions:
   - NEXENT_AUTH_TEST_DSN points to an owned isolated PostgreSQL instance with database creation permission.
   test_data:
-    profile: self-owned disposable database, signed synthetic pending Casdoor identity, invitation and local account
+    profile: self-owned disposable database, signed browser flow, synthetic Casdoor claims, and an existing business tenant
   steps:
   - order: 1
-    action: Complete a signed pending Casdoor identity with an invitation and no password, then inspect the stored account and binding.
-    expected: HTTP 200 creates the invited membership, Casdoor binding and native session; password_hash is null, password login is disabled and Casdoor origin is recorded.
+    action: Run the first signed Casdoor callback, inspect the stored account and binding, then log in again.
+    expected: HTTP 200 returns a native session without pending completion. The configured tenant membership is USER, local password is disabled, and the same subject reuses the existing account.
   - order: 2
     action: Attempt email/password login, local password update, another provider link and Casdoor unlink.
     expected: All alternative authentication or lockout-causing actions are rejected without changing the passwordless account or its Casdoor binding.
   - order: 3
     action: Repeat completion with an injected password; try an invalid invitation and verify legacy OAuth completion without a password.
     expected: Casdoor ignores injected passwords; invalid invitation creates no account; legacy OAuth retains its required-password request contract.
+  - order: 4
+    action: Return to Nexent with an expired authorization, then start a new flow. Separately authenticate new subjects without an email or with a conflicting email.
+    expected: The expired callback requests fresh authorization before exchanging a code. Invalid or conflicting emails neither create a binding nor take over another account.
   expected_results:
   - Casdoor new users retain valid local sessions and tenant membership without a local password.
   - The Casdoor-only identity cannot gain alternate login methods or lose its required binding.
   - Invalid inputs have no account side effects and existing OAuth/local contracts are preserved.
+  - Expired authorization is recoverable; invalid or conflicting email cannot create or bind an account.
   forbidden_side_effects:
   - No external provider requests, real user changes, plaintext passwords/tokens in reports, or leftover owned test database.
   acceptance:
   - id: AC-01
-    description: Passwordless completion preserves invited identity and session contracts.
+    description: First callback establishes a passwordless USER session without an invitation and reuses the account for the same subject.
     steps: [1]
     expected_results: [1]
     forbidden_side_effects: [1]
@@ -47,7 +51,12 @@ case:
     steps: [3]
     expected_results: [3]
     forbidden_side_effects: [1]
+  - id: AC-04
+    description: Expired authorization and unavailable email fail without provisioning or account takeover.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
   contract:
     protocol: Real FastAPI HTTP routes with isolated PostgreSQL persistence
-    request_expectations: [Signed pending identity headers, existing completion and authentication routes]
-    response_expectations: [Passwordless Casdoor completion succeeds, forbidden alternatives fail, legacy OAuth password omission returns 422]
+    request_expectations: [Signed browser flow and Casdoor callback, existing completion and authentication routes]
+    response_expectations: [First callback returns a session and no pending token, forbidden alternatives fail, legacy OAuth password omission returns 422]

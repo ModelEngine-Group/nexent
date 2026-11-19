@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Invocation factories preserve dispatch and balanced observer events."""
 
 from contextlib import contextmanager
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.subagent_wrapper import SubAgentDefinition, SubAgentToolWrapper
+from nexent.core.agents.resources.subagents import SubAgentDefinition, SubAgentToolWrapper
 
 
 @pytest.mark.parametrize("entry", ["call", "forward"])

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import builtins
 import concurrent.futures
@@ -8,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from backend.adapters.jiuwen_sdk_adapter import run_async
+from adapters.jiuwen_sdk_adapter import run_async
 
 CASE_ID = 'UT-BE-AUTO-4781AB28D8956C3F'
 
@@ -65,7 +67,7 @@ def _managed_thread_fallback(loop, fake_manager, new_event_loop=None):
         mock.patch('builtins.__import__', side_effect=_nest_asyncio_import(False, None)),
         mock.patch('nexent.core.concurrency.get_current_thread_manager', return_value=None),
         mock.patch(
-            'nexent.core.agents.run_agent._get_default_agent_thread_manager',
+            'nexent.core.agents.orchestration.entry._get_default_agent_thread_manager',
             return_value=fake_manager,
         ),
     ]

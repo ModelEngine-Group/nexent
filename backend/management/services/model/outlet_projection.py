@@ -45,7 +45,7 @@ def project_saved_outlet(row):
     migration = profile.provenance.provider_metadata.get("migration")
     if isinstance(migration, dict):
         result.update(migration_status="migrated", migration_review_required=
-            migration.get("reviewed_revision") != profile.config_revision,
+            not (type(migration.get("reviewed_revision")) is int and migration["reviewed_revision"] > 0),
             migration_details={key: migration.get(key) for key in ("from_version", "version", "migrated_at",
                 "defaulted_fields", "unmatched_atoms", "unbound_legacy_parameters")})
     return result

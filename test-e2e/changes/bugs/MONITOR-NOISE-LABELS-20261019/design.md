@@ -227,7 +227,7 @@ monitoring screenshot. At this checkpoint the branch is based on `0e6db8df3`.
 `bulk`, `indices.exists` and `indices.delete` are native Elasticsearch spans;
 `knowledge.process.submit` originates from the ingestion service decorator and
 `knowledge.upload.batch` from the file service decorator. Both decorators use
-`infrastructure.observability.knowledge.knowledge_span`. All flow through the
+`infrastructure.trace.knowledge.knowledge_span`. All flow through the
 existing `MonitoringSpanProcessor` export boundary, so no caller, storage or
 knowledge execution change is needed. Filtering remains exact, preserving other
 knowledge steps and non-Elasticsearch operations with matching names.

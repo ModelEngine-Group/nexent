@@ -3,15 +3,40 @@
 """
 Group service for managing groups and group memberships.
 """
+
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from management.db.identity.group import query_groups, query_groups_by_tenant, add_group, modify_group, remove_group, add_user_to_group, remove_user_from_group, query_group_users, query_groups_by_user, query_group_ids_by_user, check_user_in_group, count_group_users, check_group_name_exists
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
-from contracts.errors.exceptions import NotFoundException, UnauthorizedError, ValidationError
 from contracts.constants.constants import DEFAULT_GROUP_ID
-from management.services.permission.identity.tenants import get_tenant_info
+from contracts.errors.exceptions import (
+    NotFoundException,
+    UnauthorizedError,
+    ValidationError,
+)
+from contracts.roles import has_any_role, roles_from_record
+from management.db.configuration.tenant import (
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+)
+from management.db.identity.group import (
+    add_group,
+    add_user_to_group,
+    check_group_name_exists,
+    check_user_in_group,
+    count_group_users,
+    count_users_by_group_ids,
+    modify_group,
+    query_group_ids_by_user,
+    query_group_users,
+    query_groups,
+    query_groups_by_tenant,
+    query_groups_by_user,
+    remove_group,
+    remove_user_from_group,
+)
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.services.permission.identity import tenants as tenant_service
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.permission.identity.casdoor_groups import (
     change_synced_members, create_synced_group, synchronizes_tenant, update_synced_group,
@@ -33,8 +58,9 @@ def _require_synced_group_admin(actor: dict | None, tenant_id: str) -> None:
     if not synchronizes_tenant(tenant_id):
         raise ValidationError("Configure Casdoor group synchronization for this tenant before editing the group")
     actor = actor or {}
-    if actor.get("user_role") != "SU" and (
-        actor.get("user_role") != "ADMIN" or actor.get("tenant_id") != tenant_id
+    roles = roles_from_record(actor)
+    if not has_any_role(roles, {"SU"}) and (
+        not has_any_role(roles, {"ADMIN"}) or actor.get("tenant_id") != tenant_id
     ):
         raise UnauthorizedError("Only administrators of this tenant can change synchronized groups")
 
@@ -106,10 +132,12 @@ def get_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Opt
         result = query_groups_by_tenant(tenant_id, page, page_size, sort_by, sort_order)
 
     # Filter to only return required fields for each group and add user count
+    group_ids = [group["group_id"] for group in result["groups"] if group.get("group_id")]
+    counts = count_users_by_group_ids(group_ids) if group_ids else {}
     filtered_groups = []
     for group in result["groups"]:
         group_id = group.get("group_id")
-        user_count = count_group_users(group_id) if group_id else 0
+        user_count = counts.get(group_id, 0)
         filtered_groups.append({
             "group_id": group.get("group_id"),
             "group_name": group.get("group_name"),
@@ -135,7 +163,7 @@ def get_tenant_default_group_id(tenant_id: str) -> Optional[int]:
         Optional[int]: Default group ID if exists, None otherwise
     """
     try:
-        tenant_info = get_tenant_info(tenant_id)
+        tenant_info = tenant_service.get_tenant_info(tenant_id)
         default_group_id = tenant_info.get("default_group_id")
         return int(default_group_id) if default_group_id else None
     except Exception as e:
@@ -161,7 +189,7 @@ def set_tenant_default_group_id(tenant_id: str, group_id: int, updated_by: Optio
     """
     # Verify tenant exists
     try:
-        tenant_info = get_tenant_info(tenant_id)
+        tenant_info = tenant_service.get_tenant_info(tenant_id)
         if not tenant_info:
             raise NotFoundException(f"Tenant {tenant_id} not found")
     except NotFoundException:
@@ -238,8 +266,8 @@ def create_group(tenant_id: str, group_name: str, group_description: Optional[st
         if not user_info:
             raise NotFoundException(f"User {user_id} not found")
 
-        user_role = user_info.get("user_role", "USER")
-        if user_role not in ["SU", "ADMIN"]:
+        user_role = roles_from_record(user_info)
+        if not has_any_role(user_role, {'SU','ADMIN'}):
             raise UnauthorizedError(f"User role {user_role} not authorized to create groups")
 
     # Check if group name already exists in the tenant
@@ -291,8 +319,8 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
     if not user_info:
         raise NotFoundException(f"User {user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
-    if user_role not in ["SU", "ADMIN"]:
+    user_role = roles_from_record(user_info)
+    if not has_any_role(user_role, {'SU','ADMIN'}):
         raise UnauthorizedError(f"User role {user_role} not authorized to update groups")
 
     # Check if group exists
@@ -345,8 +373,8 @@ def delete_group(group_id: int, user_id: str) -> bool:
     if not user_info:
         raise NotFoundException(f"User {user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
-    if user_role not in ["SU", "ADMIN"]:
+    user_role = roles_from_record(user_info)
+    if not has_any_role(user_role, {'SU','ADMIN'}):
         raise UnauthorizedError(f"User role {user_role} not authorized to delete groups")
 
     # Check if group exists
@@ -447,8 +475,8 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
     if not user_info:
         raise UnauthorizedError(f"User {current_user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
-    if user_role not in ["SU", "ADMIN"]:
+    user_role = roles_from_record(user_info)
+    if not has_any_role(user_role, {'SU','ADMIN'}):
         raise UnauthorizedError(f"User role {user_role} not authorized to manage group memberships")
 
     # Check if group exists
@@ -475,7 +503,7 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
     return success
 
 
-def get_group_users(group_id: int, *, authorize_group=None) -> List[Dict[str, Any]]:
+def get_group_users(group_id: int, *, tenant_id: str | None = None) -> List[Dict[str, Any]]:
     """
     Get all users in a group with their details.
 
@@ -490,12 +518,10 @@ def get_group_users(group_id: int, *, authorize_group=None) -> List[Dict[str, An
     """
     # Check if group exists
     group = query_groups(group_id)
-    if not group:
+    if not group or (tenant_id is not None and group.get('tenant_id') != tenant_id):
         raise NotFoundException(f"Group {group_id} not found")
 
     # Get group membership records
-    if authorize_group is not None:
-        authorize_group(group)
     group_memberships = query_group_users(group_id)
 
     filtered_users = []
@@ -504,11 +530,12 @@ def get_group_users(group_id: int, *, authorize_group=None) -> List[Dict[str, An
         if user_id:
             # Get user details from user_tenant table
             user_info = get_user_tenant_by_user_id(user_id)
-            if user_info:
+            if user_info and (tenant_id is None or user_info.get('tenant_id') == tenant_id):
                 filtered_users.append({
                     "id": user_id,  # Keep user_id as string
                     "username": user_info.get("user_email", ""),
-                    "role": user_info.get("user_role", "")
+                    "role": user_info.get("user_role", ""),
+                    "roles": list(roles_from_record(user_info))
                 })
 
     return enrich_cas_usernames(filtered_users, {"cas_username": "id"})

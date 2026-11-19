@@ -144,9 +144,9 @@ def snapshot_agent_reasoning_config(
             if not entry:
                 continue
             from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-            entry = read_agent_parameter_entry(entry)
+            profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
+            entry = read_agent_parameter_entry(entry, profile=profile)
             if entry["parameter_values"] or entry.get("context_window_tokens") is not None or entry.get("custom_overrides") is not None:
-                profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
                 merge_agent_model_parameters(profile, entry)
             override_map[model_key] = entry
             continue

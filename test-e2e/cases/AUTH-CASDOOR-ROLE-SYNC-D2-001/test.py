@@ -17,7 +17,7 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
     client, _, auth, models = runtime
     from consts import const as settings
     from management.api.identity import user
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import create_account
     from management.db.identity.oauth_account import insert_oauth_account
     from management.db.identity.user_tenant import insert_user_tenant
@@ -34,11 +34,15 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
     client.app.include_router(user.router, prefix="/api")
 
     tenant = "tenant-native"
+    with get_db_session() as session:
+        create_account("tenant-admin@example.com", user_id="tenant-admin", db_session=session)
+        insert_user_tenant("tenant-admin", tenant, "ADMIN", "tenant-admin@example.com", db_session=session)
     for name, origin in [("member", "casdoor"), ("local", None)]:
         email = f"{name}@example.com"
         with get_db_session() as session:
             create_account(email, user_id=name, auth_provider=origin, db_session=session)
-            insert_user_tenant(name, tenant, "USER", email, db_session=session)
+            insert_user_tenant(name, tenant, "USER", email, db_session=session,
+                               roles=("USER", "OPS") if origin else ("USER",))
         insert_oauth_account(name, "casdoor", casdoor.subject_key(f"{name}-subject"), email, name, tenant)
     insert_oauth_account("member", "casdoor", casdoor.subject_key("secondary-subject"),
                          "other@example.com", "secondary", tenant)
@@ -82,6 +86,7 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
             assert await sync() == 1
             promoted = user_info(session_headers)
             assert promoted["user_role"] == "ADMIN"
+            assert promoted["roles"] == ["ADMIN", "OPS"]
             assert promoted["casdoor_role_sync"] is True
             assert "user.role:read" in promoted["permissions"]
             assert list_users().status_code == 200
@@ -95,6 +100,7 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
             assert await sync() == 1
             demoted = user_info(session_headers)
             assert demoted["user_role"] == "USER"
+            assert demoted["roles"] == ["USER", "OPS"]
             assert "user.role:read" not in demoted["permissions"]
             assert list_users().status_code == 403
 
@@ -114,9 +120,8 @@ async def test_invitation_role_is_published_and_can_be_revoked(runtime, monkeypa
     client, _, _, models = runtime
     from consts import const as settings
     from management.api.identity import oauth as routes
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.services.permission.identity import casdoor, casdoor_roles, oauth
-    from management.services.tool import configuration
     from nexent.core.concurrency import LanePolicy, ThreadManager
 
     mapping = {"nexent-developer": "DEV", "old-dev": "DEV"}
@@ -129,11 +134,11 @@ async def test_invitation_role_is_published_and_can_be_revoked(runtime, monkeypa
     }.items():
         monkeypatch.setattr(settings, key, value)
     monkeypatch.setattr(routes, "record_security_event", lambda *a, **kw: None)
-    monkeypatch.setattr(configuration, "init_tool_list_for_tenant", AsyncMock())
+    monkeypatch.setattr(oauth, "init_tool_list_for_tenant", AsyncMock())
     client.app.include_router(routes.router, prefix="/api")
     with get_db_session() as session:
         session.query(models.TenantInvitationCode).filter_by(invitation_code="NATIVE-INVITE").update(
-            {"code_type": "DEV_INVITE"}
+            {"code_type": "DEV_INVITE", "roles": ["DEV"]}
         )
     token = oauth.generate_pending_oauth_token(
         "casdoor", casdoor.subject_key("new-subject"), "new@example.com", "new-member"

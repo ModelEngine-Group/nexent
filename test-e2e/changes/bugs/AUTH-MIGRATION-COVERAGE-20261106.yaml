@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-MIGRATION-COVERAGE-20261106
+  change_type: bugfix
+  bug_id: AUTH-MIGRATION-COVERAGE-20261106
+  title: Validate historical account coverage before declaring migration complete
+  description: Share account-data inspection across Shell and Python migration entries and expose sanitized stage diagnostics.
+  observed_behavior: A committed empty account table skips credential import even when active membership rows remain; source query success does not establish credential completeness.
+  expected_behavior: New migrations validate all active identities before commit. Missing source credentials or business profiles roll back the new table/profile changes with affected IDs. Existing incomplete account data stops deployment without automatic repair or deletion; complete local accounts remain untouched. Deliberately excluded source identities have per-user noncredential evidence for repeat deployments.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests explicitly accepted empty-table completion and partial source coverage; deployment logs did not distinguish skip, import, commit and cleanup.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-LOCAL]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTH-LOCAL-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Complete data skips source access; incomplete existing data stops without source access or repair.
+    - Structured incomplete-coverage errors retain only account IDs and recovery guidance.
+    - Database worker failures roll back and never print credentials; every Python entry uses data inspection.
+    test_selectors:
+    - test/backend/services/test_auth_migration_automatic.py
+    - test/backend/services/test_auth_migration_container_worker.py
+    - test/backend/services/test_local_credentials.py
+    reason: UT owns branching and error transport. Existing D5 proves PostgreSQL schema/data recovery and real Docker Shell orchestration; controlled Kubernetes Shell tests prove shared preflight, Job and safe logging contracts. No new D1 or model/frontend layer is required.
+  notes: SPEC ../nexent-doc/docs/Developing/auth-local-account-migration/design.md. Existing D5 owns disposable PostgreSQL and uniquely labelled Docker resources with cleanup; no shared preparation families are required. Immutable 001 remains unchanged. Live Kubernetes verification is separate from Shell contract tests.

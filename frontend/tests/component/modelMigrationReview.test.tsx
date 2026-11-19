@@ -232,7 +232,7 @@ it.each(["reviewed", "ordinary"])(
   async (kind) => {
     const snapshot = await api.getModelOutlet.getMockImplementation()!();
     if (kind === "reviewed")
-      snapshot.profile.provenance.provider_metadata.migration.reviewed_revision = 7;
+      snapshot.profile.provenance.provider_metadata.migration.reviewed_revision = 6;
     else delete snapshot.profile.provenance.provider_metadata.migration;
     const { success } = edit();
     await save("common.save");

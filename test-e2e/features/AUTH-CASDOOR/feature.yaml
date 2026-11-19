@@ -11,13 +11,13 @@ feature:
   - rule_id: AUTH-CASDOOR-CONFIG
     description: 完整有效的配置启用 Casdoor 登录入口，公开配置不包含客户端密钥。
   - rule_id: AUTH-CASDOOR-LOGIN
-    description: 登录使用浏览器绑定的限时 state 和 PKCE，外部身份绑定本地账号并复用账号补全、租户及会话规则。
+    description: 登录与注册使用 30 分钟的浏览器绑定 state 和 PKCE；过期后提示重新发起授权。已有稳定身份绑定复用本地账号和会话。
   - rule_id: AUTH-CASDOOR-SIGNUP
-    description: Nexent 注册弹窗在 Casdoor 启用时提供注册入口，直接进入 Casdoor 注册页并保留安全回调和本地账号补全流程。
+    description: Nexent 注册弹窗在 Casdoor 启用时提供注册入口；新用户在首次成功回调时直接加入配置的业务租户，无需 Nexent 邀请码或补全页。
   - rule_id: AUTH-CASDOOR-ONLY
-    description: Casdoor 首次注册只补全邮箱和邀请码，不建立本地密码；禁止邮箱密码登录、密码设置、其他提供方关联及解绑唯一的 Casdoor 登录方式；已有本地账号显式绑定不受影响。
+    description: Casdoor 首次回调凭有效邮箱和稳定身份自动创建无本地密码的账号及绑定，初始角色为 USER。禁止邮箱密码登录、密码设置、其他提供方关联及解绑唯一的 Casdoor 登录方式；已有本地账号显式绑定不受影响。
   - rule_id: AUTH-CASDOOR-ROLE-SYNC
-    description: 配置组织和角色映射后，Casdoor 注册账号的初始邀请码角色写入 Casdoor；后续角色变更同步到 Nexent，现有会话和用户列表随之更新。
+    description: 配置组织和角色映射后，Casdoor 角色同步到对应 Nexent 账号，无映射角色时为 USER。新自动开户不向 Casdoor 写入角色；历史账号的待写回仍可完成。现有会话和用户列表随之更新。
   - rule_id: AUTH-CASDOOR-FEATURE-POLICY
     description: 启用专用 Casdoor 权限模型后，通过 Casdoor 注册和已绑定 Casdoor 的租户账号使用该模型的功能权限。页面与 API 使用同一份可撤销权限结果，存量绑定账号继续在 Nexent 管理角色和密码。策略可按资源类别配置，兼容原有统一资源策略。
   - rule_id: AUTH-CASDOOR-STAGED-ACTIONS

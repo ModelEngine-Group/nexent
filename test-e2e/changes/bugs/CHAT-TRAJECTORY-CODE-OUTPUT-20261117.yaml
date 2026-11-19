@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CODE-OUTPUT-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-CODE-OUTPUT-20261117
+  title: 代码执行节点保存最终返回值和打印日志
+  description: SDK在实际code.execute写入最终结果；Ops为归属明确的历史叶子代码节点复用Python包装输出。
+  observed_behavior: code.execute只有代码与耗时，最终结果在被折叠的python_interpreter上，页面Python调用输出为空。
+  expected_behavior: 新采集代码节点保存output与logs；旧文件唯一叶子代码阶段兼容读取父包装结果，预览与分块一致，保留自身来源和耗时，已有输出及采集失败状态不覆盖。
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: 节点UT和HTTP脚本给所有阶段伪造输出；SDK阶段UT断言没有输出，未核验最终结果可冷读。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-QUERY-D2-001, CHAT-TRAJECTORY-CAPTURE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 最终返回值和日志采集，本地/沙箱及延迟执行器一致，空值保持。
+    - 异常和序列化失败不改变执行结果或导致重复调用，关闭与远端模式保持。
+    - 旧文件明确归属时补输出，已有结果优先，失败/多次执行/工具结果不混用，源ID和耗时保持。
+    reason: UT证明SDK采集和投影边界，既有D2证明真实文件和HTTP分块，D3补运行链路，保持UT与正式资产独立。
+    test_selectors:
+    - test/sdk/core/agents/observability/test_code_execution_phase.py
+    - test/backend/services/trajectory/test_code_nodes.py
+  notes: SPEC为nexent-doc/docs/Developing/chat-local-file-trajectory/changes/chat-trajectory-code-display的AC-005，基线57ca6f915。
+    runtime责任域；D2自有临时文件、TestClient、受管线程，D3自有回环HTTP模型、真实执行器、私有OTLP和冷读客户端，均沿用fixture清理断言，无共享准备资产。
+    不新增D1；前端合同与交互保持。完整PG、部署及既有整Case验收依用户约定暂缓，局部执行与正式完整验收分开记录。

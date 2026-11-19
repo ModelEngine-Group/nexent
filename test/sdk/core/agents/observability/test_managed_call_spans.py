@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-006: preserve existing thread and asyncio call ancestry."""
 
 import asyncio
@@ -6,8 +7,8 @@ from contextlib import asynccontextmanager
 
 import mcp.types
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.core.agents.nexent_agent import _wrap_tool_with_monitoring
+from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
+from nexent.core.agents.cores.smolagents.agent import _wrap_tool_with_monitoring
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     RunCancellationScope,

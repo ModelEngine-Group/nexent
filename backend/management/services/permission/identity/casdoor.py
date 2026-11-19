@@ -24,8 +24,17 @@ from contracts.constants.environment import (
 from contracts.errors.exceptions import OAuthProviderError
 
 FLOW_COOKIE_NAME = "nexent_casdoor_flow"
-FLOW_TTL_SECONDS = 600
+FLOW_TTL_SECONDS = 1800
+LINK_FLOW_TTL_SECONDS = 600
 _FLOW_AUDIENCE = "casdoor-login"
+
+
+class CasdoorFlowExpired(OAuthProviderError):
+    """A browser must restart authorization before the provider can be contacted."""
+
+
+def flow_ttl(link_user_id: str) -> int:
+    return LINK_FLOW_TTL_SECONDS if link_user_id else FLOW_TTL_SECONDS
 
 
 def _callback_url() -> str:
@@ -49,7 +58,7 @@ def create_authorization(link_user_id: str = "", *, signup: bool = False) -> tup
         {
             "aud": _FLOW_AUDIENCE,
             "iat": now,
-            "exp": now + FLOW_TTL_SECONDS,
+            "exp": now + flow_ttl(link_user_id),
             "state": state,
             "verifier": verifier,
             "link_user_id": link_user_id,
@@ -73,7 +82,9 @@ def create_authorization(link_user_id: str = "", *, signup: bool = False) -> tup
 def validate_flow(state: str, cookie: str) -> dict[str, Any]:
     """Reject foreign, expired or modified flows before contacting the provider."""
     try:
-        if not state or not cookie or not JWT_SECRET:
+        if state and not cookie:
+            raise CasdoorFlowExpired("Casdoor authorization flow has expired or is no longer available")
+        if not state or not JWT_SECRET:
             raise ValueError("Missing browser flow")
         flow = jwt.decode(
             cookie,
@@ -91,6 +102,8 @@ def validate_flow(state: str, cookie: str) -> dict[str, Any]:
         ):
             raise ValueError("Invalid browser flow")
         return flow
+    except jwt.ExpiredSignatureError as exc:
+        raise CasdoorFlowExpired("Casdoor authorization flow has expired or is no longer available") from exc
     except (jwt.InvalidTokenError, ValueError, TypeError, KeyError) as exc:
         raise OAuthProviderError("Invalid or expired Casdoor login flow") from exc
 

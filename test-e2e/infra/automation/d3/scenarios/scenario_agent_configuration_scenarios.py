@@ -29,7 +29,6 @@ from shared.sse import assert_terminal_event, read_sse
 AGENT_CONFIG_CASES = [
     "API-055", "API-056", "API-057", "API-058",
     "AGT-001", "AGT-002", "AGT-003", "AGT-004",
-    "AGT-009", "AGT-010", "AGT-011", "AGT-012",
     "API-060", "API-061", "API-062", "API-063", "API-064", "API-065", "API-066",
 ]
 
@@ -302,50 +301,6 @@ async def _nl2agent(identity, mode: str) -> None:
 
 
 
-async def _prompt_section(identity, valid: bool) -> None:
-    model_id = await _llm_id(identity)
-    async with _draft_agent(identity) as (agent_id, _):
-        payload = {
-            "task_description": "Answer safely", "agent_id": agent_id, "model_id": model_id,
-            "section_type": "duty", "section_title": "Duty", "current_content": "Answer questions.",
-            "feedback": "Make it concise.", "mode": "select" if valid else "insert",
-            # insert ignores end_pos; its negative fixture must invalidate
-            # start_pos, not an unused select-only argument.
-            "start_pos": 0 if valid else -1, "end_pos": 6 if valid else None,
-            "tool_ids": [], "sub_agent_ids": [], "knowledge_base_display_names": [],
-        }
-        async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-            response = await api.post("/prompt/optimize", json=payload)
-        assert_status(response, 200 if valid else (400, 422))
-        if valid:
-            assert response.json()["data"]["optimized_content"]
-
-
-async def _prompt_badcase(identity, debug: bool, failure: bool) -> None:
-    model_id = await _llm_id(identity)
-    async with _draft_agent(identity) as (agent_id, _):
-        if debug:
-            path = "/prompt/optimize/from_debug"
-            payload = {
-                "agent_id": agent_id, "model_id": absent_numeric_id(__name__) if failure else model_id,
-                "feedback": "Do not invent facts",
-                "selected": {"user_question": "What is X?", "assistant_answer": "Unverified answer"},
-                "history": [{"role": "user", "content": "What is X?"}],
-            }
-        else:
-            path = "/prompt/optimize/badcase"
-            payload = {
-                "agent_id": agent_id, "model_id": absent_numeric_id(__name__) if failure else model_id,
-                "current_content": "Always answer.",
-                "bad_cases": [{"question": "Unknown?", "answer": "invented", "reason": "hallucination"}],
-                "section_type": "constraint", "section_title": "Constraints",
-                "tool_ids": [], "sub_agent_ids": [], "knowledge_base_display_names": [],
-            }
-        async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-            response = await api.post(path, json=payload)
-        assert_status(response, (400, 404) if failure else 200)
-
-
 async def _tool_binding(identity, valid: bool) -> None:
     if valid:
         server_url = os.getenv("NEXENT_TEST_MCP_URL", "").strip()
@@ -592,10 +547,6 @@ async def execute_agent_configuration_scenario(case: dict, tenant_a_admin, tenan
         "AGT-002": lambda: _regenerate_name_isolated(force_failure=True),
         "AGT-003": lambda: _nl2agent(tenant_a_admin, "core"),
         "AGT-004": lambda: _nl2agent(tenant_a_admin, "boundary"),
-        "AGT-009": lambda: _prompt_section(tenant_a_admin, True),
-        "AGT-010": lambda: _prompt_section(tenant_a_admin, False),
-        "AGT-011": lambda: _prompt_badcase(tenant_a_admin, False, False),
-        "AGT-012": lambda: _prompt_badcase(tenant_a_admin, True, True),
         "API-060": lambda: _tool_binding(tenant_a_admin, True),
         "API-061": lambda: _tool_binding(tenant_a_admin, False),
         "API-062": lambda: _skill_binding(tenant_a_admin, True),

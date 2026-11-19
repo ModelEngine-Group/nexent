@@ -1,5 +1,4 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 /**
  * Authentication service
  *
@@ -201,9 +200,7 @@ export const authService = {
 
       if (!response.ok) {
         const errorPayload =
-          data?.detail && typeof data.detail === "object"
-            ? data.detail
-            : data;
+          data?.detail && typeof data.detail === "object" ? data.detail : data;
         return {
           error: {
             message:
@@ -356,6 +353,7 @@ export const authService = {
           email: data.data.user.user_email,
           username: data.data.user.username,
           role: data.data.user.user_role,
+          roles: data.data.user.roles ?? [data.data.user.user_role],
           authProvider: data.data.user.auth_provider,
           casdoorRoleSync: data.data.user.casdoor_role_sync === true,
           casdoorFeaturePolicy: data.data.user.casdoor_feature_policy === true,

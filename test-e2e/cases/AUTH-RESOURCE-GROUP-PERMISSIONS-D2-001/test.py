@@ -15,7 +15,7 @@ def test_resource_sharing_round_trip(native_runtime, monkeypatch):
     from management.api.knowledge_base import vectordatabase
     from management.db.agent.repository import search_agent_info_by_agent_id
     from management.db.agent.version import insert_agent_snapshot
-    from management.db.client import db_client, get_db_session
+    from infrastructure.rdb.client import db_client, get_db_session
     from management.db.identity.account import create_account
     from management.db.identity.user_tenant import insert_user_tenant
     from management.db.knowledge_base.repository import get_knowledge_record

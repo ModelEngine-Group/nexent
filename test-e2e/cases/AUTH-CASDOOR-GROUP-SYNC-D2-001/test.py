@@ -15,7 +15,7 @@ def test_group_directory_round_trip(native_runtime, monkeypatch):
     from consts import const as settings
     from contracts.constants import environment
     from management.api.identity import group as group_api
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import create_account
     from management.db.identity.oauth_account import insert_oauth_account
     from management.db.identity.user_tenant import insert_user_tenant

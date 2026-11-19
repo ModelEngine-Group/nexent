@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.constants.constants import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE
-from contracts.authentication import PendingOAuthIdentity
+
 import json
 import logging
 import os
@@ -9,19 +8,81 @@ import ssl
 import time
 import urllib.request
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, quote
+from urllib.parse import quote, urlencode
 
 import jwt
-from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
+from pydantic import EmailStr, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
-from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.constants.environment import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.authentication import PendingOAuthIdentity
+from contracts.constants.constants import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+    OAUTH_PENDING_EXPIRE_SECONDS,
+    OAUTH_PENDING_PURPOSE,
+)
 from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
-from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
+from contracts.constants.environment import (
+    CASDOOR_SIGNUP_TENANT_ID,
+    JWT_EXPIRY_SECONDS,
+    JWT_SECRET,
+    OAUTH_CA_BUNDLE,
+    OAUTH_CALLBACK_BASE_URL,
+    OAUTH_LOGIN_MODE,
+    OAUTH_SSL_VERIFY,
+)
+from contracts.errors.exceptions import (
+    AccountConflictError,
+    IncorrectInviteCodeException,
+    OAuthLinkError,
+    OAuthProviderError,
+    TenantResourceLimitError,
+)
+from contracts.roles import (
+    has_any_role,
+    invitation_roles,
+    primary_role,
+    roles_from_record,
+)
+from management.services.permission.identity.session import calculate_expires_at, generate_session_jwt
+from management.utils.account_passwords import hash_password
+from infrastructure.rdb.client import get_db_session
+from management.db.identity.account import create_account, get_account_by_email
+from management.db.identity.membership import lock_tenants
+from management.db.identity.oauth_account import (
+    delete_oauth_account,
+    get_oauth_account_by_provider,
+    get_soft_deleted_oauth_account,
+    insert_oauth_account,
+    list_oauth_accounts_by_user_id,
+    reactivate_oauth_account,
+    update_oauth_account_tokens,
+)
+from management.db.identity.user_tenant import (
+    get_all_tenant_ids,
+    get_user_tenant_by_user_id,
+    insert_user_tenant,
+)
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from management.utils.oauth_providers import get_all_provider_definitions, get_provider_definition, is_provider_enabled
-from management.db.identity.oauth_account import delete_oauth_account, get_oauth_account_by_provider, get_soft_deleted_oauth_account, insert_oauth_account, list_oauth_accounts_by_user_id, reactivate_oauth_account, update_oauth_account_tokens
-from management.db.identity.user_tenant import get_user_tenant_by_user_id, insert_user_tenant
+from management.services.permission.identity.authentication import (
+    validate_password_strength,
+)
+from management.services.permission.identity.invitations import (
+    check_invitation_available,
+    get_invitation_by_code,
+)
+from management.services.permission.identity.registration import (
+    register_invited_account,
+)
+from management.services.tool.configuration import init_tool_list_for_tenant
+from management.utils.oauth_providers import (
+    get_all_provider_definitions,
+    get_provider_definition,
+    is_provider_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +101,6 @@ def _build_ssl_context() -> ssl.SSLContext:
 
 
 _SSL_CTX = _build_ssl_context()
-
-
 
 
 def _resolve_field(data: dict, field_path: str) -> Any:
@@ -285,9 +344,9 @@ def generate_pending_oauth_token(
         "iat": now,
         "exp": now + expires_in,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    from gateway.security.token_codec import encode_token
 
-
+    return encode_token(payload, key=JWT_SECRET)
 
 
 def get_pending_oauth_info(payload: PendingOAuthIdentity) -> Dict[str, Any]:
@@ -313,21 +372,56 @@ def _validate_email(email: Optional[str]) -> str:
 def find_account_user_id_by_email(email: Optional[str]) -> Optional[str]:
     if not email:
         return None
-    from management.db.identity.account import get_account_by_email
 
     account = get_account_by_email(email) if email else None
     return account["user_id"] if account else None
 
 
-def _role_from_invitation_type(code_type: str) -> str:
-    if code_type == "ADMIN_INVITE":
-        return "ADMIN"
-    if code_type == "DEV_INVITE":
-        return "DEV"
-    if code_type == ASSET_OWNER_INVITE_CODE_TYPE:
-        require_asset_owner_enabled()
-        return ASSET_OWNER_ROLE
-    return "USER"
+class CasdoorOnboardingError(OAuthLinkError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def onboard_casdoor_account(subject: str, email: str, username: str) -> str:
+    """Provision a passwordless account, membership and binding in one transaction."""
+    try:
+        normalized_email = _validate_email(email)
+    except OAuthLinkError as exc:
+        raise CasdoorOnboardingError("casdoor_email_required", "Set an email in your Casdoor account") from exc
+
+    tenant_id = CASDOOR_SIGNUP_TENANT_ID
+    if not tenant_id or tenant_id in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID} or tenant_id not in get_all_tenant_ids():
+        raise CasdoorOnboardingError("casdoor_tenant_unavailable", "Casdoor sign-up tenant is not configured")
+
+    try:
+        with get_db_session() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"casdoor-onboarding:{subject}"},
+            )
+            binding = get_oauth_account_by_provider("casdoor", subject, db_session=session)
+            if binding:
+                return binding["user_id"]
+            if get_soft_deleted_oauth_account("casdoor", subject, db_session=session):
+                raise CasdoorOnboardingError("casdoor_account_disabled", "Contact your administrator to restore access")
+            lock_tenants(session, [tenant_id])
+            account = create_account(normalized_email, db_session=session, auth_provider="casdoor")
+            user_id = account["user_id"]
+            insert_user_tenant(user_id, tenant_id, "USER", normalized_email, db_session=session)
+            insert_oauth_account(
+                user_id, "casdoor", subject, normalized_email, username, tenant_id, db_session=session
+            )
+            return user_id
+    except (AccountConflictError, IntegrityError) as exc:
+        binding = get_oauth_account_by_provider("casdoor", subject)
+        if binding:
+            return binding["user_id"]
+        if not isinstance(exc, AccountConflictError):
+            raise
+        raise CasdoorOnboardingError(
+            "casdoor_email_conflict", "The email is in use. Link Casdoor from the existing Nexent account."
+        ) from exc
 
 
 async def complete_pending_oauth_account(
@@ -336,14 +430,6 @@ async def complete_pending_oauth_account(
     invite_code: str,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
-    from management.services.permission.identity.groups import add_user_to_groups
-    from management.services.permission.identity.invitations import (
-        check_invitation_available,
-        get_invitation_by_code,
-        use_invitation_code,
-    )
-    from management.services.tool.configuration import init_tool_list_for_tenant
-    from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
 
     pending = pending_identity
     provider = pending["provider"]
@@ -356,7 +442,7 @@ async def complete_pending_oauth_account(
         raise OAuthLinkError("Password must be at least 6 characters")
 
     final_email = _validate_email(provider_email or email)
-    normalized_invite_code = invite_code.upper()
+    normalized_invite_code = invite_code.strip().upper()
 
     if get_oauth_account_by_provider(provider, provider_user_id):
         raise OAuthLinkError(f"This {provider} account is already bound to another user")
@@ -367,47 +453,28 @@ async def complete_pending_oauth_account(
     invitation_info = get_invitation_by_code(normalized_invite_code)
     if not invitation_info:
         raise OAuthLinkError("Invitation code is invalid or unavailable")
-
-    from management.db.identity.account import create_account
-    from infrastructure.security.passwords import hash_password
-    from management.db.client import get_db_session
-    from management.services.permission.identity.authentication import validate_password_strength
-
     if not casdoor_only and not validate_password_strength(password):
         raise OAuthLinkError("Password must be at least 8 characters with uppercase, lowercase, and digit")
     if find_account_user_id_by_email(final_email):
         raise OAuthLinkError("Email already exists. Please log in first, then link this OAuth account in settings.")
 
-    tenant_id = invitation_info["tenant_id"]
-    if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
-        tenant_id = ASSET_OWNER_TENANT_ID
-    user_role = _role_from_invitation_type(invitation_info.get("code_type", "USER_INVITE"))
-    is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
+    if has_any_role(invitation_roles(invitation_info), {ASSET_OWNER_ROLE}):
+        require_asset_owner_enabled()
+    account_options = {"auth_provider": "casdoor"} if casdoor_only else {}
+    try:
+        account, member = register_invited_account(
+            final_email, None if casdoor_only else hash_password(password), normalized_invite_code, **account_options
+        )
+    except IncorrectInviteCodeException as exc:
+        raise OAuthLinkError("Invitation code is invalid or unavailable") from exc
+    except AccountConflictError as exc:
+        raise OAuthLinkError("Email already exists. Please log in first, then link this OAuth account in settings.") from exc
+    user_id = account["user_id"]
+    tenant_id = member["tenant_id"]
+    assigned_roles = roles_from_record(member)
+    user_role = primary_role(assigned_roles)
 
-    with get_db_session() as session:
-        if casdoor_only:
-            from management.services.permission.identity.casdoor_roles import has_initial_role_mapping
-
-            initial_role = {}
-            if tenant_id != ASSET_OWNER_TENANT_ID and has_initial_role_mapping(user_role):
-                initial_role["casdoor_initial_role"] = user_role
-            account = create_account(final_email, None, db_session=session, auth_provider="casdoor", **initial_role)
-        else:
-            account = create_account(final_email, hash_password(password), db_session=session)
-        user_id = account["user_id"]
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_role=user_role,
-                           user_email=final_email, db_session=session)
-
-    invitation_result = use_invitation_code(normalized_invite_code, user_id)
-    group_ids = invitation_result.get("group_ids", [])
-    if isinstance(group_ids, str):
-        from management.utils.serialization import convert_string_to_list
-
-        group_ids = convert_string_to_list(group_ids)
-    if group_ids and not is_asset_owner_registration:
-        add_user_to_groups(user_id, group_ids, user_id)
-
-    if not is_asset_owner_registration:
+    if not has_any_role(assigned_roles, {ASSET_OWNER_ROLE}):
         await init_tool_list_for_tenant(tenant_id, user_id)
 
     create_or_update_oauth_account(
@@ -430,6 +497,7 @@ async def complete_pending_oauth_account(
             "id": str(user_id),
             "email": final_email,
             "role": user_role,
+            "roles": list(assigned_roles),
         },
         "session": {
             "access_token": jwt_token,

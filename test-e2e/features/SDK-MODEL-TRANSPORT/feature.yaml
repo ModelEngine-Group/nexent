@@ -11,7 +11,7 @@ feature:
   business_rules:
   - rule_id: SDK-MODEL-TRANSPORT-RULE-01
     description: Exact prepared URL, headers and body reach the HTTP peer without
-      duplicate protocol roots or extra retries.
+      duplicate protocol roots or extra retries. Empty temperature/top_p are omitted from the request body, while zero and configured numeric values are retained.
   - rule_id: SDK-MODEL-TRANSPORT-RULE-02
     description: Sync and async streams preserve event order and separate reasoning,
       content and complete tool calls. Identical usage tails are deduplicated and a

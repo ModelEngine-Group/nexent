@@ -5,6 +5,7 @@ import time
 
 from consts import const as settings
 from contracts.constants import environment
+from contracts.roles import primary_role
 
 SKILL_READ = "skill.repository:read"
 SKILL_INSTALL = "skill.repository:install"
@@ -77,7 +78,11 @@ def managed_grants(metadata: object, role: str, *, subject: str | None, now: flo
     return {grant for grant in grants if isinstance(grant, str) and grant in resources}
 
 
-def feature_grants(user_id: str, role: str) -> set[str] | None:
+def feature_grants(user_id: str, role: str | tuple[str, ...]) -> set[str] | None:
+    if not isinstance(role, str):
+        if not role:
+            return None
+        role = primary_role(role)
     if role not in _MANAGED_ROLES or not policy_scope():
         return None
     from management.db.identity.account import get_account
@@ -89,7 +94,7 @@ def feature_grants(user_id: str, role: str) -> set[str] | None:
     return managed_grants(account.get("source_metadata"), role, subject=get_casdoor_binding_subject(user_id))
 
 
-def permission_override(user_id: str, role: str, action: str) -> bool | None:
+def permission_override(user_id: str, role: str | tuple[str, ...], action: str) -> bool | None:
     grants = feature_grants(user_id, role) if action in managed_action_resources() else None
     return None if grants is None else action in grants
 

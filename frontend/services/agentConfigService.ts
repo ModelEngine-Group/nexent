@@ -301,12 +301,18 @@ export type PagedAgentList = {
   creatorCounts?: { all: number; created: number; others: number };
 };
 
-export const fetchAgentList = async (tenantId?: string) => {
+export const fetchAgentList = async (
+  tenantId?: string,
+  includeVersionLabel = false
+) => {
   try {
     const trimmedTenantId = tenantId?.trim();
-    const url = trimmedTenantId
+    let url = trimmedTenantId
       ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
       : API_ENDPOINTS.agent.list;
+    if (includeVersionLabel) {
+      url += `${trimmedTenantId ? "&" : "?"}include_version_label=true`;
+    }
     const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
@@ -1104,6 +1110,7 @@ export const searchAgentInfo = async (
     // convert backend data to frontend format
     const formattedAgent = {
       id: data.agent_id,
+      enable_context_manager: data.enable_context_manager ?? true,
       name: data.name,
       display_name: data.display_name,
       description: data.description,
@@ -1418,11 +1425,16 @@ export const validateTool = async (
  * @param tenantId - Optional tenant ID. If not provided, fetches for the current user's tenant.
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async (tenantId?: string | null) => {
+export const fetchSkills = async (
+  tenantId?: string | null,
+  view: import("@/types/skill").SkillListView = "full"
+) => {
   try {
-    const url = tenantId
-      ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
-      : API_ENDPOINTS.skills.list;
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (view !== "full") params.set("view", view);
+    const query = params.toString();
+    const url = `${API_ENDPOINTS.skills.list}${query ? `?${query}` : ""}`;
     const response = await fetch(url, {
       headers: getAuthHeaders(),
     });

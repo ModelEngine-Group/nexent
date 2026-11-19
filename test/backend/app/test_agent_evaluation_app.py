@@ -97,7 +97,7 @@ for _name in (
     "database",
     "management.db.evaluation.runs",
     "utils",
-    "gateway.authentication.auth",
+    "management.services.permission.identity.session",
 ):
     _register_package(_name)
 sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
@@ -108,7 +108,7 @@ sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
 # imports lazily; an unset attribute would make monkeypatch.setattr fail.
 _auth_utils_mock = MagicMock(name="auth_utils")
 _auth_utils_mock.parse_language_from_request = MagicMock(return_value="zh")
-sys.modules["gateway.authentication.auth"] = _auth_utils_mock
+sys.modules["management.services.permission.identity.session"] = _auth_utils_mock
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
@@ -156,7 +156,7 @@ def _code(name):
 def client():
     """Build a FastAPI TestClient with the agent-evaluation router mounted."""
     from fastapi import FastAPI
-    from middleware.exception_handler import ExceptionHandlerMiddleware
+    from runtime.api.exception_handler import ExceptionHandlerMiddleware
 
     app = FastAPI()
     app.add_middleware(ExceptionHandlerMiddleware)
@@ -658,6 +658,25 @@ class TestTrialRun:
         )
         assert response.status_code == 404
 
+    def test_runtime_upstream_error_is_forwarded(self, client):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        _mock_impls(
+            forward_agent_evaluation_trial_run=AsyncMock(
+                side_effect=RuntimeUpstreamError(
+                    status_code=400,
+                    content=b'{"code":"160209","message":"At least one published evaluator is required.","details":null}',
+                    headers={"content-type": "application/json"},
+                )
+            )
+        )
+        response = client.post(
+            "/agent-evaluations/trial-run",
+            json={"agent_id": 1, "query": "q", "judge_model_id": 2},
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "160209"
+
 
 # ---------------------------------------------------------------------------
 # safe-extract helpers
@@ -695,7 +714,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["gateway.authentication.auth"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -704,7 +723,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["gateway.authentication.auth"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

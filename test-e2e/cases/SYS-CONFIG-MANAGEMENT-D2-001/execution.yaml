@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: SYS-CONFIG-MANAGEMENT-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+acceptance_bindings:
+  AC-01: [test_catalog_and_authorization_contract]
+  AC-02: [test_atomic_save_and_notification_degradation_contract, test_explicit_ops_and_su_can_save_platform_configuration]
+  AC-03: [test_current_recommendations_are_explicitly_unavailable]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained HTTP contract proof. The actual FastAPI application runs in process
+  with persistence and notification replaced at their boundaries. No database,
+  Redis, provider, shared asset or owned subprocess is required or retained.

@@ -16,7 +16,7 @@ async def test_grant_and_revoke_skill_read_in_same_session(runtime, monkeypatch)
     client, _, auth, models = runtime
     from consts import const as settings
     from management.api.skill.skill_repository import skill_repository_router
-    from management.db.client import db_client, get_db_session
+    from infrastructure.rdb.client import db_client, get_db_session
     from management.db.identity.account import create_account
     from management.db.identity.oauth_account import insert_oauth_account
     from management.db.identity.user_tenant import insert_user_tenant
@@ -105,7 +105,7 @@ async def test_staged_knowledge_actions_follow_policy_edits_in_same_session(runt
     from consts import const as settings
     from contracts.constants import environment
     from management.api.knowledge_base import vectordatabase
-    from management.db.client import db_client, get_db_session
+    from infrastructure.rdb.client import db_client, get_db_session
     from management.db.identity.account import create_account
     from management.db.identity.oauth_account import insert_oauth_account
     from management.db.identity.user_tenant import insert_user_tenant
@@ -217,7 +217,7 @@ async def test_linked_administrator_follows_feature_policy_without_role_sync(run
     from infrastructure.security.passwords import hash_password
     from management.api.identity import oauth
     from management.api.model import model_managment
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import create_account, get_account
     from management.db.identity.oauth_account import insert_oauth_account
     from management.db.identity.user_tenant import insert_user_tenant

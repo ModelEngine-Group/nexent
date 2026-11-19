@@ -53,7 +53,7 @@ sys.modules['nexent.storage.minio_config'] = nexent_minio
 
 # Pre-mock all nexent submodules that may be referenced downstream
 for _mod_name in [
-    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.agent_model',
+    'nexent.core', 'nexent.core.agents', 'nexent.core.agents.contracts.config',
     'nexent.core.models', 'nexent.core.utils',
     'nexent.container', 'nexent.memory',
 ]:
@@ -69,7 +69,7 @@ for _mod_name in [
         sys.modules[_mod_name] = _mod
 
 # Ensure specific attributes needed by imports are present
-nexent_agent_model = sys.modules['nexent.core.agents.agent_model']
+nexent_agent_model = sys.modules['nexent.core.agents.contracts.config']
 nexent_agent_model.AgentVerificationConfig = MagicMock()
 nexent_agent_model.ToolConfig = MagicMock()
 
@@ -93,27 +93,29 @@ tool_discovery_mod = types.ModuleType("management.services.tool.discovery")
 tool_discovery_mod.get_tool_from_remote_mcp_server = AsyncMock()
 sys.modules[tool_discovery_mod.__name__] = tool_discovery_mod
 
-# Pre-mock management.db.client module
-db_client_mod = types.ModuleType("management.db.client")
+# Pre-mock infrastructure.rdb.client module
+db_client_mod = types.ModuleType("infrastructure.rdb.client")
 db_client_mod.MinioClient = MagicMock()
 db_client_mod.minio_client = MagicMock()
 db_client_mod.as_dict = MagicMock()
 db_client_mod.filter_property = MagicMock()
 db_client_mod.get_db_session = MagicMock()
-db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
-sys.modules['management.db.client'] = db_client_mod
+db_client_mod.__spec__ = importlib.machinery.ModuleSpec("infrastructure.rdb.client", loader=None)
+sys.modules['infrastructure.rdb.client'] = db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 backend_db_client_mod = db_client_mod
 backend_db_client_mod.MinioClient = MagicMock()
 backend_db_client_mod.minio_client = MagicMock()
-backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
-sys.modules['management.db.client'] = backend_db_client_mod
+backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("infrastructure.rdb.client", loader=None)
+sys.modules['infrastructure.rdb.client'] = backend_db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Apply critical patches before importing any modules
 storage_client_mock = MagicMock()
@@ -124,9 +126,9 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
@@ -163,6 +165,12 @@ from management.services.mcp.service import (
 )
 # Patch exception classes to ensure tests use correct exceptions
 from management.services.mcp import service as remote_service
+from test.backend.configuration.helpers import system_config_snapshot
+
+patch_import_context(
+    "management.services.mcp.health.get_config_snapshot",
+    lambda: system_config_snapshot(),
+).start()
 bind_import_attribute(remote_service, 'MCPConnectionError', MCPConnectionError)
 bind_import_attribute(remote_service, 'MCPNameIllegal', MCPNameIllegal)
 bind_import_attribute(remote_service, 'McpNotFoundError', McpNotFoundError)
@@ -242,6 +250,8 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "MCP connection failed")
 
     async def test_connection_handshake_timeout_is_normalized(self):
+        from test.backend.configuration.helpers import system_config_snapshot
+
         class SlowConnectClient:
             async def __aenter__(self):
                 await asyncio.sleep(0.05)
@@ -254,7 +264,10 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
                 return []
 
         with patch_import_context("management.services.mcp.service.Client", return_value=SlowConnectClient()), \
-             patch_import_context("management.services.mcp.service.MCP_REQUEST_TIMEOUT_SECONDS", 0.001):
+             patch_import_context(
+                "management.services.mcp.health.get_config_snapshot",
+                lambda: system_config_snapshot(MCP_REQUEST_TIMEOUT_SECONDS=0.001),
+             ):
             with self.assertRaises(MCPConnectionError) as context:
                 await _mcp_protocol_health_check("http://example.com/mcp", {})
 
@@ -2646,8 +2659,8 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""
 
-    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
-    @patch_import_context('management.services.tool.configuration.delete_openapi_service')
+    @patch_import_context('management.services.mcp.service._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.mcp.service.delete_openapi_service')
     @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
     @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
     @patch_import_context('management.services.mcp.service.MCPContainerManager')

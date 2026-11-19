@@ -1,14 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from management.utils.orm import as_dict, filter_property
+from infrastructure.rdb.orm import as_dict, filter_property
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 import logging
 from typing import List, Optional, Sequence, Tuple
 from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
 from sqlalchemy.orm import aliased
 
-from management.db.client import get_db_session
-from management.utils.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
 from management.db.agent.version import query_current_version_no
 from management.db.tool.repository import query_tool_knowledge_references
@@ -344,6 +344,9 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
+            "allow_mcp_header_passthrough": bool(
+                getattr(new_agent, "allow_mcp_header_passthrough", False)
+            ),
             "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,

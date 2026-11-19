@@ -3,29 +3,22 @@
 
 from typing import Callable
 
-from contracts.constants.environment import IS_SPEED_MODE
 from fastapi import Depends, Header, HTTPException
+
+from management.services.permission.identity.session import authenticate
 from permissions.models import CurrentUser
 from permissions.casdoor_policy import permission_override, policy_scope, staged_actions
 from permissions.rbac import has_permission
-from gateway.authentication.auth import authenticate
 
 
-
-
-
-
-def require(permission: str) -> Callable[[CurrentUser], CurrentUser]:
+def require(permission: str, *, alternative: str | None = None) -> Callable[[CurrentUser], CurrentUser]:
     """Return a dependency that requires the given permission string."""
 
     def dependency(current_user: CurrentUser = Depends(authenticate)) -> CurrentUser:
-        if IS_SPEED_MODE and current_user.normalized_role == "SPEED":
-            # Speed mode has no role_permission_t seeds, so allow the built-in
-            # SPEED account to pass through permission checks.
-            return current_user
-        allowed = permission_override(current_user.user_id, current_user.normalized_role, permission)
+        roles = current_user.effective_roles
+        allowed = permission_override(current_user.user_id, roles, permission)
         if allowed is None:
-            allowed = has_permission(current_user.normalized_role, permission)
+            allowed = has_permission(roles, permission) or bool(alternative and has_permission(roles, alternative))
         if not allowed:
             raise HTTPException(
                 status_code=403,
@@ -43,7 +36,7 @@ def require_managed(permission: str) -> Callable[..., None]:
         if permission not in staged_actions() or not policy_scope():
             return
         current_user = authenticate(authorization=authorization, _credentials=None)
-        if permission_override(current_user.user_id, current_user.normalized_role, permission) is False:
+        if permission_override(current_user.user_id, current_user.effective_roles, permission) is False:
             raise HTTPException(status_code=403, detail=f"Missing required permission: {permission}")
 
     return dependency

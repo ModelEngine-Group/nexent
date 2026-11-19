@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-DIRECT-SIGNUP-20261119
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-DIRECT-SIGNUP-20261119
+  title: Provision Casdoor users on first callback and recover expired login
+  description: Provision a passwordless USER in the configured business tenant without an invitation. Keep PKCE and browser binding; expired requests can restart safely.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: [AUTH-CASDOOR-CONFIG-D2-001, AUTH-CASDOOR-SIGNUP-D2-001, AUTH-CASDOOR-ROLE-SYNC-D2-001]
+    added: []
+    modified: [AUTH-CASDOOR-PASSWORDLESS-D2-001, AUTH-CASDOOR-LOGIN-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/app/test_casdoor_app.py
+    - test/backend/services/test_casdoor_completion.py
+    - test/backend/services/test_casdoor_service.py
+    behaviors:
+    - First callback returns a native session with no pending completion.
+    - Passwordless account, USER membership and binding share one transaction; existing subjects reuse their account.
+    - Missing email, invalid tenant, duplicate email and deleted binding cannot create membership.
+    - Expired or missing browser state prevents code exchange and a new authorization creates a fresh state.
+    reason: Extend existing units and use the existing D2 case to verify storage and HTTP behavior. The D4 OAuth journey remains policy-skipped.
+  notes: System owns the change. Operator setup, existing bindings and gateway boundaries are described in docs/casdoor-login.md.

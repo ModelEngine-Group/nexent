@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: WB-EXECUTION-RECOVERY-D4-001
+preparation:
+  families: []
+notes: Owns isolated authorized browser context, HTTP fixtures and ReadableStream controllers. Navigation detaches only the subscriber; cleanup closes the context and all streams. No external model or persistent user resources are used.
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: WB-EXECUTION-RECOVERY-D4-001
+acceptance_bindings:
+  AC-01: [WB-EXECUTION-RECOVERY-D4-001]
+  AC-02: [WB-EXECUTION-RECOVERY-D4-001]

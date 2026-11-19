@@ -20,7 +20,7 @@ from services.skill_repository_service import (
     update_skill_repository_status_impl,
 )
 from starlette.responses import JSONResponse
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from permissions.casdoor_policy import policy_scope
 
 logger = logging.getLogger(__name__)

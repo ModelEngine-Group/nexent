@@ -31,7 +31,15 @@ def test_retired_feature_has_no_stage_requirement_and_current_generation_is_reta
     assert historical['status'] == 'retired'
     assert historical['required_test_stages'] == []
     assert current['status'] == 'active'
-    for case_id in ['AGT-009', 'AGT-010', 'AGT-011', 'AGT-012', 'NL2AGENT-PROTOCOL-D4-001']:
+    directory = REPO / 'test-e2e/cases/NL2AGENT-PROTOCOL-D4-001'
+    assert (directory / 'case.yaml').is_file()
+    assert (directory / 'execution.yaml').is_file()
+
+
+def test_retired_optimization_cases_keep_history_without_execution_bindings():
+    for case_id in ('AGT-009', 'AGT-010', 'AGT-011', 'AGT-012'):
         directory = REPO / 'test-e2e/cases' / case_id
-        assert (directory / 'case.yaml').is_file()
-        assert (directory / 'execution.yaml').is_file()
+        case = yaml.safe_load((directory / 'case.yaml').read_text(encoding='utf-8'))['case']
+        assert case['status'] == 'retired'
+        assert not (directory / 'test.py').exists()
+        assert not (directory / 'execution.yaml').exists()

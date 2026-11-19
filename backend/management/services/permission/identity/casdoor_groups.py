@@ -16,7 +16,7 @@ from consts import const as settings
 from contracts.constants import environment
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import ValidationError
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.casdoor_groups import has_tenant_members, mirror_groups, tenant_bindings
 from management.db.identity.group import ensure_group_capacity, lock_tenant_groups
 from management.db.identity.models import TenantGroupInfo, TenantGroupUser

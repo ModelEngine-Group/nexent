@@ -5,15 +5,13 @@ Database operations for group management
 
 from typing import Any, Dict, List, Optional, Union
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError, ValidationError
-from contracts.constants.environment import MAX_GROUPS_PER_TENANT
+from management.configuration.runtime import get_config_snapshot
 from sqlalchemy import text
-
-_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
 
 
 def lock_tenant_groups(session, tenant_id: str) -> None:
@@ -43,11 +41,12 @@ def ensure_group_capacity(session, tenant_id: str) -> None:
         getattr(TenantGroupInfo, "delete_flag", None) == "N",
     ).count()
     group_count = group_count if isinstance(group_count, int) else 0
-    if group_count >= _GROUP_LIMIT:
-        error = TenantResourceLimitError(f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant")
+    limit = get_config_snapshot().get("MAX_GROUPS_PER_TENANT")
+    if group_count >= limit:
+        error = TenantResourceLimitError(f"Tenant group limit reached: maximum {limit} groups per tenant")
         error.resource = "groups"
         error.scope = "tenant"
-        error.limit = _GROUP_LIMIT
+        error.limit = limit
         error.current_count = group_count
         raise error
 
@@ -466,6 +465,19 @@ def check_user_in_group(user_id: str, group_id: int) -> bool:
         )
 
         return result is not None
+
+
+def count_users_by_group_ids(group_ids: List[int]) -> Dict[int, int]:
+    """Count active membership rows for a page of groups in one query."""
+    if not group_ids:
+        return {}
+    from sqlalchemy import func
+
+    with get_db_session() as session:
+        rows = session.query(TenantGroupUser.group_id, func.count()).filter(
+            TenantGroupUser.group_id.in_(group_ids), TenantGroupUser.delete_flag == "N"
+        ).group_by(TenantGroupUser.group_id).all()
+        return {group_id: count for group_id, count in rows}
 
 
 def count_group_users(group_id: int) -> int:

@@ -1,0 +1,56 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-ERROR-DIAGNOSTICS-20261116
+  change_type: bugfix
+  bug_id: JIUWEN-ERROR-DIAGNOSTICS-20261116
+  title: Preserve specific Jiuwen model and resource failure diagnostics
+  description: Reuse normalized model and MCP errors, attribute resource failures at their execution boundary and
+    retain the same public error across streaming and history.
+  observed_behavior: Tool exceptions expose only class names and failed runs can collapse into JIUWEN_EXECUTION_FAILED
+    with no actionable origin.
+  expected_behavior: Model, MCP, tools and collaborators retain safe localized diagnoses and optional existing error
+    metadata without changing event types or recovery/cancellation semantics.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing runtime roundtrips prove finality and exact resource results but do not assert error origin,
+      localized diagnostics or error metadata after persistence.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - JIUWEN-OUTPUT
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-OUTPUT-D5-001
+    added: []
+    modified:
+    - JIUWEN-OUTPUT-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Pure classification, lifecycle and projection boundaries belong in UT; existing real runtime D3 adds
+      transport and persistence evidence without a duplicate D1.
+    behaviors:
+    - Resource provenance distinguishes model, MCP, local tools, sandbox and collaborators without publishing exception
+      bodies or arguments.
+    - Lifecycle failures preserve the original exception, cleanup ownership and a specific unique terminal cause.
+    - Recoverable failures and cancellation do not poison successful or awaiting-input terminals, including nested
+      and parallel resources.
+    - Existing SSE and historical projections retain identical localized text and error code metadata.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_errors.py
+    - test/sdk/core/agents/test_adapter_failure_lifecycle.py
+    - test/sdk/core/agents/test_jiuwen_output.py
+    - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/backend/utils/test_nexent_error_diagnostics.py
+    - test/backend/utils/test_nexent_output.py
+    - test/sdk/core/agents/test_jiuwen_mcp_transport.py
+  notes: Design and acceptance ER-01 to ER-04 live in ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md.
+    JIUWEN-OUTPUT inherits runtime responsibility. The existing D3 owns loopback model/MCP services, managed workers,
+    temporary workspace and isolated PostgreSQL, all released in finally; no shared preparation families. Existing
+    D1-D5 contracts are retained. No frontend, SQL, environment or production deployment changes. Deployment verification
+    additionally covers MCP startup authentication before task-bound cleanup; preserve the original cause through
+    cancellation/cleanup and prove real HTTP 401 stream/history roundtrip.

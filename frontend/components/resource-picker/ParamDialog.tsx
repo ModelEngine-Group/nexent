@@ -4,7 +4,7 @@
 
 import { Button, Modal, Tooltip } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
-import { RotateCw } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import {
   forwardRef,
   type HTMLAttributes,
@@ -16,7 +16,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
 import styles from "./ParamDialog.module.css";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
@@ -101,8 +100,11 @@ export function ParamDialog({
             <span className="min-w-0 text-[16px] font-bold leading-6 text-[#1A1A1A]">
               {title}
             </span>
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("common.close")}
+              icon={<X size={14} />}
               onClick={onClose}
             />
           </div>

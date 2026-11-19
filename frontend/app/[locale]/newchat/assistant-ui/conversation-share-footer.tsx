@@ -2,10 +2,9 @@
 
 "use client";
 
-import { Checkbox } from "antd";
+import { Checkbox, Button } from "antd";
 import { LinkIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 
 interface ConversationShareFooterProps {
   selectedCount: number;
@@ -46,18 +45,18 @@ export function ConversationShareFooter({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <StandardButton disabled={creating} onClick={onCancel}>
+          <Button disabled={creating} onClick={onCancel}>
             {t("common.cancel")}
-          </StandardButton>
-          <StandardButton
-            variant="primary"
+          </Button>
+          <Button
+            type="primary"
             icon={<LinkIcon className="size-4" />}
             loading={creating}
             disabled={!selectedCount || creating}
             onClick={onCreate}
           >
             {t("chatInterface.createPublicLink")}
-          </StandardButton>
+          </Button>
         </div>
       </div>
     </footer>

@@ -137,6 +137,10 @@ class TokenExpiredError(UnauthorizedError):
     pass
 
 
+class RoleAssignmentConflict(ValueError):
+    """An otherwise valid role change violates a membership invariant."""
+
+
 class ForbiddenError(Exception):
     """Raised when an authenticated user lacks permission."""
 
@@ -573,6 +577,15 @@ class ModelOutletDatabaseError(RuntimeError):
 
     def __init__(self):
         super().__init__("MODEL_OUTLET_DATABASE_ERROR")
+
+
+class ManagementReadBusyError(RuntimeError):
+    """A bounded Management read cannot be admitted or started in time."""
+
+    def __init__(self, *, queue_timeout_seconds: float | None = None):
+        self.code = "MANAGEMENT_READ_QUEUE_TIMEOUT" if queue_timeout_seconds is not None else "MANAGEMENT_READ_CAPACITY_FULL"
+        self.retry_after_seconds = max(1, int((queue_timeout_seconds or 0) + 0.999))
+        super().__init__("Management read capacity is temporarily unavailable")
 
 
 class RuntimeQueueTimeoutError(RuntimeError):

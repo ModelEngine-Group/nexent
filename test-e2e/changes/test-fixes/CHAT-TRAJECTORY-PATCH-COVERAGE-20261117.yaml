@@ -1,0 +1,88 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-PATCH-COVERAGE-20261117
+  change_type: test-fix
+  title: Backfill trajectory query, statistics and durable storage unit coverage
+  description: >-
+    Add assertion-based unit proof for PR 4348 coverage gaps. Exercise exact
+    snapshot refresh, frozen pages and scoped facets, malformed JSON, bounded
+    queues, orphan reconciliation, revoked writers and durable failure handling.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Only traditional unit proof changes. Existing QUERY-D2, CAPTURE-D3 and
+    RETENTION-D5 contracts retain API, runtime and retention responsibilities.
+    No new integration boundary or product behavior requires another formal
+    Case; do not copy these isolated branches into D1. Existing formal Cases
+    and their preparation/cleanup bindings remain unchanged.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Publish exact model TTFT snapshots only after complete scans; reuse unchanged archives and invalidate changed versions.
+    - Freeze authorized page membership and preserve context ancestors, body coordinates and cleanup revision checks.
+    - Reject malformed JSON, invalid UTF-8 ranges, duplicate executions and unsafe storage states before returning data.
+    - Bound queue and cache memory, retry durable batches and release revoked or interrupted writers and worker resources.
+    reason: >-
+      CI UT passed but codecov/patch reported 80.81568 percent against the
+      existing 90 percent requirement. Existing tests prove normal capture,
+      retained metrics and basic pagination; refresh execution, queue failure
+      branches, directory continuation and catalog result projection lack proof.
+    test_selectors:
+    - test/backend/services/trajectory/test_statistics_refresh.py
+    - test/backend/services/trajectory/test_snapshot_pages.py
+    - test/backend/services/trajectory/test_pg_pages.py
+    - test/backend/services/trajectory/test_directory_pages.py
+    - test/backend/services/trajectory/test_collection_boundaries.py
+    - test/backend/services/trajectory/test_catalog_results.py
+    - test/backend/utils/test_trajectory_reader_failures.py
+    - test/backend/utils/test_trajectory_store_failures.py
+    - test/backend/utils/test_trajectory_processor_failures.py
+  notes: |
+    Baseline: dev/trace at 5ce4644cdeda1fc4e4eac61a027b73b0cc1f5567,
+    including origin/develop 63965d823c4ce24816bed17392013248c954d5c0.
+    No product code, CI workflow, dependency or coverage exclusion changes.
+
+    Proof-gap review before adding tests:
+    | Behavior | Existing assertion surface | Missing proof and action |
+    | --- | --- | --- |
+    | Exact snapshots | test_summary_projection compares disk quantiles; test_summary_lifecycle isolates failing scopes | Add real JSONReader/build_nodes/DiskQuantiles refresh under mocked database/archive boundaries, zero/unknown filtering, checksum cache, contention, cancellation and no partial publication. |
+    | Detail pages | test_chat_content checks final authorization; test_collection freezes list membership | Add actual stored OTLP detail pages, ancestor context, immutable references, body byte slices, parser failures and page limits. |
+    | Lists/facets | test_pg_facets compiles schema-bound SQL; test_catalog compiles bounded queries | Add returned DTO values, null/name fallback, continuation, permission recheck, memory bounds and explicit lookup failures; reuse existing SQL assertions. |
+    | Durable storage | test_trajectory_file_store proves append retry, cleanup and confirmed-prefix recovery | Add safe orphan reconciliation, duplicate turn/ingress, replaced inode, invalid metadata/configuration and closed/terminal writer rejection. |
+    | Capture worker | test_trajectory_processor uses real spans and managed threads | Add queue exhaustion, immutable retry batch IDs, serialization/I/O failures, revocation, bounded maintenance continuation and shutdown cleanup. |
+
+    Traditional UT: root test/run_all_test.py with four isolated file workers,
+    targets test/backend/services/trajectory and trajectory test files under
+    test/backend/utils and test/backend/ops: 808 passed, zero failed/skipped,
+    including 151 added tests in nine files. Final import/fixture adjustments
+    were rechecked with snapshot/store selectors: 46 passed.
+    Local log: /private/tmp/nexent-pr4348-coverage-regression.log.
+    Conservative Codecov patch reconciliation retains 3547 CI hits, adds 471
+    previously missed/partial lines with complete local branch proof, and keeps
+    all uncertain partials uncovered: 4018/4389 = 91.547049 percent. This is
+    a CI-baseline/local-data calculation, not a new remote Codecov result or
+    whole-project coverage claim. CI must confirm after submission.
+    Evidence: /private/tmp/nexent-pr4348-patch-coverage-result.json and
+    /private/tmp/nexent-pr4348-regression-coverage.json.
+    Ruff check/format, nine copyright headers and whitespace checks passed.
+    The remote develop head was rechecked and remains 63965d823, already in
+    the tested branch. Formal design validation retains two pre-existing
+    Case-ID naming errors (NB-CHAT-FINAL-ANSWER-001 and NB-OTEL-001).
+    Implementation validation retains those errors plus the missing
+    test/backend/deploy/test_k8s_env_injection.py reference and NB-OTEL-001
+    preparation declaration: four existing blockers, unchanged by this record.
+    No formal execution or live PostgreSQL acceptance is claimed.
+
+    Separate observed edge, outside this test-only change: lexicographic snapshot
+    sorting places an exact-second ISO timestamp after timestamps in the same
+    second with fractional precision. Page fixtures use consistent fractional
+    precision; this record does not certify that independent ordering edge.

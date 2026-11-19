@@ -11,7 +11,7 @@ const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 const start = source.indexOf("function forwardAuthRequest(");
 const end = source.indexOf("\n// ====", start);
 
-for (const outcome of ["session", "pending", "error", "json", "logout"]) {
+for (const outcome of ["session", "pending", "expired", "error", "json", "logout"]) {
   test(`OAuth proxy preserves flow-cookie clearing on ${outcome}`, async (t) => {
     const clearedFlow = "nexent_casdoor_flow=; Max-Age=0; Path=/; HttpOnly";
     const backend = http.createServer((req, res) => {
@@ -23,6 +23,7 @@ for (const outcome of ["session", "pending", "error", "json", "logout"]) {
             pending_token: "synthetic-pending",
           },
         },
+        expired: { data: { oauth_error: "casdoor_flow_expired" } },
         error: { data: { oauth_error: "callback_failed" } },
         json: { message: "unchanged" },
         logout: { message: "logged out" },
@@ -96,6 +97,9 @@ for (const outcome of ["session", "pending", "error", "json", "logout"]) {
       );
     } else if (outcome === "pending") {
       assert.equal(response.headers.location, "/zh/oauth/complete");
+    } else if (outcome === "expired") {
+      assert.match(response.headers.location, /oauth_error=casdoor_flow_expired/);
+      assert.ok(response.headers["set-cookie"].every((value) => !value.startsWith("access_token=")));
     } else if (outcome === "error") {
       assert.match(response.headers.location, /oauth_error=callback_failed/);
     }

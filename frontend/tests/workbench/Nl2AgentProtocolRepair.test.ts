@@ -114,6 +114,7 @@ it.each([false, true])(
     expect(service.runAgent.mock.calls.at(-1)![0]).toMatchObject({
       runtime_mode: "nl2agent",
       persist_history: true,
+      agent_id: 42,
       target: { type: "agent", id: 42 },
     });
   }

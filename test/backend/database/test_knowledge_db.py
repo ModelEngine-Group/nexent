@@ -54,7 +54,7 @@ minio_config_mock.validate = MagicMock()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('management.db.client.MinioClient', return_value=minio_client_mock), \
+with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_summary_frequency, update_last_summary_time, update_last_doc_update_time, get_knowledge_bases_for_auto_summary
 
@@ -96,11 +96,12 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -109,7 +110,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 utils_mock.str_utils = MagicMock()
 utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -185,8 +186,23 @@ def mock_session():
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value.first.return_value = None
+    mock_query.filter.return_value.scalar.return_value = None
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
+
+
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.knowledge_base.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
 
 
 def test_lock_and_check_knowledge_name_available(mock_session):
@@ -266,9 +282,11 @@ def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
     """The tenant ceiling rejects creation at the boundary with structured details."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 1)
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 10)
-    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_KNOWLEDGE_BASES_PER_TENANT=1),
+    )
     session = _LimitSession([1])
 
     with pytest.raises(Exception) as exc_info:
@@ -290,11 +308,11 @@ def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeyp
     assert knowledge_db._get_user_role_in_session(session, None, "tenant-1") == "USER"
 
     session.query.return_value.filter.return_value.scalar.return_value = "admin"
-    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "ADMIN"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == ("ADMIN",)
 
     session.query.side_effect = None
     session.query.return_value.filter.return_value.scalar.return_value = None
-    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == ("USER",)
 
     session.query.side_effect = RuntimeError("role lookup failed")
     assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
@@ -304,7 +322,11 @@ def test_knowledge_limit_skips_user_scope_without_creator(monkeypatch):
     """Legacy integrations without a creator still observe the tenant ceiling."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_KNOWLEDGE_BASES_PER_TENANT=10),
+    )
     session = _LimitSession([0])
 
     knowledge_db._enforce_knowledge_limits(session, "tenant-1", None)
@@ -327,19 +349,25 @@ def test_knowledge_limit_skips_all_scopes_without_tenant():
     "role, expected_limit",
     [
         ("USER", 1),
-        ("DEV", 1000),
-        ("ADMIN", 1000),
-        ("SU", 1000),
-        ("ASSET_OWNER", 1000),
+        ("DEV", 2),
+        ("ADMIN", 2),
+        ("SU", 2),
+        ("ASSET_OWNER", 2),
     ],
 )
 def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expected_limit):
     """The creator ceiling is checked after the tenant ceiling and includes role details."""
     from management.db.knowledge_base import repository as knowledge_db
 
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
-    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
-    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(
+        knowledge_db,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(
+            MAX_KNOWLEDGE_BASES_PER_TENANT=10,
+            MAX_KNOWLEDGE_BASES_PER_USER=1,
+            MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER=2,
+        ),
+    )
     monkeypatch.setattr(knowledge_db, "_get_user_role_in_session", lambda *_: role)
     session = _LimitSession([0, expected_limit])
 

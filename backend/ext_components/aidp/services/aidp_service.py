@@ -18,7 +18,7 @@ from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation.repository import remove_conversation_knowledge_bindings
 from management.db.tool.repository import remove_tool_knowledge_references
 

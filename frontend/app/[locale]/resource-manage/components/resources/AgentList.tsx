@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -31,13 +31,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { deleteAgent, searchAgentInfo } from "@/services/agentConfigService";
-import { fetchAgentVersionList } from "@/services/agentVersionService";
+import { useResourceAgentVersions } from "@/hooks/agent/useResourceAgentVersions";
 import { Agent } from "@/types/agentConfig";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
-import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import ManageOfficialAgentsModal from "@/components/agent/ManageOfficialAgentsModal";
-import { USER_ROLES } from "@/const/auth";
+
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Text } = Typography;
@@ -63,14 +62,21 @@ type AgentListRow = Pick<
   model_names?: string[];
   is_published?: boolean;
   current_version_no?: number;
+  version_label?: string | null;
 };
 
-export default function AgentList({ tenantId }: { tenantId: string | null }) {
+export default function AgentList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const canManageOfficialAgents = user?.role === USER_ROLES.SU;
+  const canManageOfficialAgents = hasRole(user, "SU");
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
 
@@ -82,10 +88,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view modal state
   const [fullscreenEdit, setFullscreenEdit] = useState<{
     visible: boolean;
-    field:
-      | "description"
-      | "prompt"
-      | null;
+    field: "description" | "prompt" | null;
     title: string;
     value: string;
   }>({
@@ -95,58 +98,26 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     value: "",
   });
 
-  // Version list state for each agent
-  const [agentVersions, setAgentVersions] = useState<
-    Map<number, AgentVersion[]>
-  >(new Map());
-  const [loadingVersions, setLoadingVersions] = useState<Map<number, boolean>>(
-    new Map()
-  );
+  const { agentVersions, loadingVersions, loadVersions } =
+    useResourceAgentVersions(tenantId);
   // User's manual selection for each agent (not persisted, cleared on refresh/switch)
-  const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(
-    new Map()
-  );
+  const [selection, setSelection] = useState({
+    tenantId,
+    versions: new Map<number, number>(),
+  });
+  if (selection.tenantId !== tenantId) {
+    setSelection({ tenantId, versions: new Map() });
+  }
+  const selectedVersions =
+    selection.tenantId === tenantId
+      ? selection.versions
+      : new Map<number, number>();
 
-  const { agents, isLoading, refetch } = useAgentList(tenantId);
+  const { agents, isLoading, refetch } = useAgentList(tenantId, true);
   const [keyword, setKeyword] = useState("");
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [groupFilters, setGroupFilters] = useState<number[]>([]);
   const [officialModalOpen, setOfficialModalOpen] = useState(false);
-
-  // Incremented on every component mount so version fetching always runs
-  const [mountKey, setMountKey] = useState(0);
-  useEffect(() => {
-    setMountKey((k) => k + 1);
-  }, []);
-
-  // Auto-fetch versions for all published agents so the Select label renders immediately
-  useEffect(() => {
-    if (!agents || agents.length === 0) return;
-    (agents as AgentListRow[]).forEach((agent: AgentListRow) => {
-      const agentId = Number(agent.id);
-      if (!agent.is_published) return;
-      // Skip if already fetched for current mount
-      if (agentVersions.has(agentId)) return;
-      setLoadingVersions((prev) => new Map(prev).set(agentId, true));
-      fetchAgentVersionList(agentId, tenantId ?? undefined)
-        .then((res) => {
-          if (res.success && res.data) {
-            setAgentVersions((prev) =>
-              new Map(prev).set(agentId, res.data.items || [])
-            );
-          }
-        })
-        .finally(() => {
-          setLoadingVersions((prev) => {
-            const next = new Map(prev);
-            next.delete(agentId);
-            return next;
-          });
-        });
-    });
-    // mountKey added to dep array ensures this re-runs on component re-mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, tenantId, mountKey]);
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId);
@@ -257,8 +228,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   // Fullscreen view handlers
   const openFullscreenEdit = (
-    field:
-      "description" | "prompt",
+    field: "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";
@@ -277,26 +247,15 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   // Load agent versions when dropdown is opened
   const handleVersionDropdownOpen = async (agentId: number, open: boolean) => {
-    if (open && !agentVersions.has(agentId)) {
-      setLoadingVersions((prev) => new Map(prev).set(agentId, true));
-      try {
-        const res = await fetchAgentVersionList(agentId, tenantId ?? undefined);
-        if (res.success && res.data) {
-          setAgentVersions((prev) =>
-            new Map(prev).set(agentId, res.data.items || [])
-          );
-        } else {
-          message.error(res.message || t("common.unknownError"));
-        }
-      } catch (error) {
-        message.error(t("common.unknownError"));
-      } finally {
-        setLoadingVersions((prev) => {
-          const newMap = new Map(prev);
-          newMap.delete(agentId);
-          return newMap;
-        });
-      }
+    if (!open) return;
+    try {
+      await loadVersions(agentId);
+    } catch (error) {
+      message.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t("common.unknownError")
+      );
     }
   };
 
@@ -397,6 +356,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           value: version.version_no,
         }));
 
+        if (!agentVersions.has(agentId) && currentVersionNo > 0) {
+          options.push({
+            label: record.version_label ?? String(currentVersionNo),
+            value: currentVersionNo,
+          });
+        }
+
         return (
           <Select
             placeholder={t("agent.version.select")}
@@ -406,7 +372,12 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               handleVersionDropdownOpen(agentId, open)
             }
             onChange={(value) => {
-              setSelectedVersions((prev) => new Map(prev).set(agentId, value));
+              setSelection((previous) => ({
+                tenantId,
+                versions: new Map(
+                  previous.tenantId === tenantId ? previous.versions : []
+                ).set(agentId, value),
+              }));
             }}
             style={{ width: "100%" }}
             options={options}
@@ -509,25 +480,27 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Tooltip title={t("common.delete")}>
-            <Button
-              type="text"
-              danger
-              icon={<Trash2 className="h-4 w-4" />}
-              size="small"
-              onClick={() =>
-                confirm({
-                  title: t("businessLogic.config.modal.deleteTitle"),
-                  content: t("businessLogic.config.modal.deleteContent", {
-                    name: record.display_name,
-                  }),
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record),
-                })
-              }
-            />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("common.delete")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("businessLogic.config.modal.deleteTitle"),
+                    content: t("businessLogic.config.modal.deleteContent", {
+                      name: record.display_name,
+                    }),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
         </div>
       ),
     },

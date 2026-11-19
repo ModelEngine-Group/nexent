@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+
+import { hasRole } from "@/lib/roles";
 
 import React, { useState, useEffect } from "react";
 import {
@@ -18,7 +19,6 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import {
   User,
   LogOut,
@@ -38,10 +38,8 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
-import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
-import { oauthService } from "@/services/oauthService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -69,14 +67,6 @@ export default function UserProfileComp() {
   const { logout, revoke, isLoading } = useAuthenticationContext();
   const { user, groupIds } = useAuthorizationContext();
   const { confirm } = useConfirmModal();
-  const { data: oauthConfig } = useQuery({
-    queryKey: ["oauth", "config"],
-    queryFn: () => oauthService.getConfig(),
-    enabled: !!user,
-  });
-  const isOAuthLoginEnabled =
-    oauthConfig?.enabled &&
-    (oauthConfig.login_mode === "button" || oauthConfig.login_mode === "force");
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(user?.tenantId || null);
@@ -125,13 +115,12 @@ export default function UserProfileComp() {
   const [passwordForm] = Form.useForm();
 
   // Check if user is admin or super admin (cannot delete account)
-  const isAdminOrSuperAdmin =
-    user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
+  const isAdminOrSuperAdmin = hasRole(user, "ADMIN") || hasRole(user, "SU");
   const isCasUser = user?.authProvider === "cas";
   const getRoleDisplayName = (role: string) => {
     switch (role) {
-      case USER_ROLES.SPEED:
-        return t("auth.speed");
+      case USER_ROLES.OPS:
+        return t("user.role.ops");
       case USER_ROLES.SU:
         return t("auth.su");
       case USER_ROLES.ADMIN:
@@ -323,7 +312,9 @@ export default function UserProfileComp() {
                     {t("profile.role") || "Role"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    {getRoleDisplayName(user?.role || "user")}
+                    {(user?.roles ?? [user?.role || "USER"])
+                      .map(getRoleDisplayName)
+                      .join(" / ")}
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">
@@ -747,13 +738,6 @@ export default function UserProfileComp() {
         loading={isLoading}
         disabled={isAdminOrSuperAdmin || isCasUser}
       />
-
-      {/* OAuth Linked Accounts */}
-      {user && isOAuthLoginEnabled && (
-        <div className="w-full mt-4">
-          <OAuthAccountsSection providers={oauthConfig?.providers ?? []} />
-        </div>
-      )}
     </Flex>
   );
 }

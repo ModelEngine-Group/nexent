@@ -3,19 +3,20 @@
 Group management API endpoints
 """
 
-from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
-from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 import logging
+from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
-from http import HTTPStatus
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
 from contracts.constants import environment
 from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.roles import has_any_role
+from management.services.permission.identity.session import authenticate, get_current_user_context, get_current_user_id
+from management.utils.managed_read import managed_read
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.groups import (
     create_group, get_group_info, update_group, delete_group,
@@ -25,7 +26,8 @@ from management.services.permission.identity.groups import (
 )
 from management.services.permission.identity.tenants import get_tenant_info
 from management.services.permission.identity.casdoor_groups import CasdoorGroupUnavailable, synchronizes_tenant
-from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from permissions.models import CurrentUser
+from permissions.tenant_scope import resolve_tenant_scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -42,7 +44,7 @@ def _require_directory_tenant(authorization: str | None, tenant_id: str) -> None
         _, actor_tenant, role = get_current_user_context(authorization)
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
-    if role != "SU" and actor_tenant != tenant_id:
+    if not has_any_role(role, {"SU"}) and actor_tenant != tenant_id:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Group belongs to another tenant")
 
 
@@ -143,9 +145,10 @@ async def get_group_endpoint(group_id: int, authorization: Optional[str] = Heade
 
 
 @router.post("/list")
-async def get_groups_endpoint(
+@managed_read
+def get_groups_endpoint(
     request: GroupListRequest,
-    authorization: Optional[str] = Header(None),
+    current_user: CurrentUser = Depends(authenticate),
 ) -> JSONResponse:
     """
     Search groups for a specific tenant with pagination
@@ -153,16 +156,15 @@ async def get_groups_endpoint(
     Args:
         request: Group search request with tenant_id, optional page, and page_size.
                 If page and page_size are not provided, returns all data.
+        current_user: Authenticated user
 
     Returns:
         JSONResponse: List of groups for the tenant (paginated or all)
     """
+    resolve_tenant_scope(current_user, request.tenant_id)
     try:
         synced = synchronizes_tenant(request.tenant_id)
-        if synced:
-            _require_directory_tenant(authorization, request.tenant_id)
-        # Validate tenant exists
-        get_tenant_info(request.tenant_id)
+        get_tenant_info(request.tenant_id, initialize_name=False)
         # Get groups under given tenant with pagination and sorting
         group_kwargs = {
             "tenant_id": request.tenant_id,
@@ -174,8 +176,6 @@ async def get_groups_endpoint(
         if request.search:
             group_kwargs["search"] = request.search
         result = get_groups_by_tenant(**group_kwargs)
-        if not synced and any(group.get("casdoor_managed") for group in result["groups"]):
-            _require_directory_tenant(authorization, request.tenant_id)
 
         # Build response content
         content = {"message": "Groups retrieved successfully", "data": result["groups"], "total": result["total"]}
@@ -428,23 +428,23 @@ async def remove_user_from_group_endpoint(
 
 
 @router.get("/{group_id}/members")
-async def get_group_users_endpoint(group_id: int, authorization: Optional[str] = Header(None)) -> JSONResponse:
+async def get_group_users_endpoint(
+    group_id: int,
+    current_user: CurrentUser = Depends(authenticate),
+) -> JSONResponse:
     """
     Get all users in a group
 
     Args:
         group_id: Group identifier
-        authorization: Bearer token for authentication
+        current_user: Authenticated user
 
     Returns:
         JSONResponse: List of group users
     """
+    authorized_tenant = resolve_tenant_scope(current_user, allow_all_tenants=True)
     try:
-        def authorize_group(group):
-            if group.get("casdoor_scope"):
-                _require_directory_tenant(authorization, group["tenant_id"])
-
-        users = get_group_users(group_id, authorize_group=authorize_group)
+        users = get_group_users(group_id, tenant_id=authorized_tenant) if authorized_tenant else get_group_users(group_id)
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Group users retrieved successfully", "data": users}

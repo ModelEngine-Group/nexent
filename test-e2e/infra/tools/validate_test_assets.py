@@ -23,7 +23,7 @@ from test_asset_lib import ValidationIssue, case_index, change_index, discover_d
 def validate(root: Path, phase: str, regenerate: bool,
              require_acceptance_cases: list[str] | None = None,
              require_ut_changes: list[str] | None = None,
-             require_preparation_cases: list[str] | None = None, *, daily=False) -> list[ValidationIssue]:
+             require_preparation_cases: list[str] | None = None, *, daily=False, registry_out=None) -> list[ValidationIssue]:
     if daily and regenerate:
         raise ValueError("Daily validation must not regenerate repository assets")
     issues: list[ValidationIssue] = []
@@ -60,9 +60,11 @@ def validate(root: Path, phase: str, regenerate: bool,
                 issues.append(ValidationIssue(root / "test-e2e/cases", case_id, "Selected preparation Case does not exist"))
     execution_issues, registry = validate_execution.inspect(
         root, phase, require_preparation_cases=require_preparation_cases or ())
+    if registry_out is not None:
+        registry_out.update(registry)
     issues.extend(execution_issues)
+    from validation_policy import report
     if issues:
-        from validation_policy import report
         if not daily or not report(root, issues, registry["cases"])["ready"]:
             return issues
     for path, expected in generate_feature_links.expected_pages(root).items():
@@ -80,6 +82,11 @@ def validate(root: Path, phase: str, regenerate: bool,
     excel_path = root / "test-e2e/infra/generated/Nexent_测试基线.xlsx"
     if regenerate:
         generate_excel.write_workbook(root, excel_path)
+    elif daily and report(root, issues, registry["cases"])["blocked_cases"]:
+        # The Excel reader consumes raw execution metadata. It must not turn a
+        # scoped parse/declaration failure back into a global launch failure.
+        issues.append(ValidationIssue(excel_path, "", "Excel comparison unavailable while Case execution metadata is blocked",
+                                      "DERIVED_VIEW_STALE"))
     else:
         with tempfile.TemporaryDirectory() as temporary_directory:
             expected = Path(temporary_directory) / "expected.xlsx"
@@ -110,10 +117,12 @@ def main() -> int:
         from suite_runtime import save
         from validation_policy import report
         try:
+            registry = {}
             issues = validate(root, args.phase, False, args.require_acceptance_case, args.require_ut_change,
-                              args.require_preparation_case, daily=True)
-            execution_issues, registry = validate_execution.inspect(root)
-            issues = list(dict.fromkeys([*issues, *execution_issues]))
+                              args.require_preparation_case, daily=True, registry_out=registry)
+            if "cases" not in registry:
+                execution_issues, registry = validate_execution.inspect(root)
+                issues = list(dict.fromkeys([*issues, *execution_issues]))
         except Exception as exc:
             # Unknown parser/IO failures are global; do not expose arbitrary YAML values.
             issues = [ValidationIssue(root / "test-e2e", "", f"Asset inspection failed ({type(exc).__name__})")]

@@ -7,8 +7,8 @@ Database operations for OAuth account management
 import logging
 from typing import Any, Dict, List, Optional
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import UserOAuthAccount
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,10 @@ def insert_oauth_account(
     provider_email: Optional[str] = None,
     provider_username: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    *,
+    db_session=None,
 ) -> Dict[str, Any]:
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         account = UserOAuthAccount(
             user_id=user_id,
             provider=provider,
@@ -38,8 +40,8 @@ def insert_oauth_account(
         return as_dict(account)
 
 
-def get_oauth_account_by_provider(provider: str, provider_user_id: str) -> Optional[Dict[str, Any]]:
-    with get_db_session() as session:
+def get_oauth_account_by_provider(provider: str, provider_user_id: str, *, db_session=None) -> Optional[Dict[str, Any]]:
+    with get_db_session(db_session) as session:
         result = (
             session.query(UserOAuthAccount)
             .filter(
@@ -52,8 +54,8 @@ def get_oauth_account_by_provider(provider: str, provider_user_id: str) -> Optio
         return as_dict(result) if result else None
 
 
-def get_soft_deleted_oauth_account(provider: str, provider_user_id: str) -> Optional[Dict[str, Any]]:
-    with get_db_session() as session:
+def get_soft_deleted_oauth_account(provider: str, provider_user_id: str, *, db_session=None) -> Optional[Dict[str, Any]]:
+    with get_db_session(db_session) as session:
         result = (
             session.query(UserOAuthAccount)
             .filter(

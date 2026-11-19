@@ -7,7 +7,7 @@ feature:
   name: Agent editor failure recovery and persistence
   status: active
   description: Browser regression coverage for creation validation/retry, autosave,
-    cancelled resource selection and readonly debug navigation.
+    cancelled resource selection, selected MCP tool groups and readonly debug navigation.
   business_rules:
   - rule_id: AGENT-EDITOR-RULE-001
     description: Empty/duplicate names perform no write; exactly one successful creation
@@ -30,6 +30,15 @@ feature:
     description: Creation templates come only from the authorized Agent list API.
       Empty/error states never substitute static templates; retry recovers and a selected
       Agent description is sent through the existing creation API.
+  - rule_id: AGENT-EDITOR-RULE-007
+    description: Selected MCP tools appear as one row per named service, and edits
+      from the group persist individual tool IDs without replacing unrelated bindings.
+  - rule_id: AGENT-EDITOR-RULE-008
+    description: NL2Agent and debug panel boundaries can be dragged within proportional
+      bounds, preserving normal widths and mounted conversations through visibility,
+      fullscreen and comparison transitions without writing Agent configuration.
+      NL2Agent resizing reserves at least 800px for configuration when space permits,
+      keeping the publication action on the same row as the workflow controls.
   required_test_stages:
   - D4
   source:
@@ -40,4 +49,6 @@ feature:
     - AGENT-EDITOR-REQ-004
     - AGENT-EDITOR-REQ-005
     - AGENT-EDITOR-REQ-006
+    - AGENT-EDITOR-REQ-007
+    - AGENT-PANEL-RESIZE-20261111
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

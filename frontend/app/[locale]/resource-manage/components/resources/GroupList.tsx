@@ -35,7 +35,13 @@ import {
 } from "@/services/groupService";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
-export default function GroupList({ tenantId }: { tenantId: string | null }) {
+export default function GroupList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const displayName = useUserDisplayName();
@@ -60,9 +66,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     undefined,
     15_000
   );
+  // Only the member editor needs the unpaginated tenant user list.
   const { data: userData, refetch: refetchUsers } = useUserList(
-    tenantId
-    // Omit page and pageSize to get all users for member management
+    readOnly ? null : tenantId
   );
 
   // Reset page to 1 when tenantId changes
@@ -336,6 +342,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       ),
     },
   ];
+  const visibleColumns = readOnly
+    ? columns.filter((column) => column.key !== "actions")
+    : columns;
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
     setPage(newPage);
@@ -359,15 +368,17 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           className="w-48"
         />
         <div className="ml-4">
-          <Button type="primary" onClick={openCreate}>
-            + {t("tenantResources.groups.createGroup")}
-          </Button>
+          {!readOnly && (
+            <Button type="primary" onClick={openCreate}>
+              + {t("tenantResources.groups.createGroup")}
+            </Button>
+          )}
         </div>
       </div>
 
       <Table
         dataSource={groups}
-        columns={columns}
+        columns={visibleColumns}
         rowKey={(r) => String(r.group_id)}
         loading={isLoading}
         pagination={{

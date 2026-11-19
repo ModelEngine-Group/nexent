@@ -6,8 +6,12 @@ from typing import NamedTuple
 from sqlalchemy import func, select
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from management.db.client import get_db_session
-from management.db.identity.user_tenant import _validate_user_tenant_limit, _write_user_tenant_role
+from contracts.errors.exceptions import RoleAssignmentConflict
+from contracts.roles import normalize_roles
+from infrastructure.rdb.client import get_db_session
+from management.db.identity.membership import check_admin_removal, lock_tenants
+from management.db.identity.roles import write_roles
+from management.db.identity.user_tenant import _validate_user_tenant_limit
 from management.db.models import UserAccount, UserOAuthAccount, UserTenant
 
 CASDOOR_TENANT_ROLES = ("USER", "DEV", "ADMIN")
@@ -36,8 +40,9 @@ def _bindings(session, *, include_linked: bool = False):
         .correlate(UserAccount).scalar_subquery()
     )
     casdoor_registration = UserAccount.source_metadata["auth_provider"].astext == "casdoor"
+    primary_role = UserAccount.user_roles[1]
     bindings = (
-        session.query(UserAccount.user_id, UserTenant.tenant_id, UserAccount.user_role,
+        session.query(UserAccount.user_id, UserTenant.tenant_id, primary_role,
                       UserOAuthAccount.provider_user_id, UserOAuthAccount.provider_username,
                       UserAccount.source_metadata["casdoor_initial_role"].astext,
                       func.coalesce(casdoor_registration, False))
@@ -46,7 +51,7 @@ def _bindings(session, *, include_linked: bool = False):
         .join(UserOAuthAccount, UserOAuthAccount.oauth_account_id == original_binding)
         .filter(UserAccount.delete_flag == "N", UserTenant.delete_flag == "N", membership_count == 1,
                 UserTenant.tenant_id != ASSET_OWNER_TENANT_ID,
-                UserAccount.user_role.in_(CASDOOR_TENANT_ROLES))
+                primary_role.in_(CASDOOR_TENANT_ROLES))
     )
     return bindings if include_linked else bindings.filter(casdoor_registration)
 
@@ -61,13 +66,23 @@ def apply_casdoor_role(binding: CasdoorRoleBinding, role: str) -> bool:
     if binding.initial_role is not None or role not in CASDOOR_TENANT_ROLES or role == binding.role:
         return False
     with get_db_session() as session:
-        if role == "ADMIN":
-            _validate_user_tenant_limit(session, binding.tenant_id, role, include_user_count=False)
+        lock_tenants(session, [binding.tenant_id])
         current = (_bindings(session).filter(UserAccount.user_id == binding.user_id)
                    .with_for_update(of=UserAccount).one_or_none())
         if current is None or CasdoorRoleBinding(*current) != binding:
             return False
-        return _write_user_tenant_role(session, binding.user_id, role, "casdoor-role-sync")
+        account = session.query(UserAccount).filter_by(user_id=binding.user_id, delete_flag="N").one()
+        old_roles = normalize_roles(account.user_roles)
+        new_roles = normalize_roles((set(old_roles) - set(CASDOOR_TENANT_ROLES)) | {role})
+        member = {"user_id": binding.user_id, "tenant_id": binding.tenant_id}
+        try:
+            check_admin_removal(session, member, old_roles, new_roles)
+        except RoleAssignmentConflict:
+            return False
+        if "ADMIN" in new_roles and "ADMIN" not in old_roles:
+            _validate_user_tenant_limit(session, binding.tenant_id, "ADMIN", include_user_count=False)
+        write_roles(session, member, new_roles, "casdoor-role-sync")
+        return True
 
 
 def clear_initial_casdoor_role(binding: CasdoorRoleBinding) -> None:

@@ -47,6 +47,8 @@ def _mod(name):
 
 
 nexent_pkg = _mod("nexent")
+# Keep unmocked SDK packages importable without relying on prior collection.
+nexent_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent")]
 nexent_utils = _mod("nexent.utils")
 nexent_http_mgr = _mod("nexent.utils.http_client_manager")
 nexent_http_mgr.http_client_manager = MagicMock()
@@ -71,14 +73,14 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules[mod.__name__] = mod
 
-# Register non-prefixed ``database`` / ``management.db.client`` stubs so that
-# production modules (which import as ``from management.db.client import ...``)
+# Register non-prefixed ``database`` / ``infrastructure.rdb.client`` stubs so that
+# production modules (which import as ``from infrastructure.rdb.client import ...``)
 # resolve to these mocks rather than loading real Minio/Postgres clients.
 # Previous ``backend.*``-prefixed keys caused Python to create parallel
 # module objects that broke mock patching.
 _db_pkg = sys.modules.get("database") or _mod("database")
 _db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-_db_client = _mod("management.db.client")
+_db_client = _mod("infrastructure.rdb.client")
 _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
@@ -89,13 +91,14 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
+from ext_components.aidp.apps import aidp_mgmt_app
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
     UpdateKbRequest,
     aidp_mgmt_router,
 )
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
@@ -2754,13 +2757,9 @@ class TestNormalizeKbConfigFields:
 
 def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
     """The delete flow keeps document assignment usage in sync."""
-    from importlib import import_module
-
-    tag_service = import_module("management.services.tag.library")
-    from ext_components.aidp.apps import aidp_mgmt_app
 
     sentinel = MagicMock()
-    monkeypatch.setattr(tag_service, "TagManagementService", sentinel)
+    monkeypatch.setattr(aidp_mgmt_app, "TagManagementService", sentinel)
 
     aidp_mgmt_app._cleanup_document_assignments_for_deleted_knowledge_base(
         "tenant-1", "kb-9", "user-1"

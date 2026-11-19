@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-REFRESH-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-REFRESH-20261116
+  title: 可观测中心移除保留天数提示并增加刷新按钮
+  description: 页头刷新复用静态查询快照更新，保留筛选排序并回到第一页。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 刷新入口可见，保留天数说明移除，保留筛选排序并重建查询快照和汇总。
+    - 加载期间防止重复请求，失败保持筛选并可重试。
+    reason: 现有Hook UT已证明快照重置，组件缺少刷新按钮接线与状态断言；前端改动不涉及Python，不新增D1。
+    test_selectors:
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: SPEC changes/chat-trajectory-refresh AC-01/02/03；runtime责任域，复用现有D4独占浏览器/路由/cookies清理，families为空；完整浏览器执行按用户既有要求暂缓。

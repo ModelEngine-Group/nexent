@@ -9,9 +9,9 @@ import pytest
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel, SandboxScope
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel, SandboxScope
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.utils.observer import MessageObserver
 from nexent.monitor import AgentRunMetadata, get_agent_monitoring_context
@@ -42,9 +42,9 @@ def factory(mocker):
         tool_fastpath_enabled=False,
     )
     mocker.patch.object(NexentAgent, "create_model", side_effect=lambda *_args: mocker.Mock())
-    mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", new=WarmupAgent)
-    mocker.patch("nexent.core.agents.sandbox.SandboxSkillScriptRunner")
-    mocker.patch("nexent.core.agents.sandbox.release_python_executor")
+    mocker.patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", new=WarmupAgent)
+    mocker.patch("nexent.core.agents.sandbox.execution.SandboxSkillScriptRunner")
+    mocker.patch("nexent.core.agents.sandbox.execution.release_python_executor")
     return runtime
 
 
@@ -63,7 +63,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
         intervals.append((start, time.time_ns()))
 
     executors = [mocker.Mock(_nexent_backend="docker", side_effect=execute) for _ in range(2)]
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor", side_effect=executors)
+    build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor", side_effect=executors)
     child = config("child", "子智能体")
     child._sub_agent_id = 23
     metadata = AgentRunMetadata(
@@ -118,7 +118,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
 def test_sdk_ut_013_02_backend_and_fallback(spans, mocker, factory, level, backend):
     factory.sandbox_config.level = level
     executor = mocker.Mock(_nexent_backend=backend)
-    mocker.patch("nexent.core.agents.sandbox.build_python_executor", return_value=executor)
+    mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor", return_value=executor)
     with spans.manager.start_agent_run():
         factory.create_single_agent(config())
     span, = warmups(spans)
@@ -131,7 +131,7 @@ def test_sdk_ut_013_02_backend_and_fallback(spans, mocker, factory, level, backe
 
 def test_sdk_ut_013_03_failure_is_recorded_without_changing_continue_behavior(spans, mocker, factory, caplog):
     executor = mocker.Mock(_nexent_backend="docker", side_effect=RuntimeError("warm-up unavailable"))
-    mocker.patch("nexent.core.agents.sandbox.build_python_executor", return_value=executor)
+    mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor", return_value=executor)
     with spans.manager.start_agent_run():
         parent = trace.get_current_span()
         result = factory.create_single_agent(config())
@@ -160,7 +160,7 @@ def test_sdk_ut_013_04_no_spurious_warmups(spans, mocker, factory, mode):
     else:
         spans.manager._config.enable_telemetry = False
     executor = mocker.Mock(_nexent_backend="docker")
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor", return_value=executor)
+    build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor", return_value=executor)
     factory.create_single_agent(config())
     assert not warmups(spans)
     if mode == "disabled":
@@ -179,7 +179,7 @@ def test_sdk_ut_013_05_concurrent_runs_keep_warmup_contexts_isolated(spans, thre
             pass
 
     mocker.patch(
-        "nexent.core.agents.sandbox.build_python_executor",
+        "nexent.core.agents.sandbox.execution.build_python_executor",
         side_effect=lambda **kwargs: mocker.Mock(_nexent_backend="docker", side_effect=execute),
     )
 

@@ -9,7 +9,7 @@ from typing import Any
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.errors.exceptions import AppException
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,
     _EVENT_LABELS,
@@ -23,7 +23,7 @@ from nexent.core.agents.prompt.evaluation import (
     compose_evaluator_run_prompt,
     render_evaluation_section,
 )
-from nexent.core.agents.sandbox import _scan_shell_calls
+from nexent.core.agents.sandbox.execution import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 
 

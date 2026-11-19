@@ -1,0 +1,54 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-PROTOCOL-20261020
+  change_type: bugfix
+  bug_id: JIUWEN-PROTOCOL-20261020
+  title: Accept bound Qwen stream placeholders and clarify child action protocol feedback
+  description: Preserve bound tool call identity through empty-string continuation
+    placeholders; improve invalid Python and mixed action/final feedback and platform
+    examples.
+  observed_behavior: Qwen image tool stream fails MODEL_STREAM_IDENTITY_CONFLICT.
+    Child CodeAgent copies invalid pip pseudo-code and receives misleading optional-clarification
+    feedback; valid code combined with a final envelope receives generic preamble
+    feedback.
+  expected_behavior: Only already-bound empty IDs are omitted. Real conflicts and
+    incomplete calls remain blocked. Child code/final responses stay mutually exclusive
+    with accurate feedback and executable shell-free pip examples.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Native runtime SSE coverage lacked an already-bound empty tool ID;
+      isolated legacy child feedback assertions were absent. Strengthen the existing
+      runtime Case and add UT; reuse the real UI journey.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-RESOURCES
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-REAL-UI-D4-001
+    modified:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Bound empty continuation keeps identity and complete arguments; initial empty,
+      whitespace, nonstring and conflicting IDs fail
+    - Mixed executable action/final output never executes; malformed Python gets accurate
+      syntax and dependency-install feedback; valid code still runs
+    reason: Unit contracts need regression assertions while deployed provider and
+      child artifact results require real smoke evidence.
+    test_selectors:
+    - test/sdk/core/model_service/test_qwen_stream_placeholders.py
+    - test/sdk/core/agents/test_legacy_action_feedback.py
+  notes: Existing runtime-agent-core-factory design.md records impact and verification.
+    No duplicate D1. Child retains its own saved Core. Reuse real UI and add owned
+    real-provider smoke for both saved model outlets plus document generation. Global
+    F-111-RULE-02 asset issue is independent and remains a blocker.

@@ -2,17 +2,21 @@
 
 """Tests for FastAPI authentication and permission dependencies."""
 
-import gateway.authentication.auth as depends_dependencies
+import management.services.permission.identity.session as depends_dependencies
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 import permissions.depends as depends
 
 
+@pytest.fixture(autouse=True)
+def local_permission_policy(monkeypatch):
+    monkeypatch.setattr("permissions.casdoor_policy.policy_scope", lambda: None)
+
+
 def test_authenticate_uses_authorization_header(mocker, monkeypatch):
-    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     mocker.patch(
-        "gateway.authentication.auth.get_current_user_context",
+        "management.services.permission.identity.session.get_current_user_context",
         return_value=("user-1", "tenant-1", "USER"),
     )
 
@@ -24,9 +28,8 @@ def test_authenticate_uses_authorization_header(mocker, monkeypatch):
 
 
 def test_authenticate_uses_bearer_credentials_when_header_is_missing(mocker, monkeypatch):
-    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     get_context = mocker.patch(
-        "gateway.authentication.auth.get_current_user_context",
+        "management.services.permission.identity.session.get_current_user_context",
         return_value=("user-1", "tenant-1", "DEV"),
     )
     credentials = HTTPAuthorizationCredentials(
@@ -40,7 +43,6 @@ def test_authenticate_uses_bearer_credentials_when_header_is_missing(mocker, mon
 
 
 def test_authenticate_rejects_missing_token_outside_speed_mode(monkeypatch):
-    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
 
     with pytest.raises(HTTPException) as raised:
         depends_dependencies.authenticate(None, None)
@@ -48,21 +50,15 @@ def test_authenticate_rejects_missing_token_outside_speed_mode(monkeypatch):
     assert raised.value.status_code == 401
 
 
-def test_authenticate_allows_missing_token_in_speed_mode(mocker, monkeypatch):
-    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", True)
-    get_context = mocker.patch(
-        "gateway.authentication.auth.get_current_user_context",
-        return_value=("speed-user", "tenant-1", "SPEED"),
-    )
-
-    current_user = depends_dependencies.authenticate(None, None)
-
-    get_context.assert_called_once_with(None)
-    assert current_user.normalized_role == "SPEED"
+def test_authenticate_does_not_restore_retired_anonymous_identity(mocker):
+    get_context = mocker.patch("management.services.permission.identity.session.get_current_user_context")
+    with pytest.raises(HTTPException) as error:
+        depends_dependencies.authenticate(None, None)
+    assert error.value.status_code == 401
+    get_context.assert_not_called()
 
 
 def test_require_returns_user_when_permission_exists(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
     mocker.patch("permissions.depends.has_permission", return_value=True)
     current_user = depends.CurrentUser("user-1", "tenant-1", "ADMIN")
 
@@ -72,7 +68,6 @@ def test_require_returns_user_when_permission_exists(mocker, monkeypatch):
 
 
 def test_require_rejects_missing_permission(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
     mocker.patch("permissions.depends.has_permission", return_value=False)
     current_user = depends.CurrentUser("user-1", "tenant-1", "USER")
 
@@ -83,21 +78,39 @@ def test_require_rejects_missing_permission(mocker, monkeypatch):
     assert "kb.capacity:manage" in raised.value.detail
 
 
-def test_require_bypasses_seeded_permission_for_speed_role(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", True)
-    has_permission = mocker.patch(
-        "permissions.depends.has_permission", return_value=False
-    )
-    current_user = depends.CurrentUser("speed-user", "tenant-1", "SPEED")
+def test_retired_role_has_no_permission_bypass(mocker):
+    check = mocker.patch("permissions.depends.has_permission", return_value=False)
+    with pytest.raises(HTTPException) as error:
+        depends.require("kb.capacity:read")(depends.CurrentUser("retired", "tenant-1", "SPEED"))
+    assert error.value.status_code == 403
+    check.assert_called_once_with((), "kb.capacity:read")
 
-    assert depends.require("kb.capacity:read")(current_user) is current_user
-    has_permission.assert_not_called()
+
+@pytest.mark.parametrize("managed_decision", [None, True, False])
+def test_casdoor_decision_precedes_local_permission_alternatives(mocker, managed_decision):
+    user = depends.CurrentUser("linked", "tenant-1", "DEV", roles=("DEV", "OPS"))
+    override = mocker.patch.object(depends, "permission_override", return_value=managed_decision)
+    local = mocker.patch.object(
+        depends, "has_permission", side_effect=lambda roles, action: action == "resource.inventory:read"
+    )
+    guard = depends.require("model:read", alternative="resource.inventory:read")
+
+    if managed_decision is False:
+        with pytest.raises(HTTPException) as error:
+            guard(user)
+        assert error.value.status_code == 403
+    else:
+        assert guard(user) is user
+    override.assert_called_once_with("linked", ("DEV", "OPS"), "model:read")
+    if managed_decision is None:
+        local.assert_called_with(("DEV", "OPS"), "resource.inventory:read")
+    else:
+        local.assert_not_called()
 
 
 def test_user_model_read_grant_does_not_authorize_model_writes(mocker, monkeypatch):
     from permissions import rbac
 
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
     monkeypatch.setattr(rbac, "_INITIALIZED", False)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {})
     mocker.patch("permissions.rbac.get_all_role_permissions", return_value=[{

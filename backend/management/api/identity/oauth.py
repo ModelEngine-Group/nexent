@@ -14,6 +14,7 @@ from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, Tena
 from management.utils.oauth_providers import get_all_provider_definitions
 from management.db.identity.oauth_account import get_oauth_account_by_provider
 from management.services.permission.identity.oauth import (
+    CasdoorOnboardingError,
     complete_pending_oauth_account,
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
@@ -26,19 +27,21 @@ from management.services.permission.identity.oauth import (
     get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
+    onboard_casdoor_account,
     require_provider_authentication,
     require_provider_unlink,
     unlink_account,
 )
-from gateway.authentication.auth import (
+from management.services.permission.identity.session import (
     calculate_expires_at,
     generate_session_jwt,
     require_active_account,
     get_current_user_id,
 )
-from gateway.authentication.auth import parse_state, parse_pending_oauth_token
+from management.services.permission.identity.session import parse_state, parse_pending_oauth_token
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity import casdoor
+from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
@@ -108,7 +111,7 @@ def _casdoor_authorization_response(link_user_id: str = "", *, signup: bool = Fa
     url, cookie = casdoor.create_authorization(link_user_id=link_user_id, signup=signup)
     response = RedirectResponse(url=url, status_code=HTTPStatus.FOUND)
     response.set_cookie(
-        casdoor.FLOW_COOKIE_NAME, cookie, max_age=casdoor.FLOW_TTL_SECONDS,
+        casdoor.FLOW_COOKIE_NAME, cookie, max_age=casdoor.flow_ttl(link_user_id),
         httponly=True, secure=urlparse(casdoor.OAUTH_CALLBACK_BASE_URL).scheme == "https",
         samesite="lax", path="/",
     )
@@ -175,6 +178,7 @@ async def _handle_callback(
         email = user_info["email"]
         username = user_info["username"]
 
+        provisioned = False
         if link_user_id:
             user_id = link_user_id
         else:
@@ -182,6 +186,12 @@ async def _handle_callback(
             existing_binding = get_oauth_account_by_provider(provider, provider_user_id)
             if existing_binding:
                 user_id = existing_binding["user_id"]
+            elif provider == "casdoor":
+                user_id = await run_blocking(
+                    "casdoor-first-login", onboard_casdoor_account, provider_user_id, email, username,
+                    lane="control-io", owner=__name__,
+                )
+                provisioned = True
             else:
                 user_id = None
                 if email and provider != "casdoor":
@@ -210,15 +220,15 @@ async def _handle_callback(
                     )
 
         require_provider_authentication(require_active_account(user_id), provider)
-        ensure_user_tenant_exists(user_id=user_id, email=email)
-
-        create_or_update_oauth_account(
-            user_id=user_id,
-            provider=provider,
-            provider_user_id=provider_user_id,
-            email=email,
-            username=username,
-        )
+        if not provisioned:
+            ensure_user_tenant_exists(user_id=user_id, email=email)
+            create_or_update_oauth_account(
+                user_id=user_id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                email=email,
+                username=username,
+            )
 
         jwt_token = generate_session_jwt(
             user_id, expires_in=JWT_EXPIRY_SECONDS
@@ -248,6 +258,14 @@ async def _handle_callback(
             },
         )
 
+    except (casdoor.CasdoorFlowExpired, CasdoorOnboardingError) as exc:
+        code = "casdoor_flow_expired" if isinstance(exc, casdoor.CasdoorFlowExpired) else exc.code
+        return JSONResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            content={"message": "Casdoor login could not continue", "data": {
+                "oauth_error": code, "oauth_error_description": str(exc),
+            }},
+        )
     except OAuthProviderError:
         logger.warning("OAuth provider authentication failed for provider=%s", provider)
         return JSONResponse(

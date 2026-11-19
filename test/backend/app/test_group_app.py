@@ -28,8 +28,8 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
@@ -44,8 +44,12 @@ from fastapi import FastAPI
 # Create a test client with a fresh FastAPI app
 from management.api.identity.group import router
 
+from management.services.permission.identity.session import authenticate
+from permissions.models import CurrentUser
+
 app = FastAPI()
 app.include_router(router)
+app.dependency_overrides[authenticate] = lambda: CurrentUser("actor", "platform", "SU")
 client = TestClient(app)
 
 

@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: JIUWEN-RESOURCES-D3-003
+implementations:
+- framework: pytest
+  file: test_deployed.py
+  selector: test_deployed_resource_acceptance
+  profiles:
+  - real_smoke
+timeout_seconds: 1200
+acceptance_bindings:
+  AC-01:
+  - test_deployed_resource_acceptance
+  AC-02:
+  - test_deployed_resource_acceptance
+  AC-03:
+  - test_deployed_resource_acceptance
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

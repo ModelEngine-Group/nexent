@@ -6,7 +6,7 @@ import threading
 import uuid
 from typing import Dict, Union
 
-from nexent.core.agents.agent_model import AgentRunInfo
+from nexent.core.agents.contracts.run import AgentRunInfo
 
 logger = logging.getLogger("agent_run_manager")
 

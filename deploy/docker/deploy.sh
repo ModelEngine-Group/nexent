@@ -675,17 +675,12 @@ disable_dashboard() {
 }
 
 docker_monitoring_active_services() {
+  [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ] || return 0
   printf '%s\n' otel-collector
 
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
     phoenix)
       printf '%s\n' phoenix
-      ;;
-    grafana)
-      printf '%s\n' tempo grafana
-      ;;
-    zipkin)
-      printf '%s\n' zipkin
       ;;
     langfuse)
       printf '%s\n' langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres
@@ -696,9 +691,6 @@ docker_monitoring_active_services() {
 docker_monitoring_profile_services() {
   printf '%s\n' \
     phoenix \
-    tempo \
-    grafana \
-    zipkin \
     langfuse-worker \
     langfuse-web \
     langfuse-clickhouse \
@@ -711,9 +703,6 @@ docker_monitoring_container_names() {
   printf '%s\n' \
     nexent-otel-collector \
     nexent-phoenix \
-    nexent-tempo \
-    nexent-grafana \
-    nexent-zipkin \
     nexent-langfuse-worker \
     nexent-langfuse-web \
     nexent-langfuse-clickhouse \
@@ -737,7 +726,7 @@ docker_monitoring_containers_exist() {
 }
 
 stop_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
 
   [ -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ] || return 0
   docker_monitoring_containers_exist || return 0
@@ -750,7 +739,7 @@ stop_monitoring_services() {
 }
 
 cleanup_stale_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
   local active_services
   local service
   local stale_services=()
@@ -1141,6 +1130,19 @@ prepare_directory_and_data() {
   echo ""
 }
 
+retire_legacy_northbound_container() {
+  # Remove only this project's old service; preserve images and volumes.
+  local legacy_identity
+  legacy_identity="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}/{{ index .Config.Labels "com.docker.compose.service" }}' nexent-northbound 2>/dev/null)" || return 0
+  if [ "$legacy_identity" != "nexent/nexent-northbound" ]; then
+    echo "ERROR: nexent-northbound is not the expected legacy Compose service; inspect it before upgrading."
+    return 1
+  fi
+  docker update --restart=no nexent-northbound >/dev/null || return 1
+  docker stop --time 30 nexent-northbound >/dev/null || return 1
+  docker rm nexent-northbound >/dev/null || return 1
+}
+
 prepare_core_service_deployment() {
   local service image
   local prepared_images=" "
@@ -1151,6 +1153,7 @@ prepare_core_service_deployment() {
 
   for service in "$@"; do
     case "$service" in
+      nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
       nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
       *) image="${NEXENT_IMAGE:-}" ;;
@@ -1184,27 +1187,53 @@ prepare_core_service_deployment() {
   esac
 }
 
-stop_old_business_services() {
-  local service matches container_id
-  local containers=()
-  if [ "$#" -eq 0 ]; then
-    set -- nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process
+stop_legacy_workbench_writers() {
+  local matches container_id capability state
+  local writers=()
+  # Before shared Workbench, Config created tenant drafts from Agent and tenant requests.
+  matches="$(docker ps -q \
+    --filter "label=com.docker.compose.project=nexent" \
+    --filter "label=com.docker.compose.service=nexent-config")" || return 1
+  while IFS= read -r container_id; do
+    [ -n "$container_id" ] || continue
+    if ! capability="$(docker exec "$container_id" sh -c '
+      if [ -r /opt/backend/management/services/agent/system_initialize.py ] &&
+         [ -r /opt/backend/management/services/agent/system_release.py ]; then
+        printf shared
+      else
+        printf legacy
+      fi')"; then
+      echo "Error: could not inspect the running Config service; migration will not run." >&2
+      return 1
+    fi
+    case "$capability" in
+      shared) ;;
+      legacy) writers+=("$container_id") ;;
+      *) echo "Error: unexpected Config capability; migration will not run." >&2; return 1 ;;
+    esac
+  done <<< "$matches"
+  [ "${#writers[@]}" -gt 0 ] || return 0
+
+  # Use the planned Config service's connection settings without its migration entrypoint.
+  if ! state="$(
+    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+      run --rm --no-deps -T --entrypoint sh nexent-config -ec '
+        PGPASSWORD="${NEXENT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}" PGCONNECT_TIMEOUT=5 \
+          exec psql -XqAt -v ON_ERROR_STOP=1 -h "${POSTGRES_HOST:-nexent-postgresql}" \
+            -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-root}" -d "${POSTGRES_DB:-nexent}"
+      ' < "$SCRIPT_DIR/../sql/tools/check_shared_workbench.sql"
+  )"; then
+    echo "Error: could not check shared Workbench migration state." >&2
+    return 1
   fi
-  for service in "$@"; do
-    matches=$(docker ps -q \
-      --filter "label=com.docker.compose.project=nexent" \
-      --filter "label=com.docker.compose.service=$service") || return 1
-    while IFS= read -r container_id; do
-      [ -z "$container_id" ] || containers+=("$container_id")
-    done <<< "$matches"
-  done
-  if [ "${#containers[@]}" -eq 0 ]; then
-    echo "No old business services are running."
-    return 0
-  fi
-  echo "Stopping old business services; infrastructure remains running..."
-  if ! docker stop --time 60 "${containers[@]}"; then
-    echo "Error: old business services could not be stopped; migration will not run." >&2
+  case "$state" in
+    complete) return 0 ;;
+    pending) ;;
+    *) echo "Error: unexpected shared Workbench migration state." >&2; return 1 ;;
+  esac
+  echo "Stopping legacy Config writers for the pending shared Workbench migration..."
+  if ! docker stop --time 60 "${writers[@]}"; then
+    echo "Error: legacy Config writers could not be stopped; migration will not run." >&2
     return 1
   fi
 }
@@ -1234,7 +1263,7 @@ deploy_core_services() {
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-gateway|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1247,12 +1276,19 @@ deploy_core_services() {
 
   prepare_core_service_deployment "${core_services[@]}" || return 1
   case " ${core_services[*]} " in
-    *" nexent-config "*) stop_old_business_services || return 1 ;;
-    *) stop_old_business_services "${core_services[@]}" || return 1 ;;
+    *" nexent-config "*) stop_legacy_workbench_writers || return 1 ;;
   esac
   publish_shared_workbench || return 1
 
   echo "👀 Starting core services: ${core_services[*]}"
+  if [[ " ${core_services[*]} " == *" nexent-gateway "* ]]; then
+    # Validate required secrets and the full composition before retiring a live entry.
+    if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+      echo "ERROR: Invalid Gateway deployment configuration; the legacy container was left unchanged."
+      return 1
+    fi
+    retire_legacy_northbound_container || return 1
+  fi
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
@@ -1328,7 +1364,7 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
     stop_monitoring_services || return 1
     return 0
   fi
@@ -1345,7 +1381,7 @@ deploy_monitoring() {
 
   local profile_args=()
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
-    phoenix|grafana|zipkin|langfuse)
+    phoenix|langfuse)
       profile_args+=(--profile "$DEPLOYMENT_MONITORING_PROVIDER")
       ;;
   esac
@@ -1610,7 +1646,7 @@ select_terminal_tool() {
 }
 
 check_super_admin_user_exists() {
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker exec nexent-config python /opt/backend/account_admin.py bootstrap-su --check >/dev/null
+  docker exec nexent-config python -m management.cli.account bootstrap-su --check >/dev/null
 }
 
 prompt_super_admin_password() {

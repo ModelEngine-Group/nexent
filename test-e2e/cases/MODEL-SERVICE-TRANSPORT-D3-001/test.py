@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.concurrency.manager import ThreadManager
 from nexent.core.concurrency.models import LanePolicy, ManagedTaskSpec
@@ -50,6 +50,12 @@ from .prompt_generation_cases import test_auxiliary_prompt_uses_saved_outlet_htt
 from .prompt_generation_cases import test_saved_parameter_transform_reaches_actual_http_body  # noqa: F401
 
 from .prompt_generation_cases import test_migrated_legacy_configuration_reaches_shared_http_without_extra_defaults  # noqa: F401
+
+from .sampling_cases import test_optional_sampling_reaches_http_peer_without_null  # noqa: F401
+
+from .custom_control_cases import test_custom_provider_shutdown_configuration_reaches_peer  # noqa: F401
+
+from .catalog_control_cases import test_all_selected_custom_model_controls_reach_real_peer, test_all_selected_hosted_model_controls_reach_real_peer  # noqa: F401
 
 pytestmark = [pytest.mark.case_id("MODEL-SERVICE-TRANSPORT-D3-001"), pytest.mark.stage("D3")]
 

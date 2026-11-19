@@ -9,6 +9,7 @@ export interface User {
   email: string;
   username?: string | null;
   role: UserRole;
+  roles?: UserRole[];
   avatarUrl?: string;
   tenantId?: string;
   authProvider?: "local" | "cas";

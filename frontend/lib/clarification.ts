@@ -59,12 +59,15 @@ export function parseClarification(value: unknown): ClarificationForm | null {
               "options",
               "allow_other",
               "placeholder",
+              "creation_request",
             ].includes(key)
         ) ||
         (item.required !== undefined && typeof item.required !== "boolean") ||
         (item.allow_other !== undefined &&
           typeof item.allow_other !== "boolean") ||
-        (item.placeholder !== undefined && !text(item.placeholder, 300, 0))
+        (item.placeholder !== undefined && !text(item.placeholder, 300, 0)) ||
+        (item.creation_request !== undefined &&
+          !text(item.creation_request, 8000))
       )
         return null;
       const options = item.options ?? [];
@@ -100,6 +103,9 @@ export function parseClarification(value: unknown): ClarificationForm | null {
         allow_other: item.allow_other === true,
         placeholder:
           typeof item.placeholder === "string" ? item.placeholder : "",
+        ...(typeof item.creation_request === "string"
+          ? { creation_request: item.creation_request }
+          : {}),
       });
     }
     if (

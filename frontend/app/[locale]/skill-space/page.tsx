@@ -1,16 +1,15 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useEffect, useState } from "react";
-import { ConfigProvider } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import {
   useMyEditableSkillCounts,
@@ -27,10 +26,6 @@ enum SkillRepositoryTab {
   REVIEW = "review",
 }
 
-const skillRepositoryTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
-};
-
 export default function SkillRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
@@ -43,7 +38,7 @@ export default function SkillRepositoryPage() {
   const canUseMine = canCreateSkill || canPublish;
   const canReview = managed
     ? hasPermission("skill.repository:review")
-    : user?.role === USER_ROLES.ADMIN;
+    : hasRole(user, "ADMIN");
   const [tab, setTab] = useState<SkillRepositoryTab>(
     SkillRepositoryTab.REPOSITORY
   );
@@ -85,7 +80,7 @@ export default function SkillRepositoryPage() {
   const isReviewTab = activeTab === SkillRepositoryTab.REVIEW;
 
   return (
-    <ConfigProvider theme={skillRepositoryTheme}>
+    <>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
@@ -170,6 +165,6 @@ export default function SkillRepositoryPage() {
           </motion.div>
         </div>
       </div>
-    </ConfigProvider>
+    </>
   );
 }

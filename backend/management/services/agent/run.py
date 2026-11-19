@@ -16,7 +16,7 @@ from management.services.agent.lifecycle import (
     agent_run_manager,
 )
 from management.services.agent.background import BackgroundExecutionState
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preprocessing import (
     preprocess_manager,
@@ -25,6 +25,11 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import MemoryPreparationException
 from contracts.agent import AgentRequest
+from contracts.errors.exceptions import ForbiddenError
+from contracts.conversation import (
+    format_annotations_for_llm,
+    normalize_message_annotations,
+)
 from management.services.agent.context import (
     build_agent_run_context,
     build_authorized_context_input,
@@ -58,12 +63,10 @@ from management.services.conversation.service import (
 from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +132,32 @@ async def prepare_agent_run(
     Prepare for an agent run by creating context and run info, and registering the run.
     """
 
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = getattr(agent_request, "_runtime_user_message_id", None)
+        if type(current_message_id) is not int:
+            current_message_id = get_current_run_user_message_id(
+                agent_request.conversation_id, user_id
+            )
+        if not isinstance(current_message_id, int) or isinstance(
+            current_message_id, bool
+        ):
+            current_message_id = None
+            logger.warning(
+                "Current user message boundary is unavailable; rejecting historical run"
+            )
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+    if not agent_request.is_debug and agent_request.conversation_id is not None and historical_context is None:
+        raise ForbiddenError("Authorized conversation history boundary is unavailable")
+
+    if isinstance(historical_context, dict):
+        saved_index = historical_context.get("current_user_message_index")
+        if type(saved_index) is int and saved_index >= 0:
+            agent_request._runtime_user_message_index = saved_index
+
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
     )
@@ -136,7 +165,13 @@ async def prepare_agent_run(
     create_run_kwargs = {
         "agent_id": agent_request.agent_id,
         "minio_files": agent_request.minio_files,
-        "query": agent_request.query,
+        # Merge reply annotations into the model-facing task text only; the
+        # persisted message (save_conversation_user reads agent_request.query)
+        # keeps the clean user text.
+        "query": format_annotations_for_llm(
+            agent_request.query,
+            normalize_message_annotations(getattr(agent_request, "annotations", None)),
+        ),
         "history": agent_request.history,
         "tenant_id": tenant_id,
         "user_id": user_id,
@@ -151,6 +186,8 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
+    if agent_request.metadata is not None:
+        create_run_kwargs["metadata"] = agent_request.metadata
     runtime_knowledge_context = getattr(
         agent_request, "_runtime_knowledge_context", None
     )
@@ -203,22 +240,6 @@ async def prepare_agent_run(
         None,
     )
 
-    historical_context = None
-    if not agent_request.is_debug and agent_request.conversation_id is not None:
-        current_message_id = get_current_run_user_message_id(
-            agent_request.conversation_id, user_id
-        )
-        if not isinstance(current_message_id, int) or isinstance(
-            current_message_id, bool
-        ):
-            current_message_id = None
-            logger.warning(
-                "Current user message boundary is unavailable; historical checkpoint loading skipped"
-            )
-        if current_message_id is not None:
-            historical_context = load_historical_context(
-                agent_request.conversation_id, current_message_id, user_id, tenant_id
-            )
     agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )

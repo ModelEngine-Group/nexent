@@ -22,17 +22,17 @@ case:
     action: Open Nexent login and select Casdoor, then authenticate at Casdoor.
     expected: Redirect returns to Nexent with a browser-bound state and authorization code.
   - order: 2
-    action: Complete the existing account/tenant onboarding for a new user and log in again.
-    expected: Onboarding creates a normal local account; later logins reuse the binding and establish a Nexent session.
+    action: Return to Nexent as a new Casdoor user and log in again.
+    expected: The callback creates a USER account in the configured business tenant without any completion page; later logins reuse the binding.
   - order: 3
     action: Cancel authentication or use an unrelated/expired browser flow.
-    expected: No authenticated session or unintended account binding is created.
+    expected: No authenticated session or unintended account binding is created. Expired login prompts a fresh authorization.
   expected_results:
   - Casdoor authenticates the user and Nexent enforces its own tenant and role rules.
   - Subsequent login reuses the local account and invalid flows fail safely.
   forbidden_side_effects:
   - No automatic administrator elevation or email-only takeover of an existing account.
   - No password, code verifier, client secret or token in public responses or reports.
-  journey: [Nexent login, Casdoor authentication, Nexent callback, Account completion if needed, Authenticated Nexent home]
+  journey: [Nexent login, Casdoor authentication, Nexent callback, Automatic account provisioning if needed, Authenticated Nexent home]
   final_business_result: [The Casdoor user can sign in to Nexent with local tenant authorization.]
   failure_evidence: [Sanitized redirect observations and browser trace; never report credentials.]

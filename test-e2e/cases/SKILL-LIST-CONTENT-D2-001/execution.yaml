@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: SKILL-LIST-CONTENT-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: SKILL-LIST-CONTENT-D2-001
+acceptance_bindings:
+  AC-01: [test_skill_list_content_selection_and_cleanup]
+  AC-02: [test_skill_list_content_selection_and_cleanup]
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Uses the prepared tenant identity only. The script creates one unique owned skill
+  with the existing helper, which journals cleanup ownership before assertions.
+  No shared asset factories or controlled services are needed. Finally deletes the
+  skill and confirms 404; the suite ownership journal provides failure recovery.

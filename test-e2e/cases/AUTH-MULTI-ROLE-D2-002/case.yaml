@@ -1,0 +1,97 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-MULTI-ROLE-D2-002
+  feature_id: AUTH-MULTI-ROLE
+  requirement_ids:
+  - AUTH-MULTI-ROLE-20261031
+  business_rule_ids:
+  - AUTH-MULTI-ROLE-RULE-03
+  - AUTH-MULTI-ROLE-RULE-06
+  title: 租户管理员可授予撤销角色且保护管理边界
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 租户管理员可授予撤销角色且保护管理边界
+  preconditions:
+  - Current-source management and required operations permission entry shell are available in an isolated test deployment.
+  - Logical fixture accounts su, tenant_a_admin_1, tenant_a_admin_2, tenant_a_user and tenant_b_admin have isolated
+    owned data.
+  - No mutation touches shared users; cleanup uses the fixture SU account and keeps all evidence outside Git.
+  test_data:
+    tenants:
+    - tenant_a
+    - tenant_b
+    ordinary_roles:
+    - ADMIN
+    - DEV
+    - USER
+    - OPS
+  steps:
+  - order: 1
+    action: As tenant_a_admin_1 PUT /users/{tenant_a_user} with roles ADMIN DEV OPS, then remove ADMIN while tenant_a_admin_1
+      remains active.
+    expected: Both updates succeed and reread returns the exact target arrays; role filtering by any selected role
+      returns each user once with the correct total.
+  - order: 2
+    action: As tenant_a_admin_1 remove own ADMIN; try editing tenant_b user or SU; repeat as pure OPS; attempt removing
+      the only remaining tenant_a ADMIN with SU.
+    expected: Self ADMIN removal and last ADMIN removal return 409; cross-tenant or SU-target and pure OPS edits
+      return 403; every rejection preserves roles and user status.
+  - order: 3
+    action: Read assignable_roles for a managed target and self, then send a valid complete array without any role-version
+      field.
+    expected: Ordinary grant/revoke options match backend policy, own ADMIN is locked, and successful responses
+      expose roles without requiring a role version.
+  expected_results:
+  - Both updates succeed and reread returns the exact target arrays; role filtering by any selected role returns
+    each user once with the correct total.
+  - Self ADMIN removal and last ADMIN removal return 409; cross-tenant or SU-target and pure OPS edits return 403;
+    every rejection preserves roles and user status.
+  - Ordinary grant/revoke options match backend policy, own ADMIN is locked, and successful responses expose roles
+    without requiring a role version.
+  forbidden_side_effects:
+  - Mutating protected targets on rejection, allowing a client-supplied actor role, or leaving a tenant without
+    an effective ADMIN.
+  acceptance:
+  - id: AC-01
+    description: Both updates succeed and reread returns the exact target arrays; role filtering by any selected
+      role returns each user once with the correct total.
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: Self ADMIN removal and last ADMIN removal return 409; cross-tenant or SU-target and pure OPS edits
+      return 403; every rejection preserves roles and user status.
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: Ordinary grant/revoke options match backend policy, own ADMIN is locked, and successful responses
+      expose roles without requiring a role version.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  contract:
+    protocol: HTTP JSON
+    request_expectations:
+    - As tenant_a_admin_1 PUT /users/{tenant_a_user} with roles ADMIN DEV OPS, then remove ADMIN while tenant_a_admin_1
+      remains active.
+    - As tenant_a_admin_1 remove own ADMIN; try editing tenant_b user or SU; repeat as pure OPS; attempt removing
+      the only remaining tenant_a ADMIN with SU.
+    - Read assignable_roles for a managed target and self, then send a valid complete array without any role-version
+      field.
+    response_expectations:
+    - Both updates succeed and reread returns the exact target arrays; role filtering by any selected role returns
+      each user once with the correct total.
+    - Self ADMIN removal and last ADMIN removal return 409; cross-tenant or SU-target and pure OPS edits return
+      403; every rejection preserves roles and user status.
+    - Ordinary grant/revoke options match backend policy, own ADMIN is locked, and successful responses expose roles
+      without requiring a role version.

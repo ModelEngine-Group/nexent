@@ -3,10 +3,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "antd";
 import { UserRoundPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { oauthService } from "@/services/oauthService";
 
 export function CasdoorSignupButton() {
@@ -25,7 +25,7 @@ export function CasdoorSignupButton() {
   if (!available) return null;
 
   return (
-    <StandardButton
+    <Button
       block
       htmlType="button"
       className="!w-full"
@@ -33,6 +33,6 @@ export function CasdoorSignupButton() {
       onClick={() => oauthService.startOAuthSignup("casdoor")}
     >
       {t("auth.casdoorSignup")}
-    </StandardButton>
+    </Button>
   );
 }

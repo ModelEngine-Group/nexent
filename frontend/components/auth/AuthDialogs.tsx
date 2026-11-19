@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useTranslation } from "react-i18next";
@@ -46,7 +47,7 @@ export function AuthDialogs() {
         closable
         width={480}
       >
-        <div className="relative bg-white p-4 rounded-2xl">
+        <div className="relative bg-white p-4 rounded-lg">
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
@@ -76,7 +77,7 @@ export function AuthDialogs() {
                 closeAuthPromptModal();
                 openLoginModal();
               }}
-              className="w-full h-12 rounded-lg font-medium flex items-center justify-center gap-2 shadow-sm"
+              className="w-full h-12 rounded-base font-medium flex items-center justify-center gap-2 shadow-sm"
               size="large"
               type="primary"
             >
@@ -91,7 +92,7 @@ export function AuthDialogs() {
                 openRegisterModal();
               }}
               type="default"
-              className="w-full h-12 border border-gray-300 rounded-lg font-medium flex items-center justify-center gap-2"
+              className="w-full h-12 border border-gray-300 rounded-base font-medium flex items-center justify-center gap-2"
               size="large"
             >
               <UserPlus className="h-5 w-5" />
