@@ -388,38 +388,6 @@ class TestPersonalKbCapacity:
             "test-tenant-id", "PERSONAL_KB_QUOTA_DEFAULT"
         )
 
-    def test_set_personal_default_quota_updates_config(
-        self, quota_service, mock_tenant_config_db
-    ):
-        mock_tenant_config_db["get_single_config_info"].return_value = {
-            "tenant_config_id": 7,
-            "config_value": "old",
-        }
-        mock_tenant_config_db["update_config_by_tenant_config_id"].return_value = True
-
-        result = quota_service.set_personal_default_quota(
-            quota_limit_bytes=5 * GB
-        )
-
-        assert result["quota_limit_bytes"] == 5 * GB
-        mock_tenant_config_db[
-            "update_config_by_tenant_config_id"
-        ].assert_called_once_with(7, str(5 * GB))
-
-    def test_set_personal_default_quota_unlimited_deletes_config(
-        self, quota_service, mock_tenant_config_db
-    ):
-        mock_tenant_config_db["get_single_config_info"].return_value = {
-            "tenant_config_id": 8
-        }
-        mock_tenant_config_db["delete_config_by_tenant_config_id"].return_value = True
-
-        result = quota_service.set_personal_default_quota(unlimited=True)
-
-        assert result["quota_limit_bytes"] is None
-        mock_tenant_config_db[
-            "delete_config_by_tenant_config_id"
-        ].assert_called_once_with(8)
 
     def test_effective_quota_individual_wins_over_default(
         self, quota_service, mock_tenant_config_db

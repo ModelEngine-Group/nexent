@@ -112,22 +112,6 @@ class PersonalQuotaPolicy:
             self._get_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT)
         )
 
-    def set_personal_default_quota(
-        self,
-        quota_limit_bytes: Optional[int] = None,
-        unlimited: bool = False,
-    ) -> Dict[str, Any]:
-        """Set or clear the tenant default personal KB quota."""
-        if unlimited or quota_limit_bytes is None:
-            self._delete_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT)
-            return {"quota_limit_bytes": None, "quota_limit_readable": None}
-
-        quota_limit_bytes = int(quota_limit_bytes)
-        self._set_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT, str(quota_limit_bytes))
-        return {
-            "quota_limit_bytes": quota_limit_bytes,
-            "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
-        }
 
     def _get_personal_effective_quota(
         self, user_id: str, default_quota: Any = _UNSET

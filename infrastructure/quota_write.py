@@ -18,13 +18,14 @@ from infrastructure.tenant_quota_read import bind_quota_identity, config_table
 CONFIGS = 'quota_write_configs'
 
 
-def bind_quota_write_records(actor, tenant, engine):
+def bind_quota_write_records(actor, tenant, engine, *, writable=True):
     fields = ('tenant_config_id', 'tenant_id', 'user_id', 'value_type', 'config_key', 'config_value', 'delete_flag',
               'create_time', 'update_time', 'created_by', 'updated_by')
     definition = DatasetDefinition(CONFIGS, 'tenant_config_id', tuple(
         FieldDefinition(name, 'integer' if name == 'tenant_config_id' else 'string',
                         nullable=config_table.c[name].nullable) for name in fields
-    ), frozenset({'management'}), frozenset({'management'}), tenant_field='tenant_id', active_field='delete_flag')
+    ), frozenset({'management'}), frozenset({'management'}) if writable else frozenset(),
+        tenant_field='tenant_id', active_field='delete_flag')
     return SQLRecordStore(StorageScope('management', tenant, actor.user_id, {CONFIGS}),
         DatasetCatalog((definition,)), {CONFIGS: config_table}, engine, revision_fields={CONFIGS: None},
         audit_mappings={CONFIGS: RecordAudit('create_time', 'update_time', 'created_by', 'updated_by')})

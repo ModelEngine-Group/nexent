@@ -23,22 +23,21 @@ from management.services.knowledge_base.quota_authorization import (
     quota_identity_roles,
     require_quota_scope,
 )
+from management.services.knowledge_base.quota_config_records import (
+    QuotaConfigurationRecords,
+)
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.quota_rules import (
     hard_limit_values,
     warning_values,
 )
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.storage.models import (
-    Comparison,
-    FieldPatch,
     OperationContext,
-    PageRequest,
-    RecordQuery,
 )
 
-from infrastructure.quota_write import CONFIGS, quota_write_ports
+from infrastructure.quota_write import quota_write_ports
 
 logger = logging.getLogger(__name__)
 EDITABLE = 'KB_QUOTA_HARD_LIMIT_EDITABLE'
@@ -57,7 +56,7 @@ class InvalidQuotaWarning(ValueError):
     pass
 
 
-class QuotaWriter:
+class QuotaWriter(QuotaConfigurationRecords):
     def __init__(self, *, ports=quota_write_ports, allocation=None, platform=None):
         self.ports = ports
         self.allocation = allocation if allocation is not None else QuotaAllocationReader()
@@ -74,30 +73,9 @@ class QuotaWriter:
             raise QuotaWriteDenied('Cannot modify quota config for another tenant')
         return privileged
 
-    def _row(self, records, key, context):
-        page = records.query(CONFIGS, RecordQuery(where=Comparison('config_key', 'eq', key)),
-                             PageRequest(limit=1), context=context)
-        return page.items[0] if page.items else None
 
-    def _value(self, records, key, context):
-        row = self._row(records, key, context)
-        return row['config_value'] if row else None
 
-    def _set(self, records, key, value, actor, context):
-        row = self._row(records, key, context)
-        if row is None:
-            records.create(CONFIGS, {'config_key': key, 'config_value': str(value),
-                'user_id': actor.user_id, 'value_type': 'single'}, context=context)
-            return
-        receipt = records.patch(CONFIGS, row['tenant_config_id'],
-            FieldPatch(set_values={'config_value': str(value)}), context=context)
-        if not receipt.matched:
-            raise Conflict(operation_id=context.operation_id)
 
-    def _delete(self, records, key, context):
-        row = self._row(records, key, context)
-        if row and not records.delete(CONFIGS, row['tenant_config_id'], context=context).deleted:
-            raise Conflict(operation_id=context.operation_id)
 
     def _configuration(self, records, context):
         return {**hard_limit_values(self._value(records, KEY_TENANT_HARD_LIMIT_BYTES, context),

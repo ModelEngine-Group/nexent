@@ -182,6 +182,8 @@ MIGRATED_MODULES = {
     'knowledge_base/quota_read.py',
     'knowledge_base/quota_allocation_read.py',
     'knowledge_base/quota_write.py',
+    'knowledge_base/quota_config_records.py',
+    'knowledge_base/personal_quota_configuration.py',
     'knowledge_base/quota_allocation_rules.py',
     'knowledge_base/quota_usage_read.py',
     'knowledge_base/quota_usage.py',

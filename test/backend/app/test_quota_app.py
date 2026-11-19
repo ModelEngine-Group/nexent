@@ -884,10 +884,10 @@ class TestPersonalCapacityAPI:
         )
 
     def test_get_default_quota_returns_unlimited(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_default_quota.return_value = None
+        mock_personal_configuration.return_value = {'quota_limit_bytes': None, 'quota_limit_readable': None, 'unlimited': True}
 
         resp = client.get("/api/capacity/personal/default-quota")
 
@@ -895,11 +895,12 @@ class TestPersonalCapacityAPI:
         assert resp.json()["quota_limit_bytes"] is None
         assert resp.json()["unlimited"] is True
 
+
     def test_get_default_quota_returns_value(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_default_quota.return_value = 2048
+        mock_personal_configuration.return_value = {'quota_limit_bytes': 2048, 'quota_limit_readable': '2.0 KB', 'unlimited': False}
 
         resp = client.get("/api/capacity/personal/default-quota")
 
@@ -907,10 +908,16 @@ class TestPersonalCapacityAPI:
         assert resp.json()["quota_limit_bytes"] == 2048
         assert resp.json()["unlimited"] is False
 
+
     def test_set_default_quota_requires_value_or_unlimited(
-        self, client, mock_personal_auth
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
+        from management.services.knowledge_base.personal_quota_configuration import (
+            InvalidPersonalQuotaPayload,
+        )
+
         mock_personal_auth()
+        mock_personal_configuration.side_effect = InvalidPersonalQuotaPayload('Provide quota_limit_bytes or unlimited=true')
 
         resp = client.put(
             "/api/capacity/personal/default-quota", json={}
@@ -920,10 +927,10 @@ class TestPersonalCapacityAPI:
         assert "Provide quota_limit_bytes" in resp.json()["message"]
 
     def test_set_default_quota_success(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_default_quota.return_value = {
+        mock_personal_configuration.return_value = {
             "quota_limit_bytes": 4096,
             "quota_limit_readable": "4.0 KB",
         }
@@ -935,9 +942,9 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["quota_limit_bytes"] == 4096
-        mock_quota_service.set_personal_default_quota.assert_called_once_with(
-            quota_limit_bytes=4096, unlimited=False
-        )
+        mock_personal_configuration.assert_awaited_once_with('write', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'),
+            {'quota_limit_bytes': 4096, 'unlimited': False})
+
 
     def test_list_users_rejects_unknown_sort_field(self, client, mock_personal_auth):
         mock_personal_auth()
@@ -1019,10 +1026,10 @@ class TestPersonalCapacityAPI:
         assert "Error setting personal KB quota" in response.json()["message"]
 
     def test_get_default_quota_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.get_personal_default_quota.side_effect = RuntimeError(
+        mock_personal_configuration.side_effect = RuntimeError(
             "db down"
         )
 
@@ -1031,11 +1038,12 @@ class TestPersonalCapacityAPI:
         assert response.status_code == 500
         assert "Error getting personal KB default quota" in response.json()["message"]
 
+
     def test_set_default_quota_unlimited_clears_quota(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_default_quota.return_value = {
+        mock_personal_configuration.return_value = {
             "quota_limit_bytes": None,
         }
 
@@ -1045,15 +1053,15 @@ class TestPersonalCapacityAPI:
         )
 
         assert response.status_code == 200
-        mock_quota_service.set_personal_default_quota.assert_called_once_with(
-            quota_limit_bytes=None, unlimited=True
-        )
+        mock_personal_configuration.assert_awaited_once_with('write', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'),
+            {'quota_limit_bytes': None, 'unlimited': True})
+
 
     def test_set_default_quota_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_default_quota.side_effect = RuntimeError(
+        mock_personal_configuration.side_effect = RuntimeError(
             "db down"
         )
 
@@ -1064,6 +1072,7 @@ class TestPersonalCapacityAPI:
 
         assert response.status_code == 500
         assert "Error setting personal KB default quota" in response.json()["message"]
+
 
     def test_get_personal_self_capacity_maps_unexpected_service_error(
         self, client, mock_personal_auth, mock_quota_service
@@ -1128,3 +1137,8 @@ class TestTokenExpiredMapping:
             response = getattr(client, method)(url, **kwargs)
 
         assert response.status_code == 401
+
+
+@pytest.fixture
+def mock_personal_configuration(mocker):
+    return mocker.patch.object(quota_app, 'personal_quota_configuration', new_callable=AsyncMock)
