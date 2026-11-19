@@ -793,6 +793,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
+    KNOWLEDGE_COLLECTION_METADATA_AUTHORIZE = NAMESPACE + 'v1/knowledge/authorize-collection-metadata'
     KNOWLEDGE_COLLECTION_AUTHORIZE = NAMESPACE + 'v1/knowledge/authorize-collection'
     KNOWLEDGE_CHUNK_MUTATION_AUTHORIZE = NAMESPACE + 'v1/knowledge/authorize-chunk-mutation'
     KNOWLEDGE_CHUNKS_AUTHORIZE = NAMESPACE + 'v1/knowledge/authorize-chunks'

@@ -15,7 +15,10 @@ from contracts.agentos_knowledge import (
 )
 from contracts.knowledge_base_deletion import KnowledgeBaseDeleteAuthorization
 from contracts.knowledge_chunk_mutation import ChunkMutationAuthorization
-from contracts.knowledge_collections import KnowledgeCollectionAuthorization
+from contracts.knowledge_collections import (
+    KnowledgeCollectionAuthorization,
+    KnowledgeCollectionsAuthorization,
+)
 from fastapi import APIRouter, HTTPException, Request
 from management.api.agentos_request import read_agentos_callback
 from management.services.knowledge_base.authorization import authorize_knowledge
@@ -30,6 +33,9 @@ from management.services.knowledge_base.chunks_authorization import (
 )
 from management.services.knowledge_base.collection_authorization import (
     authorize_collection,
+)
+from management.services.knowledge_base.collection_metadata_authorization import (
+    authorize_collection_metadata,
 )
 from management.services.knowledge_base.content_authorization import (
     authorize_knowledge_content,
@@ -51,7 +57,8 @@ def create_knowledge_authorization_router(service=authorize_knowledge, search_se
                                          base_deletion_service=authorize_knowledge_base_deletion,
                                          chunks_service=authorize_chunks_resource,
                                          chunk_mutation_service=authorize_chunk_mutation,
-                                         collection_service=authorize_collection):
+                                         collection_service=authorize_collection,
+                                         metadata_service=authorize_collection_metadata):
     router = APIRouter()
 
     async def dispatch(request, operation, schema, action):
@@ -114,5 +121,10 @@ def create_knowledge_authorization_router(service=authorize_knowledge, search_se
     async def authorize_collection_resource(request: Request):
         return await dispatch(request, ManagementOperation.KNOWLEDGE_COLLECTION_AUTHORIZE,
                               KnowledgeCollectionAuthorization, collection_service)
+
+    @router.post(ManagementOperation.KNOWLEDGE_COLLECTION_METADATA_AUTHORIZE.value, include_in_schema=False)
+    async def authorize_collection_metadata_resource(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_COLLECTION_METADATA_AUTHORIZE,
+                              KnowledgeCollectionsAuthorization, metadata_service)
 
     return router

@@ -380,3 +380,28 @@ SQL 时间字符串转换为原 get 使用的 ISO T 形式；revision 比较同�
 公开 POST /indices/check_exist 由 Management 通过只读 knowledge_catalog RecordStore 检查当前租户的精确名称，不创建 VDB 客户端或调用 Runtime。PRIVATE、DataMate、重复目录及尚无物理集合的目录保持占名，其他租户和已删目录不占名；接口返回原 available/exists_in_tenant 状态。此提示不替代创建事务的名称锁。阻塞读取使用 ThreadManager control-io，十秒父预算覆盖排队与读取，超时返回504，失败不会降级为available。旧 check_knowledge_base_exist_impl 和无调用方的排除索引分支已移除，列表与物理统计仍按退役 SPEC 迁移。
 
 SI VectorStore.statistics 已提供中立的物理集合指标与有限标量字段摘要。Infrastructure 实现 ES stats/settings 和 source-backed 聚合，只有可信独占集合绑定声明该能力；字段聚合仍固定租户与集合，普通维护端口权限不扩大。部分分片或超时响应显式失败，不重试。此能力尚待接入 AgentOS 的只读描述及公开列表，现有 ensure/inspect 接口语义保持，不能据此认定列表/统计已迁移或 data-process 已退役。
+
+
+### KnowledgeBase 批量集合描述
+
+Management 使用 AgentOSClient.describe_knowledge_collections 读取已授权 KB 的物理元数据。请求 KnowledgeCollectionsDescribe 包含1至100个去重 knowledge_ids、每个目录的 expected_revisions、view和 include_statistics。默认 view=resources，include_statistics=false。revision使用当前授权目录的knowledge_search_revision；此操作不要求模型，也不初始化集合。
+
+```python
+request = KnowledgeCollectionsDescribe(
+    knowledge_ids=[knowledge_id],
+    expected_revisions={knowledge_id: directory_revision},
+    include_statistics=True,
+)
+result = await client.describe_knowledge_collections(request, user_id, tenant_id)
+```
+
+| 标准操作 | 内部路径 | 用途 |
+| --- | --- | --- |
+| KnowledgeBase.describe_collections | POST /internal/agentos/v1/knowledge/bases/collections/describe | 同顺序返回物理存在性、可空维度、metric及可选中立统计 |
+| authorize_collection_metadata | POST /internal/agentos/v1/knowledge/authorize-collection-metadata | Runtime读前/读后批量复查实际身份与资源范围，每批共两次回调 |
+
+结果 KnowledgeCollectionsDescribed.items 每项绑定 knowledge_id 和 expected_revision。只有实际不存在时 present=false；失败不会变成空集合或零统计。present=true 的 payload-only 集合 dimensions 可以为None。statistics含物理record_count、source_count、size_bytes、created_at_ms、query_count、cache_hit_count、process_source与embedding_model_name，由Infrastructure SI聚合，Management负责外部展示适配。物理计数不证明文件发布或unknown写已修复，也不承诺并发事务快照。
+
+resources使用当前账号、成员及群组DAC。SU按原列表规则读取明确资源租户的普通可读元数据，实际actor身份不变，他人PRIVATE仍拒绝。inventory只用于既有运营清单视图，要求SI实时resource.inventory:read权限、资源属于当前租户且角色不含ADMIN/SU；它不授予正文或写权限。批量里任一资源失败会拒绝整批，读取后撤权也不返回部分成功。默认30秒统一预算覆盖HTTP回调和受管I/O，超时返回504并停止后续读取，无重试。
+
+此接口已可用于当前SI canonical集合。公开列表的目录/标签/模型名称装配与历史索引迁移仍按退役SPEC推进，现有ensure/inspect语义保持，不能据此认定公开列表或data-process退役已完成。

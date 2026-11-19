@@ -68,6 +68,8 @@ from contracts.knowledge_chunk_mutation import (
 from contracts.knowledge_collections import (
     KnowledgeCollectionEnsured,
     KnowledgeCollectionGrant,
+    KnowledgeCollectionsDescribed,
+    KnowledgeCollectionsGrant,
     KnowledgeCollectionStatus,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
@@ -135,6 +137,14 @@ class AgentOSClient:
 
     async def authorize_knowledge_collection(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_COLLECTION_AUTHORIZE, payload, user_id, tenant_id, KnowledgeCollectionGrant)
+
+    async def authorize_collection_metadata(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_COLLECTION_METADATA_AUTHORIZE, payload,
+                                       user_id, tenant_id, KnowledgeCollectionsGrant)
+
+    async def describe_knowledge_collections(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.DESCRIBE_COLLECTIONS, payload,
+                                             user_id, tenant_id, KnowledgeCollectionsDescribed)
 
     async def ensure_knowledge_collection(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.ENSURE_COLLECTION, payload, user_id, tenant_id, KnowledgeCollectionEnsured)

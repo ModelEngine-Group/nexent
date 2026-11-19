@@ -20,6 +20,7 @@ from contracts.knowledge_chunk_mutation import ChunkMutationIntent, ChunkMutatio
 from contracts.knowledge_collections import (
     KnowledgeCollectionEnsure,
     KnowledgeCollectionLookup,
+    KnowledgeCollectionsDescribe,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppend
 from fastapi import APIRouter, Request
@@ -64,6 +65,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.INSPECT_COLLECTION.value, include_in_schema=False)
     async def inspect_collection(request: Request):
         return await dispatch(request, KnowledgeCollectionLookup, service.inspect_collection, 200)
+
+    @router.post(KnowledgeOperation.DESCRIBE_COLLECTIONS.value, include_in_schema=False)
+    async def describe_collections(request: Request):
+        return await dispatch(request, KnowledgeCollectionsDescribe, service.describe_collections, 200)
 
     @router.post(KnowledgeOperation.APPEND_DOCUMENTS.value, include_in_schema=False)
     async def append_documents(request: Request):
