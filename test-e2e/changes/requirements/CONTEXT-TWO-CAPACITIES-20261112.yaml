@@ -31,6 +31,9 @@ change:
     - test/sdk/core/model_service/test_gateway_long_text_outlet.py
     - test/sdk/core/model_service/test_legacy_context_budget.py
     - test/sdk/core/agents/test_post_response_context.py
+    - test/sdk/core/agents/test_clarification_runtime.py
+    - test/sdk/core/context_runtime/test_runtimes.py
+    - test/backend/database/test_model_connectivity_changes.py
     - test/sdk/core/agents/test_context_directory_boundaries.py
     - test/sdk/core/agents/test_execution_history_compaction.py
     - test/sdk/core/agents/test_execution_history_review_regressions.py
