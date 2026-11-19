@@ -151,7 +151,7 @@ it("session uses server-normalized Agent defaults and saves only the explicit se
   const input = await screen.findByRole("spinbutton", {
     name: "workbench.controls.temperature",
   });
-  expect(input).toHaveValue(0.4);
+  expect(input).toHaveValue("0.4");
   fireEvent.change(input, { target: { value: "0" } });
   fireEvent.blur(input);
   await waitFor(() =>
@@ -407,6 +407,40 @@ it("SCB-01 model trigger summary reflects effective Agent/session reasoning valu
   api.getConversationModelPreferences.mockResolvedValue({parameter_values:{reasoning_effort:"high"},defaults:{enable_thinking:true,reasoning_effort:"low"},field_specs:[{...rule("reasoning_effort"),schema:{type:"string",enum:["low","medium","high"]}}],issues:[]});
   setup(<ConversationModelParameterSummary conversationId={11} modelId={42} agentDefaults={{reasoning_effort:"medium"}}/>);
   expect(await screen.findByText("modelProfile.thinkingLevel.high")).toBeVisible();
+});
+
+it("AC-002 displays service default for an unset reasoning budget without saving a prefill", async () => {
+  api.getConversationModelPreferences.mockResolvedValue({
+    config_revision: 1,
+    parameter_values: {},
+    defaults: { enable_thinking: true },
+    field_specs: [
+      { ...rule("enable_thinking"), schema: { type: "boolean" } },
+      {
+        ...rule("reasoning_budget_tokens"),
+        schema: { type: "integer", minimum: 1, maximum: 4096 },
+      },
+    ],
+    issues: [],
+  });
+  setup(
+    <>
+      <ConversationModelParameters conversationId={11} modelId={42} />
+      <ConversationModelParameterSummary conversationId={11} modelId={42} />
+    </>
+  );
+  const budget = await screen.findByRole("spinbutton", {
+    name: "reasoning_budget_tokens",
+  });
+  expect(budget).toHaveAttribute(
+    "placeholder",
+    "modelProfile.thinkingModeOption.default"
+  );
+  expect(budget).toHaveValue("");
+  expect(
+    screen.getByText("modelProfile.thinkingModeOption.default")
+  ).toBeVisible();
+  expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
 });
 
 it("SYNC-02 shows a degree-only profile in session controls without writing a synthetic toggle", async () => {

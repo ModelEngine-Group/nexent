@@ -379,6 +379,8 @@ def _build_openai_client(
         OpenAIModelClient,
     )
 
+    from nexent.core.models.sampling import validate_sampling_value, without_unset_sampling
+
     class _DirectClient:
         """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
 
@@ -387,11 +389,13 @@ def _build_openai_client(
             self._model = request_config.model_name
 
         async def invoke(self, messages: list[dict]) -> Any:
+            sampling = without_unset_sampling({"temperature": request_config.temperature, "top_p": request_config.top_p})
+            for field, value in sampling.items():
+                validate_sampling_value(field, value)
             return await self._inner.invoke(
                 model=self._model,
                 messages=messages,
-                temperature=request_config.temperature,
-                top_p=request_config.top_p,
+                **sampling,
             )
 
     client = OpenAIModelClient(

@@ -6,7 +6,6 @@ import {
   parameterIsActive,
   MODEL_TOKEN_LIMIT_KEYS,
 } from "@/lib/modelParameterLayers";
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Form, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
@@ -138,7 +137,9 @@ export function ConversationModelParameterSummary({
       ? t(`modelProfile.thinkingLevel.${effort}`, { defaultValue: effort })
       : typeof budget === "number"
         ? `${budget} Token`
-        : undefined;
+        : degree
+          ? t("modelProfile.thinkingModeOption.default")
+          : undefined;
   return text ? (
     <span className="shrink-0 text-muted-foreground">{text}</span>
   ) : null;
@@ -160,7 +161,6 @@ export function ConversationModelParameters({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const client = useQueryClient();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const { query, queryKey } = usePreferenceView({
     conversationId,
     draftScope,
@@ -235,7 +235,9 @@ export function ConversationModelParameters({
         delete_parameters: reset ? [key] : removed,
       });
     },
-    onError: (error) => message.error(modelPreferenceErrorMessage(error, t)),
+    onError: (error) => {
+      message.error(modelPreferenceErrorMessage(error, t));
+    },
   });
   const saved = query.data;
   const defaults = preferenceDefaults(saved, conversationId, agentDefaults);
@@ -262,6 +264,7 @@ export function ConversationModelParameters({
   const enabled = state.enabled;
   return (
     <div
+      className="shrink-0"
       onKeyDown={(event) => {
         if (event.key === "Enter") event.stopPropagation();
       }}
@@ -281,7 +284,6 @@ export function ConversationModelParameters({
             state.alwaysOn ||
             (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
-            advancedOpen ||
             (!conversationId && !draftScope) ||
             (!thinkingRule && !effortRule) ||
             !!saved?.issues.length
@@ -313,7 +315,7 @@ export function ConversationModelParameters({
               fallbackValues={defaults}
               scope="conversation"
               inModelSelector
-              pending={pending || advancedOpen}
+              pending={pending}
               onChange={(key, value) => quick.mutate({ key, value })}
               resetLabel={t("modelProfile.useInheritedDefault")}
               onReset={(key) => quick.mutate({ key, reset: true })}
@@ -323,7 +325,6 @@ export function ConversationModelParameters({
       </div>
       <ModelParameterPopover
         disabled={pending || (!conversationId && !draftScope)}
-        onOpenChange={setAdvancedOpen}
       >
         {() =>
           query.isPending ? (
@@ -363,7 +364,9 @@ function PreferenceEditor({
       parameter_values: Record<string, unknown>;
       delete_parameters: string[];
     }) => onSave(patch),
-    onError: (error) => message.error(modelPreferenceErrorMessage(error, t)),
+    onError: (error) => {
+      message.error(modelPreferenceErrorMessage(error, t));
+    },
   });
   const update = (key: string, value?: unknown) =>
     save.mutate({
@@ -406,22 +409,10 @@ function PreferenceEditor({
             !rule?.editable || !rule.allowed_scopes.includes("conversation")
           );
         })}
-        bounds={Object.fromEntries(
+        schemas={Object.fromEntries(
           saved.field_specs
             .filter((rule) => samplingKeys.includes(rule.key))
-            .map((rule) => [
-              rule.key,
-              {
-                min:
-                  typeof rule.schema.minimum === "number"
-                    ? rule.schema.minimum
-                    : undefined,
-                max:
-                  typeof rule.schema.maximum === "number"
-                    ? rule.schema.maximum
-                    : undefined,
-              },
-            ])
+            .map((rule) => [rule.key, rule.schema])
         )}
         onChange={(next) =>
           save.mutate({

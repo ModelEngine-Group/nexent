@@ -33,6 +33,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Image from "next/image";
+import { isSamplingField } from "@/lib/modelSamplingParameters";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
@@ -574,6 +575,11 @@ export default function AgentPrompt({
       }
     }
 
+    if (!hasOverride) {
+      delete base.temperature;
+      delete base.top_p;
+    }
+
     // Custom params are the exception: model-level customs render as plain
     // editable rows (merged display). Deletion persists as a null marker in
     // the override entry, so deleted rows do NOT reappear on reopen.
@@ -640,6 +646,7 @@ export default function AgentPrompt({
       // Reasoning is an agent-owned snapshot; do not compare with the model
       // level setting.
       if (
+        isSamplingField(key) ||
         key === "enable_thinking" ||
         key === "reasoning_effort" ||
         key === "reasoning_budget_tokens"

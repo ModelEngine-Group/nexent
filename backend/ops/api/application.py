@@ -31,6 +31,10 @@ def create_app() -> FastAPI:
 
         application.include_router(trajectory_router)
         application.include_router(directory_router)
+    else:
+        from ops.api.trajectory import imports_router
+
+        application.include_router(imports_router, prefix="/trajectory")
     return application
 
 
