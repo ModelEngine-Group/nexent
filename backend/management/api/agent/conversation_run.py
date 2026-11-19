@@ -12,7 +12,8 @@ from contracts.agentos import (
     EVENT_ID_PATTERN, IDEMPOTENCY_KEY_PATTERN, RUN_ID_PATTERN, AgentResume, AgentStop, CompatibilityConversationRun,
 )
 from contracts.errors.exceptions import (
-    RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError,
+    ForbiddenError, RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError,
+    RuntimeUpstreamError, UnauthorizedError, ValidationError,
 )
 from management.services.agent.runtime_client import (
     forward_active_run, forward_conversation_resume, forward_conversation_run, forward_debug_stop, forward_scoped_stop,
@@ -58,6 +59,15 @@ async def run_conversation(
             idempotency_key=idempotency_key,
         )
         return await forward_conversation_run(payload, user_id, tenant_id)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeServiceTimeoutError as exc:
         raise HTTPException(status_code=504, detail="Runtime service timed out") from exc
     except RuntimeServiceUnavailableError as exc:
