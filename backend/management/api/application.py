@@ -220,4 +220,12 @@ app.include_router(northbound_router)
 app.include_router(a2a_router)
 app.include_router(gateway_identity_router)
 
+# Phase-one northbound capability gates (conversations/automations/files).
+# The gates declare their exposure via @nb_exposed; the offline generator
+# compiles those declarations into the Gateway exposure snapshot.
+from management.api.northbound_gates import nb_capability_routers
+
+for _gate_router in nb_capability_routers():
+    app.include_router(_gate_router)
+
 app.include_router(ops_access_router)

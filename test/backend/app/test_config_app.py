@@ -198,10 +198,6 @@ class TestConfigAppRouterConfiguration:
         gates_pkg.nb_capability_routers = lambda: ()
         monkeypatch.setitem(sys.modules, "management.api.northbound_gates", gates_pkg)
 
-        manifest_module = types.ModuleType("management.utils.northbound_manifest")
-        manifest_module.reconcile_northbound_manifest = MagicMock()
-        monkeypatch.setitem(sys.modules, "management.utils.northbound_manifest", manifest_module)
-
         component = types.ModuleType("management.api.northbound_application")
 
         @asynccontextmanager

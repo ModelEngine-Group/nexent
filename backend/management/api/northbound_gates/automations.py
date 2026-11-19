@@ -3,9 +3,9 @@
 """Northbound gates for automation task queries and (dark) actions.
 
 The two query capabilities are open this phase. The action capabilities are
-declared in northbound.yaml with ``enabled: false`` — declared but not
-serving: the gate code exists so operations can open a capability by
-flipping one reviewed manifest line, and the gateway returns 404 for them
+declared on the gate via ``@nb_exposed(..., enabled=False)`` — declared
+but not serving: the gate code exists so operations can open a capability
+by flipping one reviewed declaration, and the gateway returns 404 for them
 until then (indistinguishable from nonexistent).
 """
 
@@ -14,6 +14,7 @@ from typing import Annotated, Callable, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from contracts.authentication import AuthenticatedIdentity
+from contracts.northbound_exposure import nb_exposed
 from management.services.permission.identity.dependency import unified_identity
 from management.services.permission.identity.gate_policies import (
     audit_hook,
@@ -27,6 +28,7 @@ nb_automation_router = APIRouter(prefix="/nb/v1/automations", tags=["northbound-
 
 
 @nb_automation_router.get("")
+@nb_exposed("automations.list")
 async def nb_list_automations(
     request: Request,
     status: Optional[str] = Query(default=None),
@@ -48,6 +50,7 @@ async def nb_list_automations(
 
 
 @nb_automation_router.get("/{task_id}")
+@nb_exposed("automations.detail")
 async def nb_get_automation(
     task_id: int,
     request: Request,
@@ -62,10 +65,11 @@ async def nb_get_automation(
     return envelope(data)
 
 
-# ── Dark action gates: present in code, serving only after the manifest ──
-# ── flips them on (see northbound.yaml automations.pause/resume/run/delete) ──
+# ── Dark action gates: present in code, serving only after the reviewed ──
+# ── enabled=False declaration flips to True (regenerate the snapshot then) ──
 
 @nb_automation_router.post("/{task_id}/pause")
+@nb_exposed("automations.pause", audit=True, enabled=False)
 async def nb_pause_automation(
     task_id: int,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
@@ -83,6 +87,7 @@ async def nb_pause_automation(
 
 
 @nb_automation_router.post("/{task_id}/resume")
+@nb_exposed("automations.resume", audit=True, enabled=False)
 async def nb_resume_automation(
     task_id: int,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
@@ -100,6 +105,7 @@ async def nb_resume_automation(
 
 
 @nb_automation_router.post("/{task_id}/run")
+@nb_exposed("automations.run", audit=True, enabled=False)
 async def nb_run_automation(
     task_id: int,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
@@ -117,6 +123,7 @@ async def nb_run_automation(
 
 
 @nb_automation_router.delete("/{task_id}")
+@nb_exposed("automations.delete", audit=True, enabled=False)
 async def nb_delete_automation(
     task_id: int,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
@@ -134,6 +141,7 @@ async def nb_delete_automation(
 
 
 @nb_automation_router.get("/{task_id}/runs")
+@nb_exposed("automations.runs", enabled=False)
 async def nb_list_automation_runs(
     task_id: int,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -147,6 +155,7 @@ async def nb_list_automation_runs(
 
 
 @nb_automation_router.post("/runs/{run_id}/cancel")
+@nb_exposed("automations.run_cancel", audit=True, enabled=False)
 async def nb_cancel_automation_run(
     run_id: int,
     ctx: AuthenticatedIdentity = Depends(unified_identity),

@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from contracts.authentication import AuthenticatedIdentity
 from contracts.conversation import BatchDeleteConversationRequest
+from contracts.northbound_exposure import nb_exposed
 from management.services.permission.identity.dependency import unified_identity
 from management.services.permission.identity.gate_policies import (
     audit_hook,
@@ -58,6 +59,7 @@ def _error_response(exc: Exception, request) -> JSONResponse:
 
 
 @nb_conversation_router.delete("/{conversation_id}")
+@nb_exposed("conversations.delete", audit=True)
 async def nb_delete_conversation(
     conversation_id: int,
     request: Request,
@@ -77,6 +79,7 @@ async def nb_delete_conversation(
 
 
 @nb_conversation_router.post("/batch-delete")
+@nb_exposed("conversations.batch_delete", audit=True)
 async def nb_delete_conversations_batch(
     request: BatchDeleteConversationRequest,
     raw_request: Request,

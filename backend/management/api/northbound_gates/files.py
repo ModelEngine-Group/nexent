@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Path as PathParam, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from contracts.authentication import AuthenticatedIdentity
+from contracts.northbound_exposure import nb_exposed
 from contracts.errors.exceptions import ForbiddenError, NotFoundException
 from management.services.permission.identity.dependency import unified_identity
 from management.services.permission.identity.gate_policies import (
@@ -51,6 +52,7 @@ def _error_response(exc: Exception, request) -> JSONResponse:
 
 
 @nb_file_router.get("/download/{object_name:path}")
+@nb_exposed("file.download")
 async def nb_get_storage_file(
     object_name: str = PathParam(..., description="File object name"),
     download: str = Query("ignore", pattern="^(ignore|stream)$", description="Download mode"),

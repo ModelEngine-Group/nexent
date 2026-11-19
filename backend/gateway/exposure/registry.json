@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "revision": "generated-574-rows",
   "routes": [
     {
       "method": "GET",
@@ -5758,6 +5759,30 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/nb/v1/automations",
+      "transport": "http",
+      "target": "northbound",
+      "source": "management.api.northbound_gates.automations.nb_list_automations",
+      "route_id": "route-072fe7cb7adbd559",
+      "capability_id": "automations.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/automations/{task_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "management.api.northbound_gates.automations.nb_get_automation",
+      "route_id": "route-33e33f81254a2715",
+      "capability_id": "automations.detail",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/nb/v1/chat/attachments/upload",
       "transport": "http",
@@ -5802,6 +5827,30 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/nb/v1/conversations/batch-delete",
+      "transport": "http",
+      "target": "northbound",
+      "source": "management.api.northbound_gates.conversations.nb_delete_conversations_batch",
+      "route_id": "route-ae902de6d85c0eba",
+      "capability_id": "conversations.batch_delete",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/nb/v1/conversations/{conversation_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "management.api.northbound_gates.conversations.nb_delete_conversation",
+      "route_id": "route-beb523b77b3d7957",
+      "capability_id": "conversations.delete",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/nb/v1/conversations/{conversation_id}",
       "transport": "http",
@@ -5819,6 +5868,18 @@
       "target": "northbound",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-304322fea3f63ac2",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/file/download/{object_name:path}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "management.api.northbound_gates.files.nb_get_storage_file",
+      "route_id": "route-a684835a9abec2c4",
+      "capability_id": "file.download",
       "credential_kinds": [
         "api_key"
       ]
@@ -6305,6 +6366,5 @@
         "session"
       ]
     }
-  ],
-  "revision": "2026-11-18.2"
+  ]
 }
