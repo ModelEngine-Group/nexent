@@ -10,7 +10,7 @@ from contracts.configuration import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,

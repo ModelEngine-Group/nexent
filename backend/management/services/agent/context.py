@@ -179,8 +179,8 @@ def build_agent_run_context(
     user_query: str | None = None,
 ):
     """Preview memory once and bind the metadata shared by both consumers."""
-    from infrastructure.observability.bootstrap import monitoring_manager
     from management.services.configuration.user.memory import build_memory_context
+    from infrastructure.trace.bootstrap import monitoring_manager
     from management.services.monitor.identity import resolve_monitoring_user_email
     from nexent.monitor.local_content import local_capture_enabled
 

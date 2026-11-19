@@ -21,7 +21,7 @@ from contracts.nl2agent_resources import (
     ResourcePurpose,
     VerificationCheck,
 )
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from management.services.agent.authorization import require_agent_draft_edit
 from services import nl2agent_resource_flow as flow
 from services.nl2agent_service import Nl2AgentResourceError, read_generation_state

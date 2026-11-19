@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from elasticsearch import BadRequestError, ConflictError
 
-from infrastructure import nl2agent_resource_index as storage
+from management.services.conversation import nl2agent_resource_index as storage
 
 
 def document(ref="tool:1", tenant="tenant", text="Safe capability"):

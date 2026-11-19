@@ -16,8 +16,10 @@ from nexent.core.agents.context.models import ContextItem, ContextItemType
 from nexent.core.agents.context.rendering import ContextItemRenderer
 from nexent.core.agents.contracts.adapter import AgentCoreAdapter, UnsupportedAgentCoreConfig
 from nexent.core.agents.contracts.clarification import render_question_text
+from nexent.core.agents.contracts.identity import root_clarification_allowed
 from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested, JiuwenClarification
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
+from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
 from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
 from nexent.core.agents.resources.provider import AgentResources
@@ -113,7 +115,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         ])
         occupied = {*reserved_names, *(child.invocation_name for child in self.external_agents)}
         self.clarification = JiuwenClarification(occupied) if (
-            getattr(config, "response_mode", "chat") == "chat"
+            root_clarification_allowed(run_info) and getattr(config, "response_mode", "chat") == "chat"
             and getattr(getattr(run_info, "observer", None), "enable_nl2a_wrapper", False) is not True
         ) else None
 
@@ -198,16 +200,70 @@ class JiuwenAdapter(AgentCoreAdapter):
             raise asyncio.CancelledError()
         call_id = uuid.uuid4().hex
         provider_id = self.events.tool_call(name, arguments, call_id)
-        token = self._active_resource.set((call_id, provider_id))
+        source = self._resource_source(name)
+        token = self._active_resource.set((call_id, provider_id, name, source))
         try:
             with self.run_info.observer.tool_call_context(call_id):
                 try:
                     yield
                 except BaseException as error:
-                    self.events.tool_result(call_id, provider_id, type(error).__name__, is_error=True)
+                    diagnostic = self._resource_failure(error, source, name)
+                    self.events.tool_result(
+                        call_id, provider_id,
+                        (public_error(diagnostic, self.run_info.observer.lang).safe_message
+                         if diagnostic else "Cancelled"),
+                        is_error=diagnostic is not None, error=diagnostic,
+                    )
                     raise
         finally:
             self._active_resource.reset(token)
+
+    def _resource_source(self, name):
+        if any((tool.name or tool.class_name) == name and tool.source == "mcp" for tool in self.tool_configs):
+            return "mcp"
+        if any((child.invocation_name or child.name) == name for child in self.run_info.agent_config.worker_agents):
+            return "subagent"
+        if any(child.invocation_name == name for child in self.external_agents):
+            return "a2a"
+        if name in {"nexent_execute_python", "nexent_execute_block"}:
+            return "sandbox"
+        return "tool"
+
+    def _resource_failure(self, error, source, name):
+        diagnostic = failure_error(
+            error, source=source, name=name,
+            request_id=self.events.turn_id, lang=getattr(self.run_info.observer, "lang", "en"),
+        )
+        if diagnostic is not None:
+            try:
+                error._nexent_resource_error = diagnostic
+            except (AttributeError, TypeError):
+                pass
+            self.events.resource_error = diagnostic
+            logger.warning("event=jiuwen_resource_failed source=%s resource=%s category=%s request_id=%s",
+                           source, name, diagnostic.category, diagnostic.request_id)
+        return diagnostic
+
+    def record_failure(self, error, *, phase="execution", source="agent"):
+        diagnostic = failure_error(
+            error, request_id=self.events.turn_id,
+            lang=getattr(self.run_info.observer, "lang", "en"), source=source, phase=phase,
+        )
+        if diagnostic is None:
+            return
+        previous = self.events.last_error
+        if previous is not None and phase == "cleanup":
+            return
+        if diagnostic.category == "JIUWEN_EXECUTION_FAILED":
+            if previous is not None and previous.category not in {
+                "JIUWEN_EXECUTION_FAILED", "JIUWEN_TERMINAL_MISSING",
+            }:
+                diagnostic = previous
+            else:
+                diagnostic = self.events.resource_error or previous or diagnostic
+        self.events.record_error(diagnostic)
+        logger.error("event=jiuwen_run_failed phase=%s category=%s request_id=%s exception_type=%s",
+                     phase, diagnostic.category, diagnostic.request_id, type(error).__name__)
 
     def _resource_result(self, result):
         value = result.model_dump() if hasattr(result, "model_dump") else result
@@ -216,12 +272,25 @@ class JiuwenAdapter(AgentCoreAdapter):
                 value = json.loads(value)
             except ValueError:
                 pass
-        is_error = isinstance(value, dict) and (value.get("success") is False or value.get("isError") is True
-                                                or value.get("status") in ("error", "failed"))
         active = self._active_resource.get()
+        failure_value = value
+        if active is not None and active[3] == "mcp" and isinstance(value, dict) and set(value) == {"result"}:
+            if isinstance(value["result"], str):
+                try:
+                    failure_value = json.loads(value["result"])
+                except ValueError:
+                    pass
+        is_error = isinstance(failure_value, dict) and (
+            failure_value.get("success") is False or failure_value.get("isError") is True
+            or failure_value.get("status") in ("error", "failed")
+        )
         if active is not None:
             rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
-            self.events.tool_result(*active, rendered, is_error)
+            diagnostic = (
+                self._resource_failure(RuntimeError("Resource returned failure"), active[3], active[2])
+                if is_error else None
+            )
+            self.events.tool_result(*active[:2], rendered, is_error, error=diagnostic)
         # Keep legacy side channels for artifacts and existing consumers.
         log_text = str(result)
         if getattr(self.run_info.agent_config, "response_mode", "chat") == "python_workflow":
@@ -431,6 +500,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         shared = business_system_instructions(
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
             getattr(getattr(self.run_info, "observer", None), "lang", "en"),
+            is_subagent=not root_clarification_allowed(self.run_info),
         )
         protocol = "" if self.text_protocol or self.artifact_output else NATIVE_PROTOCOL_INSTRUCTION
         if self.artifact_output:
@@ -649,7 +719,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.execution_loop import get_execution_loop
 
         try:
-            self._connect_mcp()
+            try:
+                self._connect_mcp()
+            except Exception as error:
+                self.record_failure(error, source="mcp")
+                raise
             answer = get_execution_loop(self.manager).run(self._run_async, cancel=self.scope.cancel)
             if getattr(self.run_info.observer, "boundary_reached", False):
                 self.events.waiting_for_input = True
@@ -663,6 +737,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         except ClarificationRequested as requested:
             if getattr(self, "scope", None) is not None and self.scope.cancelled:
                 raise RunTerminated() from None
+            if not root_clarification_allowed(self.run_info):
+                answer = render_question_text(requested.form)
+                self.events.final_answer = answer
+                self._run_completed = True
+                return answer
             self.events.output(ProcessType.HUMAN_INTERACTION,
                                json.dumps({"schema_version": 1, **requested.form.model_dump(mode="json", exclude_none=True)},
                                           ensure_ascii=False))
@@ -730,7 +809,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             return
         try:
             self._close_resources()
-        except BaseException:
+        except BaseException as error:
+            self.record_failure(error, phase="cleanup")
             self._run_completed = False
             raise
         finally:

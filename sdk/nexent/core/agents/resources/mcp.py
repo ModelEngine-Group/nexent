@@ -247,7 +247,8 @@ class ManagedMCPToolCollection:
                 raise
         except BaseException as exc:
             with self._lock:
-                self._startup_error = exc
+                if self._startup_error is None:
+                    self._startup_error = exc
             raise
         finally:
             self._cancel_active_calls()

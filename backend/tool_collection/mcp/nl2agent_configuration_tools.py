@@ -16,7 +16,7 @@ from contracts.errors.exceptions import (
 )
 from contracts.nl2agent_configuration import ConfigurationSection
 from contracts.tag import AuthenticatedCaller
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from services.nl2agent_configuration import ConfigurationError, read_configuration, save_configuration
 from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2AGENT_AGENT_ID_HEADER, NL2AGENT_CONVERSATION_ID_HEADER, NL2AGENT_POLICY_CLARIFICATION_HEADER,

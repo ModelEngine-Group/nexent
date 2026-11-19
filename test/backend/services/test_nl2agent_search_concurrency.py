@@ -11,7 +11,7 @@ import pytest
 
 from contracts.constants import environment
 from contracts.configuration import parse_positive_int
-from infrastructure import nl2agent_resource_index as storage
+from management.services.conversation import nl2agent_resource_index as storage
 
 
 def budget(seconds=2):

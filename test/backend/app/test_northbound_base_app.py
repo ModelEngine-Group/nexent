@@ -44,8 +44,8 @@ class NorthboundContext:
     authorization: str
     token_id: int = 0
 
-# services.northbound_service - provides only NorthboundContext
-northbound_service_module = types.ModuleType("services.northbound_service")
+# management.services.northbound - provides only NorthboundContext
+northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
@@ -58,7 +58,7 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
-sys.modules['services.northbound_service'] = northbound_service_module
+sys.modules['management.services.northbound'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
 from unittest.mock import AsyncMock, MagicMock
@@ -173,7 +173,6 @@ install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 consts_const_module = types.ModuleType("contracts.constants.environment")
 consts_const_module.MINIO_ENDPOINT = "http://minio:9000"
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
-consts_const_module.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = 1
 
 class VectorDatabaseType:
     ELASTICSEARCH = "elasticsearch"
@@ -181,6 +180,11 @@ class VectorDatabaseType:
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["contracts.constants.environment"] = consts_const_module
 install_business_constant_stubs(consts_const_module)
+consts_const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 5
+consts_const_module.CONFIG_SERVICE_NAME = "nexent-config"
+consts_const_module.GATEWAY_MANAGEMENT_URL = "http://localhost:5010"
+consts_const_module.GATEWAY_RUNTIME_URL = "http://localhost:5014"
+consts_const_module.GATEWAY_NORTHBOUND_URL = "http://localhost:5010"
 
 
 class _ManagerState:
@@ -209,7 +213,7 @@ class _NorthboundThreadManager:
 
     def snapshot(self):
         return {
-            "service_name": "northbound",
+            "service_name": "config",
             "active_count": 0,
             "queued_count": 0,
         }
@@ -222,25 +226,25 @@ concurrency_module.set_default_thread_manager = MagicMock()
 concurrency_module.clear_default_thread_manager = MagicMock()
 sys.modules["nexent.core.concurrency"] = concurrency_module
 
-thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
-thread_lifecycle_module.northbound_thread_manager = _NorthboundThreadManager()
-sys.modules["infrastructure.concurrency"] = thread_lifecycle_module
+thread_lifecycle_module = types.ModuleType("management.thread_management")
+thread_lifecycle_module.config_thread_manager = _NorthboundThreadManager()
+sys.modules["management.thread_management"] = thread_lifecycle_module
 
-runtime_state_module = types.ModuleType("management.services.agent.run_state")
+runtime_state_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_module.runtime_state_service = MagicMock()
-sys.modules["management.services.agent.run_state"] = runtime_state_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
 # ---------------------------------------------------------------------------
-# Mock gateway.api.northbound - provides the _get_northbound_context helper
+# Mock management.api.northbound - provides the _get_northbound_context helper
 northbound_app_router = APIRouter()
 
 @northbound_app_router.get("/dummy")
 async def _dummy_route():
     return {"msg": "ok"}
 
-northbound_app_module = types.ModuleType("gateway.api.northbound")
+northbound_app_module = types.ModuleType("management.api.northbound")
 northbound_app_module.router = northbound_app_router
 
 # _get_northbound_context helper used by a2a endpoints
@@ -255,7 +259,7 @@ async def _get_northbound_context_fake(request):
     )
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
-sys.modules['gateway.authentication.northbound_auth'] = northbound_app_module
+sys.modules['management.services.permission.identity.northbound'] = northbound_app_module
 northbound_app_module.get_northbound_context = _get_northbound_context_fake
 
 # Mock management.api.file.file_management - used by northbound_knowledge_app
@@ -265,12 +269,12 @@ file_management_app_module.build_content_disposition_header = MagicMock(
 )
 sys.modules["management.api.file.file_management"] = file_management_app_module
 
-# Mock management.utils.app_factory (imported by northbound_base_app)
-app_factory_module = types.ModuleType("management.utils.app_factory")
+# Mock backend.http.server.app_factory (imported by northbound_base_app)
+app_factory_module = types.ModuleType("backend.http.server.app_factory")
 
 # Import real register_exception_handlers to apply to the app
 try:
-    from management.utils.app_factory import register_exception_handlers as _real_register_exception_handlers
+    from backend.http.server.app_factory import register_exception_handlers as _real_register_exception_handlers
 except Exception:
     _real_register_exception_handlers = None
 
@@ -293,12 +297,12 @@ def register_exception_handlers(app):
 
 app_factory_module.register_exception_handlers = register_exception_handlers
 app_factory_module.create_app = None  # placeholder
-sys.modules['management.utils.app_factory'] = app_factory_module
+sys.modules['backend.http.server.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
                      cors_origins=None, cors_methods=None, enable_monitoring=True,
-                     lifespan=None):
+                     lifespan=None, gateway_identity_audience=None):
     """Minimal implementation of create_app for testing."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -332,12 +336,12 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['management.db.a2a.repository'] = database_a2a_module
 
-# Mock gateway.authentication.auth (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("gateway.authentication.auth")
+# Mock management.services.permission.identity.session (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("management.services.permission.identity.session")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['gateway.authentication.auth'] = auth_utils_module
+sys.modules['management.services.permission.identity.session'] = auth_utils_module
 
 # Mock management.services.knowledge_base.ingestion to avoid database/storage imports
 file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
@@ -363,9 +367,9 @@ sys.modules["management.services.monitor.audit"] = MagicMock()
 auth_utils_module.get_user_language = lambda request: "en"
 sys.modules["management.services.knowledge_base.task_state"] = MagicMock()
 
-from gateway import application as northbound_base_app_module
+from management.api import northbound_application as northbound_base_app_module
 from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings
-from gateway.application import northbound_app as app
+from management.api.northbound_application import northbound_app as app
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -396,7 +400,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
             )
 
         recover_northbound_tasks.assert_called_once_with()
-        schedule_upload_cleanup.assert_awaited_once_with("nexent-northbound")
+        self.assertEqual([c.args[0] for c in schedule_upload_cleanup.await_args_list], ["nexent-config", "nexent-northbound"])
 
     def test_lifespan_runs_startup_recovery(self):
         recover_on_startup = AsyncMock()
@@ -420,7 +424,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         ):
             asyncio.run(exercise_lifespan())
 
-        recover_on_startup.assert_awaited_once_with()
+        recover_on_startup.assert_awaited_once_with([])
 
     def test_lifespan_stops_configuration_when_recovery_fails(self):
         recover_on_startup = AsyncMock(side_effect=RuntimeError("startup failed"))
@@ -481,7 +485,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertEqual(
             response.json(),
             {
-                "service_name": "northbound",
+                "service_name": "config",
                 "active_count": 0,
                 "queued_count": 0,
             },

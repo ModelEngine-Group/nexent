@@ -11,7 +11,7 @@ from nexent.core.tools.send_email_tool import SendEmailTool
 from contracts.nl2agent_resources import (
     RequirementEdit, ResourceCardAction, ResourceInstallationRequest, ResourceLinkRequest, VerificationCheck,
 )
-from infrastructure.concurrency import mcp_thread_manager
+from backend.mcp.thread_management import mcp_thread_manager
 from management.db.mcp import remote
 from management.db.tool import outer_api
 from management.services.mcp import service as mcp_service

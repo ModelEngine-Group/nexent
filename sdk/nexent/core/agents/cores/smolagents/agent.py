@@ -21,6 +21,7 @@ from nexent.consts.mcp_errors import (
     classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message,
 )
 from nexent.core.agents.contracts.clarification import choose_clarification_tool_name
+from nexent.core.agents.contracts.identity import root_clarification_allowed
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent, convert_code_format
@@ -316,7 +317,7 @@ class NexentAgent(AgentResources):
             from nexent.core.agents.context import ContextItemInput, ContextItemType
 
             enable_clarification = (
-                not _managed_context
+                root_clarification_allowed(self.core_run_info, managed_context=_managed_context)
                 and getattr(self.observer, "manages_requirement_clarification", False) is not True
                 and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
@@ -350,7 +351,9 @@ class NexentAgent(AgentResources):
                 )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=(with_common_behavior(context_items, self.observer.lang)
+                items=(with_common_behavior(context_items, self.observer.lang,
+                       is_subagent=not root_clarification_allowed(
+                           self.core_run_info, managed_context=_managed_context))
                        if any(item.type == ContextItemType.SYSTEM for item in context_items) else context_items),
             )
 

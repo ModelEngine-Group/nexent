@@ -23,7 +23,7 @@ from management.services.mcp import service as mcp_service
 from model_controls.runtime import runtime_fixture
 from services import nl2agent_service, nl2agent_state_service
 from services.nl2agent_state_service import ResourceScope
-from infrastructure import nl2agent_resource_index as storage
+from management.services.conversation import nl2agent_resource_index as storage
 from tool_collection.mcp.nl2agent_mcp_tools import ResourceInstallationOption
 
 pytestmark = [pytest.mark.case_id("NL2A-COVERAGE-D3-001"), pytest.mark.stage("D3")]

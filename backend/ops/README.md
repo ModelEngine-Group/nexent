@@ -12,7 +12,7 @@ Authenticated operations also expose scope and resource inventory metadata using
 Use the existing Python 3.11 backend environment. From `backend/`:
 
 ```shell
-python ops_service.py
+python -m backend.http.ops_service
 ```
 
 The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
@@ -40,10 +40,10 @@ or execute Agent calls or SQL migrations.
 | `/trajectory/cleanup/schedule` | Read or update tenant cleanup intervals |
 | `/conversation/agent_groups` and its conversations subresource | Administrator directory with `view=trajectory` |
 
-The existing Web origin accepts `/api/trajectory/` and forwards it to ops through
-`OPS_HTTP_BACKEND` (local default `http://localhost:5016`). Conversation directory
-requests go to ops only with `view=trajectory`; ordinary history and execution
-requests remain on Runtime. Roles, tenant ownership, private-cache headers,
+Web sends trajectory and system configuration requests through Gateway. Gateway
+uses `GATEWAY_OPS_URL` to reach Ops and attaches a request-bound identity signature.
+Conversation directory requests go to Ops only with `view=trajectory`; ordinary
+history and execution keep their existing routing. Roles, tenant ownership, private-cache headers,
 response envelopes and opaque references retain their existing contracts.
 References are process-local; multi-replica deployments need affinity or must
 restart a query when its reference is unavailable.
@@ -51,8 +51,7 @@ restart a query when its reference is unavailable.
 Health checks describe only the operations process and do not probe dependencies.
 `GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
 OPS is restricted to its tenant; SU can select any tenant or all tenants. The
-dashboard and configuration action grants are permission contracts; monitoring
-and configuration CRUD implementations are outside this change.
+System configuration endpoints enforce the shared read and update grants in Ops.
 
 ## Storage and process resources
 
@@ -81,8 +80,8 @@ python -m ops.scripts.backfill_trajectory_summaries
 
 Normal Docker and Kubernetes application selection includes ops. Docker ops
 loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
-logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Its Web
-container receives the corresponding `OPS_HTTP_BACKEND`.
+logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Gateway
+uses the corresponding `GATEWAY_OPS_URL`.
 
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops
@@ -91,10 +90,10 @@ docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/doc
 Standalone Compose joins the existing external `nexent_network`. The shared
 network and environment files must already exist. Kubernetes mounts the logs
 PVC and, when trajectories are enabled, the trajectory PVC plus existing shared
-configuration/secrets. Default health mode keeps its minimal configuration and
-logs-only mount. The normal deployment generator sets Web `config.opsHttpBackend`
-from `OPS_PORT`; direct Helm overrides must set that address consistently with
-the ops Service port. SQL startup stays disabled in ops.
+configuration/secrets. Ops reads its database and signature settings from the
+shared ConfigMap and Secret in both modes. The normal deployment generator
+sets Gateway `opsUrl` from `OPS_PORT`; direct Helm overrides must set that
+address consistently with the Ops Service port. SQL startup stays disabled in ops.
 
 Application, Uvicorn and access logs use `infrastructure.logging`, console and
 rotating persistent files. The file path is `LOG_DIR/ops/nexent_ops.log`; Kubernetes
@@ -102,13 +101,13 @@ uses a per-pod log directory to avoid concurrent rotation.
 
 ## Code boundaries
 
-- `ops_service.py`: launcher.
+- `backend/http/ops_service.py`: launcher.
 - `ops/api/`: HTTP routes and application composition.
 - `ops/services/trajectory/`: query parsing, file retrieval and maintenance orchestration.
 - `ops/db/trajectory/`: authorized catalogs, list/statistics SQL and cleanup configuration.
 - `ops/concurrency.py`, `ops/lifespan.py`: process-owned resources.
 - `management/db/trajectory/`: shared ORM and transactional capture/projection writes.
-- `infrastructure/observability/`: shared file primitives and Runtime capture wiring.
+- `infrastructure/trace/`: shared file primitives and Runtime capture wiring.
 
 Database identity and permission access is reused from management. Resource inventory
 selects metadata fields explicitly and excludes credentials and content.

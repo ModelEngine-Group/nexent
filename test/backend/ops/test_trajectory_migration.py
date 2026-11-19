@@ -26,7 +26,7 @@ def test_query_implementations_belong_to_operations():
     assert not (ROOT / "backend/management/services/trajectory").exists()
     assert not (ROOT / "backend/management/api/observability/trajectory.py").exists()
     source = (
-        ROOT / "backend/infrastructure/observability/trajectory_runtime.py"
+        ROOT / "infrastructure/trace/trajectory_runtime.py"
     ).read_text()
     assert "ops." not in source
     assert "maintenance_store=maintenance" not in source
@@ -71,7 +71,7 @@ def test_query_lanes_are_owned_by_ops():
 
     manager = create_thread_manager()
     assert manager.service_name == "ops"
-    source = ast.parse((ROOT / "backend/infrastructure/concurrency.py").read_text())
+    source = ast.parse((ROOT / "backend/runtime/thread_management.py").read_text())
     runtime = next(
         n
         for n in source.body
@@ -144,7 +144,7 @@ def test_enabled_ops_serves_private_queries_on_existing_api_prefix(
 
 def test_runtime_capture_has_no_periodic_maintenance(tmp_path, mocker):
     from contracts.constants import environment as config
-    from infrastructure.observability.trajectory_runtime import create_local_processor
+    from infrastructure.trace.trajectory_runtime import create_local_processor
 
     mocker.patch("management.db.trajectory.repository.ExecutionRepository")
     settings = SimpleNamespace(

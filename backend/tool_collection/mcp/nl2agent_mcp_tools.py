@@ -19,7 +19,7 @@ from pydantic import (
 
 from contracts.errors.exceptions import AgentDraftEditError, UnauthorizedError
 from contracts.nl2agent_resources import MAX_REQUIREMENTS
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger(__name__)
 

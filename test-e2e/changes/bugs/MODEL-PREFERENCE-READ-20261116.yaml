@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PREFERENCE-READ-20261116
+  change_type: bugfix
+  bug_id: MODEL-PREFERENCE-READ-20261116
+  title: Preserve complete list profiles and server-normalized conversation parameters
+  description: Restore credential-free batch profile decoding and consistent saved model controls without resetting configuration.
+  observed_behavior: Sparse batch rows fail profile decoding; local legacy Agent values override normalized server defaults and validation errors appear as revision failures.
+  expected_behavior: Agent lists decode valid saved profiles; saved controls use server effective defaults and display localized structured validation failures.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Batch UT used legacy sparse rows; component UT incorrectly overlaid Agent defaults and browser coverage did not assert conflicting saved defaults or field-level errors.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D4-002]
+    added: [CHAT-PREFERENCES-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Real codec roundtrip and selected-column assertions cover batch field completeness; existing normalization UT remains authoritative. Component and transport UT add saved/draft authority and structured errors, without a duplicate D1.
+    behaviors:
+    - Complete credential-free batch rows decode and preserve missing, deleted and legacy behavior; empty and failed queries retain their contracts.
+    - Saved controls and summary consume server defaults while unsaved drafts retain local Agent inheritance, explicit false and zero.
+    - Quick and advanced errors retain field pointers, localize known categories and distinguish actual revision conflicts without exposing diagnostics or resetting values.
+    test_selectors:
+    - test/backend/database/test_model_list_profile.py
+    - test/backend/services/test_management_batch_reads.py
+    - test/backend/services/test_agent_model_parameters.py
+    - test/backend/services/test_conversation_model_preference_layers.py
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+    - frontend/tests/component/modelPreferenceErrors.test.tsx
+    - frontend/tests/component/savedModelPreferences.test.tsx
+  notes: >-
+    Design and verification are maintained in ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md
+    and task.md, MODEL-PREFERENCE-READ-20261116. Responsibility inherits model from CHAT-MODEL-CONTROLS.
+    The new D4 owns browser-local routes, state and context; empty shared preparation families are self-contained.
+    No provider calls, persistent writes or shared resources are needed. Live deployment checks separately
+    back up and restore only owned preferences and assert Agent/model configuration is unchanged.
+    Existing D1-D5 contracts are preserved; no new SQL or schema dependencies.

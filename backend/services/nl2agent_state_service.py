@@ -13,7 +13,7 @@ from redis.exceptions import RedisError, WatchError
 
 from contracts.constants.environment import NL2AGENT_RESOURCE_STATE_TTL_SECONDS
 from contracts.nl2agent_resources import ResourceCardAction, ResourceCardType
-from infrastructure.redis import get_redis_client
+from infrastructure.redis.client import get_redis_client
 
 ResourceState = dict[str, Any]
 

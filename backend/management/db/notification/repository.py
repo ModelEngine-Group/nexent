@@ -24,7 +24,7 @@ from contracts.constants.constants import (
     VALID_NOTIFICATION_SCOPES,
     VALID_RESOURCE_TYPES,
 )
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import Notification, NotificationReceiver, UserTenant
 
 logger = logging.getLogger(__name__)

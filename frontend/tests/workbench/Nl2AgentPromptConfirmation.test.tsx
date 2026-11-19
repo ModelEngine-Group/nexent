@@ -140,6 +140,9 @@ it("edits multiline text locally, retains it after rejection and applies the exa
   append.mock.calls[0][0].runConfig.custom.onRunRejected();
   await waitFor(() => expect(editor).toBeEnabled());
   expect(editor).toHaveValue(edited);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /Confirm and apply/ })).not.toHaveClass("ant-btn-loading")
+  );
   fireEvent.click(screen.getByRole("button", { name: /Confirm and apply/ }));
   expect(
     append.mock.calls[1][0].metadata.custom.nl2agentCardAction.result.prompt

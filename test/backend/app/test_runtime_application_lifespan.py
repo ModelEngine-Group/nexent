@@ -80,8 +80,8 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     manager = RuntimeThreadManager()
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.concurrency",
-        _module("infrastructure.concurrency", runtime_thread_manager=manager),
+        "runtime.thread_management",
+        _module("runtime.thread_management", runtime_thread_manager=manager),
     )
 
     automation = _module("management.api.automation.agent_automation")
@@ -103,18 +103,18 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     runtime_state = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.services.agent.run_state",
-        _module("management.services.agent.run_state", runtime_state_service=runtime_state),
+        "infrastructure.redis.run_state",
+        _module("infrastructure.redis.run_state", runtime_state_service=runtime_state),
     )
     monkeypatch.setitem(
         sys.modules,
-        "management.utils.app_factory",
-        _module("management.utils.app_factory", create_app=lambda **kwargs: RecordingApp(kwargs["lifespan"])),
+        "backend.http.server.app_factory",
+        _module("backend.http.server.app_factory", create_app=lambda **kwargs: RecordingApp(kwargs["lifespan"])),
     )
     monkeypatch.setitem(
         sys.modules,
-        "middleware.exception_handler",
-        _module("middleware.exception_handler", ExceptionHandlerMiddleware=object),
+        "runtime.api.exception_handler",
+        _module("runtime.api.exception_handler", ExceptionHandlerMiddleware=object),
     )
     manager_state = SimpleNamespace(CREATED="created")
     set_default = MagicMock()
@@ -124,7 +124,7 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
         "nexent.core.concurrency",
         _module(
             "nexent.core.concurrency",
-            ManagedTaskSpec=lambda **kwargs: SimpleNamespace(**kwargs),
+            ManagedTaskSpec=lambda *args, **kwargs: SimpleNamespace(**kwargs),
             ManagedThreadSpec=lambda **kwargs: SimpleNamespace(**kwargs),
             ManagerState=manager_state,
             set_default_thread_manager=set_default,
@@ -136,17 +136,17 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     conversation_deleted = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.observability.bootstrap",
+        "infrastructure.trace.bootstrap",
         _module(
-            "infrastructure.observability.bootstrap",
+            "infrastructure.trace.bootstrap",
             local_trajectory_processor=trajectory_processor,
         ),
     )
     monkeypatch.setitem(
         sys.modules,
-        "infrastructure.observability.trajectory_runtime",
+        "infrastructure.trace.trajectory_runtime",
         _module(
-            "infrastructure.observability.trajectory_runtime",
+            "infrastructure.trace.trajectory_runtime",
             conversation_deleted=conversation_deleted,
         ),
     )
@@ -166,10 +166,16 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     cleanup = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "services.workspace_cleanup_service",
-        _module("services.workspace_cleanup_service", cleanup_orphaned_agent_workspaces=cleanup),
+        "management.services.agent.workspace_cleanup",
+        _module("management.services.agent.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
     )
     shutdown_streams = AsyncMock(return_value=[])
+    shutdown_creators = AsyncMock(return_value=0)
+    monkeypatch.setitem(
+        sys.modules,
+        "management.services.conversation.creator_runtime",
+        _module("management.services.conversation.creator_runtime", shutdown_creator_streams=shutdown_creators),
+    )
     monkeypatch.setitem(
         sys.modules,
         "management.services.agent.execution",
@@ -185,6 +191,13 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     spec = importlib.util.spec_from_file_location("isolated_runtime_application", module_path)
     application = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(application)
+
+    shutdown_order = MagicMock()
+    shutdown_order.attach_mock(shutdown_creators, "creators")
+    shutdown_order.attach_mock(shutdown_streams, "agents")
+    shutdown_order.attach_mock(trajectory_processor.shutdown, "trajectory")
+    shutdown_order.attach_mock(stop_configuration, "configuration")
+    shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
         async with application.runtime_lifespan(None):
@@ -208,9 +221,14 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     scheduler.start.assert_awaited_once_with()
     cleanup.assert_called_once_with()
     scheduler.stop.assert_awaited_once_with()
+    shutdown_creators.assert_awaited_once()
+    assert 0 <= shutdown_creators.await_args.kwargs["timeout"] <= 1
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
+    assert [call[0] for call in shutdown_order.mock_calls] == [
+        "creators", "agents", "trajectory", "configuration", "thread_manager",
+    ]
     clear_default.assert_called_once_with(manager)

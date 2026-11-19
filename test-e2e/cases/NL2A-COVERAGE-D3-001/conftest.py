@@ -10,7 +10,7 @@ from elasticsearch import AsyncElasticsearch, Elasticsearch
 
 @pytest.fixture
 def owned_resource_es(monkeypatch):
-    from infrastructure import nl2agent_resource_index as storage
+    from management.services.conversation import nl2agent_resource_index as storage
 
     url = os.environ.get("NEXENT_TEST_NL2AGENT_ES_URL")
     if not url:

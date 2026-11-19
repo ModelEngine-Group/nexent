@@ -15,7 +15,7 @@ from contracts.constants.environment import NL2AGENT_EMBEDDING_MIN_SIMILARITY
 from contracts.nl2agent_resources import (
     MAX_CANDIDATES_PER_RECALL_ROUTE, RESOURCE_PREPARATION_TIMEOUT, RESOURCE_SEARCH_TIMEOUT,
 )
-from infrastructure.nl2agent_resource_index import (
+from management.services.conversation.nl2agent_resource_index import (
     FILTER_BATCH_SIZE, AsyncResourceSearch, ResourceIndex, digest, map_search_jobs, projection,
 )
 from management.services.configuration.tenant.settings import tenant_config_manager

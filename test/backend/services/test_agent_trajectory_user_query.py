@@ -17,7 +17,7 @@ from .test_core_service_slimming import dependency, load_source
 def run_context(monkeypatch):
     manager = SimpleNamespace(bind_agent_context=Mock(side_effect=lambda value: value))
     memory = Mock(return_value=SimpleNamespace(user_config=SimpleNamespace(memory_switch=False)))
-    dependency(monkeypatch, "infrastructure.observability.bootstrap", monitoring_manager=manager)
+    dependency(monkeypatch, "infrastructure.trace.bootstrap", monitoring_manager=manager)
     dependency(monkeypatch, "nexent.monitor.local_content", local_capture_enabled=lambda _manager: False)
     dependency(monkeypatch, "management.services.configuration.user.memory", build_memory_context=memory)
     dependency(

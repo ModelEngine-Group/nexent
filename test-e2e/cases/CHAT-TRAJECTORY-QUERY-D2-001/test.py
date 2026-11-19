@@ -6,7 +6,7 @@ import os
 from datetime import timedelta
 
 import pytest
-from infrastructure.observability.trajectory_store import parse_time
+from infrastructure.trace.trajectory_store import parse_time
 from ops.services.trajectory.primitives import QueryError
 
 pytestmark = [
@@ -237,7 +237,7 @@ def test_trj_query_whole_result_metrics_filters_and_stable_membership(harness):
 def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness, writer_locked):
     from contextlib import nullcontext
 
-    from infrastructure.observability.trajectory_store import CaptureIdentity
+    from infrastructure.trace.trajectory_store import CaptureIdentity
     from ops.services.trajectory.primitives import ReferenceStore
 
     owner = CaptureIdentity("t1", "u1", "123", "7")
@@ -419,7 +419,7 @@ def test_trj_query_conversation_and_message_snapshot_bounds(harness, monkeypatch
 
 
 def test_trj_query_cleanup_fixed_cutoff_revocation_and_expiry(harness, caplog):
-    caplog.set_level("INFO", logger="infrastructure.observability.trajectory_audit")
+    caplog.set_level("INFO", logger="infrastructure.trace.trajectory_audit")
     harness.run = harness.add_run(age_days=10)
     view = snapshot(harness)
     body = next(n for n in view["nodes"] if n["kind"] == "tool")["output"]["content_id"]

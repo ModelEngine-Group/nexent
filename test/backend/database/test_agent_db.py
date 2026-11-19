@@ -78,7 +78,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
 # Stub management.utils.serialization to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()
@@ -105,14 +105,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # 将模拟的client模块添加到sys.modules中
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # 模拟db_models模块
 # First, try to import real classes before mocking (if possible)

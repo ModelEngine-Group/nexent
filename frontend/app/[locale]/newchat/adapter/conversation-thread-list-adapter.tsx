@@ -9,6 +9,7 @@ import type { NexentOutputStatus } from "@/types/nexentOutput";
 import { getCreatorMode } from "@/lib/creatorConversation";
 import { recordNl2AgentState } from "./nl2agent-state-history";
 import type { Nl2AgentStateEvent } from "./remote-chat-model-adapter";
+import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -1436,6 +1437,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       messages.push({
         id: messageId,
         role: msg.role,
+        // A persisted active status is not a live runtime connection. Hydrate it
+        // as idle so useConversationResume can establish the actual stream.
+        ...(msg.role === "assistant" ? { status: messageExecutionStatus(
+          msg.status === "streaming" || msg.status === "pending" ? "completed"
+            : msg.status ?? (content.some(part => "isError" in part && part.isError) ? "failed" : "completed")
+        ) } : {}),
         content,
         // A persisted running flag does not represent an attached local stream.
         // The shared resume hook reconnects it under the original user boundary.

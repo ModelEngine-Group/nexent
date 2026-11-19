@@ -22,7 +22,7 @@ from management.services.mcp.service import list_visible_mcp_records
 from management.services.tool.discovery import get_tool_from_remote_mcp_server
 from management.services.mcp.containers import MCPContainerManager
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import get_current_user_info
+from management.services.permission.identity.session import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")

@@ -2,8 +2,8 @@
 
 "use client";
 
-import { useId, useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, CircleHelp, ListChecks, Send } from "lucide-react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -108,6 +108,7 @@ export function ClarificationCard({
   initialAnswers = [],
   submitted = false,
   rowLayout = false,
+  draftKey,
 }: {
   title: string;
   description: string;
@@ -124,17 +125,39 @@ export function ClarificationCard({
   initialAnswers?: ClarificationAnswer[];
   submitted?: boolean;
   rowLayout?: boolean;
+  draftKey?: string;
 }) {
   const reactId = useId();
+  const [draft] = useState(() => {
+    if (!draftKey || submitted) return null;
+    try {
+      const value = JSON.parse(sessionStorage.getItem(draftKey) ?? "null");
+      if (!Array.isArray(value)) return null;
+      return value.filter(
+        (item): item is ClarificationAnswer =>
+          item &&
+          questions.some((question) => question.id === item.questionId) &&
+          (typeof item.value === "string" ||
+            (Array.isArray(item.value) &&
+              item.value.every((v: unknown) => typeof v === "string"))) &&
+          (item.otherText == null || typeof item.otherText === "string")
+      );
+    } catch {
+      return null;
+    }
+  });
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(
     () =>
       Object.fromEntries(
-        initialAnswers.map((answer) => [answer.questionId, answer.value])
+        (draft ?? initialAnswers).map((answer) => [
+          answer.questionId,
+          answer.value,
+        ])
       )
   );
   const [otherAnswers, setOtherAnswers] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      initialAnswers.map((answer) => [
+      (draft ?? initialAnswers).map((answer) => [
         answer.questionId,
         answer.otherText ?? "",
       ])
@@ -144,6 +167,27 @@ export function ClarificationCard({
   const [isSubmitted, setIsSubmitted] = useState(submitted);
   const [error, setError] = useState("");
   const isLocked = disabled || readOnly || isSubmitting || isSubmitted;
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      if (isSubmitted) return;
+      else
+        sessionStorage.setItem(
+          draftKey,
+          JSON.stringify(
+            questions.map((question) => ({
+              questionId: question.id,
+              value:
+                answers[question.id] ??
+                (question.type === "multiple_choice" ? [] : ""),
+              otherText: otherAnswers[question.id] ?? null,
+            }))
+          )
+        );
+    } catch {
+      /* Storage availability must not disable the form. */
+    }
+  }, [draftKey, isSubmitted, answers, otherAnswers, questions]);
 
   const isComplete = useMemo(
     () =>

@@ -47,7 +47,7 @@ from management.db.skill.repository import query_enabled_skill_instances
 from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
 from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -81,7 +81,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
@@ -146,6 +146,10 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     def boundary_reached(self) -> bool:
         with self._boundary_lock:
             return self._boundary_reached
+
+    @property
+    def turn_complete(self) -> bool:
+        return self.boundary_reached
 
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
@@ -215,7 +219,9 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
             )
             if is_card:
                 self._boundary_reached = True
-                self._boundary_stop_event.set()
+            # Graceful turn completion must not cancel the SDK output consumer.
+            # CoreAgent observes turn_complete between actions, after the card
+            # has been queued, while agent_run drains output during cleanup.
 
 
 class Nl2AgentDraftSaveError(Exception):
@@ -1815,6 +1821,10 @@ async def create_nl2agent_stream(
                 ]
                 run_info.context_input = build_authorized_context_input(run_info)
 
+    control = getattr(request, "_creator_control", None)
+    if control is not None:
+        control.configure(run_info)
+
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         pending_chunk = None
@@ -1858,6 +1868,8 @@ async def create_nl2agent_stream(
             stream = agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,
+                **({"execution": control.execution, "deferred_run": control.deferred}
+                   if control is not None and control.execution is not None else {}),
             ).__aiter__()
             while True:
                 if pending_chunk is None:
@@ -1913,7 +1925,8 @@ async def create_nl2agent_stream(
             )
             yield f"data: {error_payload}\n\n"
         finally:
-            run_info.stop_event.set()
+            if control is None:
+                run_info.stop_event.set()
             if pending_chunk is not None:
                 pending_chunk.cancel()
                 await asyncio.gather(pending_chunk, return_exceptions=True)

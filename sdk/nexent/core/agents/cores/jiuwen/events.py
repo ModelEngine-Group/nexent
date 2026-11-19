@@ -7,8 +7,8 @@ import time
 import uuid
 
 from nexent.core.agents.contracts.output import RunResult, StepObservation
+from nexent.core.agents.cores.jiuwen.errors import protocol_error, public_error
 from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilter, normalize_public_answer
-from nexent.core.model_service.contracts import ModelError
 from nexent.core.utils.observer import ProcessType
 
 
@@ -19,6 +19,7 @@ class JiuwenEventAdapter:
         self.final_answer = None
         self.result = None
         self.last_error = None
+        self.resource_error = None
         self.blocks = []
         self.calls = []
         self.sequence = 0
@@ -36,7 +37,8 @@ class JiuwenEventAdapter:
             if self.result is not None:
                 raise RuntimeError("Runtime output after terminal result")
             self.sequence += 1
-            self.observer.add_message(self.agent_name, kind, content, runtime_envelope={
+            diagnostic = {key: metadata.pop(key) for key in ("error_code", "retryable") if key in metadata}
+            self.observer.add_message(self.agent_name, kind, content, **diagnostic, runtime_envelope={
                 "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
                 "turn_id": self.turn_id, "sequence": self.sequence, **metadata,
             })
@@ -68,6 +70,7 @@ class JiuwenEventAdapter:
                              ProcessType.MODEL_OUTPUT_DEEP_THINKING if reasoning else ProcessType.MODEL_OUTPUT)
         elif event.type == "message_completed":
             message = event.message
+            self.resource_error = None
             for key, parts, kind in (("reasoning", message.reasoning_parts, ProcessType.MODEL_OUTPUT_DEEP_THINKING),
                                      ("text", message.content_parts, ProcessType.MODEL_OUTPUT)):
                 text = "".join(part.get("text", "") for part in parts if part.get("type") == "text")
@@ -88,7 +91,8 @@ class JiuwenEventAdapter:
             block = self.blocks[-1]
             block["observed"] = True
             observation = StepObservation(turn_id=self.turn_id, block_id=block["id"],
-                step_number=self.step_number, duration=max(0, time.monotonic() - block["started"]), step_error=error,
+                step_number=self.step_number, duration=max(0, time.monotonic() - block["started"]),
+                step_error=public_error(error, getattr(self.observer, "lang", "en")),
                 context_capacity=self._capacity())
             self.output(ProcessType.STEP_OBSERVATION, observation.model_dump_json(), block_id=block["id"],
                         phase="partial", **observation.model_dump(exclude={"turn_id", "block_id"}))
@@ -111,9 +115,10 @@ class JiuwenEventAdapter:
                         raw_arguments=json.dumps(arguments, ensure_ascii=False))
         return provider_id
 
-    def tool_result(self, call_id, provider_id, result, is_error=False):
+    def tool_result(self, call_id, provider_id, result, is_error=False, error=None):
         self.output(ProcessType.TOOL_RESULT, str(result), local_call_id=call_id,
-                    tool_call_id=call_id, provider_call_id=provider_id, result=str(result), is_error=is_error)
+                    tool_call_id=call_id, provider_call_id=provider_id, result=str(result), is_error=is_error,
+                    **({"error_code": error.category, "retryable": error.retryable} if error else {}))
 
     def emit(self, chunk):
         kind, payload = getattr(chunk, "type", None), getattr(chunk, "payload", None)
@@ -138,8 +143,7 @@ class JiuwenEventAdapter:
         # ModelService owns ordered content/reasoning; native llm_output would duplicate it.
 
     def error(self, category):
-        return ModelError(category=category, scope="protocol", retryable=False, safe_message=category,
-                          request_id=self.turn_id)
+        return protocol_error(category, request_id=self.turn_id, lang=getattr(self.observer, "lang", "en"))
 
     def finish(self, status="completed", error=None):
         if self.result is not None:
@@ -150,7 +154,9 @@ class JiuwenEventAdapter:
         if error is not None and status == "completed":
             status = "failed"
         if status == "failed" and error is None:
-            error = self.error("JIUWEN_EXECUTION_FAILED")
+            error = self.resource_error or self.error("JIUWEN_EXECUTION_FAILED")
+        if error is not None:
+            error = public_error(error, getattr(self.observer, "lang", "en"))
         final_ids = []
         if status == "completed" and not self.waiting_for_input:
             matching = next((b for b in reversed(self.blocks) if b["text"].strip() == self.final_answer), None)

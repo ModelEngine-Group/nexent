@@ -25,7 +25,7 @@ export function PromptGenerationCard({
   const { t } = useTranslation("common");
   const aui = useAui();
   const running = useAuiState((state) => state.thread.isRunning);
-  const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
+  const { registerCard, submitCard, isCardInteractive, sessionGeneration } = useNl2AgentFlow();
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState(payload.proposed_prompt);
@@ -42,7 +42,7 @@ export function PromptGenerationCard({
   useEffect(() => {
     if (!disabled && outcome === "pending")
       registerCard(payload.card_id, payload.subtype, true);
-  }, [disabled, outcome, payload.card_id, payload.subtype, registerCard]);
+  }, [disabled, outcome, payload.card_id, payload.subtype, registerCard, sessionGeneration]);
   const locked =
     disabled ||
     running ||

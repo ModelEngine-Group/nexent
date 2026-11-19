@@ -26,7 +26,7 @@ from contracts.errors.exceptions import (
 )
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from contracts.roles import has_any_role
-from infrastructure.serialization.containers import clone_runtime_config
+from management.services.agent.runtime_config import clone_runtime_config
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.identity.group import query_group_ids_by_user
 from management.db.skill import repository as skill_db

@@ -340,6 +340,7 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound,
     requestConfigFocus,
     isCardInteractive,
+    sessionGeneration,
   } = useNl2AgentFlow();
   const [items, dispatch] = useReducer(
     reducer,
@@ -381,7 +382,7 @@ export const InstalledResourceBindingCard: FC<{
 
   useEffect(() => {
     if (!disabled) registerCard(cardKey, payload.subtype, versioned);
-  }, [cardKey, disabled, payload.subtype, registerCard, versioned]);
+  }, [cardKey, disabled, payload.subtype, registerCard, versioned, sessionGeneration]);
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const isInteractionLocked =
@@ -722,6 +723,7 @@ export const InstalledResourceBindingCard: FC<{
 
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "continue",
@@ -796,6 +798,7 @@ export const InstalledResourceBindingCard: FC<{
     markResourcesBound(payload.agent_id);
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "retry_generation",

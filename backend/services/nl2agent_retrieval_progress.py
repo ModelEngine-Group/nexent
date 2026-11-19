@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 
-from infrastructure.redis import get_redis_client
+from infrastructure.redis.client import get_redis_client
 
 logger = logging.getLogger(__name__)
 STAGES = {"preparing_embeddings", "computing_similarity", "verifying_capabilities", "fallback_to_text", "searching_text", "searching_hybrid"}
