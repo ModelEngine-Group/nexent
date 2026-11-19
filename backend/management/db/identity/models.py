@@ -104,6 +104,9 @@ class TenantGroupInfo(TableBase):
                        doc="Tenant ID, foreign key")
     group_name = Column(String(100), nullable=False, doc="Group name")
     group_description = Column(String(500), doc="Group description")
+    parent_group_id = Column(Integer, comment="Parent group identifier in the same tenant, null for a root group")
+    casdoor_scope = Column(String(64), comment="Hash of the Casdoor endpoint and organization for a mirrored group")
+    casdoor_group_key = Column(String(200), comment="Casdoor internal group name and creation time for a mirrored group")
 
 
 class TenantGroupUser(TableBase):

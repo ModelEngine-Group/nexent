@@ -60,6 +60,10 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         is_tenant_owned_agent = bool(
             agent and str(agent.get("tenant_id") or "") == str(tenant_id)
         )
+        if agent and agent.get("group_permissions") is not None:
+            from management.services.agent.authorization import authorize_explicit_agent_sharing
+
+            authorize_explicit_agent_sharing(agent, user_id, manage=True)
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
@@ -70,6 +74,8 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
             TagManagementService.cleanup_resource_assignments(
                 tenant_id, "agent", str(agent_id), user_id
             )
+    except ForbiddenError:
+        raise
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
@@ -209,6 +215,10 @@ async def list_all_agent_info_impl(
                 continue
             if not agent["enabled"]:
                 continue
+            if agent.get("group_permissions") is not None and tenant_id not in (
+                user_tenant_record.get("tenant_id"), ASSET_OWNER_TENANT_ID,
+            ):
+                continue
 
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
@@ -289,6 +299,7 @@ async def list_all_agent_info_impl(
                 agent=agent,
                 user_id=user_id,
                 can_edit_all=can_edit_all,
+                user_group_ids=user_group_ids,
             )
 
             simple_agent_list.append(
@@ -321,6 +332,7 @@ async def list_all_agent_info_impl(
                         else bool(agent["is_main_agent"])
                     ),
                     "group_ids": convert_string_to_list(agent.get("group_ids")),
+                    "group_permissions": agent.get("group_permissions"),
                     "permission": permission,
                     "is_published": agent.get("current_version_no") is not None,
                     "current_version_no": agent.get("current_version_no"),
@@ -386,6 +398,10 @@ async def list_agent_page_impl(
         for candidate in candidates:
             if candidate.get("enabled") is False:
                 continue
+            if candidate.get("group_permissions") is not None and scope_tenant_id not in (
+                caller_tenant_id or user_tenant_record.get("tenant_id"), ASSET_OWNER_TENANT_ID,
+            ):
+                continue
             if not can_edit_all:
                 agent_group_ids = set(
                     convert_string_to_list(candidate.get("group_ids"))
@@ -403,6 +419,7 @@ async def list_agent_page_impl(
                     agent=candidate,
                     user_id=user_id,
                     can_edit_all=can_edit_all,
+                    user_group_ids=user_group_ids,
                 )
             visible.append(candidate)
 

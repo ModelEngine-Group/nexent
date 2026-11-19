@@ -38,6 +38,7 @@ from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.task_state import get_redis_service
 from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from permissions.depends import require_managed
 
 
 router = APIRouter(prefix="/indices")
@@ -87,7 +88,7 @@ async def check_knowledge_base_exist(
         )
 
 
-@router.post("/{index_name}")
+@router.post("/{index_name}", dependencies=[Depends(require_managed("kb:create"))])
 def create_new_index(
     http_request: Request,
     index_name: str = Path(..., description="Name of the index to create"),
@@ -119,6 +120,11 @@ def create_new_index(
             raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
+        sharing = {}
+        if request and "group_permissions" in request:
+            if request["group_permissions"] is None:
+                raise ValueError("group_permissions must be a list")
+            sharing["group_permissions"] = request["group_permissions"]
         result = ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
@@ -131,6 +137,7 @@ def create_new_index(
             preserve_source_file=preserve_source_file,
             quota_limit_bytes=quota_limit_bytes,
             user_role=user_role,
+            **sharing,
         )
         record_security_event(
             "kb_index_create",
@@ -156,6 +163,8 @@ def create_new_index(
         ) from e
     except (TypeError, ValueError) as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -191,7 +200,7 @@ async def get_knowledge_base_bound_agents(
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)
 
 
-@router.delete("/{index_name}")
+@router.delete("/{index_name}", dependencies=[Depends(require_managed("kb:delete"))])
 async def delete_index(
     http_request: Request,
     index_name: str = Path(..., description="Name of the index to delete"),
@@ -230,7 +239,7 @@ async def delete_index(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error deleting index: {str(e)}")
 
 
-@router.patch("/{index_name}")
+@router.patch("/{index_name}", dependencies=[Depends(require_managed("kb:update"))])
 async def update_index(
     index_name: str = Path(..., description="Name of the index to update"),
     request: Dict[str, Any] = Body(
@@ -261,6 +270,10 @@ async def update_index(
         }
         if "quota_limit_bytes" in request:
             update_kwargs["quota_limit_bytes"] = request["quota_limit_bytes"]
+        if "group_permissions" in request:
+            if request["group_permissions"] is None:
+                raise ValueError("group_permissions must be a list")
+            update_kwargs.update(group_permissions=request["group_permissions"], tenant_id=auth_tenant_id)
 
         result = ElasticSearchService.update_knowledge_base(**update_kwargs)
 
@@ -273,6 +286,8 @@ async def update_index(
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"Knowledge base '{index_name}' not found")
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except HTTPException:
         raise
     except TokenExpiredError as exc:
@@ -283,7 +298,7 @@ async def update_index(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating index: {str(exc)}")
 
 
-@router.patch("/{index_name}/summary_frequency")
+@router.patch("/{index_name}/summary_frequency", dependencies=[Depends(require_managed("kb:update"))])
 async def update_summary_frequency_endpoint(
     index_name: Annotated[str, Path(..., description="Name of the index to update")],
     request: Annotated[Dict[str, Any], Body(..., description="Update payload with summary_frequency")],
@@ -415,7 +430,7 @@ def get_embedding_model_status(
         )
 
 
-@router.put("/{index_name}/embedding-model")
+@router.put("/{index_name}/embedding-model", dependencies=[Depends(require_managed("kb:update"))])
 def update_embedding_model(
     http_request: Request,
     index_name: str = Path(..., description="Internal index name of the knowledge base to update"),

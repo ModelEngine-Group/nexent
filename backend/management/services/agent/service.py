@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 from contracts.agent import AgentUnavailableReason
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
@@ -53,6 +53,7 @@ from management.services.permission.identity.display import enrich_cas_usernames
 from contracts.authentication import AuthenticatedIdentity
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.utils.serialization import convert_list_to_string, convert_string_to_list
+from permissions.group_sharing import legacy_group_permission, validate_group_permissions
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -364,7 +365,18 @@ async def get_agent_info_impl(
                 user_id=user_id,
                 can_edit_all=can_edit_all,
             )
+            if agent_info.get("group_permissions") is not None:
+                caller_tenant = str(user_tenant_record.get("tenant_id") or "")
+                if (str(agent_info.get("tenant_id")) != caller_tenant
+                        and agent_info.get("tenant_id") != ASSET_OWNER_TENANT_ID):
+                    raise ForbiddenError("Agent belongs to another tenant")
+                if agent_info["permission"] is None:
+                    raise ForbiddenError("Agent is not accessible")
+        except ForbiddenError:
+            raise
         except Exception as e:
+            if agent_info.get("group_permissions") is not None:
+                raise ForbiddenError("Agent permission could not be verified") from e
             logger.warning(f"Failed to calculate agent permission: {str(e)}")
 
     try:
@@ -660,6 +672,12 @@ async def update_agent_info_impl(
             version_no=getattr(request, "version_no", 0),
         )
     request_fields = getattr(request, "model_fields_set", set())
+    group_rules = None
+    if "group_permissions" in request_fields:
+        try:
+            group_rules = validate_group_permissions(request.group_permissions, tenant_id)
+        except ValueError as exc:
+            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, str(exc)) from exc
     model_ids = (
         request.model_ids
         if "model_ids" in request_fields and request.model_ids is not None
@@ -691,6 +709,11 @@ async def update_agent_info_impl(
         )
         if permission != "EDIT":
             raise ForbiddenError("You do not have permission to edit this agent")
+        if group_rules is not None and (
+            str(agent_record.get("created_by")) != str(user_id)
+            and user_role not in CAN_EDIT_ALL_USER_ROLES
+        ):
+            raise ForbiddenError("Only the owner or an administrator can change group sharing")
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
@@ -745,6 +768,11 @@ async def update_agent_info_impl(
                     if request.group_ids
                     else user_group_ids,
                     "ingroup_permission": request.ingroup_permission,
+                    **({
+                        "group_permissions": group_rules,
+                        "group_ids": convert_list_to_string([rule["group_id"] for rule in group_rules]),
+                        "ingroup_permission": legacy_group_permission(group_rules),
+                    } if group_rules is not None else {}),
                 },
                 tenant_id=tenant_id,
                 user_id=user_id,

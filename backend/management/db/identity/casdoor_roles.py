@@ -20,9 +20,10 @@ class CasdoorRoleBinding(NamedTuple):
     subject_key: str
     username: str
     initial_role: str | None = None
+    sync_role: bool = True
 
 
-def _bindings(session):
+def _bindings(session, *, include_linked: bool = False):
     original_binding = (
         select(func.min(UserOAuthAccount.oauth_account_id))
         .where(UserOAuthAccount.user_id == UserAccount.user_id,
@@ -34,23 +35,25 @@ def _bindings(session):
         .where(UserTenant.user_id == UserAccount.user_id, UserTenant.delete_flag == "N")
         .correlate(UserAccount).scalar_subquery()
     )
-    return (
+    casdoor_registration = UserAccount.source_metadata["auth_provider"].astext == "casdoor"
+    bindings = (
         session.query(UserAccount.user_id, UserTenant.tenant_id, UserAccount.user_role,
                       UserOAuthAccount.provider_user_id, UserOAuthAccount.provider_username,
-                      UserAccount.source_metadata["casdoor_initial_role"].astext)
+                      UserAccount.source_metadata["casdoor_initial_role"].astext,
+                      func.coalesce(casdoor_registration, False))
         .select_from(UserAccount)
         .join(UserTenant, UserTenant.user_id == UserAccount.user_id)
         .join(UserOAuthAccount, UserOAuthAccount.oauth_account_id == original_binding)
         .filter(UserAccount.delete_flag == "N", UserTenant.delete_flag == "N", membership_count == 1,
                 UserTenant.tenant_id != ASSET_OWNER_TENANT_ID,
-                UserAccount.source_metadata["auth_provider"].astext == "casdoor",
                 UserAccount.user_role.in_(CASDOOR_TENANT_ROLES))
     )
+    return bindings if include_linked else bindings.filter(casdoor_registration)
 
 
-def list_casdoor_role_bindings() -> list[CasdoorRoleBinding]:
+def list_casdoor_role_bindings(*, include_linked: bool = False) -> list[CasdoorRoleBinding]:
     with get_db_session() as session:
-        return [CasdoorRoleBinding(*row) for row in _bindings(session).all()]
+        return [CasdoorRoleBinding(*row) for row in _bindings(session, include_linked=include_linked).all()]
 
 
 def apply_casdoor_role(binding: CasdoorRoleBinding, role: str) -> bool:
@@ -82,13 +85,14 @@ def store_feature_grants(binding: CasdoorRoleBinding, snapshot: dict) -> None:
     from permissions.casdoor_policy import SNAPSHOT_KEY
 
     with get_db_session() as session:
-        current = (_bindings(session).filter(UserAccount.user_id == binding.user_id)
+        current = (_bindings(session, include_linked=True).filter(UserAccount.user_id == binding.user_id)
                    .with_for_update(of=UserAccount).one_or_none())
         if current is None or CasdoorRoleBinding(*current) != binding:
             return
         account = session.query(UserAccount).filter_by(user_id=binding.user_id, delete_flag="N").one()
         previous = account.source_metadata.get(SNAPSHOT_KEY)
-        if isinstance(previous, dict) and previous.get("scope") == snapshot["scope"]:
+        if (isinstance(previous, dict) and previous.get("scope") == snapshot["scope"]
+                and previous.get("subject") == snapshot["subject"]):
             observed = previous.get("at")
             if type(observed) in (int, float) and observed >= snapshot["at"]:
                 return

@@ -89,6 +89,12 @@ IND_AIDP_IMAGE_SIGNING_KEY = os.getenv('IND_AIDP_IMAGE_SIGNING_KEY') or JWT_SECR
 OAUTH_CALLBACK_BASE_URL = os.getenv('OAUTH_CALLBACK_BASE_URL', '').rstrip('/')
 OAUTH_SSL_VERIFY = os.getenv('OAUTH_SSL_VERIFY', 'true').lower() == 'true'
 OAUTH_CA_BUNDLE = os.getenv('OAUTH_CA_BUNDLE', '')
+CASDOOR_GROUP_SYNC_TENANT_ID = os.getenv('CASDOOR_GROUP_SYNC_TENANT_ID', '').strip()
+CASDOOR_ADDITIONAL_MANAGED_ACTIONS = frozenset(
+    action.strip()
+    for action in os.getenv('CASDOOR_ADDITIONAL_MANAGED_ACTIONS', '').split(',')
+    if action.strip()
+)
 
 # OAuth login mode:
 # - disabled: hide OAuth login entries and disable automatic OAuth redirects.

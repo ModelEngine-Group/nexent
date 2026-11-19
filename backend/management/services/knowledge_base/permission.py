@@ -62,6 +62,7 @@ def resolve_knowledge_base_permissions(
                 created_by=record.get("created_by"),
                 ingroup_permission=record.get("ingroup_permission"),
                 group_ids=record.get("group_ids"),
+                group_permissions=record.get("group_permissions"),
                 knowledge_sources=record.get("knowledge_sources"),
             ),
             user_id=user_id, role=role, user_groups=groups,

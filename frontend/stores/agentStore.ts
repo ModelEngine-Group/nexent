@@ -46,6 +46,7 @@ export type AgentDraft = Pick<
   | "external_sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
+  | "group_permissions"
   | "greeting_message"
   | "example_questions"
   | "icon_url"
@@ -137,6 +138,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
   group_ids: agent.group_ids || [],
   ingroup_permission: agent.ingroup_permission || "READ_ONLY",
+  group_permissions: agent.group_permissions,
   greeting_message: agent.greeting_message || "",
   example_questions: agent.example_questions || [],
   icon_url: agent.icon_url,
@@ -279,6 +281,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.author !== undefined ? { author: patch.author } : {}),
   ...(patch.icon_url !== undefined ? { icon_url: patch.icon_url } : {}),
   ...(patch.group_ids !== undefined ? { group_ids: patch.group_ids } : {}),
+  ...(patch.group_permissions !== undefined
+    ? { group_permissions: patch.group_permissions }
+    : {}),
   ...(patch.model_ids !== undefined ? { model_ids: patch.model_ids } : {}),
   ...(patch.max_step !== undefined ? { max_steps: patch.max_step } : {}),
   ...(patch.requested_output_tokens !== undefined

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
 from permissions.models import Resource, ResourceAccess
+from permissions.group_sharing import matching_group_permission
 
 
 MANAGEMENT_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
@@ -112,6 +113,14 @@ def _check_group_access(
     if role not in GROUP_ACCESS_ROLES or _is_private(resource):
         return ResourceAccess.deny()
 
+    if resource.group_permissions is not None:
+        permission = matching_group_permission(resource.group_permissions, user_groups)
+        if permission == PERMISSION_EDIT:
+            return ResourceAccess.edit()
+        if permission == PERMISSION_READ:
+            return ResourceAccess.read_only()
+        return ResourceAccess.deny()
+
     # Legacy data may leave both sides empty (NULL/empty groups). Keep the
     # old behavior where that combination counts as an intersection.
     if not matched_groups and (resource_groups or user_groups):
@@ -129,6 +138,8 @@ def _check_group_access(
 
 def _is_private(resource: Resource) -> bool:
     """Return whether a resource is explicitly private."""
+    if resource.group_permissions is not None:
+        return not resource.group_permissions
     return str(resource.ingroup_permission or "").upper() == PERMISSION_PRIVATE
 
 

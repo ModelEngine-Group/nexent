@@ -148,6 +148,8 @@ def _create_knowledge_record_in_session(session, query: Dict[str, Any]) -> Dict[
     }
     if "quota_limit_bytes" in query:
         data["quota_limit_bytes"] = query["quota_limit_bytes"]
+    if query.get("group_permissions") is not None:
+        data["group_permissions"] = query["group_permissions"]
     explicit_index_name = query.get("index_name")
     if explicit_index_name:
         data["index_name"] = explicit_index_name
@@ -311,6 +313,11 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             if not record:
                 return False
 
+            rules = query.get("group_permissions")
+            if rules is not None or query.get("ingroup_permission") or query.get("group_ids") is not None:
+                session.refresh(record, with_for_update=True)
+                if record.delete_flag == "Y":
+                    return False
             record.update_time = func.current_timestamp()
 
             # Update knowledge name
@@ -321,21 +328,27 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             if query.get("knowledge_describe"):
                 record.knowledge_describe = query["knowledge_describe"]
 
-            # Update permission
-            if query.get("ingroup_permission"):
-                record.ingroup_permission = query["ingroup_permission"]
+            if rules is not None or query.get("ingroup_permission") or query.get("group_ids") is not None:
+                if rules is not None:
+                    from permissions.group_sharing import legacy_group_permission
 
-            # Update group IDs
-            if query.get("group_ids") is not None:
-                record.group_ids = query["group_ids"]
+                    record.group_permissions = rules
+                    record.ingroup_permission = legacy_group_permission(rules)
+                    record.group_ids = convert_list_to_string([rule["group_id"] for rule in rules])
+                elif not isinstance(getattr(record, "group_permissions", None), list):
+                    if query.get("ingroup_permission"):
+                        record.ingroup_permission = query["ingroup_permission"]
+                    if query.get("group_ids") is not None:
+                        record.group_ids = query["group_ids"]
 
             # Update per-KB soft quota
             if "quota_limit_bytes" in query:
                 record.quota_limit_bytes = query["quota_limit_bytes"]
 
             # Update timestamp and user
-            if query.get("user_id"):
-                record.updated_by = query["user_id"]
+            actor = query.get("updated_by") or query.get("user_id")
+            if actor:
+                record.updated_by = actor
 
             session.flush()
             session.commit()

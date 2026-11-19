@@ -356,9 +356,11 @@ export const authService = {
           email: data.data.user.user_email,
           username: data.data.user.username,
           role: data.data.user.user_role,
-            authProvider: data.data.user.auth_provider,
-            casdoorRoleSync: data.data.user.casdoor_role_sync === true,
-            casdoorFeaturePolicy: data.data.user.casdoor_feature_policy === true,
+          authProvider: data.data.user.auth_provider,
+          casdoorRoleSync: data.data.user.casdoor_role_sync === true,
+          casdoorFeaturePolicy: data.data.user.casdoor_feature_policy === true,
+          casdoorAdditionalManagedActions:
+            data.data.user.casdoor_additional_managed_actions,
           avatarUrl: data.data.user.avatarUrl,
           permissions: data.data.user.permissions.map((permission: string) =>
             permission.toLowerCase()

@@ -20,13 +20,64 @@ def policy_config(monkeypatch):
 
 def test_managed_snapshot_grants_and_revokes_independent_actions(policy_config):
     source = {"auth_provider": "casdoor"}
-    assert casdoor_policy.managed_grants(source, "USER", now=100) == set()
-    source["casdoor_feature_grants"] = casdoor_policy.make_snapshot("USER", {"skill.repository:read"}, 100)
-    assert casdoor_policy.managed_grants(source, "USER", now=110) == {"skill.repository:read"}
-    assert casdoor_policy.managed_grants(source, "USER", now=200) == set()
-    assert casdoor_policy.managed_grants(source, "DEV", now=110) == set()
-    assert casdoor_policy.managed_grants({}, "USER", now=110) is None
-    assert casdoor_policy.managed_grants(source, "SU", now=110) is None
+    assert casdoor_policy.managed_grants(source, "USER", subject="member", now=100) == set()
+    source["casdoor_feature_grants"] = casdoor_policy.make_snapshot("USER", {"skill.repository:read"}, 100, subject="member")
+    assert casdoor_policy.managed_grants(source, "USER", subject="member", now=110) == {"skill.repository:read"}
+    assert casdoor_policy.managed_grants(source, "USER", subject="member", now=200) == set()
+    assert casdoor_policy.managed_grants(source, "DEV", subject="member", now=110) == set()
+    assert casdoor_policy.managed_grants({}, "USER", subject=None, now=110) is None
+    assert casdoor_policy.managed_grants(source, "SU", subject="member", now=110) is None
+
+
+def test_linked_local_account_requires_grants_for_current_binding(policy_config):
+    source = {casdoor_policy.SNAPSHOT_KEY: casdoor_policy.make_snapshot(
+        "ADMIN", {"model:read"}, 100, subject="original",
+    )}
+    assert casdoor_policy.managed_grants(source, "ADMIN", subject="original", now=105) == {"model:read"}
+    assert casdoor_policy.managed_grants(source, "ADMIN", subject="replacement", now=105) == set()
+    assert casdoor_policy.managed_grants(source, "ADMIN", subject=None, now=105) is None
+    assert casdoor_policy.managed_grants({}, "ADMIN", subject="replacement", now=105) == set()
+
+
+def test_staged_action_uses_only_the_current_managed_snapshot(policy_config, monkeypatch):
+    from management.db.identity import account, oauth_account
+
+    source = {"auth_provider": "casdoor"}
+    monkeypatch.setattr(account, "get_account", lambda user_id: {"source_metadata": source})
+    monkeypatch.setattr(oauth_account, "get_casdoor_binding_subject", lambda user_id: "member")
+    monkeypatch.setattr(casdoor_policy.time, "time", lambda: 110)
+    action = "kb:update"
+    assert casdoor_policy.permission_override("member", "USER", action) is None
+
+    monkeypatch.setattr(casdoor_policy.environment, "CASDOOR_ADDITIONAL_MANAGED_ACTIONS", frozenset({action}))
+    assert casdoor_policy.permission_override("member", "USER", action) is False
+    source[casdoor_policy.SNAPSHOT_KEY] = casdoor_policy.make_snapshot("USER", {action, "kb:delete"}, 100, subject="member")
+    assert casdoor_policy.permission_override("member", "USER", action) is True
+    assert casdoor_policy.permission_override("member", "USER", "kb:delete") is None
+    assert casdoor_policy.managed_grants(source, "USER", subject="member", now=160) == set()
+    casdoor_policy.overlay_user_permissions(
+        data := {"permissions": [action, "kb:delete"], "accessibleRoutes": []}, set()
+    )
+    assert data["permissions"] == ["kb:delete"]
+
+
+@pytest.mark.asyncio
+async def test_staged_policy_rejects_legacy_flat_resource(policy_config, monkeypatch):
+    action = "kb:update"
+    monkeypatch.setattr(casdoor_policy.environment, "CASDOOR_ADDITIONAL_MANAGED_ACTIONS", frozenset({action}))
+    base = {"owner": "business", "model": "business/features", "resourceType": "Custom",
+            "isEnabled": True, "state": "Approved", "effect": "Allow", "actions": [action]}
+
+    def respond(request):
+        return httpx.Response(200, json={"status": "ok", "data": [
+            dict(base, name="flat", resources=["nexent"]),
+            dict(base, name="typed", resources=["nexent:knowledge-base"]),
+        ]})
+
+    async with httpx.AsyncClient(base_url="https://door.example.test", transport=httpx.MockTransport(respond)) as client:
+        assert await casdoor_feature_sync.read_policies(client, "business") == [
+            casdoor_feature_sync.Policy("business/typed", (("nexent:knowledge-base", action),)),
+        ]
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import logging
 import ssl
 import time
 from contextlib import asynccontextmanager, suppress
+from functools import partial
 
 import httpx
 
@@ -24,7 +25,7 @@ from management.db.identity.casdoor_roles import (
 from management.services.permission.identity.casdoor_feature_sync import evaluate_permissions, read_policies
 from management.services.permission.identity.casdoor import subject_key
 from nexent.core.concurrency import ManagedTaskSpec, ThreadManager
-from permissions.casdoor_policy import make_snapshot
+from permissions.casdoor_policy import make_snapshot, policy_scope, staged_actions
 
 logger = logging.getLogger(__name__)
 _INTERVAL_SECONDS = 15
@@ -74,7 +75,8 @@ async def _read_bound_user(client: httpx.AsyncClient, organization: str, binding
         return None
     result = await _request(client, "get-user", f"{organization}/{binding.username}")
     user = result.get("data") if result else None
-    if not isinstance(user, dict) or user.get("owner") != organization or user.get("name") != binding.username:
+    if (not isinstance(user, dict) or user.get("owner") != organization
+            or user.get("name") != binding.username or user.get("isForbidden") is True):
         return None
     subject = user.get("id")
     if not isinstance(subject, str) or not subject or subject_key(subject) != binding.subject_key:
@@ -98,6 +100,16 @@ async def read_role(
         and isinstance(role.get("name"), str) and role["name"] in mapping
     }
     return next((role for role in reversed(CASDOOR_TENANT_ROLES) if role in mapped), "USER")
+
+
+async def _read_reconciliation_role(
+    client: httpx.AsyncClient, organization: str, mapping: dict[str, str], binding: CasdoorRoleBinding,
+) -> str | None:
+    if binding.sync_role:
+        return await read_role(client, organization, mapping, binding)
+    if await _read_bound_user(client, organization, binding) is not None:
+        return binding.role
+    return None
 
 
 async def _role_with_members(client: httpx.AsyncClient, organization: str, name: str) -> dict | None:
@@ -143,19 +155,23 @@ async def reconcile_roles(
 ) -> int:
     """Reconcile one snapshot in bounded batches; isolate individual quota failures."""
     work = ManagedTaskSpec(task_name="casdoor-role-sync", owner=__name__)
-    bindings = await manager.run("background-service", work, list_casdoor_role_bindings)
+    load_bindings = partial(list_casdoor_role_bindings, include_linked=bool(policy_scope()))
+    bindings = await manager.run("background-service", work, load_bindings)
     observed_at = time.time()
     policies = await read_policies(client, organization) if bindings else None
     changed = 0
     for start in range(0, len(bindings), _MAX_IN_FLIGHT):
         batch = []
         for binding in bindings[start:start + _MAX_IN_FLIGHT]:
-            if binding.initial_role is None:
+            if not binding.sync_role or binding.initial_role is None:
                 batch.append(binding)
             elif await provision_initial_role(client, organization, mapping, binding):
                 await manager.run("background-service", work, clear_initial_casdoor_role, binding)
-        roles = await asyncio.gather(*(read_role(client, organization, mapping, binding) for binding in batch))
-        updates = [(binding, role) for binding, role in zip(batch, roles) if role and role != binding.role]
+        roles = await asyncio.gather(*(
+            _read_reconciliation_role(client, organization, mapping, binding) for binding in batch
+        ))
+        updates = [(binding, role) for binding, role in zip(batch, roles)
+                   if binding.sync_role and role and role != binding.role]
         for binding, role in sorted(updates, key=lambda update: CASDOOR_TENANT_ROLES.index(update[1])):
             try:
                 changed += await manager.run("background-service", work, apply_casdoor_role, binding, role)
@@ -167,7 +183,8 @@ async def reconcile_roles(
             if grants is not None:
                 for (binding, role), allowed in zip(verified, grants):
                     await manager.run("background-service", work, store_feature_grants,
-                                      binding._replace(role=role), make_snapshot(role, allowed, observed_at))
+                                      binding._replace(role=role),
+                                      make_snapshot(role, allowed, observed_at, subject=binding.subject_key))
     return changed
 
 
@@ -193,6 +210,7 @@ async def periodic_role_sync(manager: ThreadManager):
         raise ValueError("CASDOOR_ROLE_SYNC_ORGANIZATION must be a single organization name")
     if "/" in settings.CASDOOR_PERMISSION_MODEL:
         raise ValueError("CASDOOR_PERMISSION_MODEL must be a single model name")
+    staged_actions()
     mapping = parse_role_map(settings.CASDOOR_ROLE_MAP_JSON)
     endpoint = settings.CASDOOR_BACKEND_ENDPOINT or settings.CASDOOR_ENDPOINT
     tls = ssl.create_default_context(cafile=OAUTH_CA_BUNDLE or None) if OAUTH_SSL_VERIFY else False

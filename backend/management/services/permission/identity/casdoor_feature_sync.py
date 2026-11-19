@@ -9,7 +9,7 @@ from typing import NamedTuple
 import httpx
 
 from consts import const as settings
-from permissions.casdoor_policy import FEATURE_ACTION_RESOURCES, policy_scope
+from permissions.casdoor_policy import FEATURE_ACTION_RESOURCES, managed_action_resources, policy_scope
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 5
@@ -43,6 +43,7 @@ async def read_policies(client: httpx.AsyncClient, organization: str) -> list[Po
     if data is None or not all(isinstance(record, dict) for record in data):
         return None
     model = f"{organization}/{settings.CASDOOR_PERMISSION_MODEL}"
+    managed_resources = managed_action_resources()
     policies = []
     for record in data:
         if (record.get("owner") != organization or record.get("model") != model
@@ -61,13 +62,13 @@ async def read_policies(client: httpx.AsyncClient, organization: str) -> list[Po
             continue
         if not isinstance(actions, list):
             continue
-        recognized = sorted({action for action in actions if isinstance(action, str) and action in FEATURE_ACTION_RESOURCES})
+        recognized = sorted({action for action in actions if isinstance(action, str) and action in managed_resources})
         resource_actions = []
         for action in recognized:
-            resource = FEATURE_ACTION_RESOURCES[action]
+            resource = managed_resources[action]
             if resource in resources:
                 resource_actions.append((resource, action))
-            elif _LEGACY_RESOURCE in resources:
+            elif action in FEATURE_ACTION_RESOURCES and _LEGACY_RESOURCE in resources:
                 resource_actions.append((_LEGACY_RESOURCE, action))
         if resource_actions:
             policies.append(Policy(f"{organization}/{name}", tuple(resource_actions)))

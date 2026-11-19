@@ -9,6 +9,7 @@ import {
   NOTIFICATION_TYPES,
 } from "@/const/knowledgeBase";
 import type { TagAssignmentValue } from "@/types/tagManagement";
+import type { GroupPermission } from "@/types/groupPermission";
 
 // Knowledge base basic type
 export interface KnowledgeBase {
@@ -29,6 +30,7 @@ export interface KnowledgeBase {
   is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;
+  group_permissions?: GroupPermission[] | null;
   group_ids?: number[];
   store_size?: string;
   process_source?: string;
@@ -54,6 +56,7 @@ export interface KnowledgeBaseCreateParams {
   embeddingModelId: number;
   // Group permission and user groups for new knowledge bases
   ingroup_permission?: string;
+  group_permissions?: GroupPermission[];
   group_ids?: number[];
   preserve_source_file?: boolean;
   // Per-KB soft storage quota in bytes (null = unlimited)

@@ -21,6 +21,7 @@ from management.api.identity.mock_user_management import router as mock_user_man
 from management.api.model.model_managment import router as model_manager_router
 from management.api.identity.oauth import router as oauth_router
 from management.services.permission.identity.casdoor_roles import periodic_role_sync
+from management.services.permission.identity.casdoor_groups import periodic_group_sync
 from management.api.prompt.prompt import router as prompt_router
 from management.api.mcp.mcp_management import router as mcp_management_router
 from management.api.mcp.remote_mcp import router as remote_mcp_router
@@ -117,7 +118,7 @@ async def config_lifespan(_app):
         await recover_config_tasks_on_startup()
         await validate_external_service_configuration()
         await start_dreaming_scheduler()
-        async with periodic_role_sync(config_thread_manager):
+        async with periodic_role_sync(config_thread_manager), periodic_group_sync(config_thread_manager):
             yield
     finally:
         # Preserve the scheduler's existing graceful shutdown behavior. Task

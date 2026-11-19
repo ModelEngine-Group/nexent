@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeBaseList from "../../app/[locale]/knowledges/components/knowledge/KnowledgeBaseList";
 const menuPermissions = vi.hoisted(() => new Set(["kb:update", "kb:delete"]));
+const additionalManagedActions = vi.hoisted(() => new Set<string>());
 vi.mock("@/hooks/permission/usePermission", () => ({
   usePermission: () => ({
     isReady: true,
@@ -31,7 +32,11 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
-    user: { tenantId: "tenant", role: "ADMIN" },
+    user: {
+      tenantId: "tenant",
+      role: "ADMIN",
+      casdoorAdditionalManagedActions: [...additionalManagedActions],
+    },
   }),
 }));
 vi.mock("@/hooks/group/useGroupList", () => ({
@@ -104,6 +109,28 @@ const baseProps = () => ({
 });
 
 describe("local knowledge catalog", () => {
+  it("shows distinct labels for read-only and edit groups", () => {
+    render(
+      <KnowledgeBaseList
+        {...baseProps()}
+        knowledgeBases={[
+          {
+            ...knowledge(1),
+            group_permissions: [
+              { group_id: 1, permission: "READ_ONLY" },
+              { group_id: 2, permission: "READ_ONLY" },
+              { group_id: 3, permission: "EDIT" },
+            ],
+          },
+        ]}
+      />
+    );
+    expect(
+      screen.getByText("resourceGroupPermission.READ_ONLY · #1, #2")
+    ).toBeVisible();
+    expect(screen.getByText("resourceGroupPermission.EDIT · #3")).toBeVisible();
+  });
+
   it("removes toolbar tag management while retaining synchronization and resource actions", () => {
     render(<KnowledgeBaseList {...baseProps()} />);
     expect(
@@ -126,6 +153,21 @@ describe("local knowledge catalog", () => {
     menuPermissions.clear();
     menuPermissions.add("kb:update");
     menuPermissions.add("kb:delete");
+    additionalManagedActions.clear();
+  });
+
+  it("updates the native create entry as a staged grant changes", () => {
+    additionalManagedActions.add("kb:create");
+    const props = baseProps();
+    const { rerender } = render(<KnowledgeBaseList {...props} />);
+    const createEntry = { name: "knowledgeBase.card.create" };
+    expect(screen.queryByRole("button", createEntry)).not.toBeInTheDocument();
+    menuPermissions.add("kb:create");
+    rerender(<KnowledgeBaseList {...props} />);
+    expect(screen.getByRole("button", createEntry)).toBeVisible();
+    menuPermissions.delete("kb:create");
+    rerender(<KnowledgeBaseList {...props} />);
+    expect(screen.queryByRole("button", createEntry)).not.toBeInTheDocument();
   });
 
   it("hides menu actions without the corresponding permission", async () => {

@@ -881,7 +881,8 @@ async def list_published_agents_impl(
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
                 is_creator = str(agent.get("created_by")) == str(user_id)
-                if not is_creator and len(user_group_ids.intersection(agent_group_ids)) == 0:
+                if not is_creator and (not user_group_ids.intersection(agent_group_ids)
+                                       or agent.get("ingroup_permission") == "PRIVATE"):
                     continue
 
             agent_id = agent.get("agent_id")
@@ -1005,6 +1006,7 @@ async def list_published_agents_impl(
                 agent=agent,
                 user_id=user_id,
                 can_edit_all=can_edit_all,
+                user_group_ids=user_group_ids,
             )
 
             simple_agent_list.append({
@@ -1023,6 +1025,7 @@ async def list_published_agents_impl(
                 "is_new": agent.get("is_new", False),
                 "is_main_agent": agent.get("is_main_agent", True),
                 "group_ids": agent.get("group_ids", []),
+                "group_permissions": agent.get("group_permissions"),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),
                 "version_name": agent.get("version_name"),

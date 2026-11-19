@@ -9,11 +9,47 @@ from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
-from contracts.errors.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError, ValidationError
 from contracts.constants.environment import MAX_GROUPS_PER_TENANT
 from sqlalchemy import text
 
 _GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
+
+
+def lock_tenant_groups(session, tenant_id: str) -> None:
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"tenant-group-limit:{tenant_id}"},
+    )
+
+
+def validate_group_parent(session, tenant_id: str, parent_id: int | None, group_id: int | None = None) -> None:
+    if parent_id is None:
+        return
+    parents = dict(session.query(TenantGroupInfo.group_id, TenantGroupInfo.parent_group_id).filter(
+        TenantGroupInfo.tenant_id == tenant_id, TenantGroupInfo.delete_flag == "N",
+    ).all())
+    seen = {group_id}
+    while parent_id is not None:
+        if parent_id in seen or parent_id not in parents:
+            raise ValidationError("Parent must belong to the same tenant and cannot create a group cycle")
+        seen.add(parent_id)
+        parent_id = parents[parent_id]
+
+
+def ensure_group_capacity(session, tenant_id: str) -> None:
+    group_count = session.query(TenantGroupInfo).filter(
+        getattr(TenantGroupInfo, "tenant_id", None) == tenant_id,
+        getattr(TenantGroupInfo, "delete_flag", None) == "N",
+    ).count()
+    group_count = group_count if isinstance(group_count, int) else 0
+    if group_count >= _GROUP_LIMIT:
+        error = TenantResourceLimitError(f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant")
+        error.resource = "groups"
+        error.scope = "tenant"
+        error.limit = _GROUP_LIMIT
+        error.current_count = group_count
+        raise error
 
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -109,7 +145,8 @@ def query_groups_by_tenant(
 
 
 def add_group(
-    tenant_id: str, group_name: str, group_description: Optional[str] = None, created_by: Optional[str] = None
+    tenant_id: str, group_name: str, group_description: Optional[str] = None, created_by: Optional[str] = None,
+    *, parent_group_id: int | None = None, db_session=None,
 ) -> int:
     """
     Add a new group
@@ -123,31 +160,15 @@ def add_group(
     Returns:
         int: Created group ID
     """
-    with get_db_session() as session:
-        session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": f"tenant-group-limit:{tenant_id}"},
-        )
-        group_count = (
-            session.query(TenantGroupInfo)
-            .filter(
-                getattr(TenantGroupInfo, "tenant_id", None) == tenant_id,
-                getattr(TenantGroupInfo, "delete_flag", None) == "N",
-            )
-            .count()
-        )
-        group_count = group_count if isinstance(group_count, int) else 0
-        if group_count >= _GROUP_LIMIT:
-            error = TenantResourceLimitError(f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant")
-            error.resource = "groups"
-            error.scope = "tenant"
-            error.limit = _GROUP_LIMIT
-            error.current_count = group_count
-            raise error
+    with get_db_session(db_session) if db_session is not None else get_db_session() as session:
+        lock_tenant_groups(session, tenant_id)
+        validate_group_parent(session, tenant_id, parent_group_id)
+        ensure_group_capacity(session, tenant_id)
         group = TenantGroupInfo(
             tenant_id=tenant_id,
             group_name=group_name,
             group_description=group_description,
+            **({"parent_group_id": parent_group_id} if parent_group_id is not None else {}),
             created_by=created_by,
             updated_by=created_by,
         )
@@ -170,6 +191,12 @@ def modify_group(group_id: int, updates: Dict[str, Any], updated_by: Optional[st
     """
     with get_db_session() as session:
         update_data = updates.copy()
+        if "parent_group_id" in updates:
+            row = session.query(TenantGroupInfo).filter_by(group_id=group_id, delete_flag="N").one_or_none()
+            if row is None:
+                return False
+            lock_tenant_groups(session, row.tenant_id)
+            validate_group_parent(session, row.tenant_id, updates["parent_group_id"], group_id)
         if updated_by:
             update_data["updated_by"] = updated_by
 
@@ -182,7 +209,7 @@ def modify_group(group_id: int, updates: Dict[str, Any], updated_by: Optional[st
         return result > 0
 
 
-def remove_group(group_id: int, updated_by: Optional[str] = None) -> bool:
+def remove_group(group_id: int, updated_by: Optional[str] = None, *, tenant_id: str | None = None) -> bool:
     """
     Remove group (soft delete) and all its user relationships
 
@@ -194,6 +221,11 @@ def remove_group(group_id: int, updated_by: Optional[str] = None) -> bool:
         bool: Whether removal was successful
     """
     with get_db_session() as session:
+        if tenant_id is not None:
+            lock_tenant_groups(session, tenant_id)
+            session.query(TenantGroupInfo).filter_by(
+                tenant_id=tenant_id, parent_group_id=group_id, delete_flag="N",
+            ).update({"parent_group_id": None, "updated_by": updated_by}, synchronize_session=False)
         update_data: Dict[str, Any] = {"delete_flag": "Y"}
         if updated_by:
             update_data["updated_by"] = updated_by

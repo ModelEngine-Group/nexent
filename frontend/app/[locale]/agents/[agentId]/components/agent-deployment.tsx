@@ -2,9 +2,10 @@
 
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, Radio, Select, Switch, Row, Col } from "antd";
+import { Checkbox, Form, Switch, Row, Col } from "antd";
+import { GroupPermissionSelect } from "@/components/permission/GroupPermissionSelect";
+import { getGroupPermissions } from "@/lib/groupPermission";
 import { AgentSettingHint } from "./agent-setting-hint";
 
 import { useAgentStore } from "@/stores/agentStore";
@@ -75,147 +76,47 @@ export default function AgentDeployment({
   const { user } = useAuthorizationContext();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
-  const currentAgentId = useAgentStore((state) => state.agentId);
-  const serverSnapshotRevision = useAgentStore(
-    (state) => state.serverSnapshotRevision
-  );
   const isReadOnly = useAgentReadOnly();
-  const { data: groupData } = useGroupList(user?.tenantId ?? null);
-  const allGroups = groupData?.groups ?? [];
-
-  const groupOptions = allGroups.map((group) => ({
+  const { data: groupData, isLoading } = useGroupList(user?.tenantId ?? null);
+  const rules = getGroupPermissions(editedAgent);
+  const groups = groupData?.groups ?? [];
+  const groupNames = new Map(
+    groups.map((group) => [group.group_id, group.group_name])
+  );
+  const options = groups.map((group) => ({
     value: group.group_id,
     label: group.group_name,
   }));
-
-  const permissionOptions = [
-    { value: "READ_ONLY", label: t("agent.permission.readOnly") },
-    { value: "EDITABLE", label: t("agent.permission.editable") },
-    { value: "INHERIT", label: t("agent.permission.inherit") },
-  ];
-
-  const initialScope =
-    (editedAgent.group_ids ?? []).length === 0
-      ? "PRIVATE"
-      : (editedAgent.ingroup_permission ?? "READ_ONLY");
-  const [permissionView, setPermissionView] = useState({
-    agentId: currentAgentId,
-    revision: serverSnapshotRevision,
-    scope: initialScope,
-  });
-  if (
-    permissionView.agentId !== currentAgentId ||
-    permissionView.revision !== serverSnapshotRevision
-  ) {
-    setPermissionView({
-      agentId: currentAgentId,
-      revision: serverSnapshotRevision,
-      scope: initialScope,
-    });
+  for (const rule of rules) {
+    if (!groupNames.has(rule.group_id)) {
+      options.push({
+        value: rule.group_id,
+        label: `${t("group.deleted")} #${rule.group_id}`,
+      });
+    }
   }
+  const canManageSharing =
+    !editedAgent.created_by ||
+    editedAgent.created_by === user?.id ||
+    ["SU", "ADMIN", "SPEED", "ASSET_OWNER"].includes(user?.role ?? "");
+  const groupSharing = (
+    <Form.Item label={t("agentConfig.layout.agentPermission")}>
+      <GroupPermissionSelect
+        value={rules}
+        options={options}
+        disabled={isReadOnly || isLoading || !canManageSharing}
+        onChange={(group_permissions) => updateAgent({ group_permissions })}
+      />
+    </Form.Item>
+  );
 
   if (highFidelity) {
-    const scope =
-      permissionView.agentId === currentAgentId &&
-      permissionView.revision === serverSnapshotRevision
-        ? permissionView.scope
-        : initialScope;
-    const canonicalScopes = ["PRIVATE", "READ_ONLY", "EDIT"];
-
-    return (
-      <div className="flex w-[406px] max-w-full flex-col gap-2">
-        <span
-          id="agent-permission-label"
-          className="text-sm font-normal leading-[22px] tracking-[0px] text-[#191919]"
-        >
-          {t("agentConfig.layout.agentPermission")}
-        </span>
-        <Radio.Group
-          aria-labelledby="agent-permission-label"
-          value={scope}
-          disabled={isReadOnly}
-          onChange={(event) => {
-            const value = event.target.value as
-              "PRIVATE" | "READ_ONLY" | "EDIT";
-            setPermissionView({
-              agentId: currentAgentId,
-              revision: serverSnapshotRevision,
-              scope: value,
-            });
-            updateAgent({
-              ingroup_permission: value,
-              ...(value === "PRIVATE" ? { group_ids: [] } : {}),
-            });
-          }}
-          className="flex flex-wrap gap-4 text-sm leading-[22px] tracking-[0px] text-[#191919]"
-        >
-          <Radio value="PRIVATE">
-            {t("agentConfig.layout.permissionPrivate")}
-          </Radio>
-          <Radio value="READ_ONLY">
-            {t("agentConfig.layout.permissionReadable")}
-          </Radio>
-          <Radio value="EDIT">
-            {t("agentConfig.layout.permissionEditable")}
-          </Radio>
-          {!canonicalScopes.includes(scope) ? (
-            <Radio value={scope} disabled>
-              {scope}
-            </Radio>
-          ) : null}
-        </Radio.Group>
-        {scope !== "PRIVATE" ? (
-          <Form.Item label={t("agent.deployment.groupIds")} className="!mb-0">
-            <Select
-              mode="multiple"
-              showSearch={{ optionFilterProp: "label" }}
-              placeholder={t("agent.deployment.groupIdsPlaceholder")}
-              options={groupOptions}
-              value={editedAgent.group_ids ?? []}
-              disabled={isReadOnly}
-              onChange={(vals) => updateAgent({ group_ids: vals })}
-              allowClear
-            />
-          </Form.Item>
-        ) : null}
-      </div>
-    );
+    return <div className="w-[406px] max-w-full">{groupSharing}</div>;
   }
 
   return (
     <div className="w-full">
-      <Row gutter={[16, 0]}>
-        {/* User Groups */}
-        <Col xs={24} sm={12}>
-          <Form.Item label={t("agent.deployment.groupIds")} className="mb-3">
-            <Select
-              mode="multiple"
-              showSearch={{ optionFilterProp: "label" }}
-              placeholder={t("agent.deployment.groupIdsPlaceholder")}
-              options={groupOptions}
-              value={editedAgent.group_ids ?? []}
-              onChange={(vals) => updateAgent({ group_ids: vals })}
-              allowClear
-            />
-          </Form.Item>
-        </Col>
-
-        {/* In-group Permission */}
-        <Col xs={24} sm={12}>
-          <Form.Item
-            label={t("agent.deployment.ingroupPermission")}
-            className="mb-3"
-          >
-            <Select
-              placeholder={t("agent.deployment.ingroupPermissionPlaceholder")}
-              options={permissionOptions}
-              value={editedAgent.ingroup_permission ?? "READ_ONLY"}
-              onChange={(val) => updateAgent({ ingroup_permission: val })}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-
+      {groupSharing}
       <Row gutter={[16, 0]}>
         {/* Is Main Agent */}
         <Col xs={24} sm={12}>

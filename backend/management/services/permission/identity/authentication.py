@@ -37,7 +37,7 @@ from contracts.errors.exceptions import AppException
 
 from management.db.model.repository import create_model_record
 from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
-from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
+from management.db.identity.oauth_account import get_casdoor_binding_subject, list_oauth_accounts_by_user_id
 from management.db.identity.group import query_group_ids_by_user
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
@@ -288,18 +288,21 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
             ).all()
             permissions = [as_dict(record) for record in permission_records]
             from consts.const import is_casdoor_role_sync_configured
+            from permissions.casdoor_policy import managed_grants, overlay_user_permissions, policy_scope, staged_actions
 
             source_metadata = None
+            casdoor_subject = None
             if user_role in {"USER", "DEV", "ADMIN"} and is_casdoor_role_sync_configured():
                 source_metadata = session.query(UserAccount.source_metadata).filter(
                     UserAccount.user_id == user_id,
                     UserAccount.delete_flag == "N",
                 ).scalar()
+                if policy_scope():
+                    casdoor_subject = get_casdoor_binding_subject(user_id, session)
 
         permissions_data = format_role_permissions(permissions)
-        from permissions.casdoor_policy import managed_grants, overlay_user_permissions
-
-        grants = managed_grants(source_metadata, user_role)
+        grants = managed_grants(source_metadata, user_role, subject=casdoor_subject)
+        additional_managed_actions = sorted(staged_actions()) if grants is not None else []
         if grants is not None:
             overlay_user_permissions(permissions_data, grants)
         casdoor_role_sync = isinstance(source_metadata, dict) and source_metadata.get("auth_provider") == "casdoor"
@@ -315,6 +318,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "accessibleRoutes": permissions_data["accessibleRoutes"],
                 **({"casdoor_role_sync": True} if casdoor_role_sync else {}),
                 **({"casdoor_feature_policy": True} if grants is not None else {}),
+                **({"casdoor_additional_managed_actions": additional_managed_actions} if additional_managed_actions else {}),
             }
         }
 

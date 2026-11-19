@@ -287,6 +287,9 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get user info for tenant ID
   const { user } = useAuthorizationContext();
   const { isReady: permissionsReady, can } = usePermission();
+  const canCreate =
+    !user?.casdoorAdditionalManagedActions?.includes("kb:create") ||
+    (permissionsReady && can("kb:create"));
   const tenantId = user?.tenantId || null;
   const showPersonalCapacity = user?.role === USER_ROLES.USER;
   const quotaMap = useMemo(() => {
@@ -815,9 +818,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.button.dataMateConfig")}
             </StandardButton>
           )}
-          <StandardButton variant="primary" onClick={onCreateNew}>
-            {t("knowledgeBase.card.create")}
-          </StandardButton>
+          {canCreate && (
+            <StandardButton variant="primary" onClick={onCreateNew}>
+              {t("knowledgeBase.card.create")}
+            </StandardButton>
+          )}
         </div>
       </div>
       <div className="min-h-0 max-h-[calc(100%-160px)] flex-none overflow-y-auto overflow-x-hidden px-px pb-3 pt-px">
@@ -1003,34 +1008,63 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   )}
 
                   <KnowledgeTagRow>
-                    <Can permission="group:read">
-                      {kb.ingroup_permission !== "PRIVATE" &&
-                        groupNames.slice(0, 2).map((groupName) => (
-                          <span
-                            key={groupName}
-                            className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700"
-                            title={groupName}
-                          >
-                            <span className="min-w-0 truncate">
-                              {groupName}
-                            </span>
-                          </span>
-                        ))}
-                    </Can>
-                    <Tooltip
-                      title={t(
-                        getPermissionTooltipKey(kb.ingroup_permission || "")
-                      )}
-                    >
-                      <span className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-normal text-gray-600">
-                        {getPermissionIcon(kb.ingroup_permission || "")}
-                        <span className="min-w-0 truncate">
-                          {t(
+                    {kb.group_permissions?.length ? (
+                      <Can permission="group:read">
+                        {(["READ_ONLY", "EDIT"] as const).map((level) => {
+                          const assigned = kb
+                            .group_permissions!.filter(
+                              (rule) => rule.permission === level
+                            )
+                            .map(
+                              (rule) =>
+                                groupNameMap.get(rule.group_id) ??
+                                `#${rule.group_id}`
+                            );
+                          if (!assigned.length) return null;
+                          const label = `${t(`resourceGroupPermission.${level}`)} · ${assigned.join(", ")}`;
+                          return (
+                            <Tooltip key={level} title={label}>
+                              <span className={CARD_TAG_CLASSNAME}>
+                                {label}
+                              </span>
+                            </Tooltip>
+                          );
+                        })}
+                      </Can>
+                    ) : (
+                      <>
+                        <Can permission="group:read">
+                          {kb.ingroup_permission !== "PRIVATE" &&
+                            groupNames.slice(0, 2).map((groupName) => (
+                              <span
+                                key={groupName}
+                                className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700"
+                                title={groupName}
+                              >
+                                <span className="min-w-0 truncate">
+                                  {groupName}
+                                </span>
+                              </span>
+                            ))}
+                        </Can>
+                        <Tooltip
+                          title={t(
                             getPermissionTooltipKey(kb.ingroup_permission || "")
                           )}
-                        </span>
-                      </span>
-                    </Tooltip>
+                        >
+                          <span className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-normal text-gray-600">
+                            {getPermissionIcon(kb.ingroup_permission || "")}
+                            <span className="min-w-0 truncate">
+                              {t(
+                                getPermissionTooltipKey(
+                                  kb.ingroup_permission || ""
+                                )
+                              )}
+                            </span>
+                          </span>
+                        </Tooltip>
+                      </>
+                    )}
                     {source === "datamate" ? (
                       <ResourceTagChips
                         resourceType="knowledge_base"

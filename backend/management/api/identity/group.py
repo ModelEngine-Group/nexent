@@ -11,7 +11,9 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
+from nexent.core.concurrency import run_blocking
 
+from contracts.constants import environment
 from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
@@ -22,10 +24,26 @@ from management.services.permission.identity.groups import (
     get_groups_by_tenant, update_group_members
 )
 from management.services.permission.identity.tenants import get_tenant_info
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.casdoor_groups import CasdoorGroupUnavailable, synchronizes_tenant
+from gateway.authentication.auth import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])
+
+
+async def _write_group(operation, **kwargs):
+    if environment.CASDOOR_GROUP_SYNC_TENANT_ID:
+        return await run_blocking("group-management-write", operation, lane="control-io", owner=__name__, **kwargs)
+    return operation(**kwargs)
+
+
+def _require_directory_tenant(authorization: str | None, tenant_id: str) -> None:
+    try:
+        _, actor_tenant, role = get_current_user_context(authorization)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    if role != "SU" and actor_tenant != tenant_id:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Group belongs to another tenant")
 
 
 @router.post("", response_model=None)
@@ -47,11 +65,14 @@ async def create_group_endpoint(
         user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Create group
-        group_info = create_group(
+        hierarchy = {"parent_group_id": request.parent_group_id} if request.parent_group_id is not None else {}
+        group_info = await _write_group(
+            create_group,
             tenant_id=request.tenant_id,
             group_name=request.group_name,
             group_description=request.group_description,
             user_id=user_id,
+            **hierarchy,
         )
 
         logger.info(f"Created group '{request.group_name}' in tenant {request.tenant_id} by user {user_id}")
@@ -79,13 +100,15 @@ async def create_group_endpoint(
     except ValidationError as exc:
         logger.warning(f"Group creation validation error: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except CasdoorGroupUnavailable as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"Unexpected error during group creation: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to create group")
 
 
 @router.get("/{group_id}")
-async def get_group_endpoint(group_id: int) -> JSONResponse:
+async def get_group_endpoint(group_id: int, authorization: Optional[str] = Header(None)) -> JSONResponse:
     """
     Get group information by group ID
 
@@ -102,6 +125,8 @@ async def get_group_endpoint(group_id: int) -> JSONResponse:
 
         if not group_info:
             raise NotFoundException(f"Group {group_id} not found")
+        if group_info.get("casdoor_managed"):
+            _require_directory_tenant(authorization, group_info["tenant_id"])
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Group retrieved successfully", "data": group_info}
@@ -110,6 +135,8 @@ async def get_group_endpoint(group_id: int) -> JSONResponse:
     except NotFoundException as exc:
         logger.warning(f"Group not found: {group_id}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Unexpected error retrieving group {group_id}: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to retrieve group")
@@ -118,6 +145,7 @@ async def get_group_endpoint(group_id: int) -> JSONResponse:
 @router.post("/list")
 async def get_groups_endpoint(
     request: GroupListRequest,
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Search groups for a specific tenant with pagination
@@ -130,6 +158,9 @@ async def get_groups_endpoint(
         JSONResponse: List of groups for the tenant (paginated or all)
     """
     try:
+        synced = synchronizes_tenant(request.tenant_id)
+        if synced:
+            _require_directory_tenant(authorization, request.tenant_id)
         # Validate tenant exists
         get_tenant_info(request.tenant_id)
         # Get groups under given tenant with pagination and sorting
@@ -143,9 +174,13 @@ async def get_groups_endpoint(
         if request.search:
             group_kwargs["search"] = request.search
         result = get_groups_by_tenant(**group_kwargs)
+        if not synced and any(group.get("casdoor_managed") for group in result["groups"]):
+            _require_directory_tenant(authorization, request.tenant_id)
 
         # Build response content
         content = {"message": "Groups retrieved successfully", "data": result["groups"], "total": result["total"]}
+        if synced:
+            content["casdoor_sync_enabled"] = True
 
         # Add pagination info only if pagination was used
         if request.page is not None and request.page_size is not None:
@@ -161,6 +196,8 @@ async def get_groups_endpoint(
     except NotFoundException as exc:
         logger.warning(f"Tenant not found: {request.tenant_id}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Unexpected error retrieving groups: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to retrieve groups")
@@ -191,12 +228,14 @@ async def update_group_endpoint(
             updates["group_name"] = request.group_name
         if request.group_description is not None:
             updates["group_description"] = request.group_description
+        if "parent_group_id" in request.model_fields_set:
+            updates["parent_group_id"] = request.parent_group_id
 
         if not updates:
             raise ValidationError("No valid fields provided for update")
 
         # Update group
-        success = update_group(group_id=group_id, updates=updates, user_id=user_id)
+        success = await _write_group(update_group, group_id=group_id, updates=updates, user_id=user_id)
 
         if not success:
             raise ValidationError("Failed to update group")
@@ -221,6 +260,8 @@ async def update_group_endpoint(
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group update attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except CasdoorGroupUnavailable as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"Unexpected error during group update: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update group")
@@ -299,7 +340,9 @@ async def add_user_to_group_endpoint(
         current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Add user to group
-        result = add_user_to_single_group(group_id=group_id, user_id=request.user_id, current_user_id=current_user_id)
+        result = await _write_group(
+            add_user_to_single_group, group_id=group_id, user_id=request.user_id, current_user_id=current_user_id,
+        )
 
         logger.info(f"Added user {request.user_id} to group {group_id} by user {current_user_id}")
 
@@ -323,6 +366,8 @@ async def add_user_to_group_endpoint(
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group membership modification: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except CasdoorGroupUnavailable as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"Unexpected error adding user to group: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to add user to group")
@@ -348,7 +393,9 @@ async def remove_user_from_group_endpoint(
         current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Remove user from group
-        success = remove_user_from_single_group(group_id=group_id, user_id=user_id, current_user_id=current_user_id)
+        success = await _write_group(
+            remove_user_from_single_group, group_id=group_id, user_id=user_id, current_user_id=current_user_id,
+        )
 
         if not success:
             raise ValidationError("Failed to remove user from group")
@@ -373,13 +420,15 @@ async def remove_user_from_group_endpoint(
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group membership modification: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except CasdoorGroupUnavailable as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"Unexpected error removing user from group: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to remove user from group")
 
 
 @router.get("/{group_id}/members")
-async def get_group_users_endpoint(group_id: int) -> JSONResponse:
+async def get_group_users_endpoint(group_id: int, authorization: Optional[str] = Header(None)) -> JSONResponse:
     """
     Get all users in a group
 
@@ -391,8 +440,11 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
         JSONResponse: List of group users
     """
     try:
-        # Get group users
-        users = get_group_users(group_id)
+        def authorize_group(group):
+            if group.get("casdoor_scope"):
+                _require_directory_tenant(authorization, group["tenant_id"])
+
+        users = get_group_users(group_id, authorize_group=authorize_group)
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Group users retrieved successfully", "data": users}
@@ -401,6 +453,8 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
     except NotFoundException as exc:
         logger.warning(f"Group not found: {group_id}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Unexpected error retrieving group users: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to retrieve group users")
@@ -429,7 +483,9 @@ async def update_group_members_endpoint(
         current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Update group members
-        result = update_group_members(group_id=group_id, user_ids=request.user_ids, current_user_id=current_user_id)
+        result = await _write_group(
+            update_group_members, group_id=group_id, user_ids=request.user_ids, current_user_id=current_user_id,
+        )
 
         logger.info(f"Updated group {group_id} members by user {current_user_id}: {result}")
 
@@ -453,6 +509,8 @@ async def update_group_members_endpoint(
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group members update attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except CasdoorGroupUnavailable as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(f"Unexpected error during group members update: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update group members")
@@ -481,7 +539,8 @@ async def add_user_to_groups_endpoint(
         current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Add user to multiple groups
-        results = add_user_to_groups(
+        results = await _write_group(
+            add_user_to_groups,
             user_id=request.user_id, group_ids=request.group_ids, current_user_id=current_user_id
         )
 

@@ -8,6 +8,7 @@ from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
 from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 from contracts.constants.environment import ENABLE_ASSET_OWNER_ROLE
 from contracts.errors.exceptions import ValidationError
+from permissions.group_sharing import matching_group_permission
 
 
 _PROMPT_FIELDS = ("prompt",)
@@ -60,7 +61,8 @@ def resolve_agent_list_permission(
     agent: Dict[str, Any],
     user_id: str,
     can_edit_all: bool,
-) -> str:
+    user_group_ids=None,
+) -> str | None:
     """
     Resolve list-item permission for an agent.
 
@@ -72,6 +74,15 @@ def resolve_agent_list_permission(
         return PERMISSION_READ
     if can_edit_all or str(agent.get("created_by")) == str(user_id):
         return PERMISSION_EDIT
+    rules = agent.get("group_permissions")
+    if rules is not None:
+        if not rules:
+            return None
+        if user_group_ids is None:
+            from management.db.identity.group import query_group_ids_by_user
+
+            user_group_ids = query_group_ids_by_user(user_id) or []
+        return matching_group_permission(rules, user_group_ids)
     ingroup_permission = agent.get("ingroup_permission")
     return ingroup_permission if ingroup_permission is not None else PERMISSION_READ
 

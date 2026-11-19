@@ -5,9 +5,9 @@
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Table,
   Button,
@@ -27,15 +27,12 @@ import {
   createGroup,
   updateGroup,
   deleteGroup,
-  addUserToGroup,
-  removeUserFromGroup,
   getGroupMembers,
   updateGroupMembers,
   type Group,
   type CreateGroupRequest,
   type UpdateGroupRequest,
 } from "@/services/groupService";
-import { type User } from "@/services/userService";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
@@ -49,11 +46,19 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState("");
 
-  const { data, isLoading, refetch } = useGroupList(
+  const { data, isLoading } = useGroupList(
     tenantId,
     page,
     pageSize,
-    keyword
+    keyword,
+    15_000
+  );
+  const { data: directory, isLoading: directoryLoading } = useGroupList(
+    tenantId,
+    undefined,
+    undefined,
+    undefined,
+    15_000
   );
   const { data: userData, refetch: refetchUsers } = useUserList(
     tenantId
@@ -69,21 +74,45 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const groups = data?.groups || [];
   const total = data?.total || 0;
   const allUsers = userData?.users || [];
+  const allGroups = directory?.groups || [];
+  const groupsById = new Map(allGroups.map((group) => [group.group_id, group]));
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [userListModalVisible, setUserListModalVisible] = useState(false);
   const [selectedGroupForUsers, setSelectedGroupForUsers] =
     useState<Group | null>(null);
-  const [groupUsers, setGroupUsers] = useState<User[]>([]);
-  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
-  const [editFormInitialValues, setEditFormInitialValues] = useState<{
-    name: string;
-    description: string;
-    members: string[];
-  } | null>(null);
+  const {
+    data: groupUsers = [],
+    isPending: membersLoading,
+    isError: membersError,
+  } = useQuery({
+    queryKey: ["groupMembers", selectedGroupForUsers?.group_id],
+    queryFn: () => getGroupMembers(selectedGroupForUsers!.group_id),
+    enabled: selectedGroupForUsers !== null,
+    refetchInterval: selectedGroupForUsers?.casdoor_managed ? 15_000 : false,
+  });
+  const [initialMemberIds, setInitialMemberIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const [form] = Form.useForm();
   const [editGroupForm] = Form.useForm();
+
+  const parentOptions = allGroups
+    .filter((group) => {
+      const managed = editingGroup
+        ? editingGroup.casdoor_managed
+        : directory?.casdoorSyncEnabled;
+      if (managed && !group.casdoor_managed) return false;
+      if (!editingGroup) return true;
+      const visited = new Set([editingGroup.group_id]);
+      let candidate: Group | undefined = group;
+      while (candidate) {
+        if (visited.has(candidate.group_id)) return false;
+        visited.add(candidate.group_id);
+        candidate = groupsById.get(candidate.parent_group_id ?? -1);
+      }
+      return true;
+    })
+    .map((group) => ({ label: group.group_name, value: group.group_id }));
 
   const openCreate = () => {
     setEditingGroup(null);
@@ -94,47 +123,22 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const openEdit = async (g: Group) => {
     try {
       const members = await getGroupMembers(g.group_id);
-      setGroupUsers(members);
-      const memberIds = new Set(members.map((u) => u.id));
-      setAvailableUsers(allUsers.filter((u) => !memberIds.has(u.id)));
-
       const formValues = {
         name: g.group_name || "",
         description: (g.group_description || "").toString(),
         members: members.map((u) => u.id),
+        parent_group_id: g.parent_group_id ?? undefined,
       };
-      setEditFormInitialValues(formValues);
+      setInitialMemberIds(formValues.members);
       setEditingGroup(g);
       editGroupForm.resetFields();
       editGroupForm.setFieldsValue(formValues);
     } catch (error) {
       message.error(t("tenantResources.groups.loadMembersFailed"));
-      setGroupUsers([]);
-      setAvailableUsers(allUsers);
-      const formValues = {
-        name: g.group_name || "",
-        description: (g.group_description || "").toString(),
-        members: [],
-      };
-      setEditFormInitialValues(formValues);
-      setEditingGroup(g);
-      editGroupForm.resetFields();
-      editGroupForm.setFieldsValue(formValues);
+      return;
     }
 
     setModalVisible(true);
-  };
-
-  const openUserList = async (g: Group) => {
-    setSelectedGroupForUsers(g);
-    try {
-      const members = await getGroupMembers(g.group_id);
-      setGroupUsers(members);
-    } catch (error) {
-      message.error(t("tenantResources.groups.loadUsersFailed"));
-      setGroupUsers([]);
-    }
-    setUserListModalVisible(true);
   };
 
   const handleDelete = async (id: number) => {
@@ -159,26 +163,19 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleSubmit = async () => {
+    setSaving(true);
     try {
       const values = await form.validateFields();
       if (!tenantId)
         throw new Error(t("tenantResources.groups.noTenantSelected"));
 
-      if (editingGroup) {
-        const updateData: UpdateGroupRequest = {
-          group_name: values.name,
-          group_description: values.description,
-        };
-        await updateGroup(editingGroup.group_id, updateData);
-        message.success(t("tenantResources.groups.updated"));
-      } else {
-        const createData: CreateGroupRequest = {
-          group_name: values.name,
-          group_description: values.description,
-        };
-        await createGroup(tenantId, createData);
-        message.success(t("tenantResources.groups.created"));
-      }
+      const createData: CreateGroupRequest = {
+        group_name: values.name,
+        group_description: values.description,
+        parent_group_id: values.parent_group_id ?? null,
+      };
+      await createGroup(tenantId, createData);
+      message.success(t("tenantResources.groups.created"));
       setModalVisible(false);
       // Invalidate all group queries to ensure all components get updated data
       queryClient.invalidateQueries({ queryKey: ["groups"] });
@@ -196,10 +193,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.error(errorMessage || t("common.unknownError"));
       }
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleEditGroupSubmit = async () => {
+    setSaving(true);
     try {
       if (!editingGroup) return;
 
@@ -209,11 +209,18 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       const updateData: UpdateGroupRequest = {
         group_name: values.name,
         group_description: values.description,
+        parent_group_id: values.parent_group_id ?? null,
       };
       await updateGroup(editingGroup.group_id, updateData);
 
       const newMemberIds = (values.members as string[]) || [];
-      await updateGroupMembers(editingGroup.group_id, newMemberIds);
+      const previousMembers = new Set(initialMemberIds);
+      if (
+        previousMembers.size !== newMemberIds.length ||
+        newMemberIds.some((id) => !previousMembers.has(id))
+      ) {
+        await updateGroupMembers(editingGroup.group_id, newMemberIds);
+      }
 
       message.success(t("tenantResources.groups.updated"));
       setModalVisible(false);
@@ -221,7 +228,12 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       // Invalidate all group queries to ensure all components get updated data
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       // Refresh user list in case user roles/status changed
-      await refetchUsers();
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["groupMembers", editingGroup.group_id],
+        }),
+        refetchUsers(),
+      ]);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
       const limitMessage = getTenantResourceLimitMessage(err, t);
@@ -238,57 +250,68 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.error(t("tenantResources.groups.updateFailed"));
       }
+    } finally {
+      setSaving(false);
     }
   };
 
-  const columns: ColumnsType<Group> = useMemo(
-    () => [
-      {
-        title: t("tenantResources.groups.name"),
-        dataIndex: "group_name",
-        key: "group_name",
-      },
-      {
-        title: t("common.description"),
-        dataIndex: "group_description",
-        key: "group_description",
-        render: (description: string) =>
-          description ? (
-            description
-          ) : (
-            <span className="text-gray-400">
-              {t("tenantResources.groups.noDescription")}
-            </span>
-          ),
-      },
-      {
-        title: t("tenantResources.groups.members"),
-        dataIndex: "user_count",
-        key: "user_count",
-        render: (count: number, record: Group) => (
-          <Button
-            type="link"
-            size="small"
-            onClick={() => openUserList(record)}
-            style={{ padding: 0 }}
-          >
-            {count || 0}
-          </Button>
+  const columns: ColumnsType<Group> = [
+    {
+      title: t("tenantResources.groups.name"),
+      dataIndex: "group_name",
+      key: "group_name",
+    },
+    {
+      title: t("tenantResources.groups.parentGroup"),
+      dataIndex: "parent_group_id",
+      key: "parent_group_id",
+      render: (parentId?: number) =>
+        parentId
+          ? (groupsById.get(parentId)?.group_name ?? String(parentId))
+          : t("tenantResources.groups.rootGroup"),
+    },
+    {
+      title: t("common.description"),
+      dataIndex: "group_description",
+      key: "group_description",
+      render: (description: string) =>
+        description ? (
+          description
+        ) : (
+          <span className="text-gray-400">
+            {t("tenantResources.groups.noDescription")}
+          </span>
         ),
-      },
-      {
-        title: t("common.actions"),
-        key: "actions",
-        render: (_, record) => (
-          <div className="flex items-center space-x-2">
-            <Tooltip title={t("tenantResources.groups.editGroup")}>
-              <Button
-                type="text"
-                icon={<Edit className="h-4 w-4" />}
-                onClick={() => openEdit(record)}
-                size="small"
-              />
-            </Tooltip>
+    },
+    {
+      title: t("tenantResources.groups.members"),
+      dataIndex: "user_count",
+      key: "user_count",
+      render: (count: number, record: Group) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setSelectedGroupForUsers(record)}
+          style={{ padding: 0 }}
+        >
+          {count || 0}
+        </Button>
+      ),
+    },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      render: (_, record) => (
+        <div className="flex items-center space-x-2">
+          <Tooltip title={t("tenantResources.groups.editGroup")}>
+            <Button
+              type="text"
+              icon={<Edit className="h-4 w-4" />}
+              onClick={() => openEdit(record)}
+              size="small"
+            />
+          </Tooltip>
+          {!record.casdoor_managed && (
             <Tooltip title={t("tenantResources.groups.deleteGroup")}>
               <Button
                 type="text"
@@ -308,12 +331,11 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 }
               />
             </Tooltip>
-          </div>
-        ),
-      },
-    ],
-    [t]
-  );
+          )}
+        </div>
+      ),
+    },
+  ];
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
     setPage(newPage);
@@ -367,6 +389,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         }
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
+        confirmLoading={saving}
         onCancel={() => {
           setModalVisible(false);
           editGroupForm.resetFields();
@@ -380,6 +403,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           <Form
             key={editingGroup?.group_id ?? "edit"}
             layout="vertical"
+            name="edit-group"
             form={editGroupForm}
           >
             <Form.Item
@@ -393,8 +417,26 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
               <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
             <Form.Item
+              name="parent_group_id"
+              label={t("tenantResources.groups.parentGroup")}
+            >
+              <Select
+                allowClear
+                aria-label={t("tenantResources.groups.parentGroup")}
+                showSearch={{ optionFilterProp: "label" }}
+                options={parentOptions}
+                loading={directoryLoading}
+                placeholder={t("tenantResources.groups.rootGroup")}
+              />
+            </Form.Item>
+            <Form.Item
               name="members"
               label={t("tenantResources.groups.members")}
+              extra={
+                editingGroup?.casdoor_managed
+                  ? t("tenantResources.groups.casdoorMembersHint")
+                  : undefined
+              }
             >
               <Select
                 mode="multiple"
@@ -420,23 +462,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                     fallback={String(label || "")}
                   />
                 )}
-                onChange={(value) => {
-                  const selectedUsers = allUsers.filter((u) =>
-                    value.includes(u.id)
-                  );
-                  setGroupUsers(selectedUsers);
-                  const memberIds = new Set(selectedUsers.map((u) => u.id));
-                  setAvailableUsers(
-                    allUsers.filter((u) => !memberIds.has(u.id))
-                  );
-                }}
               />
             </Form.Item>
           </Form>
         </div>
         {/* Create mode form - always mounted to keep form instance connected */}
         <div hidden={!!editingGroup}>
-          <Form layout="vertical" form={form}>
+          <Form layout="vertical" name="create-group" form={form}>
             <Form.Item
               name="name"
               label={t("tenantResources.groups.name")}
@@ -447,6 +479,19 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
+            <Form.Item
+              name="parent_group_id"
+              label={t("tenantResources.groups.parentGroup")}
+            >
+              <Select
+                allowClear
+                aria-label={t("tenantResources.groups.parentGroup")}
+                showSearch={{ optionFilterProp: "label" }}
+                options={parentOptions}
+                loading={directoryLoading}
+                placeholder={t("tenantResources.groups.rootGroup")}
+              />
+            </Form.Item>
           </Form>
         </div>
       </Modal>
@@ -454,8 +499,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       {/* User List Modal */}
       <Modal
         title={`${t("tenantResources.groups.members")} - ${selectedGroupForUsers?.group_name}`}
-        open={userListModalVisible}
-        onCancel={() => setUserListModalVisible(false)}
+        open={selectedGroupForUsers !== null}
+        onCancel={() => setSelectedGroupForUsers(null)}
+        loading={membersLoading}
         footer={null}
         width={500}
       >
@@ -463,7 +509,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           <p style={{ marginBottom: 16 }}>
             {t("tenantResources.groups.totalMembers")}: {groupUsers.length}
           </p>
-          {groupUsers.length > 0 ? (
+          {membersError ? (
+            <p role="alert">{t("tenantResources.groups.loadUsersFailed")}</p>
+          ) : groupUsers.length > 0 ? (
             <div style={{ maxHeight: 300, overflowY: "auto" }}>
               {groupUsers.map((user) => (
                 <div

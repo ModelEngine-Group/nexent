@@ -449,7 +449,8 @@ def test_delete_group_success(mock_remove_group, mock_query_groups, mock_get_use
     assert result is True
     mock_remove_group.assert_called_once_with(
         group_id=123,
-        updated_by="test_user"
+        updated_by="test_user",
+        tenant_id=mock_group_info["tenant_id"],
     )
 
 

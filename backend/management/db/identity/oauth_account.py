@@ -79,6 +79,18 @@ def list_oauth_accounts_by_user_id(user_id: str) -> List[Dict[str, Any]]:
         return [as_dict(r) for r in results]
 
 
+def get_casdoor_binding_subject(user_id: str, db_session=None) -> str | None:
+    """Return the subject of the same active binding used by Casdoor reconciliation."""
+    with get_db_session(db_session) as session:
+        row = (
+            session.query(UserOAuthAccount.provider_user_id)
+            .filter_by(user_id=user_id, provider="casdoor", delete_flag="N")
+            .order_by(UserOAuthAccount.oauth_account_id)
+            .first()
+        )
+        return row[0] if row else None
+
+
 def rebind_oauth_account(
     provider: str,
     provider_user_id: str,

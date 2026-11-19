@@ -16,6 +16,7 @@ from sqlalchemy import (
 )
 
 
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 
@@ -43,6 +44,7 @@ class KnowledgeRecord(TableBase):
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc=_INGROUP_PERMISSION_DOC)
+    group_permissions = Column(JSONB, comment="Explicit tenant group read or edit grants, null for legacy sharing")
     summary_frequency = Column(String(10), nullable=True,
                                doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
     last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,

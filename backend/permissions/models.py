@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared permission data models."""
 
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ class Resource:
     ingroup_permission: Optional[str] = None
     group_ids: Optional[List[object]] = None
     knowledge_sources: Optional[str] = None
+    group_permissions: Optional[List[dict]] = None
 
 
 @dataclass(frozen=True)

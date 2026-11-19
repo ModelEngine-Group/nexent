@@ -186,6 +186,7 @@ class GroupCreateRequest(BaseModel):
     group_description: Optional[str] = Field(
         None, description="Optional group description"
     )
+    parent_group_id: Optional[int] = Field(None, gt=0, description="Parent group in the same tenant")
 
 
 class GroupUpdateRequest(BaseModel):
@@ -193,6 +194,7 @@ class GroupUpdateRequest(BaseModel):
 
     group_name: Optional[str] = Field(None, description="New group name")
     group_description: Optional[str] = Field(None, description="New group description")
+    parent_group_id: Optional[int] = Field(None, gt=0, description="Parent group, or null for a root group")
 
 
 class GroupListRequest(BaseModel):

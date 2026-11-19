@@ -362,6 +362,10 @@ async def export_agent_by_agent_id(
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
+    if agent_info and agent_info.get("group_permissions") is not None:
+        from management.services.agent.authorization import authorize_explicit_agent_sharing
+
+        authorize_explicit_agent_sharing(agent_info, user_id)
     agent_relation_in_db = query_sub_agents_id_list(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )

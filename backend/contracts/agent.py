@@ -21,6 +21,7 @@ from pydantic import (
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 from contracts.conversation import ConversationTarget, HistoryItem
+from contracts.group_permissions import GroupPermission
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
@@ -402,6 +403,7 @@ class AgentInfoRequest(BaseModel):
     related_agents: Optional[List[RelatedAgentInfo]] = None  # Related agents with pinned versions
     related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
+    group_permissions: Optional[List[GroupPermission]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
     enable_protocol_repair_retry: Optional[bool] = None

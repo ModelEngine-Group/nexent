@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
 import type { User } from "./userService";
@@ -12,16 +14,20 @@ export interface Group {
   created_at?: string;
   updated_at?: string;
   user_count?: number;
+  parent_group_id?: number | null;
+  casdoor_managed?: boolean;
 }
 
 export interface CreateGroupRequest {
   group_name: string;
   group_description?: string;
+  parent_group_id?: number | null;
 }
 
 export interface UpdateGroupRequest {
   group_name?: string;
   group_description?: string;
+  parent_group_id?: number | null;
 }
 
 export interface GroupListResponse {
@@ -33,6 +39,7 @@ export interface GroupListResponse {
     total_pages: number;
   };
   total?: number;
+  casdoor_sync_enabled?: boolean;
   message: string;
 }
 
@@ -59,7 +66,12 @@ export async function listGroups(
   page?: number,
   pageSize?: number,
   search?: string
-): Promise<{ groups: Group[]; total: number; totalPages?: number }> {
+): Promise<{
+  groups: Group[];
+  total: number;
+  totalPages?: number;
+  casdoorSyncEnabled?: boolean;
+}> {
   try {
     const requestBody: any = {
       tenant_id: tenantId,
@@ -85,6 +97,7 @@ export async function listGroups(
       groups: result.data,
       total: result.pagination?.total || result.total || 0,
       totalPages: result.pagination?.total_pages,
+      casdoorSyncEnabled: result.casdoor_sync_enabled,
     };
   } catch (error) {
     if (error instanceof ApiError) {

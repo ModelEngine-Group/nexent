@@ -4,17 +4,17 @@ module: AUTH-IDENTITY
 case:
   case_id: AUTH-CASDOOR-POLICY-D2-001
   feature_id: AUTH-CASDOOR
-  business_rule_ids: [AUTH-CASDOOR-FEATURE-POLICY]
+  business_rule_ids: [AUTH-CASDOOR-FEATURE-POLICY, AUTH-CASDOOR-STAGED-ACTIONS]
   title: Casdoor 功能授权和撤销在同一 Nexent 会话生效
   type: API-IT
   priority: P1
   status: active
   automation: automated
-  objective: Exercise the configured policy through the current user response and real Skill repository HTTP authorization using the same session.
+  objective: Exercise current-user, Skill repository and native knowledge-base mutation HTTP authorization with a single session per scenario.
   preconditions:
   - NEXENT_AUTH_TEST_DSN points to an isolated PostgreSQL instance that allows creation of a disposable database.
   test_data:
-    profile: owned PostgreSQL database, synthetic Casdoor-only member and controlled feature model responses
+    profile: owned PostgreSQL database, synthetic Casdoor-registered and linked members, controlled feature model responses
   steps:
   - order: 1
     action: Reconcile a read grant for a USER from the designated model and open the existing repository HTTP route and user authorization endpoint.
@@ -25,10 +25,18 @@ case:
   - order: 3
     action: Grant read under the Skill repository resource, then move the same action to an unrelated resource and reconcile after each edit.
     expected: The matching resource grants access and the unrelated resource denies it in the same session.
+  - order: 4
+    action: For each staged native knowledge-base action, grant it, remove its role association, restore the association and remove the action itself.
+    expected: The original session reflects each change in the mutation API and user permissions. A valid action grant cannot bypass the existing resource access check.
+  - order: 5
+    action: Reconcile a password-enabled local administrator with a verified Casdoor link, remove the model menu action, and unlink the account.
+    expected: The original session loses the menu while keeping the independently granted model read action. Unlinking restores local policy. The local administrator role and password login eligibility are preserved.
   expected_results:
   - Managed actions can be added independently of the user's tenant role.
   - Revocation also applies to direct API calls without a new login.
   - The same registered action has authority only under its own resource class or the legacy flat resource.
+  - Native knowledge-base creation, metadata updates and deletion follow the selected Casdoor actions when enabled.
+  - Existing linked accounts follow Casdoor feature grants and return to local feature permissions when unlinked.
   forbidden_side_effects:
   - No external provider calls, business account changes, leaked credentials, or leftover owned test resources.
   acceptance:
@@ -46,6 +54,16 @@ case:
     description: Classified resource policies support same-session grants and reject an action under an unrelated resource.
     steps: [3]
     expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Casdoor role association and action-list changes grant and revoke staged knowledge-base operations for the same session while preserving resource authorization.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: A verified Casdoor link controls features in an existing local account session independently of the local role and credential policy.
+    steps: [5]
+    expected_results: [5]
     forbidden_side_effects: [1]
   contract:
     protocol: Real Nexent FastAPI routes and PostgreSQL with controlled Casdoor policy HTTP responses

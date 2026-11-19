@@ -2,6 +2,7 @@
 
 "use client";
 
+import type { GroupPermission } from "@/types/groupPermission";
 import {
   createContext,
   useReducer,
@@ -141,7 +142,8 @@ export const KnowledgeBaseContext = createContext<{
     group_ids?: number[],
     embeddingModelId?: number,
     preserve_source_file?: boolean,
-    quota_limit_bytes?: number | null
+    quota_limit_bytes?: number | null,
+    group_permissions?: GroupPermission[]
   ) => Promise<KnowledgeBase>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
@@ -456,7 +458,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       group_ids?: number[],
       embeddingModelId?: number,
       preserve_source_file?: boolean,
-      quota_limit_bytes?: number | null
+      quota_limit_bytes?: number | null,
+      group_permissions?: GroupPermission[]
     ) => {
       try {
         if (embeddingModelId === undefined) {
@@ -471,6 +474,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           group_ids,
           preserve_source_file,
           quota_limit_bytes,
+          group_permissions,
         });
         return newKB;
       } catch (error) {

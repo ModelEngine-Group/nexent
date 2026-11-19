@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { GroupPermission } from "@/types/groupPermission";
+
 import {
   API_ENDPOINTS,
   ApiError,
@@ -219,6 +221,7 @@ type AgentListApiItem = {
   is_available?: boolean;
   unavailable_reasons?: string[];
   group_ids?: number[];
+  group_permissions?: GroupPermission[] | null;
   is_new?: boolean;
   permission?: "EDIT" | "READ_ONLY";
   is_published?: boolean;
@@ -252,6 +255,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     is_available: agent.is_available,
     unavailable_reasons: agent.unavailable_reasons || [],
     group_ids: agent.group_ids || [],
+    group_permissions: agent.group_permissions,
     is_new: agent.is_new || false,
     permission: agent.permission,
     is_published: agent.is_published,
@@ -429,6 +433,7 @@ export const fetchPublishedAgentList = async () => {
       is_main_agent: agent.is_main_agent,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
+      group_permissions: agent.group_permissions,
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
@@ -619,6 +624,7 @@ export interface UpdateAgentInfoPayload {
   author_cas_username?: string | null;
   prompt?: string;
   group_ids?: number[];
+  group_permissions?: GroupPermission[] | null;
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
@@ -1132,6 +1138,7 @@ export const searchAgentInfo = async (
       external_sub_agent_id_list: data.external_sub_agent_id_list || [],
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
+      group_permissions: data.group_permissions,
       permission: data.permission, // Per-agent edit permission
       created_by: data.created_by ?? null,
       prompts_hidden: data.prompts_hidden === true,

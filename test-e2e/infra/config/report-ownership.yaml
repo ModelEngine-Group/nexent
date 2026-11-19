@@ -74,6 +74,7 @@ domains:
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
   AUTH-CASDOOR: system
+  RESOURCE-GROUP-PERMISSIONS: system
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
   SDK-MODEL-OUTLET-RESOLUTION: model

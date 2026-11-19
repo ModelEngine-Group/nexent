@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
+import type { GroupPermission } from "@/types/groupPermission";
 // Unified encapsulation of knowledge base related API calls
 
 import i18n from "i18next";
@@ -957,6 +958,7 @@ class KnowledgeBaseService {
                 knowledge_sources:
                   indexInfo.knowledge_sources || "elasticsearch",
                 ingroup_permission: indexInfo.ingroup_permission || "",
+                group_permissions: indexInfo.group_permissions,
                 group_ids: indexInfo.group_ids || [],
                 store_size: stats.store_size || "",
                 process_source: stats.process_source || "",
@@ -1025,6 +1027,7 @@ class KnowledgeBaseService {
                     knowledge_sources:
                       indexInfo.knowledge_sources || "datamate",
                     ingroup_permission: indexInfo.ingroup_permission || "",
+                    group_permissions: indexInfo.group_permissions,
                     group_ids: indexInfo.group_ids || [],
                     store_size: stats.store_size || "",
                     process_source: stats.process_source || "",
@@ -1151,6 +1154,7 @@ class KnowledgeBaseService {
         embedding_model_id: number;
         ingroup_permission?: string;
         group_ids?: number[];
+        group_permissions?: GroupPermission[];
         preserve_source_file?: boolean;
         quota_limit_bytes?: number | null;
       } = {
@@ -1165,6 +1169,9 @@ class KnowledgeBaseService {
       }
       if (params.group_ids && params.group_ids.length > 0) {
         requestBody.group_ids = params.group_ids;
+      }
+      if (params.group_permissions !== undefined) {
+        requestBody.group_permissions = params.group_permissions;
       }
       if (params.preserve_source_file !== undefined) {
         requestBody.preserve_source_file = params.preserve_source_file;
@@ -1210,6 +1217,7 @@ class KnowledgeBaseService {
         nickname: "",
         parserId: "",
         permission: "",
+        group_permissions: params.group_permissions,
         tokenNum: 0,
         source: params.source || "elasticsearch",
       };
@@ -1944,6 +1952,7 @@ class KnowledgeBaseService {
       knowledge_name?: string;
       ingroup_permission?: string;
       group_ids?: number[];
+      group_permissions?: GroupPermission[];
     }
   ): Promise<void> {
     try {

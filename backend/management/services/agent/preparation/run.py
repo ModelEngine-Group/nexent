@@ -21,6 +21,7 @@ from contracts.constants.environment import (
     TOKEN,
 )
 from contracts.tool import ToolParamsRequest
+from contracts.errors.exceptions import ForbiddenError
 from infrastructure.http.client import create_httpx_client
 from infrastructure.redis import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -28,6 +29,7 @@ from management.db.agent.version import query_current_version_no, update_agent_s
 from management.db.client import minio_client
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
+from management.services.agent.authorization import authorize_explicit_agent_sharing
 from management.services.agent.preparation.inputs import (
     _build_run_workspace,
     _collect_run_minio_files,
@@ -52,6 +54,8 @@ def _ensure_agent_reasoning_snapshot(
     agent_id: int,
     tenant_id: str,
     version_no: int,
+    user_id: str | None = None,
+    is_debug: bool = False,
 ) -> None:
     """Backfill reasoning ownership for agents created before Scheme B."""
     from management.services.agent.reasoning import snapshot_agent_reasoning_config
@@ -64,6 +68,13 @@ def _ensure_agent_reasoning_snapshot(
         )
         if not agent_info or agent_info.get("agent_origin") == "SYSTEM":
             return
+        if user_id is not None and agent_info.get("group_permissions") is not None:
+            try:
+                authorize_explicit_agent_sharing(agent_info, user_id, edit=is_debug)
+            except ForbiddenError:
+                raise
+            except Exception as exc:
+                raise ForbiddenError("Agent permission could not be verified") from exc
         current_overrides = agent_info.get("model_params_override")
         updated_overrides = snapshot_agent_reasoning_config(
             model_ids=agent_info.get("model_ids"),
@@ -80,6 +91,8 @@ def _ensure_agent_reasoning_snapshot(
             version_no=version_no,
             agent_data={"model_params_override": updated_overrides},
         )
+    except ForbiddenError:
+        raise
     except Exception as exc:  # pragma: no cover - defensive migration fallback
         logger.warning(
             "Failed to backfill agent reasoning snapshot for agent %s: %s",
@@ -160,6 +173,8 @@ async def create_agent_run_info(
         agent_id=agent_id,
         tenant_id=tenant_id,
         version_no=version_no,
+        user_id=user_id,
+        is_debug=is_debug,
     )
 
     final_query = await join_minio_file_description_to_query(

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listGroups } from "@/services/groupService";
@@ -7,7 +9,8 @@ export function useGroupList(
   tenantId: string | null,
   page?: number,
   pageSize?: number,
-  search?: string
+  search?: string,
+  refetchInterval?: number
 ) {
   const query = useQuery({
     queryKey: ["groups", tenantId, page, pageSize, search],
@@ -15,6 +18,8 @@ export function useGroupList(
     enabled: tenantId !== null,
     staleTime: 1000 * 30,
     refetchOnMount: "always",
+    refetchInterval: (query) =>
+      query.state.data?.casdoorSyncEnabled ? refetchInterval : false,
   });
 
   const allGroupIds = useMemo(

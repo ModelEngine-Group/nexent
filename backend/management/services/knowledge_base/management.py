@@ -16,7 +16,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.constants.environment import IS_SPEED_MODE
 from contracts.errors.exceptions import AppException, DuplicateError
 from management.db.agent.repository import query_knowledge_binding_agents
@@ -65,6 +65,7 @@ from management.services.model.resolver import (
 from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
 from permissions.dac import ResourceAccessControl
+from permissions.group_sharing import legacy_group_permission, validate_group_permissions
 from permissions.models import Resource
 from management.services.permission.asset_owner import postprocess_knowledge_visibility
 from management.services.permission.identity.groups import get_tenant_default_group_id
@@ -310,6 +311,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         preserve_source_file: Optional[bool] = None,
         quota_limit_bytes: Optional[int] = None,
         user_role: Optional[str] = None,
+        group_permissions: Optional[List[dict]] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -342,6 +344,13 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             if embedding_model_id is None:
                 raise ValueError("embedding_model_id is required")
 
+            if group_permissions is not None:
+                group_permissions = validate_group_permissions(group_permissions, tenant_id)
+                if str(user_role or "").upper() == "USER" and group_permissions:
+                    raise PermissionError("USER role cannot share a personal knowledge base")
+                group_ids = [rule["group_id"] for rule in group_permissions]
+                ingroup_permission = legacy_group_permission(group_permissions)
+
             model = get_model_by_model_id(embedding_model_id, tenant_id)
             if not model:
                 raise ValueError(
@@ -366,6 +375,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 "embedding_model_name": saved_embedding_model_name,
                 "embedding_model_id": embedding_model_id,
             }
+            if group_permissions is not None:
+                knowledge_data["group_permissions"] = group_permissions
 
             # Add group permission and group IDs if provided.
             if str(user_role or "").upper() == "USER":
@@ -421,7 +432,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         except AppException:
             # Preserve structured resource-limit errors for the application layer.
             raise
-        except (DuplicateError, ValueError):
+        except (DuplicateError, ValueError, PermissionError):
             raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
@@ -436,6 +447,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         user_id: Optional[str] = None,
         quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
         user_role: Optional[str] = None,
+        group_permissions: Optional[List[dict]] = None,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -466,7 +478,18 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 f"Invalid ingroup_permission. Must be one of: {valid_permissions}"
             )
 
-        if str(user_role or "").upper() == "USER":
+        role = str(user_role or "").upper()
+        if group_permissions is not None:
+            record = get_knowledge_record({"index_name": index_name})
+            if not record or str(record.get("tenant_id")) != str(tenant_id):
+                raise PermissionError("Knowledge base does not belong to the current tenant")
+            if str(record.get("created_by")) != str(user_id) and role not in CAN_EDIT_ALL_USER_ROLES:
+                raise PermissionError("Only the owner or an administrator can change group sharing")
+            group_permissions = validate_group_permissions(group_permissions, tenant_id)
+            if role == "USER" and group_permissions:
+                raise PermissionError("USER role cannot share a personal knowledge base")
+
+        if role == "USER":
             record = get_knowledge_record({"index_name": index_name})
             if not record:
                 raise ValueError(f"Knowledge base '{index_name}' not found")
@@ -504,6 +527,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         if group_ids is not None:
             # Convert list to string for database storage
             update_data["group_ids"] = convert_list_to_string(group_ids)
+        if group_permissions is not None:
+            update_data["group_permissions"] = group_permissions
 
         if quota_limit_bytes is not _QUOTA_LIMIT_UNSET:
             update_data["quota_limit_bytes"] = quota_limit_bytes
@@ -804,6 +829,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                     created_by=record.get("created_by"),
                     ingroup_permission=record.get("ingroup_permission"),
                     group_ids=record.get("group_ids"),
+                    group_permissions=record.get("group_permissions"),
                     knowledge_sources=record.get("knowledge_sources"),
                 ),
                 user_id=user_id,
@@ -819,7 +845,11 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 record_with_permission = dict(record)
                 record_with_permission["permission"] = permission
                 # Convert group_ids string to list for easier client consumption
-                if record.get("group_ids"):
+                if record.get("group_permissions") is not None:
+                    record_with_permission["group_ids"] = [
+                        rule["group_id"] for rule in record["group_permissions"]
+                    ]
+                elif record.get("group_ids"):
                     record_with_permission["group_ids"] = convert_string_to_list(
                         record["group_ids"]
                     )
@@ -919,6 +949,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                             # knowledge source and ingroup permission from DB record
                             "knowledge_sources": record["knowledge_sources"],
                             "ingroup_permission": record["ingroup_permission"],
+                            "group_permissions": record.get("group_permissions"),
                             "is_multimodal": is_multimodal,
                             "tenant_id": record.get("tenant_id"),
                             # Embedding model info: display_name from model_id

@@ -1,10 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Form, Input, Select, message } from "antd";
+import { Modal, Form, Input, message } from "antd";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import { buildGroupSelectOptions } from "@/hooks/group/buildGroupSelectOptions";
+import { GroupPermissionSelect } from "@/components/permission/GroupPermissionSelect";
+import { getGroupPermissions } from "@/lib/groupPermission";
+import type { GroupPermission } from "@/types/groupPermission";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -29,7 +34,7 @@ export function KnowledgeBaseEditModal({
   onSuccess,
 }: KnowledgeBaseEditModalProps) {
   const { t } = useTranslation("common");
-  const { getAccessibleGroupIds } = useAuthorizationContext();
+  const { getAccessibleGroupIds, user } = useAuthorizationContext();
   const [form] = Form.useForm();
 
   // Name validation state
@@ -38,44 +43,42 @@ export function KnowledgeBaseEditModal({
   // Store original name for comparison
   const originalNameRef = useRef<string>("");
 
-  // Track current permission value for conditional logic
-  const [currentPermission, setCurrentPermission] =
-    useState<string>("READ_ONLY");
+  const [rules, setRules] = useState<GroupPermission[]>([]);
+  const [sharingChanged, setSharingChanged] = useState(false);
+  const canManageSharing =
+    user?.role !== "USER" &&
+    (knowledgeBase?.permission === "CREATOR" ||
+      ["SU", "ADMIN", "SPEED", "ASSET_OWNER"].includes(user?.role ?? ""));
 
   // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
-  const { data: groupData } = useGroupList(tenantId);
+  const { data: groupData, isLoading: groupsLoading } = useGroupList(tenantId);
   const accessibleGroupIds = getAccessibleGroupIds();
-  const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
-
-  const selectedGroupIds = Form.useWatch("group_ids", form);
+  const { groups } = useGroupDetails(
+    groupData?.groups ?? [],
+    accessibleGroupIds
+  );
 
   const groupSelectOptions = useMemo(
     () =>
       buildGroupSelectOptions({
         groups,
         allGroups: groupData?.groups ?? [],
-        selectedGroupIds: selectedGroupIds ?? knowledgeBase?.group_ids ?? [],
+        selectedGroupIds: rules.map((rule) => rule.group_id),
         deletedGroupLabel: t("group.deleted"),
       }),
-    [groups, groupData?.groups, selectedGroupIds, knowledgeBase?.group_ids, t]
+    [groups, groupData?.groups, rules, t]
   );
 
   // Reset form and states when knowledge base changes
   React.useEffect(() => {
     if (knowledgeBase && open) {
-      const permission = knowledgeBase.ingroup_permission || "READ_ONLY";
-      form.setFieldsValue({
-        knowledge_name: knowledgeBase.name,
-        ingroup_permission: permission,
-        group_ids:
-          permission === "PRIVATE" ? [] : knowledgeBase.group_ids || [],
-      });
+      form.setFieldsValue({ knowledge_name: knowledgeBase.name });
+      setRules(getGroupPermissions(knowledgeBase));
+      setSharingChanged(false);
       // Store original name for comparison
       originalNameRef.current = knowledgeBase.name;
       // Reset error state
       setNameError(null);
-      // Set current permission
-      setCurrentPermission(permission);
     }
   }, [knowledgeBase, open, form]);
 
@@ -115,24 +118,23 @@ export function KnowledgeBaseEditModal({
         return; // Error message is displayed via Form.Item help
       }
 
-      // Ensure group_ids is empty when permission is PRIVATE
-      const groupIds =
-        values.ingroup_permission === "PRIVATE" ? [] : values.group_ids ?? [];
-
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,
-        ingroup_permission: values.ingroup_permission,
-        group_ids: groupIds,
+        ...(sharingChanged ? { group_permissions: rules } : {}),
       });
 
       message.success(t("tenantResources.knowledgeBase.updated"));
 
-      // Construct updated knowledge base object with new values
       const updatedKnowledgeBase: KnowledgeBase = {
         ...knowledgeBase,
         name: values.knowledge_name,
-        ingroup_permission: values.ingroup_permission,
-        group_ids: groupIds,
+        ...(sharingChanged
+          ? {
+              group_permissions: rules,
+              group_ids: rules.map((rule) => rule.group_id),
+              ingroup_permission: rules.length ? "READ_ONLY" : "PRIVATE",
+            }
+          : {}),
       };
 
       // Trigger knowledge base list refresh to seamlessly update UI
@@ -149,17 +151,6 @@ export function KnowledgeBaseEditModal({
       );
     }
   };
-
-  // Handle permission change - clear group_ids when PRIVATE is selected
-  const handlePermissionChange = (value: string) => {
-    setCurrentPermission(value);
-    if (value === "PRIVATE") {
-      form.setFieldsValue({ group_ids: [] });
-    }
-  };
-
-  // Check if group select should be disabled
-  const isGroupSelectDisabled = currentPermission === "PRIVATE";
 
   return (
     <Modal
@@ -188,56 +179,19 @@ export function KnowledgeBaseEditModal({
         </Form.Item>
 
         <Can permission="kb.groups:read">
-          <Form.Item
-            name="ingroup_permission"
-            label={t("tenantResources.knowledgeBase.permission")}
-            rules={[
-              {
-                required: true,
-                message: t("tenantResources.knowledgeBase.permissionRequired"),
-              },
-            ]}
-          >
-            <Select
-              placeholder={t("tenantResources.knowledgeBase.permission")}
-              onChange={handlePermissionChange}
-              options={[
-                {
-                  value: "EDIT",
-                  label: t("tenantResources.knowledgeBase.permission.EDIT"),
-                },
-                {
-                  value: "READ_ONLY",
-                  label: t(
-                    "tenantResources.knowledgeBase.permission.READ_ONLY"
-                  ),
-                },
-                {
-                  value: "PRIVATE",
-                  label: t("tenantResources.knowledgeBase.permission.PRIVATE"),
-                },
-              ]}
-            />
-          </Form.Item>
-        </Can>
-
-        <Can permission="group:read">
-          <Form.Item
-            name="group_ids"
-            label={t("tenantResources.knowledgeBase.groupNames")}
-          >
-            <Select
-              mode="multiple"
-              showSearch={{ optionFilterProp: "label" }}
-              placeholder={
-                isGroupSelectDisabled
-                  ? t("knowledgeBase.create.permission.groupPlaceholder")
-                  : t("tenantResources.knowledgeBase.groupNames")
-              }
-              options={groupSelectOptions}
-              disabled={isGroupSelectDisabled}
-            />
-          </Form.Item>
+          <Can permission="group:read">
+            <Form.Item label={t("resourceGroupPermission.title")}>
+              <GroupPermissionSelect
+                value={rules}
+                options={groupSelectOptions}
+                disabled={!canManageSharing || groupsLoading}
+                onChange={(nextRules) => {
+                  setRules(nextRules);
+                  setSharingChanged(true);
+                }}
+              />
+            </Form.Item>
+          </Can>
         </Can>
       </Form>
     </Modal>

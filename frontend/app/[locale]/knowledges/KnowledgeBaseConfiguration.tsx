@@ -2,6 +2,7 @@
 
 "use client";
 
+import type { GroupPermission } from "@/types/groupPermission";
 import type React from "react";
 import type { TFunction } from "i18next";
 import {
@@ -277,8 +278,8 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
-  const [newKbIngroupPermission, setNewKbIngroupPermission] =
-    useState<string>("READ_ONLY");
+  const [newKbGroupPermissions, setNewKbGroupPermissions] =
+    useState<GroupPermission[]>();
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
     useState<boolean>(true);
@@ -860,7 +861,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Generate the default name without probing hidden tenant knowledge bases.
     const defaultName = generateVisibleKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
-    setNewKbIngroupPermission("READ_ONLY");
+    setNewKbGroupPermissions(undefined);
     setNewKbGroupIds([]);
     setNewKbPreserveSourceFile(true);
     // Clear the previous choice; the load effect picks the default once the
@@ -958,11 +959,12 @@ function DataConfig({ isActive }: DataConfigProps) {
           newKbName.trim(),
           t("knowledgeBase.description.default"),
           "elasticsearch",
-          newKbIngroupPermission,
+          "READ_ONLY",
           newKbGroupIds,
           selectedModelId,
           newKbPreserveSourceFile,
-          newKbQuotaBytes
+          newKbQuotaBytes,
+          newKbGroupPermissions
         );
 
         setIsCreatingMode(false);
@@ -1308,9 +1310,10 @@ function DataConfig({ isActive }: DataConfigProps) {
                     containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                     hasDocuments={hasClickedUpload || docState.isUploading}
                     // Group permission and user groups for create mode
-                    ingroupPermission={newKbIngroupPermission}
-                    onIngroupPermissionChange={setNewKbIngroupPermission}
-                    selectedGroupIds={newKbGroupIds}
+                    groupPermissions={newKbGroupPermissions ?? newKbGroupIds.map((group_id) => ({
+                      group_id, permission: "READ_ONLY",
+                    }))}
+                    onGroupPermissionsChange={setNewKbGroupPermissions}
                     onSelectedGroupIdsChange={setNewKbGroupIds}
                     preserveSourceFile={newKbPreserveSourceFile}
                     onPreserveSourceFileChange={setNewKbPreserveSourceFile}

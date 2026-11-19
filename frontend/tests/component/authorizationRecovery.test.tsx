@@ -120,14 +120,14 @@ function pendingRequest() {
   return { promise, resolve, reject };
 }
 
-test("refreshes an active Casdoor session and leaves a route revoked by the new role", async () => {
+test.each(["casdoorRoleSync", "casdoorFeaturePolicy"] as const)("refreshes authorization when %s is enabled", async (flag) => {
   state.pathname = "/zh/resource-manage";
   const before = response();
   before.user.role = USER_ROLES.ADMIN;
-  before.user.casdoorRoleSync = true;
+  before.user[flag] = true;
   const after = response(["/"]);
-  after.user.role = USER_ROLES.USER;
-  after.user.casdoorRoleSync = true;
+  after.user.role = flag === "casdoorRoleSync" ? USER_ROLES.USER : USER_ROLES.ADMIN;
+  after.user[flag] = true;
   after.user.permissions = ["chat:read"];
   const intervals = vi.spyOn(window, "setInterval");
   state.request.mockResolvedValueOnce(before).mockResolvedValue(after);

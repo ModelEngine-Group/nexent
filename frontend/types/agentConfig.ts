@@ -3,6 +3,7 @@
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
 import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
+import type { GroupPermission } from "@/types/groupPermission";
 
 import { ChatMessageType } from "./chat";
 
@@ -28,6 +29,7 @@ export type AgentConfigUpdate = Partial<
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
+    | "group_permissions"
     | "is_a2a"
     | "greeting_message"
     | "example_questions"
@@ -198,6 +200,7 @@ export interface Agent {
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  group_permissions?: GroupPermission[] | null;
   /**
    * Per-agent permission returned by /agent/list.
    * EDIT: editable, READ_ONLY: read-only.
@@ -350,6 +353,7 @@ export interface Skill {
   tool_ids?: number[];
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  group_permissions?: GroupPermission[] | null;
   permission?: "EDIT" | "READ_ONLY";
   created_by?: string | null;
   updated_by?: string | null;

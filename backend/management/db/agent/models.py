@@ -79,6 +79,7 @@ class AgentInfo(TableBase):
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
+    group_permissions = Column(JSONB, comment="Explicit tenant group read or edit grants, null for legacy sharing")
     requested_output_tokens = Column(
         Integer,
         doc=(

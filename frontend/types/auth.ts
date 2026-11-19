@@ -14,6 +14,7 @@ export interface User {
   authProvider?: "local" | "cas";
   casdoorRoleSync?: boolean;
   casdoorFeaturePolicy?: boolean;
+  casdoorAdditionalManagedActions?: string[];
 }
 
 // Session type definition

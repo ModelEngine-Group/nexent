@@ -13,8 +13,30 @@ from contracts.errors.exceptions import NotFoundException, UnauthorizedError, Va
 from contracts.constants.constants import DEFAULT_GROUP_ID
 from management.services.permission.identity.tenants import get_tenant_info
 from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.permission.identity.casdoor_groups import (
+    change_synced_members, create_synced_group, synchronizes_tenant, update_synced_group,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _hierarchy_fields(group: dict) -> dict:
+    fields = {}
+    if group.get("parent_group_id") is not None:
+        fields["parent_group_id"] = group["parent_group_id"]
+    if group.get("casdoor_scope"):
+        fields["casdoor_managed"] = True
+    return fields
+
+
+def _require_synced_group_admin(actor: dict | None, tenant_id: str) -> None:
+    if not synchronizes_tenant(tenant_id):
+        raise ValidationError("Configure Casdoor group synchronization for this tenant before editing the group")
+    actor = actor or {}
+    if actor.get("user_role") != "SU" and (
+        actor.get("user_role") != "ADMIN" or actor.get("tenant_id") != tenant_id
+    ):
+        raise UnauthorizedError("Only administrators of this tenant can change synchronized groups")
 
 
 def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -42,7 +64,9 @@ def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[
         return {
             "group_id": result.get("group_id"),
             "group_name": result.get("group_name"),
-            "group_description": result.get("group_description")
+            "group_description": result.get("group_description"),
+            **_hierarchy_fields(result),
+            **({"tenant_id": result["tenant_id"]} if result.get("casdoor_scope") else {}),
         }
     elif isinstance(group_id, (str, list)) and result is not None:
         # List of groups result
@@ -51,7 +75,8 @@ def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[
             filtered_groups.append({
                 "group_id": group.get("group_id"),
                 "group_name": group.get("group_name"),
-                "group_description": group.get("group_description")
+                "group_description": group.get("group_description"),
+                **_hierarchy_fields(group),
             })
         return filtered_groups
 
@@ -89,7 +114,8 @@ def get_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Opt
             "group_id": group.get("group_id"),
             "group_name": group.get("group_name"),
             "group_description": group.get("group_description"),
-            "user_count": user_count
+            "user_count": user_count,
+            **_hierarchy_fields(group),
         })
 
     return {
@@ -150,6 +176,8 @@ def set_tenant_default_group_id(tenant_id: str, group_id: int, updated_by: Optio
     if str(group.get("tenant_id")) != tenant_id:
         raise ValidationError(
             f"Group {group_id} does not belong to tenant {tenant_id}")
+    if group.get("casdoor_scope"):
+        raise ValidationError("A synchronized group cannot be the default group for local accounts")
 
     try:
         # Try to update existing default group config
@@ -185,7 +213,7 @@ def set_tenant_default_group_id(tenant_id: str, group_id: int, updated_by: Optio
 
 
 def create_group(tenant_id: str, group_name: str, group_description: Optional[str] = None,
-               user_id: str = None) -> Dict[str, Any]:
+                 user_id: str = None, *, parent_group_id: int | None = None) -> Dict[str, Any]:
     """
     Create a new group.
 
@@ -204,6 +232,7 @@ def create_group(tenant_id: str, group_name: str, group_description: Optional[st
         ValidationError: When group name already exists in the tenant
     """
     # Check user permission
+    user_info = None
     if user_id:
         user_info = get_user_tenant_by_user_id(user_id)
         if not user_info:
@@ -218,19 +247,25 @@ def create_group(tenant_id: str, group_name: str, group_description: Optional[st
         raise ValidationError(f"Group name '{group_name}' already exists in this tenant")
 
     # Create group
-    group_id = add_group(
-        tenant_id=tenant_id,
-        group_name=group_name,
-        group_description=group_description,
-        created_by=user_id
-    )
+    managed = synchronizes_tenant(tenant_id)
+    hierarchy = {"parent_group_id": parent_group_id} if parent_group_id is not None else {}
+    if managed:
+        _require_synced_group_admin(user_info, tenant_id)
+        group_id = create_synced_group(tenant_id, group_name, group_description, parent_group_id)
+    else:
+        group_id = add_group(
+            tenant_id=tenant_id, group_name=group_name, group_description=group_description,
+            created_by=user_id, **hierarchy,
+        )
 
     logger.info(f"Created group {group_name} for tenant {tenant_id} by user {user_id}")
 
     return {
         "group_id": group_id,
         "group_name": group_name,
-        "group_description": group_description
+        "group_description": group_description,
+        **hierarchy,
+        **({"casdoor_managed": True} if managed else {}),
     }
 
 
@@ -267,12 +302,17 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
 
     tenant_id = group.get("tenant_id")
 
+    if group.get("casdoor_scope"):
+        _require_synced_group_admin(user_info, tenant_id)
+
     # Check if new group name already exists in the tenant (when updating group_name)
     if "group_name" in updates and updates["group_name"]:
         if check_group_name_exists(tenant_id, updates["group_name"], exclude_group_id=group_id):
             raise ValidationError(f"Group name '{updates['group_name']}' already exists in this tenant")
 
     # Update group
+    if group.get("casdoor_scope"):
+        return update_synced_group(tenant_id, group_id, updates)
     success = modify_group(
         group_id=group_id,
         updates=updates,
@@ -315,9 +355,13 @@ def delete_group(group_id: int, user_id: str) -> bool:
         raise NotFoundException(f"Group {group_id} not found")
 
     # Delete group
+    if group.get("casdoor_scope"):
+        _require_synced_group_admin(user_info, group["tenant_id"])
+        raise ValidationError("Delete synchronized groups in Casdoor")
     success = remove_group(
         group_id=group_id,
-        updated_by=user_id
+        updated_by=user_id,
+        tenant_id=group.get("tenant_id"),
     )
 
     if success:
@@ -351,6 +395,11 @@ def add_user_to_single_group(group_id: int, user_id: str, current_user_id: str) 
     group = query_groups(group_id)
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
+
+    if group.get("casdoor_scope"):
+        tenant_id = group["tenant_id"]
+        _require_synced_group_admin(user_info, tenant_id)
+        return change_synced_members(tenant_id, group_id, {user_id}, mode="add")
 
     # Check if user is already in group
     if check_user_in_group(user_id, group_id):
@@ -407,6 +456,12 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
 
+    if group.get("casdoor_scope"):
+        tenant_id = group["tenant_id"]
+        _require_synced_group_admin(user_info, tenant_id)
+        change_synced_members(tenant_id, group_id, {user_id}, mode="remove")
+        return True
+
     # Remove user from group
     success = remove_user_from_group(
         group_id=group_id,
@@ -420,7 +475,7 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
     return success
 
 
-def get_group_users(group_id: int) -> List[Dict[str, Any]]:
+def get_group_users(group_id: int, *, authorize_group=None) -> List[Dict[str, Any]]:
     """
     Get all users in a group with their details.
 
@@ -439,6 +494,8 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
         raise NotFoundException(f"Group {group_id} not found")
 
     # Get group membership records
+    if authorize_group is not None:
+        authorize_group(group)
     group_memberships = query_group_users(group_id)
 
     filtered_users = []
@@ -535,6 +592,11 @@ def update_group_members(group_id: int, user_ids: List[str], current_user_id: st
     group = query_groups(group_id)
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
+
+    if group.get("casdoor_scope"):
+        tenant_id = group["tenant_id"]
+        _require_synced_group_admin(user_info, tenant_id)
+        return change_synced_members(tenant_id, group_id, set(user_ids), mode="replace")
 
     # Get current group members
     current_members = get_group_users(group_id)

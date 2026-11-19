@@ -23,7 +23,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { checkSessionValid } from "@/lib/session";
 import { useGroupList } from "@/hooks/group/useGroupList";
 
-const CASDOOR_ROLE_REFRESH_MS = 15_000;
+const CASDOOR_AUTHORIZATION_REFRESH_MS = 15_000;
 
 /**
  * Custom hook for authorization management
@@ -136,13 +136,13 @@ export function useAuthorization(): AuthorizationContextType {
   }, [refetch, applyAuthzData]);
 
   useEffect(() => {
-    if (!user?.casdoorRoleSync) return;
+    if (!user?.casdoorRoleSync && !user?.casdoorFeaturePolicy) return;
 
     const timer = window.setInterval(() => {
       if (checkSessionValid()) void fetchAuthzData();
-    }, CASDOOR_ROLE_REFRESH_MS);
+    }, CASDOOR_AUTHORIZATION_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [user?.casdoorRoleSync, fetchAuthzData]);
+  }, [user?.casdoorRoleSync, user?.casdoorFeaturePolicy, fetchAuthzData]);
 
   // Initialize authorization on mount
   useEffect(() => {

@@ -22,6 +22,7 @@ from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest
 from contracts.conversation import ConversationResponse
 from contracts.tag import TagAssignmentFilter
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
+from management.services.agent.authorization import authorize_agent_version_access
 from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
@@ -140,6 +141,7 @@ async def get_agent_knowledge_capabilities_api(
     """Return knowledge source capabilities across the resolved agent tree."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         return {
             "code": 0,
             "message": "success",
@@ -154,6 +156,8 @@ async def get_agent_knowledge_capabilities_api(
                 owner="management.api.agent.agent",
             ),
         }
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
@@ -680,8 +684,11 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
     Get agent call relationship tree including tools and sub-agents
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         return get_agent_call_relationship_impl(agent_id, tenant_id)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Agent call relationship error: {str(e)}")
         raise HTTPException(
@@ -701,6 +708,7 @@ async def publish_version_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id, edit=True)
         result = publish_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -716,6 +724,8 @@ async def publish_version_api(
             details={"agent_id": agent_id, "version_name": request.version_name},
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -733,7 +743,8 @@ async def compare_versions_api(
     Compare two versions and return their differences
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         result = compare_versions_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -741,6 +752,8 @@ async def compare_versions_api(
             version_no_b=request.version_no_b,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -759,15 +772,18 @@ async def get_version_list_api(
     Get version list for an agent
     """
     try:
-        _, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
+        authorize_agent_version_access(agent_id, effective_tenant_id, user_id)
         result = get_version_list_impl(
             agent_id=agent_id,
             tenant_id=effective_tenant_id,
         )
         logger.info(f"Version list: {result}")
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Get version list error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version list error.")
@@ -783,13 +799,16 @@ async def get_version_api(
     Get version
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         result = get_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
             version_no=version_no,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -807,13 +826,16 @@ async def get_version_detail_api(
     Get version detail including snapshot data
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         result = _get_version_detail_or_draft(
             agent_id=agent_id,
             tenant_id=tenant_id,
             version_no=version_no,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -836,6 +858,7 @@ async def rollback_version_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id, edit=True)
         result = rollback_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -849,6 +872,8 @@ async def rollback_version_api(
             details={"agent_id": agent_id, "version_no": version_no},
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -869,6 +894,7 @@ async def update_version_status_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id, edit=True)
         result = update_version_status_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -884,6 +910,8 @@ async def update_version_status_api(
             details={"agent_id": agent_id, "version_no": version_no, "status": request.status},
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -904,6 +932,7 @@ async def update_version_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id, edit=True)
         result = update_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -920,6 +949,8 @@ async def update_version_api(
             details={"agent_id": agent_id, "version_no": version_no, "version_name": request.version_name},
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -939,6 +970,7 @@ async def delete_version_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id, edit=True)
         result = delete_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -953,6 +985,8 @@ async def delete_version_api(
             details={"agent_id": agent_id, "version_no": version_no},
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -969,12 +1003,15 @@ async def get_current_version_api(
     Get current published version
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        authorize_agent_version_access(agent_id, tenant_id, user_id)
         result = get_current_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:

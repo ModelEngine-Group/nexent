@@ -353,6 +353,14 @@ def insert_agent_snapshot(
     Insert agent snapshot (copy from draft to new version)
     """
     with get_db_session() as session:
+        draft = session.query(AgentInfo).filter_by(
+            agent_id=agent_data["agent_id"], tenant_id=agent_data["tenant_id"],
+            version_no=0, delete_flag="N",
+        ).with_for_update().first()
+        if draft is not None and isinstance(getattr(draft, "group_permissions", None), list):
+            agent_data = {**agent_data, **{
+                field: getattr(draft, field) for field in ("group_permissions", "group_ids", "ingroup_permission")
+            }}
         session.execute(insert(AgentInfo).values(**agent_data))
 
 
@@ -538,6 +546,12 @@ def restore_agent_draft(
         draft_values = {
             k: v for k, v in target_agent_snapshot.items() if k not in ("version_no", "current_version_no")
         }
+        draft = session.query(AgentInfo).filter_by(
+            agent_id=agent_id, tenant_id=tenant_id, version_no=0, delete_flag="N",
+        ).with_for_update().first()
+        if draft is not None and isinstance(getattr(draft, "group_permissions", None), list):
+            for field in ("group_permissions", "group_ids", "ingroup_permission"):
+                draft_values.pop(field, None)
         draft_values["current_version_no"] = target_version_no
         session.execute(
             update(AgentInfo)

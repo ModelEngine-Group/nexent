@@ -33,10 +33,6 @@ import {
 import {
   BookText,
   Pilcrow,
-  PencilRuler,
-  Eye,
-  Glasses,
-  CircleOff,
   AlertCircle,
   Settings2,
   Tag,
@@ -92,6 +88,8 @@ import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { GroupPermissionSelect } from "@/components/permission/GroupPermissionSelect";
+import type { GroupPermission } from "@/types/groupPermission";
 import { Can } from "@/components/permission/Can";
 
 const CONTAINER_HEIGHT_CLASS_MAP: Record<string, string> = {
@@ -127,9 +125,8 @@ interface DocumentListProps {
   onRefresh?: () => void;
 
   // Group permission and user groups for create mode
-  ingroupPermission?: string;
-  onIngroupPermissionChange?: (value: string) => void;
-  selectedGroupIds?: number[];
+  groupPermissions?: GroupPermission[];
+  onGroupPermissionsChange?: (value: GroupPermission[]) => void;
   onSelectedGroupIdsChange?: (values: number[]) => void;
   // Embedding model for create mode
   availableEmbeddingModels?: ModelOption[];
@@ -206,9 +203,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onChunkCountChange,
       onRefresh,
       // Group permission and user groups for create mode
-      ingroupPermission,
-      onIngroupPermissionChange,
-      selectedGroupIds,
+      groupPermissions,
+      onGroupPermissionsChange,
       onSelectedGroupIdsChange,
       // Embedding model for create mode
       availableEmbeddingModels,
@@ -408,25 +404,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
-    // Get permission icon for dropdown options
-    const getPermissionIcon = (permission: string) => {
-      const iconProps = {
-        size: 16,
-        className: "text-gray-500",
-      };
-
-      switch (permission) {
-        case "EDIT":
-          return <PencilRuler {...iconProps} />;
-        case "READ_ONLY":
-          return <Eye {...iconProps} />;
-        case "PRIVATE":
-          return <Glasses {...iconProps} />;
-        default:
-          return <CircleOff {...iconProps} />;
-      }
-    };
-
     // Build model mismatch info
     const getMismatchInfo = (): string => {
       if (embeddingModelInfo) return embeddingModelInfo;
@@ -555,39 +532,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onEmbeddingModelParamsOverrideChange(updated);
     };
 
-    // Permission options with icons shown inside dropdown
-    const permissionOptions = [
-      {
-        value: "EDIT",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("EDIT")}
-            <span>{t("tenantResources.knowledgeBase.permission.EDIT")}</span>
-          </span>
-        ),
-      },
-      {
-        value: "READ_ONLY",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("READ_ONLY")}
-            <span>
-              {t("tenantResources.knowledgeBase.permission.READ_ONLY")}
-            </span>
-          </span>
-        ),
-      },
-      {
-        value: "PRIVATE",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("PRIVATE")}
-            <span>{t("tenantResources.knowledgeBase.permission.PRIVATE")}</span>
-          </span>
-        ),
-      },
-    ];
-
     // Reset showDetail and showChunk state when knowledge base name changes
     React.useEffect(() => {
       setShowDetail(false);
@@ -617,15 +561,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onSelectedGroupIdsChange,
     ]);
 
-    // Clear group IDs when permission is set to PRIVATE
-    React.useEffect(() => {
-      if (ingroupPermission === "PRIVATE" && onSelectedGroupIdsChange) {
-        onSelectedGroupIdsChange([]);
-      }
-    }, [ingroupPermission, onSelectedGroupIdsChange]);
-
-    // Check if group select should be disabled (when permission is PRIVATE)
-    const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
     const embeddingModelsForOptions = availableEmbeddingModels || [];
     const availableEmbeddingModelKeys = new Set(
       embeddingModelsForOptions
@@ -1434,46 +1369,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   {isAdvancedSettingsOpen && (
                     <div className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-gray-50/60 p-3">
                       <Can permission="kb.groups:update">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.permission")}
-                          </label>
-                          <Select
-                            value={ingroupPermission}
-                            onChange={onIngroupPermissionChange}
-                            className="w-full"
-                            size="middle"
-                            placeholder={t(
-                              "knowledgeBase.ingroup.permission.DEFAULT"
-                            )}
-                            options={permissionOptions}
-                          />
-                        </div>
-                      </Can>
-
-                      <Can permission="kb.groups:update">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.groups")}
-                          </label>
-                          <Select
-                            mode="multiple"
-                            showSearch={{ optionFilterProp: "label" }}
-                            value={
-                              isGroupSelectDisabled ? [] : selectedGroupIds
-                            }
-                            onChange={onSelectedGroupIdsChange}
-                            className="w-full"
-                            size="middle"
-                            placeholder={t(
-                              "knowledgeBase.create.permission.groupPlaceholder"
-                            )}
-                            options={groupOptions}
-                            maxTagCount={2}
-                            allowClear
-                            disabled={isGroupSelectDisabled}
-                          />
-                        </div>
+                        <GroupPermissionSelect
+                          value={groupPermissions}
+                          options={groupOptions}
+                          onChange={onGroupPermissionsChange}
+                        />
                       </Can>
 
                       {onPreserveSourceFileChange && (

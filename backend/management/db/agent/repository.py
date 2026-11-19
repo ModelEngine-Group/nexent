@@ -16,6 +16,7 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import MAX_AGENTS_PER_TENANT
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 from management.utils.serialization import convert_list_to_string
+from permissions.group_sharing import legacy_group_permission
 
 logger = logging.getLogger("agent_db")
 
@@ -425,6 +426,30 @@ def update_agent(
             raise ValueError("System Agent is managed by the platform")
 
         agent_data = dict(agent_info.__dict__)
+        agent_data.pop("version_no", None)
+        group_rules = agent_data.pop("group_permissions", None)
+        if group_rules is not None or {"group_ids", "ingroup_permission"} & agent_data.keys():
+            session.refresh(agent, with_for_update=True)
+            if agent.delete_flag == "Y":
+                raise AgentNotFoundError("Agent was deleted")
+        if group_rules is not None or isinstance(getattr(agent, "group_permissions", None), list):
+            agent_data.pop("group_ids", None)
+            agent_data.pop("ingroup_permission", None)
+        if group_rules is not None:
+            rules = [rule.model_dump() for rule in group_rules]
+            sharing = {
+                "group_permissions": rules,
+                "group_ids": convert_list_to_string([rule["group_id"] for rule in rules]),
+                "ingroup_permission": legacy_group_permission(rules),
+            }
+            for field, value in sharing.items():
+                setattr(agent, field, value)
+            session.execute(update(AgentInfo).where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == agent.tenant_id,
+                AgentInfo.version_no != version_no,
+                AgentInfo.delete_flag == "N",
+            ).values(**sharing))
         fields_set = getattr(agent_info, "model_fields_set", None)
         if fields_set is not None and "requested_output_tokens" not in fields_set:
             agent_data.pop("requested_output_tokens", None)
@@ -568,6 +593,7 @@ def query_agent_list_candidates_by_tenant_id(tenant_id: str, *, include_descript
         AgentInfo.create_time,
         AgentInfo.group_ids,
         AgentInfo.ingroup_permission,
+        AgentInfo.group_permissions,
         AgentInfo.current_version_no,
     ]
     if include_description:
