@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from management.configuration.runtime import load_system_configuration
 from management.db.agent.system import (
     create_workbench_draft, has_legacy_workbench_agents,
     load_system_agent, lock_system_agent_release, replace_workbench_draft_bindings,
@@ -64,6 +65,9 @@ def initialize_system_agents(*, app_version=None):
 
 
 def main():
+    # Standalone command: load one database snapshot before official skill
+    # installation reads bounded configuration values.
+    load_system_configuration()
     print(json.dumps(initialize_system_agents()))
 
 
