@@ -52,6 +52,16 @@ feature:
       meeting the inclusive 0.50 threshold, with stable reference ordering for ties and no name bypass. New verification batches require one reasoned capability assessment per candidate and accepted must equal all
       positive assessments; preference never rejects an otherwise qualified alternative. Legacy in-flight batches remain compatible.
       Assessment evidence persists through card confirmation; only the binding card chooses defaults.
+      Lexical admission uses complete-name similarity or query coverage in capability declarations, never a token-set maximum
+      or configuration metadata alone. Installation, quality and native-tool bonuses apply only after relevance reaches 0.50.
+      The first model turn extracts concise positive action/object queries, preserving source and eligibility constraints in
+      the authoritative requirement; no enumerated generic-word filter is used.
+      Resource retrieval phrases describe reusable capabilities, not runtime search content or business topics. Preserve
+      only explicitly required tools, platforms and data sources as source constraints; retain the original execution
+      content in query and the Agent Prompt.
+      Prepared bilingual capability phrases are the lexical recall routes; do not add the full business request as another
+      route. Legacy calls use their short search_query when provided, otherwise query. The full query remains authoritative
+      for display and verification.
   - rule_id: F-045-RULE-10
     description: With tenant embedding configured, union lexical and ES semantic references without comparing scores or truncating
       lexical matches; otherwise use lexical only. Store each resource as one stable document per model/projection generation

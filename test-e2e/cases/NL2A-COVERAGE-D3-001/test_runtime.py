@@ -23,6 +23,7 @@ from management.services.mcp import service as mcp_service
 from model_controls.runtime import runtime_fixture
 from services import nl2agent_service, nl2agent_state_service
 from services.nl2agent_state_service import ResourceScope
+from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from management.services.conversation import nl2agent_resource_index as storage
 from tool_collection.mcp.nl2agent_mcp_tools import ResourceInstallationOption
 
@@ -187,6 +188,54 @@ def test_bilingual_recall_and_edited_requirement(monkeypatch):
         assert runtime.draft() == before
 
 
+@pytest.mark.parametrize("query,pair,correct,unrelated", [
+    ("生成图片", {"zh": "生成图片", "en": "generate image"},
+     ("image_generator", "Generate an image from a text prompt."),
+     ("analyze_image", "Analyze an existing image and return its description.")),
+    ("查询列车经停站", {"zh": "查询列车经停站", "en": "query train route stops"},
+     ("train_routes", "Query stops on a train route."),
+     ("send_email", "Send an email to recipients with a subject and body.")),
+    ("使用知识库检索工具查询已关联的活动方案、品牌介绍和往期素材",
+     {"zh": "知识库检索", "en": "knowledge base search"},
+     (KnowledgeBaseSearchTool.name, KnowledgeBaseSearchTool.description),
+     ("generate_fishbone_diagram", "Generate a fishbone diagram chart.")),
+])
+def test_lexical_precision_runtime(monkeypatch, query, pair, correct, unrelated):
+    from services import nl2agent_semantic_retrieval as semantic
+
+    catalog = [{
+        "candidate_ref": f"tool:{index}", "resource_type": "tool", "source": "LOCAL_TOOL",
+        "name": name, "description": description, "names": [name], "descriptions": [description],
+        "labels": [], "interfaces": [], "installed": True, "quality": 1.0,
+    } for index, (name, description) in enumerate((correct, unrelated), 701)]
+    monkeypatch.setattr(nl2agent_service, "_load_installed_resource_catalog", AsyncMock(return_value=catalog))
+    monkeypatch.setattr(nl2agent_service, "_load_internal_uninstalled_resource_catalog", AsyncMock(return_value=[]))
+    monkeypatch.setattr(semantic, "resolve_model", AsyncMock(return_value=None))
+    with owned_runtime(monkeypatch) as (runtime, redis):
+        scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
+        before = runtime.draft()
+
+        def verify():
+            state = json.loads(redis.get(_state_key(runtime)))
+            row = state["requirements"]["r1"]
+            assert row["query"] == query
+            assert [item["candidate_ref"] for item in row["installed"]] == ["tool:701"]
+            assert row["installable"] == []
+            checks = [assessed_check(state, "r1", ["tool:701"])]
+            return (f"<code>print(nl2a_verify_requirements(verification_batch_id={state['batch']['id']!r}, "
+                    f"checks={checks!r}))</code>")
+
+        requirements = [{"query": query, "search_queries": pair}]
+        _, events = post(runtime, query, [
+            f"<code>print(nl2a_discover_requirements(requirements={requirements!r}, purpose='recommend'))</code>",
+            verify,
+        ])
+        card = get_card(events)
+        assert card["requirements"][0]["query"] == query
+        assert [row["candidate_ref"] for row in card["requirements"][0]["covered_resources"]] == ["tool:701"]
+        assert runtime.draft() == before
+
+
 def get_card(events):
     cards = [json.loads(event["content"]) for event in events if event["type"] == "nl2a"]
     assert len(cards) == 1, events
@@ -203,6 +252,12 @@ def action(card, name, **result):
 
 @contextmanager
 def owned_runtime(monkeypatch):
+    from management.configuration import runtime as configuration
+
+    # The owned test app has no production configuration startup lifecycle.
+    config = configuration.SystemConfigurationRuntime(loader=AsyncMock(return_value={}))
+    config.store_snapshot(configuration.DEFAULT_CATALOG.defaults)
+    monkeypatch.setattr(configuration, "_process_runtime", config)
     with Redis.from_url(os.environ["NEXENT_TEST_NL2AGENT_REDIS_URL"], decode_responses=True) as redis:
         redis.ping()
         monkeypatch.setattr(nl2agent_state_service, "get_redis_client", lambda: redis)
@@ -572,10 +627,10 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
                 active_query = "使用DataMate知识库检索企业资料" if mode == "explicit" else query
                 monkeypatch.setattr(semantic.tenant_config_manager, "get_model_config",
                                     lambda **kw: {} if mode not in ("hybrid", "early_native", "fallback") else config)
-                catalog[1]["description"] = "检索平台知识库 [lexical-only]"
+                catalog[1]["description"] = "检索平台知识库中的资料 [lexical-only]"
                 catalog[1]["descriptions"] = [catalog[1]["description"]]
-                catalog[0]["description"] = query
-                catalog[0]["descriptions"] = [query]
+                catalog[0]["description"] = "DataMate: " + query
+                catalog[0]["descriptions"] = [catalog[0]["description"]]
                 if mode == "native_high":
                     catalog[1]["description"] = query
                     catalog[1]["descriptions"] = [query]
@@ -752,7 +807,8 @@ def test_semantic_recall_runtime(monkeypatch, owned_resource_es):
                 assert "tool:702" not in refs
             accepted = [] if row.get("verification_offset", 0) else ["tool:701"]
             return f"<code>print(nl2a_verify_requirements(verification_batch_id={state['batch']['id']!r}, checks={[assessed_check(state, 'r1', accepted)]!r}))</code>"
-        requirement = {"query": "使用DeepSeek检索公开网页", "search_queries": {"zh": "DeepSeek", "en": "DeepSeek"}}
+        expression = "DeepSeek search public webpages"
+        requirement = {"query": "使用DeepSeek检索公开网页", "search_queries": {"zh": expression, "en": expression}}
         try:
             original_keys = set()
             es, prefix = owned_resource_es
@@ -794,7 +850,7 @@ def test_semantic_recall_runtime(monkeypatch, owned_resource_es):
                     assert len(original_keys) == 1
                     assert es.count(index=next(iter(original_keys)))["count"] == 20
                 if index in (1, 2):
-                    assert len(calls) == 1 and calls[0]["input"] == ["DeepSeek"]
+                    assert len(calls) == 1 and calls[0]["input"] == [expression]
                     assert set(es.indices.get(index=prefix + "-*")) == original_keys
                     assert es.count(index=next(iter(original_keys)))["count"] == 20
                 if index == 3:

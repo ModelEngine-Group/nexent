@@ -26,6 +26,7 @@ acceptance_bindings:
   - test_linked_installation_reenters_verification
   AC-BILINGUAL-RECALL:
   - test_bilingual_recall_and_edited_requirement
+  - test_lexical_precision_runtime
   AC-SEARCH-ALTERNATIVES:
   - test_search_alternatives_runtime
   - test_top3_hybrid_uncovered_runtime

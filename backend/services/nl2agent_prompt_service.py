@@ -34,24 +34,16 @@ def revision(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
 
 
-async def _bindings(scope, facts):
-    from services import nl2agent_service as legacy
-
-    def read():
-        args = {"agent_id": scope.agent_id, "tenant_id": scope.tenant_id, "version_no": 0}
-        tools = legacy.query_all_enabled_tool_instances(**args)
-        skills = legacy.query_enabled_skill_instances(**args)
-        # Only the digest is retained server-side; private configuration never enters model/card data.
-        records = [
-            ["tool", row.get("tool_instance_id"), row.get("tool_id"), row.get("params")]
-            for row in tools
-        ] + [
-            ["skill", row.get("skill_instance_id"), row.get("skill_id"), row.get("config_values"), row.get("config_schemas")]
-            for row in skills
-        ]
-        return revision({"facts": facts, "instances": sorted(records, key=lambda row: str(row[:3]))})
-
-    return await run_blocking("nl2agent-prompt-binding-revision", read, lane="control-io", owner=__name__)
+def binding_revision(facts, tools, skills):
+    # Only the digest is retained server-side; private configuration never enters model/card data.
+    records = [
+        ["tool", row.get("tool_instance_id"), row.get("tool_id"), row.get("params")]
+        for row in tools
+    ] + [
+        ["skill", row.get("skill_instance_id"), row.get("skill_id"), row.get("config_values"), row.get("config_schemas")]
+        for row in skills
+    ]
+    return revision({"facts": facts, "instances": sorted(records, key=lambda row: str(row[:3]))})
 
 
 async def snapshot(scope):
@@ -59,8 +51,9 @@ async def snapshot(scope):
 
     state = await read_generation_state(
         agent_id=scope.agent_id, tenant_id=scope.tenant_id, user_id=scope.user_id,
+        include_binding_revision=True,
     )
-    return {"prompt": state["draft_fields"].get("prompt"), "bindings": await _bindings(scope, state["bound_resources"])}
+    return {"prompt": state["draft_fields"].get("prompt"), "bindings": state["binding_revision"]}
 
 
 async def begin_run(scope):
@@ -71,7 +64,7 @@ async def begin_run(scope):
 
 async def refresh_basis(scope, state, *, complete_generation=False):
     """An explicit context read establishes the latest facts used for generation."""
-    basis = {"prompt": state["draft_fields"].get("prompt"), "bindings": await _bindings(scope, state["bound_resources"])}
+    basis = {"prompt": state["draft_fields"].get("prompt"), "bindings": state["binding_revision"]}
     pending = await read_resource_state(_key(scope))
     if (pending and pending.get("conversation_id") == scope.conversation_id
             and pending.get("status") == "pending"):

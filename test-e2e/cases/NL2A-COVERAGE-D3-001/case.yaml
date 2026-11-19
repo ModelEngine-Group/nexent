@@ -84,6 +84,12 @@ case:
     expected: Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once
       per requirement. Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully
       rejected results stay uncovered without another search.
+  - order: 12
+    action: Discover compact positive image-generation and train-route queries with complete matching tools and unrelated
+      image-analysis or email tools, and discover native knowledge-search capability for an event-material request,
+      using the real HTTP/MCP/Redis flow without embeddings.
+    expected: Only complete capability matches reach model verification; shared name fragments and unrelated declarations
+      are excluded before verification. The accepted card retains the original query and no draft bindings are written.
   expected_results:
   - Coverage is based on complete checked candidate sets and current evidence.
   - Card actions are authorized, versioned and isolated to their Agent and conversation.
@@ -104,6 +110,8 @@ case:
   - Threshold failures do not enter verification, ties never expand Top3, and hybrid duplicates are checked once per requirement.
     Missing or inconsistent assessments fail; all qualified recalled alternatives remain. Empty or fully rejected results
     stay uncovered without another search.
+  - Complete capability matches reach verification while wrong-action partial matches are excluded before model checks;
+    original queries and draft bindings are preserved.
   forbidden_side_effects:
   - Candidate discovery and returning to clarification never create a resource or modify the draft.
   integration_boundary:
@@ -187,13 +195,16 @@ case:
     - 1
   - id: AC-BILINGUAL-RECALL
     description: Opposite-language tools reach verification, unrelated candidates can be rejected, and requirement edits prepare
-      fresh expressions without changing original text or draft state.
+      fresh expressions without changing original text or draft state. Compact positive expressions exclude wrong-action
+      partial lexical matches before verification without a generic-word list.
     steps:
     - 6
+    - 12
     expected_results:
     - 1
     - 2
     - 6
+    - 12
     forbidden_side_effects:
     - 1
   - id: AC-SEARCH-ALTERNATIVES

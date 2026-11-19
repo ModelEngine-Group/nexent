@@ -50,10 +50,10 @@ def database(monkeypatch):
         statements.append(sql) if sql.lstrip().upper().startswith("SELECT") else None
     ))
 
-    def insert(model_name, **values):
+    def insert(table_name, **values):
         values.setdefault("delete_flag", "N")
         with factory.begin() as session:
-            session.add(classes[model_name](**values))
+            session.add(classes[table_name](**values))
 
     yield insert, statements
     mappings.dispose()
@@ -202,3 +202,46 @@ def test_capacity_projection_preserves_values_scope_and_order_without_credential
     assert rows == [{key: row[key] for key in rows[0]} for row in all_rows if row["model_type"] in {"llm", "vlm"}]
     assert len(statements) == 1
     assert all("api_key" not in row and "extra_params" not in row for row in rows)
+
+
+@pytest.mark.parametrize("entry", [{"temperature": 0}, {"parameter_values": {"temperature": 0}}, {}])
+def test_model_batch_preserves_saved_profile_for_agent_overrides(database, entry):
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+    from test.backend.services.test_model_outlet_migration_service import build, row
+
+    insert, statements = database
+    stored = encode_resolved_model_profile(build(row()), registered_references=model_service_references())
+    insert("ModelRecord", **stored, api_key="private", http_headers={"Authorization": "private"},
+           model_appid="private", access_token="private")
+    agent = {"agent_id": 8, "model_ids": [42], "model_params_override": {"42": entry}}
+    expected = read.project_agent_models(agent, "tenant")
+    statements.clear()
+    batch = model.get_model_records_by_ids([42, 999])
+    assert set(batch) == {42}
+    assert len(statements) == 1
+    selected = statements[0].split("FROM")[0]
+    for credential in ("api_key", "http_headers", "model_appid", "access_token"):
+        assert credential not in batch[42]
+        assert credential not in selected
+    statements.clear()
+    context = read.AgentListReadContext(batch, {}, {}, "tenant")
+    actual = read.project_agent_models(agent, "tenant", batch, read_context=context)
+    assert actual == expected
+    assert actual.fields["model_params_override"]["42"]["parameter_values"] == (
+        {"temperature": 0} if entry else {}
+    )
+    assert statements == []
+    assert agent["model_params_override"] == {"42": entry}
+    assert model.get_model_records_by_ids([]) == {}
+    assert statements == []
+
+
+def test_model_batch_does_not_hide_invalid_saved_profiles(database):
+    from nexent.core.model_service.profiles.outlet_storage import ProfileStorageError
+
+    insert, _ = database
+    insert("ModelRecord", model_id=42, tenant_id="tenant", model_type="llm", profile_schema_version=1)
+    agent = {"model_ids": [42], "model_params_override": {"42": {}}}
+    with pytest.raises(ProfileStorageError, match="^PROFILE_STORAGE_INVALID$"):
+        read.project_agent_models(agent, "tenant", model.get_model_records_by_ids([42]))

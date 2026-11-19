@@ -107,7 +107,8 @@ def _rank(
     search_query: str | None = None, minimum_score: float = legacy.MINIMUM_RESOURCE_SCORE,
     search_queries: dict[str, str] | None = None,
 ) -> list[dict]:
-    routes = dict.fromkeys([query, search_query, *(search_queries or {}).values()])
+    # Prepared capability phrases own recall; the full request stays for verification.
+    routes = dict.fromkeys(list(search_queries.values()) if search_queries else [search_query or query])
     selected: set[str] = set()
     best: dict[str, tuple[float, dict]] = {}
     catalog = list({item["candidate_ref"]: item for item in catalog}.values())
@@ -210,7 +211,9 @@ def _batch_result(state: ResourceState) -> dict:
     }
 
 
-async def _authorized_batch_result(scope: ResourceScope, state: ResourceState) -> dict:
+async def _authorized_batch_result(
+    scope: ResourceScope, state: ResourceState, *, catalogs: dict[str, list[dict]] | None = None,
+) -> dict:
     """Cached batches must pass current source authorization before disclosure."""
     result = _batch_result(state)
     rows = [item for row in result["requirements"]
@@ -220,11 +223,18 @@ async def _authorized_batch_result(scope: ResourceScope, state: ResourceState) -
     if not rows:
         return result
     identity = {"tenant_id": scope.tenant_id, "user_id": scope.user_id}
+    # Reuse only source reads from this call; callers must not retain catalogs across stages.
+    if catalogs is None:
+        catalogs = {}
     actual = []
     if any(row["capability_evidence"] == "installed_declaration" for row in rows):
-        actual.extend(await legacy._load_installed_resource_catalog(**identity))
+        if "installed" not in catalogs:
+            catalogs["installed"] = await legacy._load_installed_resource_catalog(**identity)
+        actual.extend(catalogs["installed"])
     if any(row["capability_evidence"] == "repository_declaration" for row in rows):
-        actual.extend(await legacy._load_internal_uninstalled_resource_catalog(**identity))
+        if "installable" not in catalogs:
+            catalogs["installable"] = await legacy._load_internal_uninstalled_resource_catalog(**identity)
+        actual.extend(catalogs["installable"])
     latest = {row["candidate_ref"]: row for row in actual}
     revisions = {}
     for row in state["requirements"].values():
@@ -422,7 +432,9 @@ async def discover(
         updated = {**current, "requirements": {**current["requirements"], **ranked}}
         return {**updated, "batch": _next_batch(updated)}
 
-    result = await _authorized_batch_result(scope, await update_resource_state(scope, store))
+    result = await _authorized_batch_result(scope, await update_resource_state(scope, store), catalogs={
+        "installed": current_installed, "installable": current_installable,
+    })
     await _progress(publisher, "verifying_capabilities")
     return result
 
@@ -488,11 +500,14 @@ async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationC
         if item["candidate_ref"] in refs
     }
     identity = {"tenant_id": scope.tenant_id, "user_id": scope.user_id}
+    catalogs = {}
     actual = []
     if any(item["capability_evidence"] == "installed_declaration" for item in selected.values()):
-        actual.extend(await legacy._load_installed_resource_catalog(**identity))
+        catalogs["installed"] = await legacy._load_installed_resource_catalog(**identity)
+        actual.extend(catalogs["installed"])
     if any(item["capability_evidence"] == "repository_declaration" for item in selected.values()):
-        actual.extend(await legacy._load_internal_uninstalled_resource_catalog(**identity))
+        catalogs["installable"] = await legacy._load_internal_uninstalled_resource_catalog(**identity)
+        actual.extend(catalogs["installable"])
     latest = {item["candidate_ref"]: item for item in actual}
     if any(
         ref not in latest or _candidate(latest[ref], old["retrieval_score"]) != old
@@ -535,7 +550,7 @@ async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationC
                    "submitted_batches": {**state.get("submitted_batches", {}), batch_id: signature}}
         return {**updated, "batch": _next_batch(updated)}
 
-    return await _authorized_batch_result(scope, await update_resource_state(scope, store))
+    return await _authorized_batch_result(scope, await update_resource_state(scope, store), catalogs=catalogs)
 
 
 async def _visible_repository_mcps(scope: ResourceScope, refs: set[str]) -> dict[str, list[dict]]:
@@ -618,7 +633,8 @@ async def show_card(scope: ResourceScope) -> dict | None:
     state = require_current_run(await read_resource_state(scope), scope)
     if state["batch"] or any("accepted" not in row for row in state["requirements"].values()):
         raise ResourceStateError("verification_incomplete")
-    await _authorized_batch_result(scope, state)
+    catalogs = {}
+    await _authorized_batch_result(scope, state, catalogs=catalogs)
     rows = coverage_rows(state)
     if not rows and state["purpose"] != "recommend":
         return None
@@ -660,6 +676,7 @@ async def show_card(scope: ResourceScope) -> dict | None:
                 agent_id=scope.agent_id, candidates=list(candidates.values()), recommended_refs=list(recommended),
                 tenant_id=scope.tenant_id, user_id=scope.user_id,
                 include_knowledge_recommendations=False,
+                catalog=catalogs["installed"],
             )
             resources = [
                 {

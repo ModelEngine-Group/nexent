@@ -131,9 +131,11 @@ async def show_resource_card() -> ToolResult:
 async def _read_generation_context(scope: ResourceScope, goal: str = "prompt") -> dict:
     state = await read_generation_state(
         agent_id=scope.agent_id, tenant_id=scope.tenant_id, user_id=scope.user_id,
+        include_binding_revision=True,
     )
     from services.nl2agent_prompt_service import read_pending, refresh_basis
     await refresh_basis(scope, state, complete_generation=goal == "complete")
+    state.pop("binding_revision")
     pending = await read_pending(scope)
     if pending:
         state["pending_prompt"] = pending

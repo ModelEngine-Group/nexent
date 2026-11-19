@@ -177,12 +177,13 @@ async def test_failed_save_retries_and_full_generation_resumes_only_after_save(f
 async def test_dialogue_refinement_reads_pending_text_and_retains_original_full_task(fixture, mocker):
     scope, draft, facts, writer = fixture
     mocker.patch.object(prompts, "read_continuation", new=AsyncMock(return_value=True))
-    mocker.patch.object(prompts, "_bindings", new=AsyncMock(return_value=prompts.revision(facts)))
     await prompts.begin_run(scope)
     card = await prompts.propose(scope, "Full proposal to refine")
     next_scope = ResourceScope("tenant", "user", 42, "7", "next-run")
     assert (await prompts.read_pending(next_scope))["proposed_prompt"] == card["proposed_prompt"]
-    await prompts.refresh_basis(next_scope, {"draft_fields": draft, "bound_resources": facts})
+    await prompts.refresh_basis(next_scope, {
+        "draft_fields": draft, "bound_resources": facts, "binding_revision": prompts.revision(facts),
+    })
     newer = await prompts.propose(next_scope, "Refined full proposal")
     assert newer["card_id"] != card["card_id"]
     writer.assert_not_called()

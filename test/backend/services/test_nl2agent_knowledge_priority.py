@@ -67,6 +67,7 @@ def test_native_bonus_is_small_and_uses_resource_identity(setup_policy, monkeypa
     requirement = ResourceRequirement(requirement_id="r", query="retrieve documents")
     monkeypatch.setattr(legacy, "_resource_similarity",
                         lambda query, value: .8 if value == "retrieve documents" else .2)
+    monkeypatch.setattr(legacy, "_resource_name_similarity", lambda query, value: .2)
     native = tool("tool:2", "knowledge_base_search", "retrieve documents")
     alternative = {**native, "name": "other", "names": ["other"]}
     native_score = legacy._score_resource_requirement(requirement, native)

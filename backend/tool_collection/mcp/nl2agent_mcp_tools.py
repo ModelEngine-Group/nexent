@@ -91,7 +91,9 @@ NL2A_MCP_LEGACY_TOOL_NAMES += (*RESOURCE_TOOL_LOCAL_NAMES, READ_CONFIGURATION_LO
 NL2A_MCP_LOCAL_TOOL_NAMES += (*RESOURCE_TOOL_LOCAL_NAMES, READ_CONFIGURATION_LOCAL_NAME,
                              SAVE_CONFIGURATION_LOCAL_NAME, READ_GENERATION_CONTEXT_LOCAL_NAME)
 DISCOVER_REQUIREMENTS_DESCRIPTION = (
-    "Find safe candidates for each requirement's query and optional short search_query. "
+    "Find safe candidates using each requirement's prepared capability queries. "
+    "Prepare bilingual search_queries from reusable resource capabilities, not runtime search content or business topics. "
+    "Keep requested content in query and preserve explicitly required tools, platforms and data sources. "
     "Omit requirements to resume accepted requirements."
 )
 VERIFY_REQUIREMENTS_DESCRIPTION = (

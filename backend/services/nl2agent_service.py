@@ -453,15 +453,60 @@ def _resource_text_variants(value: Any) -> tuple[str, str]:
 
 
 def _resource_similarity(left: Any, right: Any) -> float:
+    """Measure how much of the query a declaration supports, without a word list."""
     left_normalized, left_compact = _resource_text_variants(left)
     right_normalized, right_compact = _resource_text_variants(right)
     if not left_normalized or not right_normalized:
         return 0.0
-    return max(
-        fuzz.ratio(left_compact, right_compact),
-        fuzz.WRatio(left_normalized, right_normalized),
-        fuzz.token_set_ratio(left_normalized, right_normalized),
-    ) / 100
+    has_han = bool(re.search(r"[\u3400-\u9fff]", left_normalized))
+    if has_han and not re.search(r"[a-z0-9]", left_normalized):
+        # Unsegmented text needs whole-query alignment rather than word subsets.
+        alignment = fuzz.partial_ratio(left_compact, right_compact) / 100
+        for phrase in re.split(r"[。；;：:\n.!?]", _normalize_search_text(right)):
+            _, compact = _resource_text_variants(phrase)
+            if compact:
+                alignment = max(alignment, fuzz.ratio(left_compact, compact) / 100)
+        query_chars = set(re.findall(r"[\u3400-\u9fff]", left_normalized))
+        document_chars = set(re.findall(r"[\u3400-\u9fff]", right_normalized))
+        coverage = len(query_chars & document_chars) / len(query_chars)
+        return max(coverage ** 2, alignment ** 1.5 * min(1.0, len(right_compact) / len(left_compact)))
+    pattern = r"[a-z0-9]+|[\u3400-\u9fff]" if has_han else r"[^\W_]+"
+    query_words = set(re.findall(pattern, left_normalized))
+    document_words = set(re.findall(pattern, right_normalized))
+    if not query_words or not document_words:
+        return 0.0
+
+    def matches(word: str) -> bool:
+        return any(word == other or (
+            min(len(word), len(other)) >= 3 and (
+                word.startswith(other) or other.startswith(word)
+                or fuzz.ratio(word, other) >= 85
+            )
+        ) for other in document_words)
+
+    if has_han:
+        coverage = sum(len(word) for word in query_words if matches(word)) / sum(map(len, query_words))
+    else:
+        coverage = sum(matches(word) for word in query_words) / len(query_words)
+    # Missing actions count as much as long object names in word-based queries.
+    return coverage ** 2
+
+
+def _resource_name_similarity(query: Any, name: Any) -> float:
+    """Accept complete identifier variants and small typos, not token subsets."""
+    query_normalized, query_compact = _resource_text_variants(query)
+    name_normalized, name_compact = _resource_text_variants(name)
+    if not query_compact or not name_compact:
+        return 0.0
+    score = fuzz.ratio(query_compact, name_compact) / 100
+    if query_compact == name_compact:
+        return 1.0
+    query_parts, name_parts = query_normalized.split(), name_normalized.split()
+    complete = len(query_parts) == len(name_parts) and all(
+        word == other or (min(len(word), len(other)) >= 4 and fuzz.ratio(word, other) >= 80)
+        for word, other in zip(query_parts, name_parts)
+    )
+    return score if complete and score >= .85 else min(.49, score)
 
 
 def _flatten_resource_text(value: Any, *, limit: int = 4000) -> list[str]:
@@ -658,10 +703,8 @@ def _score_resource_requirement(
     term_scores: list[float] = []
     for term in terms:
         term_scores.append(max(
-            max((_resource_similarity(term, value) for value in resource["names"]), default=0) * 1.00,
-            max((_resource_similarity(term, value) for value in resource["labels"]), default=0) * 0.95,
-            max((_resource_similarity(term, value) for value in resource["descriptions"]), default=0) * 0.90,
-            max((_resource_similarity(term, value) for value in resource["interfaces"]), default=0) * 0.80,
+            max((_resource_name_similarity(term, value) for value in resource["names"]), default=0),
+            _resource_similarity(term, "\n".join(resource["descriptions"])) * 0.95,
         ))
     top_scores = sorted(term_scores, reverse=True)[:3]
     capability_score = (
@@ -675,12 +718,16 @@ def _score_resource_requirement(
     )
     name_score = max(
         (
-            _resource_similarity(term, name)
+            _resource_name_similarity(term, name)
             for term in name_terms
             for name in resource["names"]
         ),
         default=0,
     )
+    if requirement.resource_name_hint:
+        _, hint = _resource_text_variants(requirement.resource_name_hint)
+        if hint and any(hint in _resource_text_variants(name)[1] for name in resource["names"]):
+            name_score = 1.0
     installed_bonus = 0.03 if resource.get("installed") else 0.0
     quality_bonus = 0.02 * max(
         0.0, min(1.0, float(resource.get("quality") or 0.0))
@@ -689,16 +736,16 @@ def _score_resource_requirement(
         score = (
             0.65 * capability_score
             + 0.30 * name_score
-            + installed_bonus
-            + quality_bonus
         )
     else:
         score = (
             0.82 * capability_score
             + 0.13 * name_score
-            + installed_bonus
-            + quality_bonus
         )
+    # Ranking preferences cannot turn weak relevance into a qualified match.
+    if score < MINIMUM_RESOURCE_SCORE:
+        return score
+    score += installed_bonus + quality_bonus
     # Explicit resource hints retain the existing name-matching precedence.
     if not requirement.resource_name_hint and MANAGED_KNOWLEDGE_NAMES.intersection(resource["names"]):
         score += 0.02
@@ -1202,13 +1249,16 @@ async def recommend_installed_resources_impl(
     tenant_id: str,
     user_id: str,
     include_knowledge_recommendations: bool = True,
+    catalog: list[dict[str, Any]] | None = None,
 ) -> RecommendResourcesOutput:
     """Resolve model-selected refs into current tenant-owned card data."""
 
-    catalog = await _load_installed_resource_catalog(
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    # Internal callers may supply the catalog just authorized in their current stage.
+    if catalog is None:
+        catalog = await _load_installed_resource_catalog(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
     by_ref = {item["candidate_ref"]: item for item in catalog}
     bound_instances = query_all_enabled_tool_instances(
         agent_id=agent_id, tenant_id=tenant_id, version_no=0
@@ -1431,7 +1481,8 @@ async def _load_verified_nl2agent_state(
     agent_id: int,
     tenant_id: str,
     user_id: str,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    include_binding_revision: bool = False,
+) -> tuple[dict[str, Any], list[dict[str, Any]]] | tuple[dict[str, Any], list[dict[str, Any]], str]:
     draft = require_agent_draft_edit(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -1443,11 +1494,17 @@ async def _load_verified_nl2agent_state(
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
     facts: list[dict[str, Any]] = []
-    for instance in query_all_enabled_tool_instances(
+    tools = query_all_enabled_tool_instances(
         agent_id=agent_id,
         tenant_id=tenant_id,
         version_no=0,
-    ):
+    )
+    skills = query_enabled_skill_instances(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=0,
+    )
+    for instance in tools:
         tool_id = instance.get("tool_id")
         resource = by_ref.get(f"tool:{tool_id}")
         if resource is None:
@@ -1462,11 +1519,7 @@ async def _load_verified_nl2agent_state(
             "description": resource["description"],
             "runtime_inputs": _runtime_input_contract(resource, set(params) if isinstance(params, dict) else set()),
         })
-    for instance in query_enabled_skill_instances(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        version_no=0,
-    ):
+    for instance in skills:
         skill_id = instance.get("skill_id")
         resource = by_ref.get(f"skill:{skill_id}")
         if resource is None:
@@ -1481,6 +1534,10 @@ async def _load_verified_nl2agent_state(
             "runtime_inputs": [],
         })
     facts.sort(key=lambda item: (item["resource_type"], item["resource_id"]))
+    if include_binding_revision:
+        from services.nl2agent_prompt_service import binding_revision
+
+        return draft, facts, binding_revision(facts, tools, skills)
     return draft, facts
 
 
@@ -1490,11 +1547,18 @@ async def read_generation_state(
     tenant_id: str,
     user_id: str,
     include_bindings: bool = True,
+    include_binding_revision: bool = False,
 ) -> dict:
     if include_bindings:
-        draft, facts = await _load_verified_nl2agent_state(
-            agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
-        )
+        if include_binding_revision:
+            draft, facts, bindings = await _load_verified_nl2agent_state(
+                agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+                include_binding_revision=True,
+            )
+        else:
+            draft, facts = await _load_verified_nl2agent_state(
+                agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+            )
     else:
         draft = require_agent_draft_edit(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
         facts = None
@@ -1515,6 +1579,7 @@ async def read_generation_state(
             else {}
         ),
         **({"bound_resources": facts} if facts is not None else {}),
+        **({"binding_revision": bindings} if include_bindings and include_binding_revision else {}),
     }
 
 
