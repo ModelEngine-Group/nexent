@@ -782,11 +782,8 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         # instead of collapsing into a generic 500.
         raise ConversationNotFoundError(f"Conversation {conversation_id} does not exist or has been deleted")
 
-        _request_trajectory_cleanup([conversation_id], user_id)
-        return True
-    except Exception as e:
-        logging.error(f"Failed to delete conversation: {str(e)}")
-        raise Exception(str(e))
+    _request_trajectory_cleanup([conversation_id], user_id)
+    return True
 
 
 def delete_conversations_batch_service(conversation_ids: List[int], user_id: str) -> Dict[str, Any]:

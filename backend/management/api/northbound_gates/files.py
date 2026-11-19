@@ -71,7 +71,7 @@ async def nb_get_storage_file(
     # time and stubbed test apps keep working.
     from management.services.file.access import check_file_access
     from management.services.file.service import get_file_stream_impl, get_file_url_impl
-    from management.utils.file_http import _build_object_etag, build_content_disposition_header
+    from management.api.file.http import _build_object_etag, build_content_disposition_header
 
     if not check_file_access(object_name, ctx.user_id, ctx.tenant_id):
         return _error_response(

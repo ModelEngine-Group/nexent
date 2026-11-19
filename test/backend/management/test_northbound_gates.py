@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from contracts.authentication import AuthenticatedIdentity, CredentialKind
-from management.utils.app_factory import create_app
+from backend.http.server.app_factory import create_app
 
 IDENTITY = AuthenticatedIdentity("user-1", "tenant-1", kind=CredentialKind.API_KEY, token_id=42)
 
