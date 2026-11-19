@@ -557,10 +557,10 @@ class TestPersonalCapacityAPI:
     """Integration tests for personal KB capacity endpoints."""
 
     def test_get_personal_self_capacity_requires_only_authentication(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_self_capacity
     ):
         mock_personal_auth(role="USER", user_id="user-1")
-        mock_quota_service.get_personal_self_capacity.return_value = {
+        mock_personal_self_capacity.return_value = {
             "used_bytes": 1024,
             "used_readable": "1.0 KB",
             "quota_bytes": 2048,
@@ -575,15 +575,15 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["used_bytes"] == 1024
-        mock_quota_service.get_personal_self_capacity.assert_called_once_with(
-            "user-1"
+        mock_personal_self_capacity.assert_awaited_once_with(
+            ServicePrincipal('user-1', 'test-tenant')
         )
 
     def test_get_personal_self_capacity_maps_unavailable_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_self_capacity
     ):
         mock_personal_auth(role="USER", user_id="user-1")
-        mock_quota_service.get_personal_self_capacity.side_effect = (
+        mock_personal_self_capacity.side_effect = (
             AppException(ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE, "es down")
         )
 
@@ -1078,10 +1078,10 @@ class TestPersonalCapacityAPI:
 
 
     def test_get_personal_self_capacity_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_self_capacity
     ):
         mock_personal_auth(role="USER", user_id="user-1")
-        mock_quota_service.get_personal_self_capacity.side_effect = RuntimeError(
+        mock_personal_self_capacity.side_effect = RuntimeError(
             "db down"
         )
 
@@ -1145,3 +1145,8 @@ class TestTokenExpiredMapping:
 @pytest.fixture
 def mock_personal_configuration(mocker):
     return mocker.patch.object(quota_app, 'personal_quota_configuration', new_callable=AsyncMock)
+
+
+@pytest.fixture
+def mock_personal_self_capacity(mocker):
+    return mocker.patch.object(quota_app, 'personal_self_capacity', new_callable=AsyncMock)

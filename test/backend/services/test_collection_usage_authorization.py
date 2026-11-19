@@ -141,3 +141,18 @@ def test_revoked_identity_cannot_open_quota_metadata_namespace(quota_metadata, d
     with pytest.raises(ScopeDenied):
         s.invoke([1])
     assert not s.opened and s.closed == [True]
+
+
+def test_datamate_local_collection_usage_only_has_no_model_binding(quota_metadata):
+    s = quota_metadata
+    s.update('cleanse_knowledge', knowledge_sources='datamate')
+    grant = s.invoke([1]).knowledge_bases[0]
+    assert grant.collection == 'kb-one' and grant.embedding_model_id is None
+    assert grant.resource_tenant_id == s.actor.tenant_id
+
+
+def test_unknown_provider_is_not_authorized_as_local_collection(quota_metadata):
+    s = quota_metadata
+    s.update('cleanse_knowledge', knowledge_sources='unknown')
+    with pytest.raises(ScopeDenied):
+        s.invoke([1])

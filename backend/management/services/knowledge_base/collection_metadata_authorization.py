@@ -84,7 +84,9 @@ def authorize_collection_metadata(request, actor, *, context, ports=collection_m
         grants = []
         for key in request.knowledge_ids:
             row = {**rows[key], 'tenant_id': rows[key]['resource_tenant_id']}
-            if row['knowledge_sources'] != 'elasticsearch':
+            if row['knowledge_sources'] != 'elasticsearch' and not (
+                request.view == 'usage' and row['knowledge_sources'] == 'datamate'
+            ):
                 raise ScopeDenied()
             if metadata_permission(row, actor, roles, groups, request.view) is None:
                 raise ScopeDenied()

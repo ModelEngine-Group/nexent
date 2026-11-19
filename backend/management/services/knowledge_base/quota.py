@@ -23,7 +23,6 @@ from management.services.knowledge_base.quota_common import (
     PlatformQuotaConflictError,
     QuotaExceededError,
     Tuple,
-    _bytes_to_readable,
     _gb_to_bytes,
     _is_displayable_tenant_id,
     _mb_to_bytes,
@@ -111,37 +110,6 @@ class QuotaService(
             )
         return result
 
-    def get_personal_self_capacity(self, user_id: str) -> Dict[str, Any]:
-        """Return the current user's PRIVATE KB usage and effective quota."""
-        usage_data = self._get_personal_usage_data(strict=True, user_id=user_id)
-        user_usage = self._aggregate_personal_storage_by_user(
-            usage_data, user_ids={user_id}
-        ).get(user_id, {"total_bytes": 0, "kb_count": 0})
-        quota_bytes, quota_source = self._get_personal_effective_quota(user_id)
-        used_bytes = user_usage["total_bytes"]
-        usage_rate = None
-        if quota_bytes is not None:
-            usage_rate = (
-                100.0
-                if quota_bytes <= 0 and used_bytes > 0
-                else round(used_bytes / quota_bytes * 100, 2)
-                if quota_bytes > 0
-                else 0.0
-            )
-        return {
-            "used_bytes": used_bytes,
-            "used_readable": _bytes_to_readable(used_bytes),
-            "es_physical_bytes": user_usage.get("es_physical_bytes"),
-            "es_physical_readable": _bytes_to_readable(
-                user_usage.get("es_physical_bytes")
-            ),
-            "quota_bytes": quota_bytes,
-            "quota_readable": _bytes_to_readable(quota_bytes),
-            "quota_source": quota_source,
-            "usage_rate": usage_rate,
-            "is_over_quota": quota_bytes is not None and used_bytes > quota_bytes,
-            "kb_count": user_usage["kb_count"],
-        }
 
     def _check_personal_user_quota_from_usage(
         self,

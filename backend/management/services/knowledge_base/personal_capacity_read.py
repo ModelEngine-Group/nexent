@@ -9,7 +9,11 @@ from contracts.errors.exceptions import AppException
 from management.services.knowledge_base.personal_capacity_access import (
     PersonalCapacityAccess,
 )
-from management.services.knowledge_base.quota_authorization import require_quota_scope
+from management.services.knowledge_base.quota_authorization import (
+    quota_identity_roles,
+    require_quota_scope,
+)
+from management.services.knowledge_base.quota_rules import parse_personal_quota
 from nexent.storage.errors import (
     Conflict,
     DeadlineExceeded,
@@ -20,7 +24,7 @@ from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 
 from infrastructure.personal_capacity import personal_capacity_ports
 from infrastructure.rdb.storage_ledger import LEDGER
-from infrastructure.tenant_quota_read import CATALOG
+from infrastructure.tenant_quota_read import CATALOG, CONFIGS
 
 logger = logging.getLogger(__name__)
 _usage_ports = partial(personal_capacity_ports, usage=True)
@@ -31,9 +35,26 @@ class PersonalCapacityReader(PersonalCapacityAccess):
         self.ports = ports
 
     def read(self, tenant, actor, subject, *, strict=True, context):
+        return self._read(tenant, actor, subject, strict=strict, own=False, context=context)
+
+    def authorize_self(self, actor, *, context):
+        context.remaining()
+        with self.ports(actor, context=context, writable=False) as (identity, _, _):
+            quota_identity_roles(identity, actor, context=context)
+
+    def read_self(self, actor, *, context):
+        return self._read(actor.tenant_id, actor, actor.user_id, strict=True, own=True, context=context)
+
+    def _read(self, tenant, actor, subject, *, strict, own, context):
         context.remaining()
         with self.ports(actor, context=context, writable=False) as (identity, permissions, open_records):
-            self._authorize(identity, permissions, actor, tenant, True, context)
+            def authorize():
+                if own:
+                    quota_identity_roles(identity, actor, context=context)
+                else:
+                    self._authorize(identity, permissions, actor, tenant, True, context)
+
+            authorize()
             records = open_records(tenant)
             require_quota_scope(records, actor, tenant)
             rows, cursor, seen = [], None, set()
@@ -69,6 +90,17 @@ class PersonalCapacityReader(PersonalCapacityAccess):
             # Keep legacy index-keyed projection when historical KB aliases collide.
             by_index = {row['index_name']: by_knowledge.get(row['knowledge_id'], 0) for row in rows if row['index_name']}
             total = sum(by_index[row['index_name']] for row in rows if row['index_name'])
-            self._authorize(identity, permissions, actor, tenant, True, context)
+            result = {'knowledge_bases': rows, 'source_bytes_by_kb': by_knowledge, 'personal_bytes': total}
+            if own:
+                value, source = None, 'unlimited'
+                for key, kind in [('PERSONAL_KB_QUOTA_' + subject, 'individual'), ('PERSONAL_KB_QUOTA_DEFAULT', 'default')]:
+                    page = records.query(CONFIGS, RecordQuery(where=Comparison('config_key', 'eq', key)),
+                                         PageRequest(limit=1), context=context)
+                    value = parse_personal_quota(page.items[0]['config_value']) if page.items else None
+                    if value is not None:
+                        source = kind
+                        break
+                result.update(quota_bytes=value, quota_source=source)
+            authorize()
             context.remaining()
-            return {'knowledge_bases': rows, 'source_bytes_by_kb': by_knowledge, 'personal_bytes': total}
+            return result

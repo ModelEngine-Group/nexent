@@ -784,45 +784,6 @@ class TestPersonalKbCapacity:
                 )
 
 
-    def test_get_personal_self_capacity(self, quota_service, mock_knowledge_db):
-        kbs = [
-            {
-                "knowledge_id": 1,
-                "index_name": "kb-a",
-                "created_by": "user-1",
-            },
-            {
-                "knowledge_id": 2,
-                "index_name": "kb-b",
-                "created_by": "user-2",
-            },
-        ]
-        mock_vdb = self._mock_personal_usage(
-            mock_knowledge_db, kbs, {"kb-a": "4 GB", "kb-b": "2 GB"}
-        )
-
-        with patch_import_context(
-            "management.services.knowledge_base.service.get_vector_db_core",
-            return_value=mock_vdb,
-        ), patch.object(
-            quota_service,
-            "_get_personal_effective_quota",
-            return_value=(5 * GB, "individual"),
-        ):
-            result = quota_service.get_personal_self_capacity("user-1")
-
-        assert result["used_bytes"] == 4 * GB
-        assert result["quota_bytes"] == 5 * GB
-        assert result["quota_source"] == "individual"
-        assert result["usage_rate"] == 80.0
-        assert result["is_over_quota"] is False
-        assert result["kb_count"] == 1
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_creator"
-        ].assert_called_once_with("test-tenant-id", "user-1")
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].assert_not_called()
 
     def test_check_quota_private_kb_quota_blocks_upload(
         self, quota_service, mock_knowledge_db
@@ -1046,24 +1007,6 @@ def test_personal_effective_quota_map_accepts_preloaded_default(
     )
 
 
-def test_get_personal_self_capacity_without_quota_has_no_rate(
-    quota_service, mock_knowledge_db
-):
-    mock_knowledge_db["get_private_knowledge_info_by_creator"].return_value = []
-    with patch.object(
-        quota_service,
-        "_get_kb_storage_stats",
-        return_value={"stats": {}, "details": {}, "total_bytes": 0},
-    ), patch.object(
-        quota_service,
-        "_get_personal_effective_quota",
-        return_value=(None, "unlimited"),
-    ):
-        result = quota_service.get_personal_self_capacity("user-1")
-
-    assert result["quota_source"] == "unlimited"
-    assert result["usage_rate"] is None
-    assert result["is_over_quota"] is False
 
 
 def test_get_personal_kb_details_returns_sorted_paged_storage_details(quota_service):

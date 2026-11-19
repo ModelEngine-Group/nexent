@@ -26,6 +26,7 @@ from management.services.knowledge_base.inventory import (
     knowledge_listing_operation,
     list_knowledge_indices,
 )
+from management.services.knowledge_base.personal_capacity import personal_self_capacity
 from management.services.knowledge_base.personal_capacity_access import (
     PersonalQuotaDenied,
 )
@@ -464,18 +465,22 @@ async def delete_tenant_hard_quota(
 
 
 @personal_quota_router.get("/me")
-def get_personal_self_capacity(
+async def get_personal_self_capacity(
     current_user: CurrentUser = Depends(authenticate),
 ):
     """Return the current user's own personal KB capacity."""
     try:
-        service = QuotaService(current_user.tenant_id, current_user.user_id)
-        data = service.get_personal_self_capacity(current_user.user_id)
+        data = await personal_self_capacity(ServicePrincipal(current_user.user_id, current_user.tenant_id))
         return JSONResponse(status_code=HTTPStatus.OK, content=data)
     except AppException:
         raise
     except HTTPException:
         raise
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot access personal KB capacity") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Error getting personal KB capacity: {exc!s}") from None
     except Exception as exc:
         logger.exception("Error getting current user's personal KB capacity")
         raise HTTPException(

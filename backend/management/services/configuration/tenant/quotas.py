@@ -26,7 +26,6 @@ from management.services.knowledge_base.quota_common import (
     _personal_quota_key,
     _usage_cache,
     bytes_to_readable,
-    delete_config_by_tenant_config_id,
     get_committed_bytes_by_kb,
     get_committed_source_bytes_by_paths,
     get_configs_by_tenant_id_and_keys,
@@ -36,11 +35,9 @@ from management.services.knowledge_base.quota_common import (
     get_single_config_info,
     get_tenant_committed_source_bytes,
     get_user_email_map,
-    insert_config,
     logger,
     logging,
     time,
-    update_config_by_tenant_config_id,
     update_knowledge_record,
 )
 
@@ -51,33 +48,7 @@ class TenantQuotaPolicy:
         record = get_single_config_info(self.tenant_id, key)
         return record.get("config_value") if record else None
 
-    def _set_tenant_config(
-        self, key: str, value: Any, value_type: str = "single"
-    ) -> bool:
-        """Upsert a tenant config key. Updates existing row or inserts new."""
-        existing = get_single_config_info(self.tenant_id, key)
-        if existing and existing.get("tenant_config_id"):
-            return update_config_by_tenant_config_id(
-                existing["tenant_config_id"], str(value)
-            )
-        else:
-            return insert_config(
-                {
-                    "tenant_id": self.tenant_id,
-                    "user_id": self.user_id,
-                    "config_key": key,
-                    "config_value": str(value),
-                    "value_type": value_type,
-                }
-            )
 
-    def _delete_tenant_config(self, key: str) -> bool:
-        """Soft-delete a tenant config key."""
-        existing = get_single_config_info(self.tenant_id, key)
-        tenant_config_id = existing.get("tenant_config_id") if existing else None
-        if tenant_config_id is None:
-            return True
-        return delete_config_by_tenant_config_id(tenant_config_id)
 
     def get_hard_limit(self) -> Dict[str, Any]:
         """
