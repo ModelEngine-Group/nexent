@@ -65,7 +65,7 @@ def test_ac004_explicit_zero_survives_other_sampling_clear():
 
 
 @pytest.mark.parametrize("key,value", [("temperature", -1), ("temperature", 2.1),
-    ("top_p", 1.1), ("top_p", True), ("temperature", "0.7")])
+    ("top_p", 0), ("top_p", 1.1), ("top_p", True), ("temperature", "0.7")])
 def test_ac004_nonempty_values_keep_the_saved_domain(key, value):
     with pytest.raises(ModelOutletValidationError):
         service.apply_outlet_patch(make_profile(), ModelOutletPatchRequest(

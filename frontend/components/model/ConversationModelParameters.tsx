@@ -6,7 +6,6 @@ import {
   parameterIsActive,
   MODEL_TOKEN_LIMIT_KEYS,
 } from "@/lib/modelParameterLayers";
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Form, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
@@ -31,6 +30,18 @@ import {
 import { patchModelDraft, readModelDraft } from "@/lib/conversationModelDrafts";
 import type { ConversationModelPreferenceView } from "@/types/modelProfile";
 import { ModelParameterField } from "./ModelParameterField";
+import { modelPreferenceErrorMessage } from "@/lib/modelPreferenceErrors";
+
+function preferenceDefaults(
+  saved: ConversationModelPreferenceView | undefined,
+  conversationId: number | undefined,
+  agentDefaults: Record<string, unknown>
+) {
+  // Saved views already include normalized Agent defaults on the server.
+  return conversationId
+    ? (saved?.defaults ?? {})
+    : { ...saved?.defaults, ...agentDefaults };
+}
 
 function usePreferenceView({
   conversationId,
@@ -60,7 +71,8 @@ function usePreferenceView({
         issues: [],
         output_limit: outlet.profile.capabilities?.context?.output_limit,
         reasoning_status: outlet.profile.capabilities?.reasoning?.status,
-        reasoning_can_disable: outlet.profile.capabilities?.reasoning?.can_disable,
+        reasoning_can_disable:
+          outlet.profile.capabilities?.reasoning?.can_disable,
       } satisfies ConversationModelPreferenceView;
     },
     enabled: Boolean(conversationId || draftScope),
@@ -102,8 +114,7 @@ export function ConversationModelParameterSummary({
   const { query } = usePreferenceView({ conversationId, draftScope, modelId });
   if (!query.data || query.isError || query.data.issues.length) return null;
   const values = {
-    ...query.data.defaults,
-    ...agentDefaults,
+    ...preferenceDefaults(query.data, conversationId, agentDefaults),
     ...query.data.parameter_values,
   };
   if (
@@ -126,7 +137,9 @@ export function ConversationModelParameterSummary({
       ? t(`modelProfile.thinkingLevel.${effort}`, { defaultValue: effort })
       : typeof budget === "number"
         ? `${budget} Token`
-        : undefined;
+        : degree
+          ? t("modelProfile.thinkingModeOption.default")
+          : undefined;
   return text ? (
     <span className="shrink-0 text-muted-foreground">{text}</span>
   ) : null;
@@ -148,7 +161,6 @@ export function ConversationModelParameters({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const client = useQueryClient();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const { query, queryKey } = usePreferenceView({
     conversationId,
     draftScope,
@@ -200,8 +212,7 @@ export function ConversationModelParameters({
       const values: Record<string, unknown> = reset ? {} : { [key]: value };
       if (key === "enable_thinking" && value === true) {
         const effective = {
-          ...query.data!.defaults,
-          ...agentDefaults,
+          ...preferenceDefaults(query.data, conversationId, agentDefaults),
           ...query.data!.parameter_values,
         };
         const mode = detectThinkingMode(query.data!.field_specs, effective);
@@ -224,10 +235,12 @@ export function ConversationModelParameters({
         delete_parameters: reset ? [key] : removed,
       });
     },
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: (error) => {
+      message.error(modelPreferenceErrorMessage(error, t));
+    },
   });
   const saved = query.data;
-  const defaults = { ...saved?.defaults, ...agentDefaults };
+  const defaults = preferenceDefaults(saved, conversationId, agentDefaults);
   const effective = { ...defaults, ...saved?.parameter_values };
   const state = thinkingDisplayState(
     saved?.field_specs ?? [],
@@ -251,6 +264,7 @@ export function ConversationModelParameters({
   const enabled = state.enabled;
   return (
     <div
+      className="shrink-0"
       onKeyDown={(event) => {
         if (event.key === "Enter") event.stopPropagation();
       }}
@@ -270,7 +284,6 @@ export function ConversationModelParameters({
             state.alwaysOn ||
             (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
-            advancedOpen ||
             (!conversationId && !draftScope) ||
             (!thinkingRule && !effortRule) ||
             !!saved?.issues.length
@@ -302,7 +315,7 @@ export function ConversationModelParameters({
               fallbackValues={defaults}
               scope="conversation"
               inModelSelector
-              pending={pending || advancedOpen}
+              pending={pending}
               onChange={(key, value) => quick.mutate({ key, value })}
               resetLabel={t("modelProfile.useInheritedDefault")}
               onReset={(key) => quick.mutate({ key, reset: true })}
@@ -312,7 +325,6 @@ export function ConversationModelParameters({
       </div>
       <ModelParameterPopover
         disabled={pending || (!conversationId && !draftScope)}
-        onOpenChange={setAdvancedOpen}
       >
         {() =>
           query.isPending ? (
@@ -352,7 +364,9 @@ function PreferenceEditor({
       parameter_values: Record<string, unknown>;
       delete_parameters: string[];
     }) => onSave(patch),
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: (error) => {
+      message.error(modelPreferenceErrorMessage(error, t));
+    },
   });
   const update = (key: string, value?: unknown) =>
     save.mutate({
@@ -395,22 +409,10 @@ function PreferenceEditor({
             !rule?.editable || !rule.allowed_scopes.includes("conversation")
           );
         })}
-        bounds={Object.fromEntries(
+        schemas={Object.fromEntries(
           saved.field_specs
             .filter((rule) => samplingKeys.includes(rule.key))
-            .map((rule) => [
-              rule.key,
-              {
-                min:
-                  typeof rule.schema.minimum === "number"
-                    ? rule.schema.minimum
-                    : undefined,
-                max:
-                  typeof rule.schema.maximum === "number"
-                    ? rule.schema.maximum
-                    : undefined,
-              },
-            ])
+            .map((rule) => [rule.key, rule.schema])
         )}
         onChange={(next) =>
           save.mutate({
@@ -467,7 +469,10 @@ function PreferenceEditor({
           />
         ))}
       {save.isError && (
-        <Alert type="error" title={t("modelProfile.preferencesFailed")} />
+        <Alert
+          type="error"
+          title={modelPreferenceErrorMessage(save.error, t)}
+        />
       )}
     </div>
   );

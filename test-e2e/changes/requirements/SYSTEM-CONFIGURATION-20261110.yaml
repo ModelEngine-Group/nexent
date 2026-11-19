@@ -47,6 +47,7 @@ change:
     - test/backend/services/test_remote_mcp_service.py
     - test/backend/services/test_role_assignment.py
     - test/backend/services/test_local_account_cli.py
+    - test/backend/management/test_workbench_migration.py
     - test/sdk/core/tools/test_parallel_executor.py
     - test/sdk/core/model_service/test_agent_model_construction.py
     - test/backend/database/test_group_db.py
@@ -56,6 +57,7 @@ change:
     - test/backend/services/test_shared_creator_runtime.py
     - test/backend/deploy/test_ops_chart.py
     - frontend/tests/component/systemConfiguration.test.tsx
+    - frontend/tests/systemConfigI18n.test.mjs
     - frontend/tests/apiProxyRouting.test.mjs
     behaviors:
     - Validate exactly nineteen typed positive integer, finite positive number and boolean settings without environment fallback.

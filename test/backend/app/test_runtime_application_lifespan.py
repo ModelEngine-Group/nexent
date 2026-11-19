@@ -170,6 +170,12 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
         _module("management.services.agent.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
     )
     shutdown_streams = AsyncMock(return_value=[])
+    shutdown_creators = AsyncMock(return_value=0)
+    monkeypatch.setitem(
+        sys.modules,
+        "management.services.conversation.creator_runtime",
+        _module("management.services.conversation.creator_runtime", shutdown_creator_streams=shutdown_creators),
+    )
     monkeypatch.setitem(
         sys.modules,
         "management.services.agent.execution",
@@ -185,6 +191,13 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     spec = importlib.util.spec_from_file_location("isolated_runtime_application", module_path)
     application = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(application)
+
+    shutdown_order = MagicMock()
+    shutdown_order.attach_mock(shutdown_creators, "creators")
+    shutdown_order.attach_mock(shutdown_streams, "agents")
+    shutdown_order.attach_mock(trajectory_processor.shutdown, "trajectory")
+    shutdown_order.attach_mock(stop_configuration, "configuration")
+    shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
         async with application.runtime_lifespan(None):
@@ -208,9 +221,14 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     scheduler.start.assert_awaited_once_with()
     cleanup.assert_called_once_with()
     scheduler.stop.assert_awaited_once_with()
+    shutdown_creators.assert_awaited_once()
+    assert 0 <= shutdown_creators.await_args.kwargs["timeout"] <= 1
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
+    assert [call[0] for call in shutdown_order.mock_calls] == [
+        "creators", "agents", "trajectory", "configuration", "thread_manager",
+    ]
     clear_default.assert_called_once_with(manager)

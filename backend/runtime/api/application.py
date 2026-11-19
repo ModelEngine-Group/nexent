@@ -112,7 +112,13 @@ async def runtime_lifespan(_app):
             from management.services.agent.execution import (
                 shutdown_agent_stream_tasks,
             )
+            from management.services.conversation.creator_runtime import (
+                shutdown_creator_streams,
+            )
 
+            await shutdown_creator_streams(
+                timeout=max(0, shutdown_deadline - time.monotonic())
+            )
             pending_stream_tasks = await shutdown_agent_stream_tasks(
                 timeout=max(0, shutdown_deadline - time.monotonic())
             )

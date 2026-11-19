@@ -198,7 +198,7 @@ def test_null_sampling_inherits_shared_defaults_and_matches_display_metadata(run
         ({}, (expected_temperature, 1.0)),
         ({"temperature": None, "top_p": None}, (expected_temperature, 1.0)),
         ({"temperature": None, "top_p": 0.4}, (expected_temperature, 0.4)),
-        ({"temperature": 0, "top_p": 0}, (0, 0)),
+        ({"temperature": 0, "top_p": 0.995}, (0, 0.995)),
     ):
         before_wire = len(runtime.provider.wire)
         response = runtime.post(path, workbench=workbench, version_no=0,

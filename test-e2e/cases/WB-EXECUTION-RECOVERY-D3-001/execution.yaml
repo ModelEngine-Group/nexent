@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: WB-EXECUTION-RECOVERY-D3-001
+preparation:
+  families: []
+notes: Owns a unique labelled ephemeral Redis container, client and subscribers; finally closes clients and removes only that container. No shared service or user state is used.
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_execution_checkpoint_replay_and_generation_ownership
+acceptance_bindings:
+  AC-01: [test_execution_checkpoint_replay_and_generation_ownership]
+  AC-02: [test_execution_checkpoint_replay_and_generation_ownership]
