@@ -29,7 +29,6 @@ from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
 from management.db.file.attachment import (
     copy_file,
-    delete_file,
     file_exists,
     generate_object_name,
     get_content_type,
@@ -52,7 +51,6 @@ from management.services.file.upload_context import resolve_upload_context
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
-from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
@@ -532,7 +530,7 @@ async def upload_files_impl(
                     f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")
 
         if storage_context and uploaded_file_paths:
-            from management.services.knowledge_base.storage import (
+            from management.services.file.object_deletion import (
                 compensate_uploaded_objects,
             )
 
@@ -553,11 +551,8 @@ async def upload_files_impl(
                             expected_statuses=("UPLOADING", "UPLOADED"),
                             updated_by=user_id,
                         )
-                compensate_uploaded_objects(
-                    context=storage_context,
-                    object_names=uploaded_file_paths,
-                    updated_by=user_id,
-                )
+                await compensate_uploaded_objects(storage_context, uploaded_file_paths,
+                    ServicePrincipal(user_id, uploader_tenant_id))
                 invalidate_usage_cache(storage_context.tenant_id)
                 raise
     else:
@@ -668,65 +663,6 @@ async def get_file_stream_impl(object_name: str):
     return file_stream, content_type
 
 
-async def delete_file_impl(
-    object_name: str,
-    tenant_id: Optional[str] = None,
-    updated_by: Optional[str] = None,
-):
-    """Delete a storage object and reconcile a tenant-owned KB ledger row."""
-    reference = None
-    ledger_record = None
-    if tenant_id:
-        from management.db.knowledge_base.storage_object import get_storage_object
-        from management.services.knowledge_base.storage import resolve_storage_reference
-
-        reference = resolve_storage_reference(object_name)
-        if reference:
-            is_kb_source_path = reference.object_name.startswith((
-                "knowledge_base/",
-                f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/",
-            ))
-            ledger_record = get_storage_object(
-                tenant_id=tenant_id,
-                bucket_name=reference.bucket_name,
-                object_name=reference.object_name,
-            )
-            if is_kb_source_path and ledger_record is None:
-                raise PermissionError(
-                    "The knowledge-base source object is not owned by the caller's tenant"
-                )
-
-    if reference:
-        result = await run_blocking(
-            "delete-storage-file",
-            delete_file,
-            lane="control-io",
-            owner="config",
-            object_name=reference.object_name,
-            bucket=reference.bucket_name,
-        )
-    else:
-        result = await run_blocking(
-            "delete-storage-file",
-            delete_file,
-            object_name=object_name,
-            lane="control-io",
-            owner="config",
-        )
-    if not result["success"]:
-        raise Exception(
-            f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")
-
-    if ledger_record and reference:
-        from management.services.knowledge_base.storage import release_storage_charge
-
-        release_storage_charge(
-            tenant_id=tenant_id,
-            bucket_name=reference.bucket_name,
-            object_name=reference.object_name,
-            updated_by=updated_by,
-        )
-    return result
 
 
 async def list_files_impl(prefix: str, limit: Optional[int] = None):

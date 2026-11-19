@@ -21,8 +21,8 @@ def check_file_access(
     Check if user has permission to access the file.
 
     Access rules:
-    - knowledge_base/*: All authenticated users can read; write operations
-      resolve the storage ledger and the owning knowledge-base DAC permission
+    - knowledge_base/*: All authenticated users can read; deletion uses
+      the managed object-deletion entry with current KB edit permission
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can read; writes are denied
     - workspace/{user_id}/{run_id}/outputs/*: Only the owner can access
@@ -44,25 +44,9 @@ def check_file_access(
     if is_read:
         return can_read_object(object_name, user_id, caller_tenant_id)
 
-    if object_name.startswith(ASSET_OWNER_ATTACHMENTS_PREFIX):
-        from management.services.knowledge_base.storage import resolve_storage_object_access
-
-        return resolve_storage_object_access(
-            object_name=object_name,
-            user_id=user_id,
-            tenant_id=caller_tenant_id,
-            required_permission=normalized_permission,
-        )
-
-    if object_name.startswith("knowledge_base/"):
-        from management.services.knowledge_base.storage import resolve_storage_object_access
-
-        return resolve_storage_object_access(
-            object_name=object_name,
-            user_id=user_id,
-            tenant_id=caller_tenant_id,
-            required_permission=normalized_permission,
-        )
+    if object_name.startswith((ASSET_OWNER_ATTACHMENTS_PREFIX, "knowledge_base/")):
+        # KB source writes require the managed object-deletion service's live DAC.
+        return False
 
     if object_name.startswith("images_in_attachments/"):
         return False

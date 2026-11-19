@@ -19,7 +19,6 @@ from contracts.errors.exceptions import AppException, FileTooLargeException, Not
 from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.services.file.service import (
     check_file_access,
-    delete_file_impl,
     get_file_stream_impl,
     get_file_url_impl,
     get_preview_stream,
@@ -27,6 +26,7 @@ from management.services.file.service import (
     resolve_preview_file,
     upload_files_impl,
 )
+from management.services.file.object_deletion import delete_file_impl
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
 from management.services.knowledge_base.ingestion import submit_knowledge_files
@@ -443,17 +443,6 @@ async def remove_storage_file(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if not check_file_access(
-            object_name,
-            user_id,
-            tenant_id,
-            required_permission="DELETE",
-        ):
-            logger.warning("[remove_storage_file] Access denied")
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN, detail="You don't have permission to delete this file"
-            )
-
         await delete_file_impl(
             object_name=object_name,
             tenant_id=tenant_id,
@@ -465,6 +454,8 @@ async def remove_storage_file(
     except PermissionError as e:
         logger.warning("[remove_storage_file] Tenant ownership check failed")
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except (TimeoutError, DeadlineExceeded):
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Remove storage file error.") from None
     except Exception:
         logger.exception("Remove storage file error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Remove storage file error.")

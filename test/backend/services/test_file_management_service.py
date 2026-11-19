@@ -6,7 +6,7 @@ without actual file system or MinIO connections.
 All external services and dependencies are mocked to isolate the tests.
 """
 
-from test.backend.management.import_patching import patch_import_context, patch_import_object_context, patch_imports, set_import_attribute
+from test.backend.management.import_patching import patch_import_context, patch_imports, set_import_attribute
 import importlib
 import os
 import sys
@@ -14,6 +14,7 @@ import types
 from contextlib import contextmanager
 from types import SimpleNamespace
 import pytest
+from infrastructure.agentos_identity import ServicePrincipal
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 from pathlib import Path
 from io import BytesIO
@@ -77,15 +78,7 @@ vdb_stub.get_vector_db_core = _stub_get_vector_db_core
 sys.modules['management.services.knowledge_base.service'] = vdb_stub
 setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
-knowledge_storage_stub = types.ModuleType('management.services.knowledge_base.storage')
-knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
-knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
-knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
-knowledge_storage_stub.get_committed_bytes_by_kb = MagicMock(return_value=0)
-knowledge_storage_stub.get_committed_source_bytes_by_paths = MagicMock(return_value=0)
-knowledge_storage_stub.get_tenant_committed_source_bytes = MagicMock(return_value=0)
-sys.modules['management.services.knowledge_base.storage'] = knowledge_storage_stub
-setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
+source_cleanup_stub = AsyncMock()
 
 
 async def _stub_admit_knowledge_uploads(specs, *, actor):
@@ -120,7 +113,6 @@ upload_files_impl = file_management_service.upload_files_impl
 upload_to_minio = file_management_service.upload_to_minio
 get_file_url_impl = file_management_service.get_file_url_impl
 get_file_stream_impl = file_management_service.get_file_stream_impl
-delete_file_impl = file_management_service.delete_file_impl
 list_files_impl = file_management_service.list_files_impl
 
 @pytest.fixture(scope="module", autouse=True)
@@ -166,7 +158,7 @@ def _default_system_configuration(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def reset_knowledge_storage_stub():
+def reset_upload_context_and_cleanup():
     """Keep generic MinIO tests outside KB accounting unless they opt in."""
     file_management_service.invalidate_usage_cache.reset_mock()
     file_management_service.resolve_upload_context.reset_mock(
@@ -174,21 +166,9 @@ def reset_knowledge_storage_stub():
         side_effect=True,
     )
     file_management_service.resolve_upload_context.return_value = None
-    knowledge_storage_stub.commit_uploaded_object.reset_mock(
-        return_value=True,
-        side_effect=True,
-    )
-    knowledge_storage_stub.commit_uploaded_object.return_value = {"storage_object_id": 1}
-    knowledge_storage_stub.compensate_uploaded_objects.reset_mock(
-        return_value=True,
-        side_effect=True,
-    )
-    knowledge_storage_stub.resolve_storage_object_access.reset_mock(
-        return_value=True,
-        side_effect=True,
-    )
-    knowledge_storage_stub.resolve_storage_object_access.return_value = False
-
+    source_cleanup_stub.reset_mock(return_value=True, side_effect=True)
+    with patch_import_context('management.services.file.object_deletion.compensate_uploaded_objects', source_cleanup_stub):
+        yield
 
 class TestUploadFilesImpl:
     """Test cases for upload_files_impl function"""
@@ -816,8 +796,6 @@ class TestUploadFilesImpl:
                         "error": "read failed",
                     },
                 ])), \
-                patch_import_object_context(knowledge_storage_stub, "commit_uploaded_object",
-                             return_value={"storage_object_id": 11}), \
                 patch.dict(sys.modules, {"management.services.file.upload_quota": quota_module}):
             result = await upload_files_impl(
                 destination="minio",
@@ -898,8 +876,7 @@ class TestUploadFilesImpl:
                     [{"success": False, "file_id": "fid-upload", "file_name": "broken.txt", "error": "read failed"}],
                     [{"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}],
                 ])), \
-                patch_import_object_context(knowledge_storage_stub, "commit_uploaded_object", side_effect=RuntimeError("commit failed")), \
-                patch_import_object_context(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
+                patch_import_context("management.services.file.object_deletion.compensate_uploaded_objects", new_callable=AsyncMock) as compensate, \
                 patch.dict(sys.modules, {"management.services.file.upload_quota": quota_module}):
             result = await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1", uploader_tenant_id=context.tenant_id)
             assert transition.call_args_list[0].kwargs["error_code"] == "000402"
@@ -916,7 +893,7 @@ class TestUploadFilesImpl:
                     {"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}
                 ])), \
                 patch.object(FakeQuota, "after", side_effect=RuntimeError("post-write failed")), \
-                patch_import_object_context(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
+                patch_import_context("management.services.file.object_deletion.compensate_uploaded_objects", new_callable=AsyncMock) as compensate, \
                 patch.dict(sys.modules, {"management.services.file.upload_quota": quota_module}):
             with pytest.raises(RuntimeError, match="post-write failed"):
                 await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1", uploader_tenant_id=context.tenant_id)
@@ -924,7 +901,7 @@ class TestUploadFilesImpl:
         assert commit_transition.call_args_list[-1].kwargs["stage"] == "STORAGE_COMMIT"
         assert commit_transition.call_args_list[-1].kwargs["error_code"] == "060107"
         assert commit_transition.call_args_list[-1].kwargs["error_message"] is None
-        compensate.assert_called_once()
+        compensate.assert_awaited_once()
 
 
 class TestUploadToMinio:
@@ -1224,113 +1201,6 @@ class TestGetFileStreamImpl:
                 object_name="nonexistent/file.txt")
 
 
-class TestDeleteFileImpl:
-    """Test cases for delete_file_impl function"""
-
-    @pytest.mark.asyncio
-    async def test_delete_file_impl_success(self):
-        """Test successful file deletion"""
-        # Mock successful result
-        mock_result = {
-            "success": True,
-            "message": "File deleted successfully"
-        }
-
-        with patch_import_context('management.services.file.service.delete_file', MagicMock(return_value=mock_result)) as mock_delete:
-            # Execute
-            result = await delete_file_impl(object_name="test/file.txt")
-
-            # Assertions
-            assert result == mock_result
-            assert result["success"] is True
-            assert result["message"] == "File deleted successfully"
-            mock_delete.assert_called_once_with(object_name="test/file.txt")
-
-    @pytest.mark.asyncio
-    async def test_delete_file_impl_failure(self):
-        """Test file deletion failure"""
-        # Mock failed result
-        mock_result = {
-            "success": False,
-            "error": "File not found"
-        }
-
-        with patch_import_context('management.services.file.service.delete_file', MagicMock(return_value=mock_result)) as mock_delete:
-            # Execute and assert exception
-            with pytest.raises(Exception) as exc_info:
-                await delete_file_impl(object_name="nonexistent/file.txt")
-
-            # Assertions
-            assert "File does not exist or deletion failed: File not found" in str(
-                exc_info.value)
-            mock_delete.assert_called_once_with(
-                object_name="nonexistent/file.txt")
-
-    @pytest.mark.asyncio
-    async def test_delete_kb_source_requires_same_tenant_ledger_and_releases_charge(self):
-        ledger_module = types.ModuleType("management.db.knowledge_base.storage_object")
-        ledger_module.get_storage_object = MagicMock(return_value={"storage_object_id": 1})
-        storage_module = types.ModuleType("management.services.knowledge_base.storage")
-        storage_module.resolve_storage_reference = MagicMock(
-            return_value=SimpleNamespace(
-                bucket_name="kb-bucket",
-                object_name="knowledge_base/doc.pdf",
-            )
-        )
-        storage_module.release_storage_charge = MagicMock(return_value=True)
-
-        with patch.dict(sys.modules, {
-            "management.db.knowledge_base.storage_object": ledger_module,
-            "management.services.knowledge_base.storage": storage_module,
-        }), patch_import_context(
-            "management.services.file.service.delete_file",
-            return_value={"success": True},
-        ) as delete:
-            result = await delete_file_impl(
-                object_name="knowledge_base/doc.pdf",
-                tenant_id="tenant-a",
-                updated_by="user-a",
-            )
-
-        assert result["success"] is True
-        delete.assert_called_once_with(
-            object_name="knowledge_base/doc.pdf",
-            bucket="kb-bucket",
-        )
-        storage_module.release_storage_charge.assert_called_once_with(
-            tenant_id="tenant-a",
-            bucket_name="kb-bucket",
-            object_name="knowledge_base/doc.pdf",
-            updated_by="user-a",
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_kb_source_denies_missing_or_cross_tenant_ledger(self):
-        ledger_module = types.ModuleType("management.db.knowledge_base.storage_object")
-        ledger_module.get_storage_object = MagicMock(return_value=None)
-        storage_module = types.ModuleType("management.services.knowledge_base.storage")
-        storage_module.resolve_storage_reference = MagicMock(
-            return_value=SimpleNamespace(
-                bucket_name="kb-bucket",
-                object_name="knowledge_base/doc.pdf",
-            )
-        )
-        storage_module.release_storage_charge = MagicMock()
-
-        with patch.dict(sys.modules, {
-            "management.db.knowledge_base.storage_object": ledger_module,
-            "management.services.knowledge_base.storage": storage_module,
-        }), patch_import_context(
-            "management.services.file.service.delete_file",
-        ) as delete:
-            with pytest.raises(PermissionError, match="not owned"):
-                await delete_file_impl(
-                    object_name="knowledge_base/doc.pdf",
-                    tenant_id="tenant-b",
-                )
-
-        delete.assert_not_called()
-        storage_module.release_storage_charge.assert_not_called()
 
 
 class TestListFilesImpl:
@@ -1397,7 +1267,7 @@ class TestCheckFileAccess:
         assert check_file_access("knowledge_base/subfolder/doc.pdf", "user456") is True
         assert check_file_access("knowledge_base/", "any_user") is True
 
-    def test_check_file_access_knowledge_base_write_uses_storage_resolver(self):
+    def test_check_file_access_knowledge_base_write_requires_managed_service(self):
         from management.services.file.service import check_file_access
 
         assert check_file_access(
@@ -1406,12 +1276,6 @@ class TestCheckFileAccess:
             "tenant-a",
             required_permission="DELETE",
         ) is False
-        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
-            object_name="knowledge_base/file.txt",
-            user_id="user123",
-            tenant_id="tenant-a",
-            required_permission="DELETE",
-        )
 
     @pytest.mark.parametrize("permission", ["READ", "READ_ONLY", None])
     def test_check_file_access_knowledge_base_reads_keep_compatibility(self, permission):
@@ -1423,26 +1287,18 @@ class TestCheckFileAccess:
             "tenant-a",
             required_permission=permission,
         ) is True
-        knowledge_storage_stub.resolve_storage_object_access.assert_not_called()
 
-    def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
+    def test_check_file_access_asset_owner_write_requires_managed_service(self):
         from management.services.file.service import check_file_access
         from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
-        knowledge_storage_stub.resolve_storage_object_access.return_value = True
 
         assert check_file_access(
             "attachments/asset_owner/user1/doc.pdf",
             "user1",
             ASSET_OWNER_TENANT_ID,
             required_permission="EDIT",
-        ) is True
-        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
-            object_name="attachments/asset_owner/user1/doc.pdf",
-            user_id="user1",
-            tenant_id=ASSET_OWNER_TENANT_ID,
-            required_permission="EDIT",
-        )
+        ) is False
 
     def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
         from management.services.file.service import check_file_access
@@ -1454,12 +1310,6 @@ class TestCheckFileAccess:
             "regular-tenant",
             required_permission="DELETE",
         ) is False
-        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
-            object_name="attachments/asset_owner/user1/doc.pdf",
-            user_id="user1",
-            tenant_id="regular-tenant",
-            required_permission="DELETE",
-        )
 
     def test_check_file_access_image_and_skill_file_rules(self):
         from management.services.file.service import check_file_access
@@ -1576,13 +1426,6 @@ class TestResolveMinioUploadFolder:
 class TestUploadQuotaEnforcement:
     """Test KB-only accounting, batch enforcement, and compensation."""
 
-    @pytest.fixture(autouse=True)
-    def _install_knowledge_storage_stub(self, monkeypatch):
-        monkeypatch.setitem(
-            sys.modules,
-            "management.services.knowledge_base.storage",
-            knowledge_storage_stub,
-        )
 
     @staticmethod
     def _quota_module(quota_service):
@@ -1627,7 +1470,6 @@ class TestUploadQuotaEnforcement:
 
         quota_service.before.assert_awaited_once_with(128)
         quota_service.after.assert_awaited_once_with()
-        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
         file_management_service.invalidate_usage_cache.assert_called_once_with("tenant-id")
         assert result.quota_status == {"stage": "post"}
 
@@ -1819,7 +1661,6 @@ class TestUploadQuotaEnforcement:
 
         assert result[1] == ["attachments/user-id/attachment.txt"]
         quota_module.UploadQuota.assert_not_called()
-        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_post_write_failure_compensates_only_new_batch(self, monkeypatch):
@@ -1859,14 +1700,8 @@ class TestUploadQuotaEnforcement:
                     uploader_tenant_id="tenant-id", user_id="user-1")
 
         assert raised.value is failure
-        knowledge_storage_stub.compensate_uploaded_objects.assert_called_once_with(
-            context=context,
-            object_names=[
-                "knowledge_base/quota.txt",
-                "knowledge_base/quota-2.txt",
-            ],
-            updated_by="user-1",
-        )
+        source_cleanup_stub.assert_awaited_once_with(context,
+            ['knowledge_base/quota.txt', 'knowledge_base/quota-2.txt'], ServicePrincipal('user-1', 'tenant-id'))
         assert file_management_service.invalidate_usage_cache.call_count == 2
         file_management_service.invalidate_usage_cache.assert_called_with("tenant-id")
 
@@ -1906,7 +1741,6 @@ class TestUploadQuotaEnforcement:
                 index_name="kb-index",
                 uploader_tenant_id="tenant-id", user_id="user-1")
 
-        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
         assert set(result[1]) == {"knowledge_base/object-a", "knowledge_base/object-b"}
 
 
@@ -2741,7 +2575,7 @@ class TestIsPdfCacheValid:
 
         with patch_import_context('management.services.file.service.file_exists', return_value=True), \
              patch_import_context('management.services.file.service.get_file_range', return_value=None), \
-             patch_import_context('management.services.file.service.delete_file') as mock_delete:
+             patch_import_context('management.services.file.preview.delete_file') as mock_delete:
             assert _is_pdf_cache_valid("preview/converted/doc_abc12345.pdf") is False
             mock_delete.assert_called_once_with("preview/converted/doc_abc12345.pdf")
 

@@ -373,18 +373,6 @@ asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess
 sys.modules['management.services.permission.asset_owner'] = asset_owner_visibility_mock
 setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
 
-storage_service_mock = types.ModuleType('management.services.knowledge_base.storage')
-storage_service_mock.release_storage_charge = MagicMock(return_value=True)
-storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
-storage_service_mock.resolve_storage_object_knowledge = MagicMock(return_value=None)
-sys.modules[
-    'management.services.knowledge_base.storage'
-] = storage_service_mock
-setattr(
-    sys.modules['services'],
-    'knowledge_storage_service',
-    storage_service_mock,
-)
 
 # Mock management.services.model.adapter so vectordatabase_service can import
 # ``build_adapter_fresh`` (the gateway bridge). Tests that exercise the

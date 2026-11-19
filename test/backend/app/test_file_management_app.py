@@ -142,7 +142,6 @@ sfms_stub.upload_to_minio = _stub_upload_to_minio
 sfms_stub.upload_files_impl = _stub_upload_files_impl
 sfms_stub.get_file_url_impl = _stub_get_file_url_impl
 sfms_stub.get_file_stream_impl = _stub_get_file_stream_impl
-sfms_stub.delete_file_impl = _stub_delete_file_impl
 sfms_stub.list_files_impl = _stub_list_files_impl
 sfms_stub.preprocess_files_generator = _stub_preprocess_files_generator
 sfms_stub.resolve_minio_upload_folder = _stub_resolve_minio_upload_folder
@@ -921,13 +920,10 @@ async def test_remove_storage_file_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_remove_storage_file_access_denied(monkeypatch):
     """Test that deletion of other user's file is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
-        if object_name.startswith("attachments/"):
-            expected_prefix = f"attachments/{user_id}"
-            return object_name.startswith(expected_prefix)
-        return object_name.startswith("knowledge_base/")
+    async def deny_delete(*args, **kwargs):
+        raise PermissionError("You don't have permission to delete this file")
 
-    monkeypatch.setattr(file_management_app, "check_file_access", fake_check_access)
+    monkeypatch.setattr(file_management_app, 'delete_file_impl', deny_delete)
 
     with pytest.raises(Exception) as ei:
         await file_management_app.remove_storage_file(
@@ -965,6 +961,20 @@ async def test_remove_storage_file_maps_tenant_ownership_failure_to_forbidden(mo
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "not owned by tenant"
+
+
+@pytest.mark.asyncio
+async def test_remove_storage_file_deadline_retains_500_without_duplicate_error(monkeypatch):
+    async def timed_out(*args, **kwargs):
+        raise file_management_app.DeadlineExceeded()
+
+    logger = MagicMock()
+    monkeypatch.setattr(file_management_app, 'delete_file_impl', timed_out)
+    monkeypatch.setattr(file_management_app, 'logger', logger)
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.remove_storage_file(object_name='knowledge_base/owned', authorization=MOCK_AUTH)
+    assert raised.value.status_code == 500 and raised.value.detail == 'Remove storage file error.'
+    logger.exception.assert_not_called()
 
 
 # --- get_storage_file_batch_urls tests ---
