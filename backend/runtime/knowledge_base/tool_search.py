@@ -91,7 +91,7 @@ class KnowledgeToolSearch:
         threshold, phase = context.remaining(), "query"
         try:
             async with asyncio.timeout(context.remaining()):
-                results = []
+                results, revisions = [], {}
                 for (model_id, revision), scoped in groups.items():
                     context.remaining()
                     scope_ids = {r.knowledge_id for r in scoped}
@@ -110,6 +110,9 @@ class KnowledgeToolSearch:
                                                             and h.file_version == f.file_version for f in files))
                            for h in response.hits):
                         raise ScopeDenied()
+                    if set(response.data_revisions) != scope_ids or set(revisions).intersection(scope_ids):
+                        raise ScopeDenied()
+                    revisions.update(response.data_revisions)
                     results.append(response.hits)
                 candidates = self._merge(results, limit)
                 if candidates and rerank_model:
@@ -125,6 +128,10 @@ class KnowledgeToolSearch:
                                   for index, score in rerank_indexes(output.output, len(candidates))]
                 phase = "reauthorize"
                 await self._reauthorize(resources)
+                phase = "content"
+                if revisions:
+                    await self.service.verify_data_revisions([r for r in resources if r.knowledge_id in revisions],
+                                                             revisions, self.actor, context=context)
                 context.remaining()
                 return candidates[:top_k]
         except TimeoutError as error:

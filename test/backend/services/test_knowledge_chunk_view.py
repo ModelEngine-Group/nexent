@@ -20,7 +20,7 @@ from nexent.storage.models import (
     WriteOutcome,
 )
 from runtime.knowledge_base.chunk_view import ChunkReadView
-from runtime.knowledge_base.sample import _snapshot
+from runtime.knowledge_base.data_revision import knowledge_data_revision
 
 from infrastructure.rdb.knowledge_jobs import FILES, JOBS
 from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
@@ -251,9 +251,9 @@ def test_standalone_orphans_missing_rows_and_wrong_generation_are_refused(view, 
 
 def test_epoch_changes_snapshot_even_without_any_manifest_change(view):
     s = view
-    before = _snapshot(s.s.record, 1, context=context())
+    before = knowledge_data_revision(s.s.record, 1, context=context())
     s.mutate("update", "base1", 1, 0)
-    after = _snapshot(s.s.record, 1, context=context())
+    after = knowledge_data_revision(s.s.record, 1, context=context())
     assert before != after
 
 
@@ -269,7 +269,7 @@ def test_active_mutation_prevents_a_stable_snapshot(view):
     )
     s.s.mutation.reserve(value, context=context())
     with pytest.raises(Conflict):
-        _snapshot(s.s.record, 1, context=context())
+        knowledge_data_revision(s.s.record, 1, context=context())
 
 
 def test_read_binding_projects_only_selected_kb_and_refuses_writes(view):

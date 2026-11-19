@@ -82,7 +82,7 @@ async def test_tampered_body_cannot_reach_service(setup):
 async def test_search_requires_signature_and_preserves_model_scope(setup):
     app, service, _ = setup
     request = KnowledgeSearch(knowledge_ids=[1], query="worker", embedding_model={"model_id": 2, "revision": "v1"})
-    service.search.return_value = KnowledgeSearchResult(hits=[], embedding_model=request.embedding_model)
+    service.search.return_value = KnowledgeSearchResult(hits=[], data_revisions={1: "a" * 64}, embedding_model=request.embedding_model)
     response = await send(app, KnowledgeOperation.SEARCH, request)
     assert response.status_code == 200 and response.json()["hits"] == []
     service.search.assert_awaited_once_with(request, ServicePrincipal("user", "tenant"))

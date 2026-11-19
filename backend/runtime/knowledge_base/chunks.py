@@ -20,8 +20,9 @@ from contracts.knowledge_chunk_projection import (
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_view import ChunkReadView
+from runtime.knowledge_base.data_revision import knowledge_data_revision
 from runtime.knowledge_base.publication import published_files, published_job
-from runtime.knowledge_base.sample import PublishedKnowledgeReader, _snapshot
+from runtime.knowledge_base.sample import PublishedKnowledgeReader
 
 from infrastructure.knowledge_runtime import knowledge_chunks_ports
 
@@ -96,11 +97,11 @@ class KnowledgeChunksService(PublishedKnowledgeReader):
                 resource = await self._grant(request,actor)
                 with self.ports(actor,resource,context=context) as (records,vectors):
                     _scope(records,actor,resource); _scope(vectors,actor,resource)
-                    revision = await self._blocking(_snapshot,records,request.knowledge_id,context=context)
+                    revision = await self._blocking(knowledge_data_revision,records,request.knowledge_id,context=context)
                     if request.expected_data_revision is not None and request.expected_data_revision != revision: raise Conflict()
                     total,chunks = await self._blocking(_window,records,vectors,request,resource,context=context)
                     if await self._grant(request,actor) != resource: raise Conflict()
-                    final = await self._blocking(_snapshot,records,request.knowledge_id,context=context)
+                    final = await self._blocking(knowledge_data_revision,records,request.knowledge_id,context=context)
                     if final != revision: raise Conflict()
                 next_offset = request.offset+len(chunks) if request.offset+len(chunks) < total else None
                 return KnowledgeChunksResult(knowledge_id=request.knowledge_id,knowledge_revision=resource.revision,

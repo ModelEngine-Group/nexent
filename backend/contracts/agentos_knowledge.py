@@ -280,8 +280,31 @@ class KnowledgeSearchHit(Contract):
 
 class KnowledgeSearchResult(Contract):
     hits: list[KnowledgeSearchHit]
+    data_revisions: dict[int, str] = Field(min_length=1, max_length=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
+
+    @field_validator("data_revisions", mode="before")
+    @classmethod
+    def decode_revision_keys(cls, values):
+        if not isinstance(values, dict):
+            return values
+        decoded = {}
+        for key, value in values.items():
+            if isinstance(key, str) and key.isascii() and key.isdecimal() and str(int(key)) == key:
+                key = int(key)
+            if key in decoded:
+                raise ValueError("Duplicate knowledge data revision")
+            decoded[key] = value
+        return decoded
+
+    @field_validator("data_revisions")
+    @classmethod
+    def valid_data_revisions(cls, values):
+        if any(key <= 0 or len(value) != 64 or any(char not in "0123456789abcdef" for char in value)
+               for key, value in values.items()):
+            raise ValueError("Expected a SHA256 data revision for each queried knowledge resource")
+        return values
 
 
 class KnowledgeSample(Contract):

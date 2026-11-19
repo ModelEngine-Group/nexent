@@ -7,7 +7,7 @@ import pytest
 from contracts.knowledge_chunk_mutation import CHANGES, STATES
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Page, StorageScope
-from runtime.knowledge_base.sample import _snapshot
+from runtime.knowledge_base.data_revision import knowledge_data_revision
 
 from test.backend.infrastructure.test_vector_store import context
 
@@ -29,24 +29,24 @@ def test_snapshot_hashes_all_pages_including_late_visible_documents():
     rows = [manifest(n) for n in range(501)]
     records = record_port()
     records.query.side_effect = [Page(tuple(rows[:500])), Page(tuple(rows[500:]))]
-    digest = _snapshot(records, 1, context=context())
+    digest = knowledge_data_revision(records, 1, context=context())
     assert len(digest) == 64
     second = records.query.call_args.args[1]
     assert second.where.terms[1].field == 'record_id' and second.where.terms[1].value == rows[499]['record_id']
     assert second.order_by[0].field == 'record_id'
     rows[-1] = {**rows[-1], 'visible_generation': 'c' * 32}
     records.query.side_effect = [Page(tuple(rows[:500])), Page(tuple(rows[500:]))]
-    changed = _snapshot(records, 1, context=context())
+    changed = knowledge_data_revision(records, 1, context=context())
     assert changed != digest
 
 
 def test_tombstoned_and_unpublished_manifests_do_not_enter_sample_or_revision():
     records = record_port()
     records.query.return_value = Page((manifest(1),))
-    original = _snapshot(records, 1, context=context())
+    original = knowledge_data_revision(records, 1, context=context())
     records.query.return_value = Page((manifest(1), {**manifest(2), 'visible_version': None},
                                       {**manifest(3), 'tombstone_version': 0}))
-    final = _snapshot(records, 1, context=context())
+    final = knowledge_data_revision(records, 1, context=context())
     assert original == final
 
 
@@ -55,4 +55,4 @@ def test_foreign_manifest_is_refused_even_if_driver_violates_scope(foreign):
     records = record_port()
     records.query.return_value = Page(({**manifest(1), **foreign},))
     with pytest.raises(ScopeDenied):
-        _snapshot(records, 1, context=context())
+        knowledge_data_revision(records, 1, context=context())

@@ -12,6 +12,7 @@ from contracts.agentos import EmbeddingInvocation, RerankInvocation
 from contracts.agentos_knowledge import (
     KnowledgeSearch,
     KnowledgeSearchAuthorization,
+    KnowledgeSearchGrant,
     KnowledgeSearchHit,
     KnowledgeSearchResult,
 )
@@ -28,6 +29,7 @@ from nexent.storage.errors import (
 )
 from nexent.storage.models import Comparison, Junction, OperationContext, SearchQuery
 from runtime.knowledge_base.chunk_view import ChunkReadView, validate_read_ports
+from runtime.knowledge_base.data_revision import knowledge_data_revision
 from runtime.knowledge_base.ingestion import embedding_vectors
 from runtime.knowledge_base.jobs import KnowledgeJobs
 
@@ -169,6 +171,25 @@ class KnowledgeSearchService:
             view.stable(context=context)
 
     @staticmethod
+    def _data_revisions(records, grant, *, context):
+        return {resource.knowledge_id: knowledge_data_revision(records[resource.knowledge_id], resource.knowledge_id,
+                                                              context=context)
+                for resource in grant.knowledge_bases}
+
+    async def verify_data_revisions(self, resources, expected, actor, *, context):
+        grant = KnowledgeSearchGrant(knowledge_bases=resources)
+        if set(expected) != {resource.knowledge_id for resource in resources}:
+            raise ScopeDenied()
+        try:
+            async with asyncio.timeout(context.remaining()):
+                with self.ports(actor, grant, None, context=context) as (records, vectors):
+                    validate_read_ports(records, vectors, grant, actor)
+                    if await self._blocking(self._data_revisions, records, grant, context=context) != expected:
+                        raise Conflict()
+        except TimeoutError as error:
+            raise DeadlineExceeded(operation_id=context.operation_id) from error
+
+    @staticmethod
     def _collect(vectors, grant, request, query_vector, limit, *, context):
         lexical, semantic = [], []
         for resource in grant.knowledge_bases:
@@ -239,9 +260,13 @@ class KnowledgeSearchService:
                         candidates = self._reranked(output, candidates)
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
+                    revisions = await self._blocking(self._data_revisions, records, grant, context=context)
                     candidates = await self._blocking(self._visible, records, grant, request, candidates, views, False, context=context)
+                    if await self._blocking(self._data_revisions, records, grant, context=context) != revisions:
+                        raise Conflict()
                     return KnowledgeSearchResult(hits=[self._dto(h) for h in candidates[:request.top_k]],
-                                                 embedding_model=request.embedding_model, rerank_model=request.rerank_model)
+                                                 data_revisions=revisions, embedding_model=request.embedding_model,
+                                                 rerank_model=request.rerank_model)
         except (TimeoutError, DeadlineExceeded) as error:
             logger.warning("knowledge_search_timeout operation_id=%s phase=query timeout_seconds=%s exception_type=%s",
                            context.operation_id, threshold, type(error).__name__)

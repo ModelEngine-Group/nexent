@@ -24,24 +24,13 @@ from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_view import ChunkReadView, validate_read_ports
+from runtime.knowledge_base.data_revision import knowledge_data_revision
 from runtime.knowledge_base.publication import published_files, published_job
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_search_ports
 
 logger = logging.getLogger(__name__)
-
-
-def _snapshot(records, knowledge_id, *, context):
-    """Hash every visible manifest and the stable confirmed-change epoch."""
-    view = ChunkReadView(records, knowledge_id, context=context)
-    digest = hashlib.sha256(json.dumps([knowledge_id, view.version], separators=(",", ":")).encode())
-    for row in published_files(records, knowledge_id, context=context):
-        digest.update(json.dumps([row['file_id'], row['visible_version'], row['visible_generation'],
-                                  row['visible_job_id']], separators=(',', ':')).encode())
-    view.stable(context=context)
-    return digest.hexdigest()
-
 
 
 def _sample_chunk(record, model, *, allow_unbound=False):
@@ -150,13 +139,13 @@ class KnowledgeSampleService(PublishedKnowledgeReader):
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     records = records[request.knowledge_id]
-                    revision = await self._blocking(_snapshot, records, request.knowledge_id, context=context)
+                    revision = await self._blocking(knowledge_data_revision, records, request.knowledge_id, context=context)
                     documents = await self._blocking(_sample_documents, records, vectors[resource.collection], resource,
                                                     model, request.document_limit, context=context)
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
                     await self.models.embedding_dimensions(model, actor)
-                    final = await self._blocking(_snapshot, records, request.knowledge_id, context=context)
+                    final = await self._blocking(knowledge_data_revision, records, request.knowledge_id, context=context)
                     if final != revision:
                         raise Conflict()
                     return KnowledgeSampleResult(knowledge_id=request.knowledge_id, knowledge_revision=resource.revision,
