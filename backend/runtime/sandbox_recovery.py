@@ -7,7 +7,10 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
+from threading import Lock
 
 from nexent.core.agents.sandbox_contracts import SandboxOwner
 from nexent.core.agents.sandbox_kubernetes import _document, wait_for_sandbox_termination
@@ -19,6 +22,12 @@ from runtime.sandbox_workspace import KubernetesWorkspace, _no_symlinks
 
 
 logger = logging.getLogger(__name__)
+_MISSING_POD_WARNING_INTERVAL_SECONDS = 300
+_MAX_MISSING_POD_WARNINGS = 256
+
+
+class _MissingSandboxPod(SandboxCoordinationUnknown):
+    """The Pod API no longer has the object needed to prove execution stopped."""
 
 
 class SandboxRuntimeRecovery:
@@ -28,6 +37,23 @@ class SandboxRuntimeRecovery:
         self.api_factory, self.observer, self.fail_work = api_factory, observer, fail_work
         self.workspace_root = Path(workspace_root).absolute()
         self.retention_seconds = retention_seconds
+        self._missing_pod_warnings: OrderedDict[tuple[str, str], float] = OrderedDict()
+        self._missing_pod_warning_lock = Lock()
+
+    def _warn_missing_pod(self, owner, pod_name):
+        key = (owner.key, owner.epoch)
+        with self._missing_pod_warning_lock:
+            now = time.monotonic()
+            last_warning = self._missing_pod_warnings.get(key)
+            if last_warning is not None and now - last_warning < _MISSING_POD_WARNING_INTERVAL_SECONDS:
+                return
+            self._missing_pod_warnings[key] = now
+            self._missing_pod_warnings.move_to_end(key)
+            if len(self._missing_pod_warnings) > _MAX_MISSING_POD_WARNINGS:
+                self._missing_pod_warnings.popitem(last=False)
+        logger.warning('Sandbox Pod not found (404); recovery remains unknown '
+                       'namespace=%s sandbox_pod=%s runtime_pod=%s epoch=%s',
+                       owner.namespace, pod_name, owner.pod_name, owner.epoch)
 
     def _same_deployment(self, owner):
         current = self.coordinator.owner
@@ -51,9 +77,17 @@ class SandboxRuntimeRecovery:
         owner = store.owner
         with self.api_factory() as api:
             if fact['resource_state'] == 'TERMINATED':
-                self._delete_service(api, owner, fact)
+                self._delete_service(api, store, fact)
                 return True
-            pod = _document(api.read_namespaced_pod(fact['pod_name'], owner.namespace, _request_timeout=3))
+            try:
+                pod = api.read_namespaced_pod(fact['pod_name'], owner.namespace, _request_timeout=3)
+            except Exception as exc:
+                if getattr(exc, 'status', None) == 404:
+                    raise _MissingSandboxPod(
+                        'Previous SYSTEM execution termination is unproved: sandbox Pod not found (404)',
+                    ) from exc
+                raise
+            pod = _document(pod)
             self._verify_resource(pod, owner, fact)
             if fact['pod_uid'] is not None and pod['metadata']['uid'] != fact['pod_uid']:
                 raise SandboxCoordinationUnknown('Recovery sandbox UID changed')
@@ -72,13 +106,22 @@ class SandboxRuntimeRecovery:
                                                 container_id=fact['container_id']):
                 return False
             store.terminated(owner, pod['metadata']['uid'])
-            self._delete_service(api, owner, fact)
+            self._delete_service(api, store, fact)
         return True
 
-    def _delete_service(self, api, owner, fact):
+    def _delete_service(self, api, store, fact):
+        owner = store.owner
         try:
             service = _document(api.read_namespaced_service(fact['pod_name'], owner.namespace,
                                                              _request_timeout=3))
+            epoch = service.get('metadata', {}).get('annotations', {}).get('nexent.ai/epoch')
+            if isinstance(epoch, str) and 0 < len(epoch) <= 253 and epoch != owner.epoch:
+                other_fact = store.read(epoch)
+                if (other_fact is not None and other_fact['pod_name'] == fact['pod_name']
+                        and other_fact['owner']['pod_name'] == owner.pod_name):
+                    # The terminated generation's Service name can be reused in the same Runtime Pod.
+                    self._verify_resource(service, replace(owner, epoch=epoch), other_fact)
+                    return
             self._verify_resource(service, owner, fact)
             api.delete_namespaced_service(fact['pod_name'], owner.namespace,
                 body={'preconditions': {'uid': service['metadata']['uid']}}, _request_timeout=3)
@@ -224,11 +267,14 @@ class SandboxRuntimeRecovery:
                         retired_facts.append(store)
                     elif owner != self.coordinator.owner:
                         peer_unresolved = True
-                except Exception:
+                except Exception as exc:
                     result['unknown_owners'] += 1
                     if startup and (owner is None or owner.key == self.coordinator.owner.key):
                         raise
-                    logger.warning('Sandbox owner recovery preserved unknown state', exc_info=True)
+                    if isinstance(exc, _MissingSandboxPod):
+                        self._warn_missing_pod(owner, fact['pod_name'])
+                    else:
+                        logger.warning('Sandbox owner recovery preserved unknown state', exc_info=True)
         for path in (self.journal.root / 'runs').glob('*.json'):
             if time.monotonic() >= deadline:
                 break
