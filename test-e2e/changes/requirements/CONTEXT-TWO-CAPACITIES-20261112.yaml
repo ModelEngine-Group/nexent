@@ -42,6 +42,10 @@ change:
     - test/backend/management/test_gateway_app_boundary.py
     - test/backend/app/test_ops_entrypoint.py
     - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/services/test_model_outlet_migration_service.py
+    - test/backend/services/test_model_saved_contracts.py
+    - test/backend/services/test_model_runtime_options.py
+    - test/backend/agents/test_resolved_model_config.py
     - test/backend/agents/test_context_budget_v2_pipeline.py
     - test/backend/agents/test_create_agent_info.py
     - test/backend/agents/test_agent_outlet_run_snapshot.py

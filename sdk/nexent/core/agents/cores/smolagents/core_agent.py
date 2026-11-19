@@ -1350,15 +1350,8 @@ Additional Args:
             code = None
         policy.validate_code(code)
 
-    def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
-        """
-        Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
-        Returns None if the step is not final.
-        """
-        history = getattr(self, "_execution_history", None)
-        if history is not None:
-            history.reset_read_budget(self._execution_owner)
-            self._execution_loaded = False
+    def _context_request_overlays(self):
+        """Build current framing after protocol and delegation state changes."""
         strict_code_action = (
             getattr(self, "output_protocol", "code_action") == "code_action"
             and getattr(self, "enable_protocol_repair_retry", False)
@@ -1384,6 +1377,18 @@ Additional Args:
             ))
         if getattr(self, "_pending_thought_continuation", False):
             tail_overlay.append(self._thought_continuation_message())
+        return system_overlay, tail_overlay
+
+    def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
+        """
+        Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
+        Returns None if the step is not final.
+        """
+        history = getattr(self, "_execution_history", None)
+        if history is not None:
+            history.reset_read_budget(self._execution_owner)
+            self._execution_loaded = False
+        system_overlay, tail_overlay = self._context_request_overlays()
         request_kwargs = (
             {"request_system_messages": system_overlay, "request_tail_messages": tail_overlay}
             if system_overlay or tail_overlay else {}
@@ -2422,10 +2427,13 @@ Additional Args:
                     self.memory.steps.append(action_step)
                     response = getattr(action_step, "model_output_message", None)
                     if response is not None and getattr(response, "nexent_context_accepted", False) is True:
+                        system_overlay, tail_overlay = self._context_request_overlays()
                         maintenance = self.context_runtime.complete_step(
                             model=self.model, memory=self.memory,
                             current_run_start_idx=self._history_step_count,
                             response=response, tools=self._context_tools(),
+                            request_system_messages=system_overlay,
+                            request_tail_messages=tail_overlay,
                         )
                         if maintenance is not None and maintenance.maintenance_phase == "post_response":
                             get_monitoring_manager().record_final_context_evidence(
@@ -2706,9 +2714,11 @@ Additional Args:
         final_memory_step.model_output_message = accepted_context_response
         self.memory.steps.append(final_memory_step)
         if accepted_context_response is not None:
+            system_overlay, tail_overlay = self._context_request_overlays()
             self.context_runtime.complete_step(
                 model=self.model, memory=self.memory, current_run_start_idx=self._history_step_count,
                 response=accepted_context_response, tools=self._context_tools(),
+                request_system_messages=system_overlay, request_tail_messages=tail_overlay,
             )
             self._emit_history_summary_event()
 

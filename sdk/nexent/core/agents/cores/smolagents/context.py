@@ -58,6 +58,8 @@ class ManagedContextRuntime:
         self._memory_adapter = SmolagentsMemoryAdapter(context_manager)
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._request_system_messages = ()
+        self._request_tail_messages = ()
 
     @property
     def context_manager(self) -> ContextManager:
@@ -74,6 +76,8 @@ class ManagedContextRuntime:
         self._evidence.reset()
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._request_system_messages = ()
+        self._request_tail_messages = ()
         self._run_context = self.context_manager.prepare_items_context(
             fallback_system_prompt=fallback_system_prompt,
             items=self.items,
@@ -97,14 +101,16 @@ class ManagedContextRuntime:
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
+        self._request_system_messages = tuple(context_messages(request_system_messages))
+        self._request_tail_messages = tuple(context_messages(request_tail_messages))
         final_context = self.context_manager.assemble_context_items(
             model=adapt_context_model(model),
             current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
             tools=context_tool_views(tools),
             purpose="step",
             run_context=self._ensure_run_context(memory),
-            request_system_messages=context_messages(request_system_messages),
-            request_tail_messages=context_messages(request_tail_messages),
+            request_system_messages=self._request_system_messages,
+            request_tail_messages=self._request_tail_messages,
         )
         self.check_input_capacity(final_context.messages, final_context.tools, model)
         self.capture_request(final_context.messages, final_context.tools, model)
@@ -123,6 +129,8 @@ class ManagedContextRuntime:
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
         """Force a source-backed rebuild after explicit Provider overflow."""
+        self._request_system_messages = tuple(context_messages(request_system_messages))
+        self._request_tail_messages = tuple(context_messages(request_tail_messages))
         final_context = self.context_manager.assemble_context_items(
             model=adapt_context_model(model),
             current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
@@ -222,18 +230,25 @@ class ManagedContextRuntime:
             raise ValueError("Context input exceeds the combined context window; reduce the new input")
         return estimate
 
-    def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None):
+    def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
+                      request_system_messages=None, request_tail_messages=None):
         """Maintain only accepted steps after all native tool results are present."""
         if response is None:
             return None
         usage = getattr(response, "token_usage", None)
         stop_event = getattr(model, "stop_event", None)
+        system_messages = (self._request_system_messages if request_system_messages is None
+                           else context_messages(request_system_messages))
+        tail_messages = (self._request_tail_messages if request_tail_messages is None
+                         else context_messages(request_tail_messages))
         def assemble(maintenance):
             return self.context_manager.assemble_context_items(
                 model=adapt_context_model(model),
                 current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
                 tools=context_tool_views(tools), run_context=self._ensure_run_context(memory),
                 force_compaction=maintenance, maintenance=maintenance,
+                request_system_messages=system_messages,
+                request_tail_messages=tail_messages,
             )
         evidence = complete_context(manager=self.context_manager, baseline=self.usage_baseline,
             model_key=self._model_key(model),

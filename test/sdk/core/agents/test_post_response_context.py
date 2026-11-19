@@ -133,3 +133,72 @@ def test_ac010_estimated_legacy_token_usage_is_not_a_provider_anchor():
     assert managed.usage_baseline.actual_input_tokens is None
     assert managed.usage_baseline.source == "estimated"
     assert managed.last_maintenance_evidence is None
+
+
+@pytest.mark.parametrize('overlay_kind', ['request_system_messages', 'request_tail_messages'])
+def test_ac008_post_response_uses_the_same_request_overlay_basis(monkeypatch, overlay_kind):
+    managed = runtime(window=10000)
+    memory = SimpleNamespace(steps=[TaskStep(task='x' * 500)])
+    model = SimpleNamespace(model_id='controlled')
+    compact = Mock(side_effect=lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(managed.context_manager, '_compact_to_compaction_target', compact)
+    overlay = [{'role': 'system' if overlay_kind=='request_system_messages' else 'user',
+                'content': [{'type': 'text', 'text': 'overlay ' * 375}]}]
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0,
+                         **{overlay_kind: overlay})
+    compact.assert_not_called()
+    memory.steps.append(ActionStep(step_number=1, model_output='accepted', observations='R' * 2000,
+                                   timing=Timing(start_time=0)))
+    response = SimpleNamespace(token_usage=SimpleNamespace(input_tokens=7000, output_tokens=20))
+    managed.complete_step(model=model, memory=memory, current_run_start_idx=0, response=response)
+    assert compact.call_count == 1
+
+
+@pytest.mark.parametrize('overlay_kind', ['request_system_messages', 'request_tail_messages'])
+def test_ac008_explicitly_cleared_overlays_are_removed_from_next_input(monkeypatch, overlay_kind):
+    managed = runtime(window=10000)
+    memory = SimpleNamespace(steps=[TaskStep(task='x' * 500)])
+    model = SimpleNamespace(model_id='controlled')
+    compact = Mock(side_effect=lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(managed.context_manager, '_compact_to_compaction_target', compact)
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0,
+        **{overlay_kind: [{'role': 'user', 'content': [{'type': 'text', 'text': 'overlay ' * 375}]}]})
+    memory.steps.append(ActionStep(step_number=1, model_output='accepted', observations='R' * 2000,
+                                   timing=Timing(start_time=0)))
+    managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=7000)),
+        request_system_messages=(), request_tail_messages=())
+    compact.assert_not_called()
+
+
+def test_ac008_core_passes_fresh_framing_after_clearing_protocol_repairs(monkeypatch):
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.utils.observer import MessageObserver
+    from smolagents.models import ChatMessage, Model, TokenUsage
+
+    class FinalModel(Model):
+        def generate(self, messages, **kwargs):
+            return ChatMessage(role='assistant', content='<final_answer>done</final_answer>',
+                token_usage=TokenUsage(input_tokens=1200, output_tokens=10))
+
+    managed = runtime(window=100000)
+    complete = Mock(wraps=managed.complete_step)
+    monkeypatch.setattr(managed, 'complete_step', complete)
+    agent = CoreAgent(observer=MessageObserver(lang='en'), model=FinalModel(model_id='controlled'),
+        tools=[], context_runtime=managed, max_steps=1, enable_protocol_repair_retry=True)
+    original = agent._context_request_overlays
+    frames = []
+
+    def framing():
+        if not frames:
+            agent._protocol_repair_messages = [ChatMessage(role='user', content='obsolete repair fixture')]
+        result = original()
+        frames.append(result)
+        return result
+
+    monkeypatch.setattr(agent, '_context_request_overlays', framing)
+    assert str(agent.run('Return done.')) == 'done'
+    complete.assert_called_once()
+    assert 'obsolete repair fixture' in str(frames[0][1])
+    assert complete.call_args.kwargs['request_system_messages']
+    assert 'obsolete repair fixture' not in str(complete.call_args.kwargs['request_tail_messages'])
