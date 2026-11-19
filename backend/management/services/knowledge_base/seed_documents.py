@@ -24,6 +24,6 @@ async def index_seed_texts(index_name, documents, actor, *, embedding_model_name
                 "embedding_model_name": embedding_model_name,
             },
         )
-        await create_manual_chunk(index_name, payload, actor)
+        await create_manual_chunk(index_name, payload, actor, require_embedding=True)
         indexed += 1
     return indexed

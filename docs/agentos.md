@@ -321,6 +321,8 @@ KnowledgeBase.search 的结果必须携带 data_revisions，覆盖每个实际�
 
 官方 Agent 的文本种子复用分块创建入口。Management 准备原正文、文件名、展示字段和旧分块 ID，以实际安装用户调用 AgentOS，等待每次 Runtime 写入完成后继续安装。模型调用和向量写入都在 Runtime；同秒同正文保留旧 ID 覆盖语义。二进制种子继续使用上传、清洗及 File.upload 链路。旧公开 documents 写入入口中的图片处理、KB 集合创建及其他存储旁路仍待迁移。
 
+分块创建的内部数据可显式设置 require_embedding=true，要求模型推理成功。官方文本种子使用此策略，模型、修订、维度或向量错误会终止写入，不使用提供的替代向量，也不改存纯正文。原手工创建保留现有默认策略。embedding_input_type=image 要求严格策略、显式模型和内联 base64 图片，Runtime 校验多模态模型后调用 Model.invoke，存储正文仍来自 content。此能力不授权读取任意对象或 URL，也不会为旧 image_url 自动生成可信图片引用。
+
 ### KnowledgeBase 已登记文件清单
 
 `KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。

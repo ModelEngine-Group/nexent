@@ -130,11 +130,15 @@ class ChunkCreationExecutor:
             return self._supplied(data, binding)
         try:
             async with asyncio.timeout(context.remaining()):
-                if isinstance(binding, ModelReference):
+                if isinstance(binding, ModelReference) or data.embedding_input_type == "image":
                     metadata = await self.models.get(binding.model_id, self.actor)
+                    allowed = {"multi_embedding"} if data.embedding_input_type == "image" else {"embedding", "multi_embedding"}
                     if (not isinstance(metadata, ModelMetadata) or metadata.model_id != binding.model_id
-                        or metadata.model_type not in {"embedding", "multi_embedding"}):
+                        or metadata.model_type not in allowed):
                         raise ValueError("Invalid embedding model metadata")
+                    if (isinstance(binding, ModelVersion) and normalize_model_revision(metadata.revision)
+                        != normalize_model_revision(binding.revision)):
+                        raise ValueError("Embedding model revision mismatch")
                     binding = ModelVersion(model_id=metadata.model_id, revision=metadata.revision)
                 dimensions = await self.models.embedding_dimensions(
                     binding, self.actor
@@ -144,6 +148,7 @@ class ChunkCreationExecutor:
                         model_id=binding.model_id,
                         expected_revision=binding.revision,
                         input=[text],
+                        input_type=data.embedding_input_type,
                     ),
                     self.actor,
                 )
@@ -163,9 +168,14 @@ class ChunkCreationExecutor:
                 raise ValueError("Invalid embedding response")
             if type(dimensions) is not int or dimensions <= 0:
                 raise ValueError("Missing embedding dimensions")
-            return dimensions, tuple(output[0]), binding, True
-        except Exception as error:  # noqa: BLE001 - Existing manual creation saves plaintext after model failures.
+            vector = explicit_chunk_vector(output[0]) if data.require_embedding else tuple(output[0])
+            if data.require_embedding and (len(vector) != dimensions or not math.isfinite(sum(v * v for v in vector))):
+                raise ValueError("Invalid embedding dimensions or norm")
+            return dimensions, vector, binding, True
+        except Exception as error:
             context.remaining()
+            if data.require_embedding:
+                raise
             # This is the existing manual-create behavior; resource checks stay outside this branch.
             logger.warning(
                 "knowledge_chunk_create_embedding_failed operation_id=%s phase=model exception_type=%s",

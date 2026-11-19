@@ -27,6 +27,7 @@ async def test_seed_text_preserves_source_defaults_key_and_actual_identity(write
     for call, doc in zip(create.await_args_list, docs, strict=True):
         index, payload, principal = call.args
         assert index == "kb" and principal == actor
+        assert call.kwargs == {"require_embedding": True}
         assert payload.content == doc.content and payload.chunk_id == f"1234_{hash(doc.content)}"[:20]
         assert payload.title == payload.filename == payload.path_or_url == doc.file_name
         assert payload.metadata == {

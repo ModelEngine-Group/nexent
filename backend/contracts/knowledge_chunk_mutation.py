@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Literal
 
-from contracts.agentos import ModelReference
+from contracts.agentos import EmbeddingInvocation, ModelReference
 from contracts.agentos_knowledge import (
     Contract,
     KnowledgeChunk,
@@ -26,12 +26,21 @@ class ChunkCreateData(Contract):
     location: dict[str, JsonValue] = Field(default_factory=dict)
     embedding_model: ModelVersion | ModelReference | None = None
     embedding_input: str | None = None
+    embedding_input_type: Literal["text", "image"] = "text"
+    require_embedding: bool = False
     supplied_embedding: JsonValue = None
 
     @model_validator(mode="after")
     def explicit_model_text(self):
         if self.embedding_model is not None and self.embedding_input is None and not isinstance(self.content, str):
             raise ValueError("A nontext stored body requires explicit embedding_input")
+        if self.require_embedding and (self.embedding_model is None or not (
+            self.content if self.embedding_input is None else self.embedding_input)):
+            raise ValueError("Required embedding needs a model and nonempty input")
+        if self.embedding_input_type == "image":
+            if not self.require_embedding or self.embedding_model is None or self.embedding_input is None:
+                raise ValueError("Image embedding requires strict, explicit model input")
+            EmbeddingInvocation(model_id=self.embedding_model.model_id, input=[self.embedding_input], input_type="image")
         return self
 
 

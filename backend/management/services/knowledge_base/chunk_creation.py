@@ -40,7 +40,10 @@ from infrastructure.agentos_client import AgentOSClient
 logger = logging.getLogger(__name__)
 
 
-async def create_manual_chunk(index_name, payload, actor, *, reader=None, client=None, operation_seconds=180):
+async def create_manual_chunk(index_name, payload, actor, *, reader=None, client=None, operation_seconds=180,
+                              require_embedding=False):
+    if type(require_embedding) is not bool:
+        raise InvalidInput()
     if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
         raise InvalidInput()
     cancelled = Event()
@@ -76,6 +79,8 @@ async def create_manual_chunk(index_name, payload, actor, *, reader=None, client
                     "supplied_embedding": source.pop("embedding", None), "location": {PUBLIC_CHUNK_SOURCE_KEY: source},
                     "embedding_input": payload.content,
                     "embedding_model": {"model_id": model_id} if type(model_id) is int and model_id > 0 else None}
+                if require_embedding:
+                    changes["require_embedding"] = True
                 intent = ChunkMutationIntent(knowledge_id=grant.knowledge_id, chunk_id=key, operation="create",
                     request_key=uuid4().hex, resource_revision=grant.revision, expected_change_epoch=target.change_epoch,
                     file_ref=ref, generation=target.generation if ref else None, chunk_index=chunk.chunk_index if ref else None,
