@@ -46,6 +46,7 @@ async def test_management_uses_64_document_batches_and_one_final_activity_touch(
     calls = s.client.append_knowledge_documents.await_args_list
     assert [len(call.args[0].documents) for call in calls] == [64, 2]
     assert all(call.args[0].embedding_model.model_id == 2 for call in calls)
+    assert all(call.args[0].embedding_batch_size is None for call in calls)
     assert s.touch.call_count == 1 and all(context is s.contexts[0] for context in s.contexts)
 
 

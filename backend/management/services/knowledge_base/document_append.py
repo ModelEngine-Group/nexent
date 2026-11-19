@@ -44,14 +44,14 @@ def _touch_activity(index_name, grant, actor, reader, *, context):
 
 
 async def append_documents(index_name, documents, actor, *, reader=None, client=None, operation_seconds=180,
-                           context=None, embedding_batch_size=10):
+                           context=None, embedding_batch_size=None):
     if not isinstance(documents, (list, tuple)):
         raise InvalidInput()
     if not documents:
         return 0
     if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
         raise InvalidInput()
-    if type(embedding_batch_size) is not int or embedding_batch_size <= 0:
+    if embedding_batch_size is not None and (type(embedding_batch_size) is not int or embedding_batch_size <= 0):
         raise InvalidInput()
     cancelled = Event() if context is None else None
     context = context or OperationContext("knowledge-document-append-" + uuid4().hex,
@@ -72,7 +72,7 @@ async def append_documents(index_name, documents, actor, *, reader=None, client=
                 selected = list(documents[offset:offset + 64])
                 request = KnowledgeDocumentsAppend(knowledge_id=grant.knowledge_id, resource_revision=grant.revision,
                     embedding_model={"model_id": model_id}, documents=selected,
-                    embedding_batch_size=min(embedding_batch_size, 64))
+                    embedding_batch_size=min(embedding_batch_size, 64) if embedding_batch_size is not None else None)
                 result = await client.append_knowledge_documents(request, actor.user_id, actor.tenant_id)
                 context.remaining()
                 if (not isinstance(result, KnowledgeDocumentsAppended) or result.knowledge_id != grant.knowledge_id

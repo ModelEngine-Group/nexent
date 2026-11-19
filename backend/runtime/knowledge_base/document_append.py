@@ -14,6 +14,7 @@ from contracts.knowledge_documents import (
     KnowledgeDocumentsAppend,
     KnowledgeDocumentsAppended,
 )
+from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
     Conflict,
     DeadlineExceeded,
@@ -26,6 +27,7 @@ from runtime.knowledge_base.chunk_creation import ChunkCreationExecutor
 from runtime.knowledge_base.ingestion import embedding_vectors
 
 from infrastructure.agent_model_config import normalize_model_revision
+from infrastructure.rdb.document_embedding_batch import read_document_embedding_batch
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,11 @@ class KnowledgeDocumentAppender:
                     raise Conflict()
                 binding = ModelVersion(model_id=model.model_id, revision=model.revision)
                 dimensions = await self.mutations.models.embedding_dimensions(binding, actor)
+                embedding_batch_size = request.embedding_batch_size
+                if embedding_batch_size is None:
+                    embedding_batch_size = await run_blocking("knowledge-document-embedding-batch",
+                        read_document_embedding_batch, actor, grant.resource_tenant_id, model.model_type,
+                        context=context, lane="control-io", owner="runtime.knowledge_base")
                 prepared, vectors = [], []
                 now = int(time.time())
                 for document in request.documents:
@@ -66,8 +73,8 @@ class KnowledgeDocumentAppender:
                     if not source.get("id"):
                         source["id"] = f"{now}_{hash(document.content)}"[:20]
                     prepared.append(source)
-                for offset in range(0, len(request.documents), request.embedding_batch_size):
-                    documents = request.documents[offset:offset + request.embedding_batch_size]
+                for offset in range(0, len(request.documents), embedding_batch_size):
+                    documents = request.documents[offset:offset + embedding_batch_size]
                     result = await self.mutations.models.invoke(EmbeddingInvocation(
                         model_id=binding.model_id, expected_revision=binding.revision,
                         input=[document.content for document in documents]), actor)

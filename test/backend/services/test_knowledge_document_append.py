@@ -12,6 +12,7 @@ from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from contracts.knowledge_documents import KnowledgeDocument, KnowledgeDocumentsAppend
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import WriteReceipt
+from runtime.knowledge_base import document_append as module
 from runtime.knowledge_base.chunk_write import ChunkMutationService
 from runtime.knowledge_base.document_append import KnowledgeDocumentAppender
 
@@ -28,7 +29,7 @@ from test.backend.services.test_knowledge_chunk_creation import (
 
 
 @pytest.fixture
-def append(creation):
+def append(creation, mocker):
     s = creation
     rows, events, opened = {}, [], []
     s.models.get = AsyncMock(return_value=ModelMetadata(model_id=2, model_type="embedding", display_name="model", revision="r1"))
@@ -60,9 +61,75 @@ def append(creation):
 
     client = SimpleNamespace(authorize_knowledge_chunk_mutation=AsyncMock(side_effect=authorize))
     service = KnowledgeDocumentAppender(ChunkMutationService(client, s.models, records=records, creation_ports=s.ports))
+    batch_setting = mocker.patch.object(module, "read_document_embedding_batch", create=True, return_value=10)
     request = KnowledgeDocumentsAppend(knowledge_id=1, resource_revision="a" * 64, embedding_model={"model_id": 2},
         documents=[KnowledgeDocument(content="same", metadata={"id": "duplicate", "title": "original"}) for _ in range(2)])
     return SimpleNamespace(**locals())
+
+
+async def test_default_batch_uses_authorized_resource_setting_before_inference(append):
+    a = append
+    a.batch_setting.return_value = 1
+    result = await a.service.append(a.request, a.s.s.actor, context=context())
+    assert result.total_indexed == 2
+    assert a.events == ["model", "model", "put", "put"]
+    assert a.batch_setting.call_count == 1
+    assert a.batch_setting.call_args.args == (a.s.s.actor, a.s.s.actor.tenant_id, "embedding")
+
+
+async def test_explicit_batch_never_reads_tenant_setting(append):
+    a = append
+    request = a.request.model_copy(update={"embedding_batch_size": 2})
+    await a.service.append(request, a.s.s.actor, context=context())
+    a.batch_setting.assert_not_called()
+    assert a.events == ["model", "put", "put"]
+
+
+async def test_configuration_failure_prevents_model_and_write_without_replay(append):
+    a = append
+    a.batch_setting.side_effect = Conflict()
+    with pytest.raises(Conflict):
+        await a.service.append(a.request, a.s.s.actor, context=context())
+    assert a.batch_setting.call_count == 1 and not a.events and not a.opened
+
+
+async def test_asset_configuration_uses_resource_namespace_without_impersonating_actor(append):
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+
+    a = append
+    original = a.client.authorize_knowledge_chunk_mutation.side_effect
+
+    async def asset(*args):
+        grant = await original(*args)
+        return grant.model_copy(update={"resource_tenant_id": ASSET_OWNER_TENANT_ID})
+
+    a.client.authorize_knowledge_chunk_mutation.side_effect = asset
+    a.batch_setting.side_effect = Conflict()
+    with pytest.raises(Conflict):
+        await a.service.append(a.request, a.s.s.actor, context=context())
+    assert a.batch_setting.call_args.args == (a.s.s.actor, ASSET_OWNER_TENANT_ID, "embedding")
+    assert not a.events and not a.opened
+
+
+async def test_configuration_wait_shares_parent_deadline_and_does_not_start_inference(append, mocker):
+    import asyncio
+    from time import monotonic
+
+    from nexent.storage.models import OperationContext
+
+    a = append
+    ended = asyncio.Event()
+
+    async def waiting(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            ended.set()
+
+    blocking = mocker.patch.object(module, "run_blocking", side_effect=waiting)
+    with pytest.raises(DeadlineExceeded):
+        await a.service.append(a.request, a.s.s.actor, context=OperationContext("batch-config-timeout", monotonic() + .05))
+    assert ended.is_set() and blocking.await_count == 1 and not a.events and not a.opened
 
 
 async def test_duplicate_display_ids_append_two_physical_records_after_all_inference(append):

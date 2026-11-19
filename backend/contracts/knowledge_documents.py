@@ -22,7 +22,7 @@ class KnowledgeDocumentsAppend(Contract):
     resource_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     embedding_model: ModelVersion | ModelReference
     documents: list[KnowledgeDocument] = Field(min_length=1, max_length=64)
-    embedding_batch_size: int = Field(default=10, ge=1, le=64)
+    embedding_batch_size: int | None = Field(default=None, ge=1, le=64)
 
 
 class KnowledgeDocumentsAppended(Contract):
