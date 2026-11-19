@@ -294,12 +294,22 @@ def test_unknown_sampling_preserves_legacy_calls_and_explicit_top_p_controls():
     assert "top_p" not in profile.parameter_values
     assert profile.capabilities.sampling.top_p.status == "unknown"
     assert merge_model_preferences(profile, {"top_p": 0.85}).parameter_values["top_p"] == 0.85
-    invocation = LegacyInvocationOptions({"temperature": 0.5, "top_p": 0}).resolve(profile)
+    from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+
+    with pytest.raises(ParameterValidationError, match="TOP_P_OUT_OF_RANGE"):
+        LegacyInvocationOptions({"top_p": 0}).resolve(profile)
+    invocation = LegacyInvocationOptions({"temperature": 0.5, "top_p": 0.995}).resolve(profile)
     request = ModelRequest(request_id="legacy-platform-call", outlet_id=profile.outlet_id,
         config_revision=profile.config_revision,
         messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "title"}])])
     body = OpenAIChatAdapter().prepare_http_request(request, invocation).json_body
-    assert body["temperature"] == 0.5 and body["top_p"] == 0
+    assert body["temperature"] == 0.5 and body["top_p"] == 0.995
+    adapter = OpenAIChatAdapter()
+    old = profile.model_copy(update={"parameter_values": {"top_p": 0}})
+    with pytest.raises(ModelAdapterError, match="TOP_P_OUT_OF_RANGE"):
+        adapter.prepare_http_request(request, old)
+    assert "top_p" not in adapter.prepare_http_request(request, profile).json_body
     assert merge_model_preferences(profile, {"temperature": 0.5}).parameter_values["temperature"] == 0.5
 
 
