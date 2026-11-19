@@ -9,6 +9,24 @@ import httpx
 from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
 
 
+async def resolve_delegated_identity(scope, authorization, *, transport=None):
+    """TenantMCPRouter adapter: bind the deployment Gateway origin and signing key.
+
+    The router only passes ``(scope, authorization)``, so the Gateway location and
+    the identity signing key must be resolved from configuration here instead of
+    being left as required keyword arguments of the pure protocol call.
+    """
+    from contracts.constants import environment
+    from gateway.downstream.identity import signing_key
+
+    return await resolve_mcp_identity(
+        scope, authorization,
+        gateway_url=environment.GATEWAY_SERVICE_URL,
+        key=signing_key(),
+        transport=transport,
+    )
+
+
 async def resolve_mcp_identity(scope, authorization, *, gateway_url, key, transport=None):
     origin = urlsplit(gateway_url)
     if (origin.scheme not in {"http", "https"} or not origin.netloc or origin.username or origin.password

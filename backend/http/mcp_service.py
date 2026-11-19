@@ -24,7 +24,7 @@ from nexent.core.concurrency import (
 from backend.mcp.thread_management import mcp_thread_manager
 from gateway.downstream.identity import enabled as gateway_identity_enabled
 from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
-from gateway.mcp.credential_client import resolve_mcp_identity as _resolve_gateway_mcp_identity
+from gateway.mcp.credential_client import resolve_delegated_identity as _resolve_gateway_mcp_identity
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,

@@ -14,7 +14,8 @@ from gateway.configuration import GatewaySettings
 from gateway.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
 from gateway.mcp import identity_router as mcp
 from gateway.security.context import identity_context
-from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.mcp import credential_client
+from gateway.mcp.credential_client import resolve_delegated_identity, resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -98,6 +99,37 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             await resolve_mcp_identity(SCOPE, "Bearer test", gateway_url="http://gateway", key=KEY,
                                        transport=httpx.MockTransport(transport))
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_settings(monkeypatch):
+    """TenantMCPRouter calls the resolver with (scope, authorization) only.
+
+    The adapter must therefore bind the Gateway origin and the derived signing key
+    from configuration; leaving them as required keyword arguments made every
+    authenticated MCP call fail with a TypeError that surfaced as a 403.
+    """
+    from contracts.constants import environment
+    from gateway.security.identity import derive_signing_key
+
+    seen = {}
+
+    async def fake_resolve(scope, authorization, *, gateway_url, key, transport=None):
+        seen.update(gateway_url=gateway_url, key=key, authorization=authorization, scope=scope)
+        return PRINCIPAL
+
+    monkeypatch.setattr(environment, "GATEWAY_SERVICE_URL", "http://gateway:5013")
+    monkeypatch.setattr(environment, "JWT_SECRET", KEY)
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
+    monkeypatch.setattr(credential_client, "resolve_mcp_identity", fake_resolve)
+
+    result = await resolve_delegated_identity(SCOPE, "Bearer test")
+
+    assert result == PRINCIPAL
+    assert seen["gateway_url"] == "http://gateway:5013"
+    assert seen["key"] == derive_signing_key(KEY, "")
+    assert seen["authorization"] == "Bearer test"
+    assert seen["scope"] is SCOPE
 
 
 @pytest.mark.asyncio
