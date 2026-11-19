@@ -32,7 +32,7 @@ from test.backend.services.model_profile_helpers import stub_resolved_model_cata
 @pytest.mark.parametrize("changed", [False, True])
 def test_root_sandbox_policy_crosses_agentos_and_is_resolved_in_runtime(mocker, changed):
     from nexent.core.agents.contracts.config import AgentConfig
-    from nexent.core.agents.sandbox import SandboxLevel
+    from nexent.core.agents.sandbox.config import SandboxLevel
 
     record = model_record(model_id=11)
     model = create_model_config_from_record(record)
@@ -67,19 +67,14 @@ def test_snapshot_pins_the_first_catalog_model_for_a_legacy_duplicate_alias(mock
     second = model_record(model_id=12, model_name="second", api_key="second-private-key")
     records = [first, second]
     models = [create_model_config_from_record(record) for record in records]
-    lookup = mocker.patch.object(
-        evaluation_snapshot, "get_model_records", return_value=list(reversed(records)) if changed else records,
-    )
-    resource = SimpleNamespace(agent_id=7, version_no=2)
+    rows = list(reversed(records)) if changed else records
+    stub_resolved_model_catalog(mocker, *rows)
+    resource = SimpleNamespace(agent_id=7, version_no=2, model_alias="Evaluation")
 
-    if changed:
-        with pytest.raises(ValueError, match="Unsupported evaluation model override"):
-            evaluation_snapshot._export_model(models[0].cite_name, models, "tenant-a", resource, {})
-    else:
-        binding = evaluation_snapshot._export_model(models[0].cite_name, models, "tenant-a", resource, {})
-        assert binding.model_id == 11
-        assert "first-private-key" not in binding.model_dump_json()
-    lookup.assert_called_once_with({"display_name": "Evaluation", "model_type": "llm"}, "tenant-a")
+    binding = evaluation_snapshot._export_model(models[0].cite_name, models, "tenant-a", resource, {})
+
+    assert binding.model_id == 11
+    assert "first-private-key" not in binding.model_dump_json()
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -90,7 +85,7 @@ def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocke
     current = {**first, "update_time": "revision-2"} if changed else first
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[second, current])
     stub_resolved_model_catalog(mocker, second, current)
-    resource = SimpleNamespace(agent_id=7, version_no=2)
+    resource = SimpleNamespace(agent_id=7, version_no=2, model_alias="Evaluation")
     aliases = {"Evaluation": (11, "revision-1")}
 
     if changed:
@@ -118,17 +113,18 @@ def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocke
     ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),
 ])
 @pytest.mark.parametrize("scoped", [False, True])
-@pytest.mark.parametrize("legacy_reasoning", [False, True])
-async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, scoped, legacy_reasoning):
+@pytest.mark.parametrize("explicit_preferences", [False, True])
+async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, scoped, explicit_preferences):
     mounts = [{"agent_id": child_id, "version_no": 5} for child_id in child_ids]
+    preferences = {"11": {"temperature": 0.4}} if explicit_preferences else {}
     request = AgentRequest(
         query="hello", is_debug=True, entrypoint="workbench",
         metadata={"project": "fixture"} if scoped else None,
-        reasoning_effort="low" if legacy_reasoning else None,
+        model_id=11 if explicit_preferences else None,
+        model_parameter_preferences=preferences,
         workbench={
-            "mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4},
+            "mode": mode, "agent_mounts": mounts,
             "knowledge_scope": {"local": {"mode": "disabled"}} if scoped else None,
-            "model_id": 11 if legacy_reasoning else None,
         },
     )
     config = request.workbench
@@ -161,10 +157,9 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
         authorize_scope = mocker.patch.object(scope, "resolve_knowledge_scope", return_value=knowledge)
     raw = evaluation_payload()
     raw["resource"]["origin"] = "SYSTEM"
-    raw["models"]["llm"]["root_generation"] = {"temperature": 0.4}
-    if legacy_reasoning:
+    if explicit_preferences:
         mocker.patch("management.services.model.run_controls.get_model_by_model_id", return_value=model_record(connect_status="available"))
-        raw["models"]["llm"]["turn_generation"] = {"reasoning_effort": "low"}
+        raw["models"]["llm"]["conversation_parameters"] = preferences["11"]
     if children:
         raw["models"]["additional_llms"] = [{"model_id": 11, "alias": "child_model", "revision": "revision-1"}]
         raw["resource"]["subagents"] = [
@@ -177,7 +172,11 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
         ]
     compile_run = mocker.patch.object(run, "create_agent_run_info", return_value=PreparedEvaluationRun.model_validate(raw))
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
-    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model_record())
+    row = model_record()
+    stub_resolved_model_catalog(mocker, row)
+    mocker.patch("management.db.model.outlets.get_resolved_model_record",
+                 return_value=create_model_config_from_record(row).resolved_profile)
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=row)
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
 
     async def events():
@@ -194,7 +193,7 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     options = compile_run.await_args.kwargs
     assert options["prepared_workbench"].plan == plan
     assert options["override_version_no"] == 2
-    assert options["reasoning_effort"] == ("low" if legacy_reasoning else None)
+    assert options["model_parameter_preferences"] == preferences
     assert options["runtime_sub_agent_mounts"] == [asdict(child) for child in children]
     if scoped:
         metadata_policy.assert_called_once_with(7, "tenant-a", 2)
@@ -209,13 +208,14 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     assert info.conversation_id is None
     assert info.runtime_metadata == ({"project": "fixture"} if scoped else {})
     assert info.runtime_metadata_version is None
-    assert info.model_config_list[0].temperature == 0.4
+    expected = 0.4 if explicit_preferences else create_model_config_from_record(row).temperature
+    assert info.model_config_list[0].resolved_profile.parameter_values["temperature"] == expected
     assert [(child.agent_id, child.version_no, child.model_name) for child in info.agent_config.worker_agents] == [
         (child_id, 5, "child_model") for child_id in child_ids
     ]
     frames = [json.loads(frame.removeprefix(b"data: ")) async for frame in result.body_iterator]
     assert frames[0] == {"type": "workbench_config_resolved", "content": {
-        "config_version": 0, "schema_version": 3, "mode": mode,
+        "config_version": 0, "schema_version": config.schema_version, "mode": mode,
         "agent_mounts": [mount.model_dump(mode="json") for mount in config.agent_mounts],
     }}
     assert [frame["type"] for frame in frames] == (
@@ -296,16 +296,16 @@ async def test_workbench_debug_checks_root_metadata_policy_before_dispatch(mocke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("kind", "persisted_body"), [
-    (kind, persisted_body)
-    for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
+@pytest.mark.parametrize(("kind", "persisted_parameters"), [
+    (kind, persisted_parameters)
+    for kind in ("evaluation", "ordinary", "clarification", "saved_preferences", "saved_preferences_clear", "planning",
                  "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
-                 "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_mixed_controls",
-                 "workbench_legacy_reasoning",
+                 "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_preferences",
+                 "workbench_preferences_clear",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
-    for persisted_body in (False, True)
+    for persisted_parameters in (False, True)
 ] + [("a2a_default_model", False)])
-async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
+async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_parameters, kind):
     legacy_default = kind == "a2a_default_model"
     if legacy_default:
         kind = "a2a"
@@ -318,15 +318,16 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
     model = create_model_config_from_record(record)
+    mocker.patch("management.db.model.outlets.get_resolved_model_record", return_value=model.resolved_profile)
     if legacy_default:
         model = create_tenant_default_model_config(record, "main_model", include_logprobs=True)
         mocker.patch.object(evaluation_snapshot.tenant_config_manager, "get_model_config", return_value=record)
 
-    agent_model_overrides = {"11": {"extra_params": {"__custom__": {"provider_option": "fixture-private-option"}}}}
+    agent_model_overrides = {"11": {"parameter_values": {"temperature": 0.2}}}
 
     def read_agent(agent_id, **kwargs):
         agent = {"name": f"agent_{agent_id}", "description": "Test agent", "model_ids": [] if legacy_default else [11]}
-        if persisted_body and agent_id == 7:
+        if persisted_parameters and agent_id == 7:
             agent["model_params_override"] = agent_model_overrides
         return agent
 
@@ -346,15 +347,22 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         user_config=SimpleNamespace(memory_switch=False),
     ))
     mocker.patch("management.services.skill.service.SkillService.get_enabled_skills_for_agent", return_value=[])
-    mocker.patch.object(compiler, "RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS", 37)
+    mocker.patch.object(compiler, "get_config_snapshot", return_value={"RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS": 37})
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
     mocker.patch.object(run, "create_model_config_list", return_value=[model])
-    if persisted_body:
+    if persisted_parameters:
         mocker.patch.object(run, "get_model_by_model_id", return_value=record)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[] if legacy_default else [record])
     mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value=None)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
-    lookup_override = mocker.patch.object(prepared_evaluation, "read_agent_model_overrides", return_value=agent_model_overrides)
+    stub_resolved_model_catalog(mocker, record)
+
+    def read_overrides(agent_id, version_no, tenant_id):
+        assert tenant_id == "tenant-a"
+        return agent_model_overrides if persisted_parameters and agent_id == 7 else {}
+
+    mocker.patch("management.services.agent.preparation.model_bindings.read_agent_model_overrides", side_effect=read_overrides)
+    mocker.patch("runtime.model.parameters.read_agent_model_overrides", side_effect=read_overrides)
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-compiler-signing-key")
     client = AsyncMock()
@@ -387,14 +395,19 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             query="hello", agent_id=7, conversation_id=42, clarification_response=clarification,
             enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
         )
-        if kind in {"turn_generation", "legacy_reasoning"}:
-            if kind == "turn_generation":
-                request.generation_config = WorkbenchGenerationConfig(temperature=0.4)
-            else:
-                request.reasoning_effort = "auto"
+        conversation_preferences = {}
+        if kind in {"saved_preferences", "workbench_preferences"}:
+            conversation_preferences = {"11": {"temperature": 0.4}}
+        elif kind in {"saved_preferences_clear", "workbench_preferences_clear"}:
+            conversation_preferences = {"11": {"temperature": None}}
+        if conversation_preferences:
             request.version_no = 2
+            read_conversation.return_value.update(
+                selected_model_id=11, model_parameter_preferences=conversation_preferences,
+            )
             mocker.patch("management.db.agent.repository.search_agent_info_by_agent_id", side_effect=read_agent)
             mocker.patch("management.services.model.run_controls.get_model_by_model_id", return_value=record)
+            mocker.patch.object(run, "get_model_by_model_id", return_value=record)
         if kind == "clear_metadata":
             request.version_no = 2
         if kind == "metadata_conflict":
@@ -407,19 +420,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             knowledge_scope = {"local": {"mode": "disabled"}} if kind == "workbench_scope" else None
             config = WorkbenchSessionConfig(
                 mode="single_agent_chat", agent_mounts=[{"agent_id": 8, "version_no": 5}],
-                generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
+                knowledge_scope=knowledge_scope,
             )
-            if kind in {"workbench_mixed_controls", "workbench_legacy_reasoning"}:
-                from management.services.model import run_controls
-
-                config.model_id = 11
-                if kind == "workbench_mixed_controls":
-                    request.generation_config = WorkbenchGenerationConfig(temperature=1.7, top_p=0.8)
-                else:
-                    request.reasoning_effort = "low"
-                mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
-                mocker.patch.object(run, "get_model_by_model_id", return_value=record)
-                preflight_overlay = mocker.patch.object(run_controls, "overlay_root_model", wraps=run_controls.overlay_root_model)
             if knowledge_scope is not None:
                 knowledge = ResolvedKnowledgeScope(
                     desired_scope=config.knowledge_scope.model_dump(mode="json"), tool_params=ToolParamsRequest(),
@@ -474,15 +476,11 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert "Original form" not in prepared.model_dump_json()
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
-        if kind in {"turn_generation", "legacy_reasoning"}:
-            wire = payload.model_dump()["models"]["llm"]["turn_generation"]
-            assert wire.get("settings") == ({"temperature": 0.4} if kind == "turn_generation" else None)
-            assert wire.get("reasoning_effort") == ("auto" if kind == "legacy_reasoning" else None)
+        if conversation_preferences:
+            assert payload.models.llm.conversation_parameters == conversation_preferences["11"]
             assert info.agent_config.model_name != info.agent_config.worker_agents[0].model_name
-            assert info.model_config_list[1].temperature == model.temperature
-            if kind == "turn_generation":
-                assert info.model_config_list[0].temperature == 0.4
-                assert info.model_config_list[0].explicit_sampling == ["temperature"]
+            assert info.model_config_list[0].resolved_profile.parameter_values.get("temperature") == conversation_preferences["11"]["temperature"]
+            assert info.model_config_list[1].resolved_profile.parameter_values.get("temperature") == model.temperature
         if use_workbench:
             root_tools = [call for call in compile_tools.await_args_list if call.args[0] == 7]
             assert root_tools[0].kwargs["runtime_skill_snapshot"] == []
@@ -494,20 +492,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert payload.workbench_config_version == (1 if new else 4)
             if workbench_metadata:
                 permission.assert_called_once_with(7, tenant, 2)
-            assert payload.models.llm.root_generation.temperature == 0.4
-            if kind == "workbench_legacy_reasoning":
-                assert payload.models.llm.turn_generation.model_dump() == {"reasoning_effort": "low"}
             assert info.agent_config.invocation_name == "workbench_main"
             assert info.agent_config.worker_agents[0].invocation_name == "agent_8_v5"
-            assert info.agent_config.model_name != info.agent_config.worker_agents[0].model_name
-            assert info.model_config_list[0].temperature == 0.4
-            assert info.model_config_list[0].explicit_sampling == ["temperature"]
-            assert info.model_config_list[1].temperature == model.temperature
-            if kind == "workbench_mixed_controls":
-                preflight = next(call.args[1] for call in preflight_overlay.call_args_list if call.args[2] == "preflight_root")
-                assert preflight == config.generation_config.model_dump(mode="json")
-                assert info.model_config_list[0].top_p == model.top_p
-                assert request.generation_config.temperature == 1.7
         if metadata is not None and not use_workbench:
             if kind == "northbound_metadata":
                 permission.assert_not_called()
@@ -600,20 +586,10 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     else:
         get_redis.assert_not_called()
     encoded = prepared.model_dump_json()
-    assert "fixture-private-option" not in encoded
-    assert ("provider_body_revision" in encoded) is persisted_body
-    if persisted_body:
-        if use_workbench or kind in {"turn_generation", "legacy_reasoning"}:
-            assert lookup_override.call_count == 2
-            extra = {"provider_option": "fixture-private-option"}
-            if use_workbench:
-                extra["enable_thinking"] = False
-            assert info.model_config_list[0].extra_body == extra
-        else:
-            lookup_override.assert_called_once_with(7, 0 if debug_planning else 2, "tenant-a")
-            assert info.model_config_list[0].extra_body == {"provider_option": "fixture-private-option"}
-    else:
-        lookup_override.assert_not_called()
+    assert record["api_key"] not in encoded
+    assert payload.models.llm.agent_parameters == (agent_model_overrides["11"] if persisted_parameters else None)
+    if persisted_parameters and not payload.models.llm.conversation_parameters:
+        assert info.model_config_list[0].resolved_profile.parameter_values["temperature"] == 0.2
     manager = ThreadManager(
         service_name="evaluation-test",
         lane_policies={"model-tool-io": LanePolicy(
@@ -824,7 +800,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     request = AgentRequest(
         agent_id=7, is_debug=True, query="hello", version_no=version if version else None,
         conversation_id=correlation_id,
-        generation_config={"temperature": 0.4},
+        model_id=11, model_parameter_preferences={"11": {"temperature": 0.4}},
         knowledge_scope={"local": {"mode": "disabled"}, "aidp": {"mode": "disabled"}} if scoped else None,
     )
     if allowed:
@@ -838,7 +814,8 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
         options = compile_run.await_args.kwargs
         assert "conversation_id" not in options
         assert options["override_version_no"] == version and options["is_debug"]
-        assert options["turn_generation"].model_dump() == {"settings": {"temperature": 0.4}}
+        assert options["override_model_id"] == 11
+        assert options["model_parameter_preferences"] == {"11": {"temperature": 0.4}}
         assert options["allow_memory_search"] is False and options["enable_automation_tool"] is False
         if scoped:
             tree.assert_called_once_with(7, "tenant-a", version)
