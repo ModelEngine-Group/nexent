@@ -7,6 +7,7 @@ import os
 from datetime import date, datetime, time, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
+from time import monotonic_ns
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -24,7 +25,7 @@ from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import AgentRunMetadata, MonitoringConfig, agent_monitoring_context, get_monitoring_manager
 from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
@@ -36,6 +37,44 @@ from ops.monitoring.store import BATCH, DAY
 
 
 pytestmark = [pytest.mark.case_id("OPS-AGENT-FACTS-D3-001"), pytest.mark.stage("D3")]
+
+
+@pytest.fixture
+def first_answer_clock(monkeypatch):
+    """Observe real clock reads inside the first answer event without replacing timing."""
+    from nexent.monitor import agent_fact, get_agent_monitoring_context
+
+    reads, answers = {}, {}
+    original_emit = MessageObserver._emit
+
+    def clock():
+        instant = monotonic_ns()
+        context = get_agent_monitoring_context()
+        reads.setdefault(context.monitoring_run_id, []).append(instant)
+        return instant
+
+    def output(observer, process_type, content, **kwargs):
+        context = get_agent_monitoring_context()
+        before = monotonic_ns()
+        result = original_emit(observer, process_type, content, **kwargs)
+        if (context is not None and process_type in {ProcessType.FINAL_ANSWER, ProcessType.MODEL_OUTPUT}
+                and isinstance(content, str) and content.strip()):
+            answers.setdefault(context.monitoring_run_id, (before, monotonic_ns()))
+        return result
+
+    monkeypatch.setattr(agent_fact, "monotonic_ns", clock)
+    monkeypatch.setattr(MessageObserver, "_emit", output)
+    return reads, answers
+
+
+def _assert_first_answer_clock(clock, terminal):
+    reads, answers = clock
+    run_id = terminal["agent_run_id"]
+    started, answered, ended = reads[run_id]
+    before, after = answers[run_id]
+    assert before <= answered <= after
+    assert terminal["ttft_ms"] == (answered - started) // 1_000_000
+    assert terminal["duration_ms"] == (ended - started) // 1_000_000
 
 
 def test_bulk_model_batch_failures_preserve_scoped_status(isolated_monitoring, record_property):
@@ -190,9 +229,10 @@ def _run_across_midnight(tenant):
     return started, finished
 
 
-def _successful_metrics(count, average, samples):
+def _successful_metrics(count, average, samples, ttft=None, ttft_samples=None):
     return {"execution_count": count, "avg_duration_ms": average, "duration_sample_count": samples,
-            "succeeded_count": count, "failed_count": 0, "success_rate": 1.0 if count else None}
+            "succeeded_count": count, "failed_count": 0, "success_rate": 1.0 if count else None,
+            "avg_ttft_ms": ttft, "ttft_sample_count": int(ttft is not None) if ttft_samples is None else ttft_samples}
 
 
 @pytest.mark.asyncio
@@ -243,6 +283,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
     service, tenant = isolated_monitoring
     started, finished = _run_across_midnight(tenant)
     day = date(2026, 10, 31)
+    finished["ttft_ms"] = 150
 
     def interrupt_publication(*_):
         raise RuntimeError("Interrupt publication before the pointer switch")
@@ -255,6 +296,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
         assert initial["execution_count"] == 1
         assert initial["duration_sum_ms"] == initial["duration_sample_count"] == 0
         assert initial["succeeded_count"] == initial["failed_count"] == 0
+        assert initial["ttft_sum_ms"] == initial["ttft_sample_count"] == 0
 
         await _submit_and_read(service, tenant, finished)
         with monkeypatch.context() as patch:
@@ -279,6 +321,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
         assert current["execution_count"] == 1
         assert current["duration_sample_count"] == 1 and current["duration_sum_ms"] == 350
         assert current["succeeded_count"] == 1 and current["failed_count"] == 0
+        assert (current["ttft_sum_ms"], current["ttft_sample_count"]) == (150, 1)
         assert service.es.count(index=f"{DAILY}-*", query=filters(
             tenant_id=tenant, fact_kind="agent", statistic_date="2026-11-01",
         ))["count"] == 0
@@ -302,6 +345,10 @@ def model_peer(request):
             self.end_headers()
             if not release.wait(20):
                 return
+            reasoning = {"id": "reasoning", "object": "chat.completion.chunk", "created": 1, "model": "model",
+                         "choices": [{"index": 0, "delta": {"reasoning_content": "internal reasoning"}}]}
+            self.wfile.write(f"data: {json.dumps(reasoning)}\n\n".encode())
+            self.wfile.flush()
             content = "<final_answer>ops-agent-ready</final_answer>"
             if getattr(request, "param", None) in {"children", "tokens"}:
                 model = payload["model"]
@@ -351,7 +398,7 @@ def _resume_app(info, tenant, channel, threads, monkeypatch):
     return app
 
 
-async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
+async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch, ttft_ms):
     from management.services.permission.identity import session as auth
     from contracts.constants import environment
 
@@ -411,7 +458,7 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         actual = await get(dict(selection, tenant_id=tenant))
         assert actual.status_code == 200
         observed = actual.json()
-        assert observed["data"] == _successful_metrics(1, duration_ms, 1)
+        assert observed["data"] == _successful_metrics(1, duration_ms, 1, ttft_ms)
         assert observed["data_as_of"] and observed["coverage_state"] == "covered" and not observed["is_stale"]
         assert (await get(selection)).json() == observed
 
@@ -420,7 +467,7 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         agent_filtered = await get(dict(selection, agent_id=22))
         assert agent_filtered.json()["data"] == _successful_metrics(1, 500, 1)
         dates = await get(dict(selection, start_date=previous.isoformat()))
-        assert dates.json()["data"] == _successful_metrics(2, (duration_ms + 200) / 2, 2)
+        assert dates.json()["data"] == _successful_metrics(2, (duration_ms + 200) / 2, 2, ttft_ms)
         zero = (await get(dict(selection, group_ids=[555]))).json()
         assert zero["coverage_state"] == "covered"
         assert zero["data"] == _successful_metrics(0, None, 0)
@@ -435,12 +482,12 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         other_only = await get(dict(selection, tenant_id=other), actor="admin")
         assert other_only.json()["data"] == _successful_metrics(1, 800, 1)
         all_tenants = await get(selection, actor="admin")
-        assert all_tenants.json()["data"] == _successful_metrics(2, (duration_ms + 800) / 2, 2)
-        views = await _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms)
+        assert all_tenants.json()["data"] == _successful_metrics(2, (duration_ms + 800) / 2, 2, ttft_ms)
+        views = await _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms, ttft_ms)
     return actual.request.url.raw_path.decode("ascii"), observed, views
 
 
-async def _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms):
+async def _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms, ttft_ms):
     base = "/ops/v1/monitoring/agents"
 
     async def get(suffix="", params=None, actor="ops"):
@@ -452,7 +499,7 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
     assert listing["data"]["current_agent_count"] == listing["data"]["total"] == 1
     assert root["name"] == "internal-21" and root["display_name"] == "Agent 21"
     assert root["configured_group_ids"] == [12, 13] and root["model_ids"] == [7]
-    assert root["metrics"] == _successful_metrics(1, duration_ms, 1)
+    assert root["metrics"] == _successful_metrics(1, duration_ms, 1, ttft_ms)
     own = {key: value for key, value in selection.items() if key != "agent_id"}
     full = (await get(params=own)).json()["data"]
     assert full["current_agent_count"] == 3 and full["total"] == 10
@@ -501,13 +548,13 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
     service.tick()
     current = (await get()).json()
     assert not current["is_stale"]
-    assert current["data"]["items"][0]["metrics"] == _successful_metrics(2, (duration_ms + 250) / 2, 2)
+    assert current["data"]["items"][0]["metrics"] == _successful_metrics(2, (duration_ms + 250) / 2, 2, ttft_ms)
     return {"directory": listing, "rankings": ranked, "trends": series, "after_publication": current}
 
 
 @pytest.mark.asyncio
 async def test_real_root_agent_capture_survives_sse_reconnect(
-    isolated_monitoring, model_peer, monkeypatch, record_property,
+    isolated_monitoring, model_peer, monkeypatch, record_property, first_answer_clock,
 ):
     from management.services.agent.channels import StreamingChannel, runtime_state_service
 
@@ -600,6 +647,7 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
 
             terminal = await _apply_and_read(service, tenant)
             started, finished = observations
+            _assert_first_answer_clock(first_answer_clock, finished)
             assert [event["record_revision"] for event in observations] == [1, 2]
             for key in ("fact_id", "agent_run_id", "root_run_id", "call_context_id"):
                 assert started[key] == finished[key] == info.workspace_run_id
@@ -610,6 +658,7 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             assert terminal["_source"]["record_revision"] == 2
             assert terminal["_source"]["outcome"] == finished["outcome"] == "succeeded"
             assert terminal["_source"]["duration_ms"] == finished["duration_ms"] > 0
+            assert 0 <= finished["ttft_ms"] == terminal["_source"]["ttft_ms"] <= finished["duration_ms"]
             assert terminal["_source"]["ended_at"] >= terminal["_source"]["started_at"]
             assert not service.apply_batch(tenant, "agent")
 
@@ -619,8 +668,9 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             assert state["source_revision"] == state["published_source_revision"]
             assert daily["execution_count"] == daily["duration_sample_count"] == 1
             assert daily["duration_sum_ms"] == finished["duration_ms"]
+            assert daily["ttft_sum_ms"] == finished["ttft_ms"] and daily["ttft_sample_count"] == 1
             request_path, response_body, views = await _verify_ops_query(
-                service, tenant, day, finished["duration_ms"], monkeypatch,
+                service, tenant, day, finished["duration_ms"], monkeypatch, finished["ttft_ms"],
             )
             record_property("agent_summary_request", request_path)
             record_property("agent_summary_response", json.dumps(response_body))
@@ -768,7 +818,7 @@ async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitor
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_peer", ["children", "tokens"], indirect=True)
 async def test_real_parent_and_child_facts_publish_and_replay(
-    isolated_monitoring, model_peer, monkeypatch, record_property, request,
+    isolated_monitoring, model_peer, monkeypatch, record_property, request, first_answer_clock,
 ):
     from contracts.constants import environment
     from management.services.permission.identity import session as auth
@@ -823,6 +873,8 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             terminals = {event["fact_id"]: event for event in events if event["record_revision"] == 2}
             assert len(events) == 6 and len(starts) == len(terminals) == 3
             root = terminals[info.workspace_run_id]
+            for terminal in terminals.values():
+                _assert_first_answer_clock(first_answer_clock, terminal)
             children = [event for event in terminals.values() if not event["is_root"]]
             assert root["agent_id"] == 21 and len(children) == 2
             assert len({event["fact_id"] for event in children}) == 2
@@ -872,6 +924,11 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             assert by_agent[21]["duration_sum_ms"] == root["duration_ms"]
             assert by_agent[22]["execution_count"] == by_agent[22]["duration_sample_count"] == 2
             assert by_agent[22]["duration_sum_ms"] == sum(event["duration_ms"] for event in children)
+            for number, row in by_agent.items():
+                measured = [event for event in terminals.values() if event["agent_id"] == number]
+                assert row["ttft_sum_ms"] == sum(event["ttft_ms"] for event in measured)
+                assert row["ttft_sample_count"] == len(measured)
+                assert all(0 <= event["ttft_ms"] <= event["duration_ms"] for event in measured)
             with service.store.engine.begin() as connection:
                 for number in (21, 22):
                     connection.execute(insert(AgentInfo).values(
@@ -889,7 +946,8 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             app.state.monitoring = service
             params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13]}
             expected = {number: _successful_metrics(row["execution_count"],
-                        row["duration_sum_ms"] / row["duration_sample_count"], row["duration_sample_count"])
+                        row["duration_sum_ms"] / row["duration_sample_count"], row["duration_sample_count"],
+                        row["ttft_sum_ms"] / row["ttft_sample_count"], row["ttft_sample_count"])
                         for number, row in by_agent.items()}
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops",
                                          headers={"Authorization": "Bearer ops"}) as client:
@@ -904,15 +962,73 @@ async def test_real_parent_and_child_facts_publish_and_replay(
                 assert summary["data"]["avg_duration_ms"] == sum(event["duration_ms"] for event in terminals.values()) / 3
                 assert summary["data"]["succeeded_count"] == 3 and summary["data"]["failed_count"] == 0
                 assert summary["data"]["success_rate"] == 1
+                assert summary["data"]["avg_ttft_ms"] == sum(event["ttft_ms"] for event in terminals.values()) / 3
+                assert summary["data"]["ttft_sample_count"] == 3
                 trend = (await client.get("/ops/v1/monitoring/agents/trends", params=params)).json()["data"]
                 assert len(trend) == 1 and all(trend[0][key] == value for key, value in summary["data"].items())
                 if token_run:
                     evidence = await _verify_real_agent_tokens(client, service, tenant, day, terminals, model_events)
                     record_property("agent_token_verification", json.dumps(evidence))
+                else:
+                    record_property("agent_ttft_verification", json.dumps(
+                        await _verify_agent_ttft_history(client, service, tenant, day)))
             record_property("parent_child_metrics", json.dumps({"agents": expected, "combined": summary}))
         finally:
             await threads.shutdown(timeout=8)
             set_fact_sink(sink)
+
+
+async def _verify_agent_ttft_history(client, service, tenant, day):
+    """Publish controlled missing and zero samples beside real parent/child runs."""
+    previous = day - timedelta(days=1)
+    _, base = _run_across_midnight(tenant)
+    events = []
+    for statistic_day, timing, group, number in [
+        (previous, 100, 77, 23), (day, 300, 77, 23), (day, 300, 77, 23), (day, 300, 77, 23),
+        (day, 0, 77, 23), (day, None, 77, 23), (day, None, 78, 24), (day, 0, 79, 25),
+    ]:
+        run_id = uuid4().hex
+        instant = datetime.combine(statistic_day, time.max, timezone.utc)
+        fact = dict(base, fact_id=run_id, call_context_id=run_id, agent_run_id=run_id, root_run_id=run_id,
+                    agent_id=number, initiator_group_ids=[group], started_at=instant.isoformat(),
+                    ended_at=(instant + timedelta(milliseconds=350)).isoformat())
+        if timing is not None:
+            fact["ttft_ms"] = timing
+        events.append(fact)
+        emit_fact(fact)
+    await _wait_for_agent_batch(service, tenant)
+    while service.apply_batch(tenant, "agent"):
+        pass
+    service.publish(tenant, "agent")
+    base_path = "/ops/v1/monitoring/agents"
+    params = {"start_date": previous.isoformat(), "end_date": day.isoformat(), "agent_id": 23, "group_ids": [77]}
+
+    async def read(suffix="/summary", **selection):
+        response = await client.get(base_path + suffix, params={**params, **selection})
+        assert response.status_code == 200
+        return response.json()
+
+    overall = await read()
+    assert (overall["data"]["avg_ttft_ms"], overall["data"]["ttft_sample_count"]) == (200, 5)
+    trend = (await read("/trends"))["data"]
+    assert [(row["avg_ttft_ms"], row["ttft_sample_count"]) for row in trend] == [(100, 1), (225, 4)]
+    assert (await read(start_date=day.isoformat()))["data"]["avg_ttft_ms"] == 225
+    item, = (await read(""))["data"]["items"]
+    assert item["metrics"] == overall["data"]
+    missing = (await read(agent_id=24, group_ids=[78]))["data"]
+    assert missing["avg_ttft_ms"] is None and missing["ttft_sample_count"] == 0
+    zero = (await read(agent_id=25, group_ids=[79]))["data"]
+    assert zero["avg_ttft_ms"] == 0 and zero["ttft_sample_count"] == 1
+    assert (await client.get(base_path + "/summary", params={**params, "tenant_id": tenant + "-other"})).status_code == 403
+    for fact in events:
+        emit_fact(fact)
+    await _wait_for_agent_batch(service, tenant)
+    while service.apply_batch(tenant, "agent"):
+        pass
+    service.publish(tenant, "agent")
+    assert await read() == overall
+    assert (await read("/trends"))["data"] == trend
+    return {"combined": overall, "days": trend, "missing": missing, "zero": zero}
 
 
 async def _wait_for_model_batch(service, tenant):

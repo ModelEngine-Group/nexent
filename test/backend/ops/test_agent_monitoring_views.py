@@ -81,10 +81,12 @@ def test_views_keep_tenant_identity_exact_counts_and_weighted_durations(publicat
     assert lookup["a", 21]["metrics"] == {
         "execution_count": 4, "avg_duration_ms": 250, "duration_sample_count": 4,
         "succeeded_count": None, "failed_count": None, "success_rate": None,
+        "avg_ttft_ms": None, "ttft_sample_count": 0,
     }
     assert lookup["a", 22]["metrics"] == {
         "execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0,
         "succeeded_count": 0, "failed_count": 0, "success_rate": None,
+        "avg_ttft_ms": None, "ttft_sample_count": 0,
     }
     assert lookup["b", 21]["metrics"] is None
     assert lookup["a", 99]["metrics"]["execution_count"] == 2**53 + 1
@@ -93,6 +95,18 @@ def test_views_keep_tenant_identity_exact_counts_and_weighted_durations(publicat
     assert [row["execution_count"] for row in history] == [1, 2**53 + 4]
     assert status["coverage_state"] == "partial" and not status["is_stale"]
     service.store.coverage_starts.assert_called_once()
+
+
+def test_published_views_merge_first_answer_samples_across_dates(publication):
+    service, rows, _ = publication
+    rows[0].update(ttft_sum_ms=100, ttft_sample_count=1)
+    rows[1].update(ttft_sum_ms=900, ttft_sample_count=3)
+    items, _, history, _ = query.read_agent_views(
+        service, tenant="a", start=PREVIOUS, end=DAY, groups=[12, 13], agent_id=21,
+    )
+    root, = [item for item in items if item["agent_id"] == 21 and item["tenant_id"] == "a"]
+    assert root["metrics"]["avg_ttft_ms"] == 250 and root["metrics"]["ttft_sample_count"] == 4
+    assert [row["avg_ttft_ms"] for row in history] == [100, 300]
 
 
 def test_trends_fill_known_zero_uncovered_and_stale(publication):
@@ -105,7 +119,8 @@ def test_trends_fill_known_zero_uncovered_and_stale(publication):
     )
     assert history[0] == {"statistic_date": PREVIOUS - timedelta(days=1), "execution_count": None,
                           "avg_duration_ms": None, "duration_sample_count": None, "coverage_state": "uncovered",
-                          "succeeded_count": None, "failed_count": None, "success_rate": None}
+                          "succeeded_count": None, "failed_count": None, "success_rate": None,
+                          "avg_ttft_ms": None, "ttft_sample_count": None}
     # The controlled catalog also contains an uncovered tenant, so these global days remain partial.
     assert history[1]["execution_count"] is None and history[1]["coverage_state"] == "partial"
     assert status["is_stale"] and status["coverage_state"] == "partial"
@@ -180,6 +195,18 @@ async def test_rankings_choose_exact_top_five_with_stable_ties(view_app):
     app, _ = view_app
     data = (await get(app, "/rankings")).json()["data"]
     assert [row["agent_id"] for row in data] == [8, 6, 7, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_directory_sorts_first_answer_timing_and_keeps_missing_values_last(view_app):
+    app, reader = view_app
+    items = reader.return_value[0]
+    for item in items[:-1]:
+        item["metrics"]["avg_ttft_ms"] = item["agent_id"] * 5
+        item["metrics"]["ttft_sample_count"] = 1
+    response = await get(app, sort_by="avg_ttft_ms", descending=False)
+    assert response.status_code == 200
+    assert [row["agent_id"] for row in response.json()["data"]["items"]] == list(range(1, 10))
 
 
 @pytest.mark.asyncio

@@ -144,10 +144,12 @@ def test_summary_averages_all_duration_samples_across_rows():
     assert summarize_agent(rows) == {
         "execution_count": 6, "avg_duration_ms": 200, "duration_sample_count": 3,
         "succeeded_count": None, "failed_count": None, "success_rate": None,
+        "avg_ttft_ms": None, "ttft_sample_count": 0,
     }
     assert summarize_agent(()) == {
         "execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0,
         "succeeded_count": 0, "failed_count": 0, "success_rate": None,
+        "avg_ttft_ms": None, "ttft_sample_count": 0,
     }
 
 

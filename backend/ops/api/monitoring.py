@@ -28,7 +28,7 @@ ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
 Metric = Literal["request_count", "total_tokens", "error_rate", "avg_duration_ms", "avg_ttft_ms",
                  "avg_generation_rate"]
 PositiveResourceId = Annotated[int, Field(gt=0, le=2**31 - 1)]
-AgentMetric = Literal["execution_count", "avg_duration_ms"]
+AgentMetric = Literal["execution_count", "avg_duration_ms", "avg_ttft_ms"]
 
 
 class MonitoringSelection(BaseModel):

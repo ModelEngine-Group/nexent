@@ -258,6 +258,17 @@ rate. Normal recomputation of a changed day fills the result counters from
 source facts. Existing historical publications require recomputation before
 their success metrics become available.
 
+## Agent first-answer timing
+
+Agent summary, directory metrics and daily trends include nullable `avg_ttft_ms`
+and `ttft_sample_count`. The interval starts at the actual Adapter run and ends
+at its first nonblank public answer fragment. Each child uses its own execution.
+Tools, thinking, empty-answer placeholders and SSE replay create no sample.
+No measured answer returns null, while a measured zero remains zero. Daily
+statistics use the execution start date; range queries divide combined timing
+sums by combined sample counts. Historical rows without timing remain unmeasured.
+Directory sorting accepts `sort_by=avg_ttft_ms`.
+
 ## Agent Token usage
 
 Agent summary responses include `tokens` and `token_status` beside `data`.
