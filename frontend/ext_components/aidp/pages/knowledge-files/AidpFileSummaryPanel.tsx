@@ -27,7 +27,7 @@ interface AidpFileSummaryPanelProps {
 }
 
 const readReason = (summary: AidpFileSummary): string | undefined => {
-  for (const key of ["message", "reason", "error_message"]) {
+  for (const key of ["message", "reason", "error_reason", "error_message"]) {
     const value = summary[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }

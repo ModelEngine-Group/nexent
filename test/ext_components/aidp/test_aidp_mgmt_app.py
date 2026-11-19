@@ -2989,9 +2989,10 @@ class TestChunkEndpoints:
 
         page = {
             "value": [{"chunk_id": 1, "chunk_text": "正文"}],
-            "total_count": 40,
-            # The live service returns next_link on every page, so it must not
-            # keep "next" enabled on the last page.
+            # Real AIDP reports the current page's row count, not a global
+            # total, and returns next_link on every page; the proxy derives
+            # pagination from the page being full instead of either field.
+            "total_count": 1,
             "next_link": "/next",
         }
         with patch.object(aidp_permission_service, "require_permission",
@@ -3011,9 +3012,9 @@ class TestChunkEndpoints:
             SERVER_URL, API_KEY, "kb-1", self.FILE_UUID, 2, 20
         )
         body = response.json()
-        assert body["total_count"] == 40
-        assert body["has_more"] is False
-        assert body["total_reliable"] is True
+        assert body["total_count"] == 21  # (page - 1) * page_size + len(rows)
+        assert body["has_more"] is False  # a short page is the last page
+        assert body["total_reliable"] is False
 
     def test_search_requires_read_and_forwards_file_name(self):
         client = _client()

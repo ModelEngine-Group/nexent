@@ -1871,6 +1871,20 @@ def _normalize_chunk_id(value: Any) -> Any:
     return value
 
 
+def _file_name_stem(name: str) -> str:
+    """Return a file name without its last extension.
+
+    AIDP keeps two name shapes for the same file: the KnowledgeFiles list
+    reports ``file_name`` without the extension while retrieval ``title`` and
+    ``original_file_name`` keep it (verified 2026-11-18). Comparing stems lets
+    the defensive title check agree with the ``contains`` filter for both
+    shapes.
+    """
+    base = name.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    stem, dot, _ = base.rpartition(".")
+    return stem if dot else base
+
+
 def _normalize_aidp_chunk(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize one AIDP chunk item without inventing missing fields.
 
@@ -2754,7 +2768,12 @@ def search_aidp_chunks_impl(
         "conditions": [
             {
                 "name": "original_file_name",
-                "comparison_operator": "=",
+                # Real AIDP (verified 2026-11-18) rejects "=" on string fields
+                # with 400 code 1002; allowed operators are contains / is /
+                # in / start with. "contains" matches the file-name filter
+                # semantics here because the defensive title check below
+                # pins the hit to the requested file.
+                "comparison_operator": "contains",
                 "value": normalized_file_name,
             }
         ],
@@ -2776,14 +2795,18 @@ def search_aidp_chunks_impl(
         )
 
     chunks: List[Dict[str, Any]] = []
+    wanted_stem = _file_name_stem(normalized_file_name)
     for hit in records:
         if not isinstance(hit, dict):
             continue
         title = hit.get("title")
-        if isinstance(title, str) and title.strip() and title.strip() != normalized_file_name:
+        if isinstance(title, str) and title.strip():
             # Defensive check: the upstream filter is authoritative, but do not
-            # surface a different file if it is ignored or unavailable.
-            continue
+            # surface a different file if it is ignored or unavailable. Compare
+            # name stems because AIDP titles carry the extension while the
+            # Nexent file list drops it.
+            if _file_name_stem(title) != wanted_stem:
+                continue
         chunk_id = _normalize_chunk_id(hit.get("id"))
         if not isinstance(chunk_id, int) or chunk_id < 0:
             continue

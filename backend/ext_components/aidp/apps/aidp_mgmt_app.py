@@ -1380,8 +1380,10 @@ async def list_chunks(
 
     AIDP addresses the list by ``file_uuid`` only: the contract has no keyword
     filter, so the page cannot offer a content search. Its ``next_link`` is
-    returned on every page, including the last, so ``has_more`` is derived from
-    ``total_count`` instead of the link.
+    returned on every page, including the last, and ``total_count`` is the
+    current page's row count rather than a global total (both verified against
+    the real 2026-11-18 deployment), so ``has_more`` is derived from the page
+    being full instead of either field.
     """
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
@@ -1406,20 +1408,15 @@ async def list_chunks(
             ErrorCode.AIDP_RESPONSE_ERROR,
             "Unexpected AIDP chunk list response format",
         )
-    raw_total = payload.get("total_count")
-    total_reliable = (
-        isinstance(raw_total, int) and not isinstance(raw_total, bool) and raw_total >= 0
-    )
-    total = int(raw_total) if total_reliable else (page - 1) * page_size + len(rows)
-    has_more = (
-        total > page * page_size
-        if total_reliable
-        else len(rows) >= page_size
-    )
+    # A full page means another page may exist; a short page (or an empty
+    # out-of-range page) is the last one. This deliberately over-reports one
+    # page when the row count is an exact multiple of page_size; the following
+    # fetch then returns an empty page and stops.
+    total = (page - 1) * page_size + len(rows)
     payload.update({
         "total_count": total,
-        "has_more": has_more,
-        "total_reliable": total_reliable,
+        "has_more": len(rows) >= page_size,
+        "total_reliable": False,
     })
     return JSONResponse(status_code=HTTPStatus.OK, content=payload)
 

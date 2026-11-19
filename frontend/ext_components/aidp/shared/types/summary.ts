@@ -8,6 +8,8 @@ export interface AidpFileSummary {
   summary_status?: AidpSummaryStatus | string;
   summary_text?: string;
   summary_model?: string;
+  /** Failure reason from AIDP's file_summary_table; filled only when failed. */
+  error_reason?: string;
   /** Unknown diagnostic fields are preserved for display/debugging only. */
   [key: string]: unknown;
 }

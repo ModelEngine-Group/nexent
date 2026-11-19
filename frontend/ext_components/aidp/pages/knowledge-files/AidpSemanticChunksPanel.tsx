@@ -265,16 +265,22 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
 
       if (drawer.mode === "create" && !searchActive) {
         try {
-          const firstPage = await aidpKnowledgeService.listChunks(
-            kdsId,
-            fileUuid,
-            1,
-            1
-          );
-          if (firstPage.total_reliable) {
-            setSelectedIds([]);
-            setPage(Math.max(1, Math.ceil(firstPage.total_count / pageSize)));
+          // AIDP's total_count is the current page's row count, not a global
+          // total, and page_size=1 errors on the real deployment, so probe
+          // with full pages until a short page marks the end of the file.
+          let lastCount = 0;
+          for (let probe = 1; probe <= 50; probe += 1) {
+            const data = await aidpKnowledgeService.listChunks(
+              kdsId,
+              fileUuid,
+              probe,
+              100
+            );
+            lastCount = (probe - 1) * 100 + data.value.length;
+            if (!data.has_more || data.value.length === 0) break;
           }
+          setSelectedIds([]);
+          setPage(Math.max(1, Math.ceil(lastCount / pageSize)));
         } catch (error) {
           log.warn("Could not determine the last AIDP chunk page:", error);
         }

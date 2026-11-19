@@ -184,7 +184,9 @@ class TestChunkSearchImpl:
             "logical_operator": "or",
             "conditions": [{
                 "name": "original_file_name",
-                "comparison_operator": "=",
+                # Real AIDP rejects "=" on string fields (400 code 1002);
+                # "contains" is the verified operator for the file-name filter.
+                "comparison_operator": "contains",
                 "value": "演示.pdf",
             }],
         }
