@@ -681,3 +681,26 @@ def test_service_accessors_cache_and_reset(monkeypatch):
     assert memory_retrieval_service.get_memory_retrieval_service() is first
     constructor.assert_called_once_with()
     memory_retrieval_service.reset_memory_retrieval_service()
+
+
+@pytest.mark.parametrize("budget_remaining", [-1.0, 0.75])
+async def test_vector_lookup_passes_remaining_budget_to_index_and_skips_expired_queries(monkeypatch, budget_remaining):
+    retrieval = memory_retrieval_service
+    model = MagicMock()
+    model.get_index_name.return_value = "memory-index"
+    index = MagicMock()
+    index.search_similar.return_value = []
+    service = retrieval.MemoryRetrievalService(index_service=index)
+    request = MemorySearchRequest(
+        tenant_id="t", user_id="u", agent_id="1", conversation_id=None,
+        query="question", embedding=[0.25, 0.75], layers=[retrieval.MemoryLayer.AGENT], top_k=3,
+    )
+    monkeypatch.setattr(retrieval, "monotonic", lambda: 10.0)
+
+    assert await service.search(
+        request, embedding_model_info=model, deadline=10.0 + budget_remaining, write_hits=False,
+    ) == []
+    if budget_remaining > 0:
+        assert index.search_similar.call_args.kwargs["request_timeout"] == 0.75
+    else:
+        index.search_similar.assert_not_called()
