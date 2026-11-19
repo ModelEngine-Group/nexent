@@ -23,8 +23,6 @@ by the client.
 
 from __future__ import annotations
 
-from contracts.memory import CreateMemoryRequest, SearchMemoryRequest, UpdateMemoryRequest
-
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
@@ -57,7 +55,7 @@ router = APIRouter(prefix="/memory")
 def _require_tenant_admin(user_id: str) -> None:
     """Reject tenant-memory writes from non-ADMIN users."""
     user_tenant = get_user_tenant_by_user_id(user_id) or {}
-    if str(user_tenant.get("user_role") or "").upper() != "ADMIN":
+    if not has_any_role(roles_from_record(user_tenant), {"ADMIN"}):
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
             detail="Tenant memory creation requires the ADMIN role",

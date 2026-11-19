@@ -38,9 +38,9 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
                 .all()
             )
             if (
-                account.get("delete_flag", "N") != "N"
+                account["delete_flag"] != "N"
                 or not members
-                or any(tuple(getattr(m, "roles", None) or ()) != ("SU",) for m in members)
+                or any(tuple(m.roles or ()) != ("SU",) for m in members)
             ):
                 raise AccountConflictError(
                     "Bootstrap email belongs to an unavailable or non-SU identity"

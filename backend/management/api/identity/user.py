@@ -136,7 +136,7 @@ async def update_user_endpoint(
             tenant_id=requester_tenant_id,
             details={
                 "target_user_id": user_id,
-                "changed_fields": sorted(request.model_dump(exclude_unset=True).keys()),
+                "changes": {key: value for key, value in request.model_dump().items() if value is not None},
             },
         )
         return JSONResponse(
@@ -205,6 +205,8 @@ async def delete_user_endpoint(
             raise RoleAssignmentConflict("Cannot delete your own managed identity")
         # Perform complete user cleanup
         await delete_user_and_cleanup(user_id, tenant_id, actor_id=current_user_id)
+
+        logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
 
         record_security_event(
             "user_delete",

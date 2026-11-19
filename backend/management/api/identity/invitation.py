@@ -3,13 +3,12 @@
 Invitation management API endpoints
 """
 
-from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError, ForbiddenError
 import logging
+import traceback
+from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from http import HTTPStatus
 from starlette.responses import JSONResponse
 
 from contracts.errors.exceptions import (
@@ -29,9 +28,14 @@ from management.utils.managed_read import managed_read
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.invitations import (
-    create_invitation_code, update_invitation_code, get_invitation_by_code,
-    check_invitation_available, use_invitation_code, update_invitation_code_status,
-    get_invitations_list, delete_invitation_code
+    check_invitation_available,
+    create_invitation_code,
+    delete_invitation_code,
+    get_invitation_by_code,
+    get_invitations_list,
+    update_invitation_code,
+    update_invitation_code_status,
+    use_invitation_code,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.permission.identity.session import get_current_user_id
@@ -41,7 +45,8 @@ router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
 @router.post("/list")
-async def list_invitations_endpoint(
+@managed_read
+def list_invitations_endpoint(
     request: InvitationListRequest, authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -119,6 +124,7 @@ async def create_invitation_endpoint(
         invitation_info = create_invitation_code(
             tenant_id=tenant_id,
             code_type=request.code_type,
+            roles=request.roles,
             invitation_code=invitation_code,
             group_ids=group_ids,
             capacity=request.capacity,
@@ -240,7 +246,6 @@ async def update_invitation_endpoint(
         logger.warning(f"Unauthorized invitation update attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
-        import traceback
 
         logger.error(f"Unexpected error during invitation update: {str(exc)}")
         logger.error(f"Exception type: {type(exc).__name__}")

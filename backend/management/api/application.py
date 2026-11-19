@@ -85,7 +85,6 @@ from nexent.core.concurrency import (
     run_blocking,
     set_default_thread_manager,
 )
-from infrastructure.concurrency import config_thread_manager
 from ops.api.access import router as ops_access_router
 
 logger = logging.getLogger("base_app")

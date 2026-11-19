@@ -10,7 +10,9 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlencode
 
-from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
+import jwt
+from pydantic import EmailStr, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from contracts.authentication import PendingOAuthIdentity
 from contracts.constants.constants import (
@@ -387,6 +389,7 @@ async def complete_pending_oauth_account(
     invite_code: str,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
+
     pending = pending_identity
     provider = pending["provider"]
     provider_user_id = pending["provider_user_id"]
@@ -408,6 +411,7 @@ async def complete_pending_oauth_account(
     invitation_info = get_invitation_by_code(normalized_invite_code)
     if not invitation_info:
         raise OAuthLinkError("Invitation code is invalid or unavailable")
+
 
     if not validate_password_strength(password):
         raise OAuthLinkError("Password must be at least 8 characters with uppercase, lowercase, and digit")

@@ -26,6 +26,7 @@ from contracts.constants.constants import (
     ASSET_OWNER_ROLE,
     ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     LANGUAGE,
     MOCK_JWT_SECRET_KEY,
     OAUTH_PENDING_PURPOSE,

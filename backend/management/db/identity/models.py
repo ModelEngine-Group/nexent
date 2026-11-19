@@ -246,8 +246,8 @@ class UserAccount(TableBase):
     )
     account_id = Column(Integer, Sequence("user_account_t_account_id_seq", schema=SCHEMA),
                         primary_key=True, comment="Technical account record identifier")
-    user_id = Column(String(100), nullable=False, comment="Stable UUID; service-serialized identity uniqueness")
-    user_email = Column(String(255), comment="Normalized login email; null for API-only identities or legacy profiles pending migration")
+    user_id = Column(String(100), nullable=False, comment="Stable user identifier including legacy system IDs; service-serialized uniqueness")
+    user_email = Column(String(255), comment="Normalized login email; null for passwordless identities")
     user_roles = Column(ARRAY(String(30)), nullable=False, default=list, server_default=text("'{}'::varchar[]"),
                    comment="Authoritative built-in account roles; empty until assigned within registration")
     password_hash = Column(String(512), comment="Encoded local or imported password hash; never returned to API callers")
