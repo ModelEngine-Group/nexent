@@ -25,6 +25,7 @@ import {
   resolveRepositoryMcpToolCount,
   resolveRepositoryMcpTools,
 } from "@/lib/repositoryMcpDetail";
+import { formatDateTimeLocale } from "@/lib/date";
 import { listMcpRuntimeTools } from "@/services/mcpToolsService";
 import type { McpTool } from "@/types/agentConfig";
 import type { CommunityMcpCard } from "@/types/mcpTools";
@@ -46,7 +47,7 @@ export function McpDetail({
   onClose,
   onInstall,
 }: McpDetailProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const presentation = useRepositoryPresentation();
   const displayName = useUserDisplayName();
   const { message } = App.useApp();
@@ -99,53 +100,81 @@ export function McpDetail({
         bodyStyle={{ padding: 0 }}
       >
         {presentation?.resourceType === "mcp" ? (
-          <div className="flex min-h-0 flex-1 flex-col font-['HarmonyOS_Sans_SC',sans-serif] text-sm leading-[22px] text-[#191919]">
-            <header className="shrink-0 space-y-2 pb-2">
-              <div className="flex min-h-14 items-center gap-3 pr-6">
-                <span className="shrink-0">{icon}</span>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-2">
-                    <h2 className="min-w-0 break-words text-xl font-medium leading-7">
-                      {service.name}
-                    </h2>
-                    <span className="rounded bg-[#D0D8FD]/50 px-2 text-xs leading-5 text-[#1F55B5]">
-                      {deploymentLabel}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-2">
-                    {tags.map((label, index) => (
-                      <span
-                        key={index}
-                        className="max-w-full break-words rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
-                      >
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs leading-[18px] text-[#191919]/70">
-                <span className="break-all">
-                  {t("resourceCenter.author")}：{author}
-                </span>
-                <span>
-                  {t("resourceCenter.publishedAt")}：
-                  {service.publishedAt?.slice(0, 10) ||
-                    t("resourceCenter.notRecorded")}
-                </span>
-                <span>
-                  {t("agentRepository.detail.downloads", {
-                    count: downloadCount,
-                  })}
+          <div className="-mx-6 flex min-h-0 flex-1 flex-col text-sm leading-[22px] text-foreground">
+            <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 pb-4 pr-14">
+              <div className="shrink-0">{icon}</div>
+              <div className="min-w-0 flex-1">
+                <h2 className="break-words text-xl font-medium leading-7">
+                  {service.name}
+                </h2>
+                <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 text-xs text-primary">
+                  {deploymentLabel}
                 </span>
               </div>
             </header>
-            <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-hidden">
-              <p className="shrink-0 whitespace-pre-wrap break-words">
-                {service.description || t("mcpTools.detail.noDescription")}
-              </p>
-              <section className="flex min-h-0 flex-1 flex-col gap-2">
-                <h3 className="shrink-0 font-medium">
+            <div className="repository-detail-body min-h-0 flex-1 overflow-y-auto">
+              <section className="space-y-3 border-b border-border px-6 py-5">
+                <h3 className="font-semibold">
+                  {t("resourceCenter.agentDetail.basicInfo")}
+                </h3>
+                <p
+                  className={`whitespace-pre-wrap break-words ${service.description ? "" : "text-muted-foreground"}`}
+                >
+                  {service.description || t("mcpTools.detail.noDescription")}
+                </p>
+                {tags.length > 0 ? (
+                  <ul
+                    aria-label={t("agentRepository.mine.detail.tags")}
+                    className="flex flex-wrap gap-1.5"
+                  >
+                    {tags.map((tag) => (
+                      <li
+                        key={tag}
+                        className="max-w-full break-words rounded bg-primary/5 px-2 text-xs leading-5 text-muted-foreground"
+                      >
+                        {tag}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <dl className="grid grid-cols-[minmax(5rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-1">
+                  <div className="contents">
+                    <dt className="text-muted-foreground">
+                      {t("resourceCenter.author")}
+                    </dt>
+                    <dd className="min-w-0 [overflow-wrap:anywhere]">
+                      {author}
+                    </dd>
+                  </div>
+                  <div className="contents">
+                    <dt className="text-muted-foreground">
+                      {t("resourceCenter.publishedAt")}
+                    </dt>
+                    <dd className="min-w-0 [overflow-wrap:anywhere]">
+                      {service.publishedAt ? (
+                        <time dateTime={service.publishedAt}>
+                          {formatDateTimeLocale(
+                            service.publishedAt,
+                            i18n?.language
+                          )}
+                        </time>
+                      ) : (
+                        t("resourceCenter.notRecorded")
+                      )}
+                    </dd>
+                  </div>
+                  <div className="contents">
+                    <dt className="text-muted-foreground">
+                      {t("skillRepository.detail.downloads")}
+                    </dt>
+                    <dd className="min-w-0 [overflow-wrap:anywhere]">
+                      {downloadCount.toLocaleString()}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+              <section className="space-y-3 px-6 py-5">
+                <h3 className="font-semibold">
                   {t("mcpTools.detail.tools")}{" "}
                   <Button
                     type="link"
@@ -156,7 +185,7 @@ export function McpDetail({
                     {t("mcpTools.repository.toolCount", { count: toolCount })}
                   </Button>
                 </h3>
-                <div className="repository-detail-body min-h-0 space-y-2 overflow-y-auto">
+                <div className="space-y-2">
                   {snapshotTools.map((tool) => (
                     <details
                       key={tool.name}
@@ -191,7 +220,7 @@ export function McpDetail({
                 </div>
               </section>
             </div>
-            <footer className="flex shrink-0 justify-end gap-2 pt-8">
+            <footer className="-mx-6 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-background px-6 py-3">
               <Button className="min-w-[88px]" onClick={onClose}>
                 {t("common.close")}
               </Button>

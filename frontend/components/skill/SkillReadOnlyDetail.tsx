@@ -23,12 +23,15 @@ export default function SkillReadOnlyDetail({
   tags,
   description,
   files,
+  hideMetadata = false,
 }: {
   name: string;
   source: string;
   tags: string[];
   description: string;
   files: SkillFileContent[];
+  /** Skip the label/value metadata block when the shell already renders it. */
+  hideMetadata?: boolean;
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -37,6 +40,7 @@ export default function SkillReadOnlyDetail({
   const [selectedPath, setSelectedPath] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset per-archive selection state when the file list changes.
     setSearch("");
     setExpandedPreview(false);
     setSelectedPath(
@@ -99,46 +103,50 @@ export default function SkillReadOnlyDetail({
     );
   return (
     <div className="space-y-6 text-sm leading-[22px] text-[#191919]">
-      <dl className="space-y-6">
-        {[
-          ["name", name],
-          ["source", source],
-        ].map(([key, value]) => (
-          <div key={key} className="space-y-2">
-            <dt className="text-[#777777]">
-              {t(`skillManagement.form.${key}`)}
-            </dt>
-            <dd className="break-words">{value || "—"}</dd>
+      {hideMetadata ? null : (
+        <dl className="space-y-6">
+          {[
+            ["name", name],
+            ["source", source],
+          ].map(([key, value]) => (
+            <div key={key} className="space-y-2">
+              <dt className="text-[#777777]">
+                {t(`skillManagement.form.${key}`)}
+              </dt>
+              <dd className="break-words">{value || "—"}</dd>
+            </div>
+          ))}
+          <div className="space-y-2">
+            <dt className="text-[#777777]">{t("skillManagement.form.tags")}</dt>
+            <dd className="flex flex-wrap gap-2">
+              {tags.length
+                ? tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
+                    >
+                      {tag}
+                    </span>
+                  ))
+                : "—"}
+            </dd>
           </div>
-        ))}
-        <div className="space-y-2">
-          <dt className="text-[#777777]">{t("skillManagement.form.tags")}</dt>
-          <dd className="flex flex-wrap gap-2">
-            {tags.length
-              ? tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
-                  >
-                    {tag}
-                  </span>
-                ))
-              : "—"}
-          </dd>
-        </div>
-        <div className="space-y-2">
-          <dt className="text-[#777777]">
-            {t("skillManagement.form.description")}
-          </dt>
-          <dd className="whitespace-pre-wrap break-words">
-            {description || t("skillRepository.common.noDescription")}
-          </dd>
-        </div>
-      </dl>
+          <div className="space-y-2">
+            <dt className="text-[#777777]">
+              {t("skillManagement.form.description")}
+            </dt>
+            <dd className="whitespace-pre-wrap break-words">
+              {description || t("skillRepository.common.noDescription")}
+            </dd>
+          </div>
+        </dl>
+      )}
       <section className="space-y-2">
-        <h3 className="font-normal">
-          {t("skillRepository.detail.skillFiles")}
-        </h3>
+        {hideMetadata ? null : (
+          <h3 className="font-normal">
+            {t("skillRepository.detail.skillFiles")}
+          </h3>
+        )}
         <div className="flex h-[min(560px,60vh)] min-h-[280px] flex-col overflow-hidden rounded border border-[#D9D9D9] sm:flex-row">
           <aside className="flex max-h-[180px] shrink-0 flex-col gap-3 border-b p-3 sm:max-h-none sm:w-[220px] sm:border-r sm:border-b-0">
             <h4 className="text-sm font-medium">

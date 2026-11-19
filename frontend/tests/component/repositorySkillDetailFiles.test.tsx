@@ -5,6 +5,7 @@ import { App } from "antd";
 import JSZip from "jszip";
 import { expect, test, vi } from "vitest";
 import RepositorySkillDetail from "@/components/skill/RepositorySkillDetail";
+import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 
 vi.mock("react-i18next", () => ({
@@ -14,24 +15,31 @@ vi.mock("@/components/common/markdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn() } }));
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { authProvider: undefined } }),
+}));
 
 function show(detail: Partial<SkillRepositoryListingDetail>) {
   render(
     <App>
-      <RepositorySkillDetail
-        open
-        detail={{
-          skill_repository_id: 1,
-          name: "Example",
-          status: "shared",
-          ...detail,
-        }}
-        isLoading={false}
-        isError={false}
-        isFetching={false}
-        onClose={vi.fn()}
-        onRetry={vi.fn()}
-      />
+      <RepositoryPresentationContext.Provider
+        value={{ layout: "cards", resourceType: "skill" }}
+      >
+        <RepositorySkillDetail
+          open
+          detail={{
+            skill_repository_id: 1,
+            name: "Example",
+            status: "shared",
+            ...detail,
+          }}
+          isLoading={false}
+          isError={false}
+          isFetching={false}
+          onClose={vi.fn()}
+          onRetry={vi.fn()}
+        />
+      </RepositoryPresentationContext.Provider>
     </App>
   );
   expect(document.querySelector(".ant-drawer-right")).not.toBeNull();
