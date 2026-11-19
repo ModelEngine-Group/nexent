@@ -1399,6 +1399,7 @@ const ThreadScrollToBottom: FC = () => {
 
 const MessageError: FC = () => {
   const { t } = useTranslation();
+  const hasInlineError = useAuiState((s) => s.message.content.some(part => (part as { isError?: boolean }).isError));
   const rawError = useAuiState((state) => {
     const status = state.message.status;
     return status?.type === "incomplete" && status.reason === "error"
@@ -1406,6 +1407,7 @@ const MessageError: FC = () => {
       : undefined;
   });
   const localizedMessage = getConversationResourceLimitMessage(rawError, t);
+  if (hasInlineError) return null;
 
   return (
     <MessagePrimitive.Error>
@@ -1445,18 +1447,21 @@ const AssistantWorkingIndicator: FC = () => {
 
 const AssistantCompletionIndicator: FC = () => {
   const { t } = useTranslation();
-  const isComplete = useAuiState((s) => s.message.status?.type === "complete");
+  const status = useAuiState((s) => s.message.status);
+  const isComplete = status?.type === "complete";
+  const failed = status?.type === "incomplete" && status.reason === "error";
+  const stopped = status?.type === "incomplete" && status.reason === "cancelled";
 
-  if (!isComplete) return null;
+  if (!isComplete && !failed && !stopped) return null;
 
   return (
     <span
       data-slot="aui_assistant-message-completion-indicator"
-      className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
+      className={cn("inline-flex items-center gap-1 text-xs", failed ? "text-destructive" : stopped ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400")}
       role="status"
     >
-      <DotMatrix state="success" aria-hidden />
-      <span>{t("chat.thread.complete")}</span>
+      {isComplete && <DotMatrix state="success" aria-hidden />}
+      <span>{t(failed ? "chat.thread.failed" : stopped ? "chat.thread.stopped" : "chat.thread.complete")}</span>
     </span>
   );
 };

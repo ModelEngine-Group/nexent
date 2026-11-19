@@ -20,11 +20,11 @@ from contracts.constants.environment import (
     OPS_MONITORING_REPLICAS,
     OPS_MONITORING_TIMEZONE,
     OPS_POSTGRES_DB,
-    OPS_POSTGRES_HOST,
-    OPS_POSTGRES_PASSWORD,
-    OPS_POSTGRES_PORT,
-    OPS_POSTGRES_USER,
+    NEXENT_POSTGRES_PASSWORD,
     POSTGRES_DB,
+    POSTGRES_HOST,
+    POSTGRES_PORT,
+    POSTGRES_USER,
 )
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor.facts import set_fact_sink
@@ -42,12 +42,12 @@ MONITORING_KINDS = {"model": MODEL_MONITORING, "mcp_tool": MCP_TOOL_MONITORING}
 
 
 def control_store():
-    if not OPS_POSTGRES_HOST or not OPS_POSTGRES_USER or not OPS_POSTGRES_DB:
-        raise RuntimeError("Ops monitoring requires an explicit PostgreSQL connection")
+    if not POSTGRES_HOST or not POSTGRES_USER or not OPS_POSTGRES_DB:
+        raise RuntimeError("Ops monitoring requires the Nexent PostgreSQL connection")
     if OPS_POSTGRES_DB == (POSTGRES_DB or "nexent"):
         raise RuntimeError("Ops monitoring requires an independent PostgreSQL database")
-    url = URL.create("postgresql+psycopg2", username=OPS_POSTGRES_USER, password=OPS_POSTGRES_PASSWORD,
-                     host=OPS_POSTGRES_HOST, port=OPS_POSTGRES_PORT, database=OPS_POSTGRES_DB)
+    url = URL.create("postgresql+psycopg2", username=POSTGRES_USER, password=NEXENT_POSTGRES_PASSWORD,
+                     host=POSTGRES_HOST, port=POSTGRES_PORT, database=OPS_POSTGRES_DB)
     return ControlStore(create_engine(url, pool_size=4, max_overflow=2, pool_pre_ping=True,
                                       connect_args={"connect_timeout": 3, "options": "-c lock_timeout=4000"}))
 

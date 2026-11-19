@@ -5,14 +5,13 @@ import json
 import runpy
 from contextlib import nullcontext
 from io import StringIO
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from contracts.errors.exceptions import AccountConflictError
-from infrastructure.security import account_cli as cli
-from infrastructure.security.passwords import verify_password
+from management.cli import account as cli
+from management.utils.account_passwords import verify_password
 
 
 @pytest.fixture
@@ -20,22 +19,13 @@ def store(mocker):
     session = MagicMock()
     session.execute.return_value.first.return_value = None
     session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU", roles=["SU"])]
-    mocker.patch("infrastructure.security.account_cli.get_db_session", return_value=nullcontext(session))
-    lock = mocker.patch("infrastructure.security.account_cli.lock_account_keys")
-    lookup = mocker.patch("infrastructure.security.account_cli.get_account_by_email", return_value=None)
-    create = mocker.patch("infrastructure.security.account_cli.create_account", return_value={"user_id": "new-su"})
-    member = mocker.patch("infrastructure.security.account_cli.insert_user_tenant")
-    configuration = mocker.patch(
-        "infrastructure.security.account_cli.load_system_configuration"
-    )
-    return SimpleNamespace(
-        session=session,
-        lock=lock,
-        lookup=lookup,
-        create=create,
-        member=member,
-        configuration=configuration,
-    )
+    mocker.patch("infrastructure.rdb.client.get_db_session", return_value=nullcontext(session))
+    lock = mocker.patch("management.db.identity.account.lock_account_keys")
+    lookup = mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
+    create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
+    member = mocker.patch("management.db.identity.user_tenant.insert_user_tenant")
+    configuration = mocker.patch("management.cli.account.load_system_configuration")
+    return SimpleNamespace(configuration=configuration, session=session, lock=lock, lookup=lookup, create=create, member=member)
 
 
 def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
@@ -112,18 +102,9 @@ def test_cli_failure_returns_safe_diagnostics(mocker, capsys, error, expected):
     assert "private-credential" not in output.err
 
 
-def test_container_entry_point_propagates_cli_status(mocker):
-    main = mocker.patch.object(cli, "main", return_value=3)
-    path = Path(__file__).resolve().parents[3] / "backend/account_admin.py"
-    with pytest.raises(SystemExit) as raised:
-        runpy.run_path(str(path), run_name="__main__")
-    assert raised.value.code == 3
-    main.assert_called_once_with()
-
-
 def test_cli_module_entry_point_runs_preflight(mocker, capsys):
     mocker.patch("sys.argv", ["account_cli.py", "bootstrap-su", "--check"])
-    mocker.patch("management.db.client.get_db_session", side_effect=RuntimeError("private-dsn"))
+    mocker.patch("infrastructure.rdb.client.get_db_session", side_effect=RuntimeError("private-dsn"))
     with pytest.raises(SystemExit) as raised:
         runpy.run_module(cli.__name__, run_name="__main__")
     assert raised.value.code == 1

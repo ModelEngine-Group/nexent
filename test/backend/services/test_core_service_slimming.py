@@ -193,7 +193,7 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
         return types.SimpleNamespace(user_config=types.SimpleNamespace(memory_switch=enabled, agent_share_option="private"))
 
     dependency(monkeypatch, "management.services.configuration.user.memory", build_memory_context=memory)
-    dependency(monkeypatch, "infrastructure.observability.bootstrap", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    dependency(monkeypatch, "infrastructure.trace.bootstrap", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
     dependency(monkeypatch, "management.services.monitor.identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
     module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_run_context")
     request = types.SimpleNamespace(
@@ -443,7 +443,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
         if path.is_dir() and not path.name.startswith("__")
     )
 
-    assert root_modules == ["__init__.py"]
+    assert root_modules == ["__init__.py", "northbound.py"]
     assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 

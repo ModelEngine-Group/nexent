@@ -192,7 +192,7 @@ def _create_package_mock(name):
 nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
 
-# Mock psycopg2 before management.db.client is imported
+# Mock psycopg2 before infrastructure.rdb.client is imported
 psycopg2_mock = MagicMock()
 sys.modules['psycopg2'] = psycopg2_mock
 sys.modules['psycopg2.pool'] = MagicMock()
@@ -483,8 +483,8 @@ import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 backend_database_client_module = importlib.import_module(
-    'management.db.client')
-sys.modules['management.db.client'] = backend_database_client_module
+    'infrastructure.rdb.client')
+sys.modules['infrastructure.rdb.client'] = backend_database_client_module
 # Tool configuration owns the gateway collaborator, not its model-service internals.
 gateway_stub = types.ModuleType('management.services.model.adapter')
 gateway_stub.get_llm_adapter = MagicMock()
@@ -590,7 +590,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient',
+patch('infrastructure.object_storage.client.MinioClient',
       return_value=minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 

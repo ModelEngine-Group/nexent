@@ -7,7 +7,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_io import Directory, TrajectoryConflict
+from infrastructure.trace.trajectory_io import Directory, TrajectoryConflict
 
 from test.backend.utils import test_trajectory_file_store as fixtures
 
@@ -42,40 +42,44 @@ def populate(store, identity, count):
         store._save_manifest(directory, meta)
 
 
-@pytest.mark.parametrize("count", [100, 101, 1000, 1001])
-def test_delete_limit_continuation_never_skips_a_file(store, identity, count):
+@pytest.mark.parametrize(
+    ("count", "expired_count", "expected_batches"),
+    [
+        (100, 100, [(100, 100, None)]),
+        (101, 101, [(101, 100, 100), (1, 1, None)]),
+        (1000, 2, [(1000, 2, None)]),
+        (1001, 2, [(1000, 1, 1000), (1, 1, None)]),
+    ],
+)
+def test_cleanup_limits_never_skip_a_file(
+    store, identity, count, expired_count, expected_batches
+):
     populate(store, identity, count)
-    expired_count = min(count, 101)
+    # Use expired files on both sides of the scan boundary without rewriting a
+    # thousand-run manifest once per deletion in the scan-limit cases.
+    retained_names = set()
     if count > expired_count:
-        from infrastructure.observability.trajectory_store import timestamp
+        from infrastructure.trace.trajectory_store import timestamp
 
         with store._session(identity) as directory:
             meta = directory.read_json("meta.json")
             for run in meta["runs"][: count - expired_count]:
+                retained_names.add(f"{run['trajectory_id']}.otlp.jsonl")
                 run.update(
                     finished_at=timestamp(fixtures.NOW + timedelta(days=30)),
                     expires_at=timestamp(fixtures.NOW + timedelta(days=60)),
                 )
             store._save_manifest(directory, meta)
-    after, deleted = 0, 0
-    for _ in range(count // 100 + 2):
-        result = store.cleanup(
-            identity, after_turn=after, now=fixtures.NOW + timedelta(days=30)
+    now = fixtures.NOW + timedelta(days=30)
+    after = 0
+    for scanned, deleted, next_turn in expected_batches:
+        result = store.cleanup(identity, after_turn=after, now=now)
+        assert (result["scanned_runs"], result["deleted_runs"], result["next_turn"]) == (
+            scanned, deleted, next_turn,
         )
-        assert result["deleted_runs"] <= 100 and result["scanned_runs"] <= 1000
-        deleted += result["deleted_runs"]
-        if result["next_turn"] is None:
-            break
-        assert result["next_turn"] >= after
-        after = result["next_turn"]
-    else:
-        pytest.fail("Cleanup never completed")
-    assert deleted == expired_count
-    assert len(list(store.root.rglob("*.otlp.jsonl"))) == count - expired_count
-    assert (
-        store.cleanup(identity, now=fixtures.NOW + timedelta(days=30))["deleted_runs"]
-        == 0
-    )
+        after = next_turn
+    assert {path.name for path in store.root.rglob("*.otlp.jsonl")} == retained_names
+    assert store.cleanup(identity, now=now)["deleted_runs"] == 0
 
 
 def test_cleanup_never_requests_a_blocking_session_lock(store, identity, monkeypatch):

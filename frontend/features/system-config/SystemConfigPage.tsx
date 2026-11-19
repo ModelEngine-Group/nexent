@@ -151,6 +151,23 @@ export function SystemConfigPage() {
     };
   }, [changes.length, t]);
 
+  const hasUnsavedChanges = changes.length > 0;
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const currentUrl = window.location.href;
+    window.history.pushState(null, "", currentUrl);
+    const guardHistory = () => {
+      if (window.confirm(t("systemConfig.leaveWarning"))) {
+        window.removeEventListener("popstate", guardHistory);
+        window.history.back();
+      } else {
+        window.history.pushState(null, "", currentUrl);
+      }
+    };
+    window.addEventListener("popstate", guardHistory);
+    return () => window.removeEventListener("popstate", guardHistory);
+  }, [hasUnsavedChanges, t]);
+
   const normalizedQuery = query.trim().toLowerCase();
   const visibleItems = items.filter((item) => {
     const matchesGroup = groupFilter === "all" || item.group === groupFilter;
@@ -286,7 +303,7 @@ export function SystemConfigPage() {
             }
           />
         ) : null}
-        {!isLoading && !error
+        {!isLoading && (items.length > 0 || !error)
           ? CONFIG_GROUPS.map((group) => {
               const groupItems = visibleItems.filter(
                 (item) => item.group === group.id

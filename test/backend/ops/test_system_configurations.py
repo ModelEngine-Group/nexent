@@ -1,12 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP and authorization contracts for ops system configuration."""
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from management.configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
@@ -383,3 +384,54 @@ async def test_configuration_io_uses_the_ops_control_lane(mocker):
     assert fn is operation
     assert changes == {"MAX_TENANT_COUNT": 5}
     assert manager.run.await_args.kwargs == {"actor": "su-user"}
+
+
+def test_authorization_shares_the_control_io_thread_with_persistence(mocker):
+    seen = {}
+
+    def authorize(user):
+        seen["authorization"] = threading.current_thread().name
+        return "ops-user"
+
+    def query():
+        seen["persistence"] = threading.current_thread().name
+        return _items()
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_operations", side_effect=authorize
+    )
+    mocker.patch(
+        "ops.api.system_configurations.list_system_configurations", side_effect=query
+    )
+
+    response = _request("GET", "/system_configurations")
+
+    assert response.status_code == 200
+    assert seen["authorization"] == seen["persistence"]
+
+
+def test_write_authorization_shares_the_control_io_thread_with_save(mocker):
+    seen = {}
+
+    def authorize(user):
+        seen["authorization"] = threading.current_thread().name
+        return "ops-user"
+
+    def save(changes, *, actor):
+        seen["persistence"] = threading.current_thread().name
+        return {"items": [_items()[0]], "notification": "published"}
+
+    mocker.patch(
+        "ops.api.system_configurations.authorize_configuration_write",
+        side_effect=authorize,
+    )
+    mocker.patch(
+        "ops.api.system_configurations.save_system_configurations", side_effect=save
+    )
+
+    response = _request(
+        "PATCH", "/system_configurations", json={"changes": {"MAX_TENANT_COUNT": 5}}
+    )
+
+    assert response.status_code == 200
+    assert seen["authorization"] == seen["persistence"]

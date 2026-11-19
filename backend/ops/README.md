@@ -9,11 +9,17 @@ Authenticated operations also expose scope and resource inventory metadata using
 
 ## Local startup
 
-Use the existing Python 3.11 backend environment. From `backend/`:
+Use the existing Python 3.11 backend environment. From the repository root,
+with both the root and `backend/` on `PYTHONPATH`:
 
 ```shell
-python ops_service.py
+bash deploy/common/start-backend.sh python -m backend.http.ops_service
 ```
+
+Compose and Helm use this module command through `start-backend.sh`, which
+initializes Ops storage before launching the service. Running
+`backend/http/ops_service.py` as a script places its directory first on Python's
+import path, where the shared `logging.py` shadows the standard library.
 
 The listener binds to `0.0.0.0`; `OPS_PORT` defaults to `5016`. Configuration
 reads remain centralized in `contracts/constants/environment.py`. Set
@@ -41,10 +47,10 @@ or execute Agent calls or SQL migrations.
 | `/trajectory/cleanup/schedule` | Read or update tenant cleanup intervals |
 | `/conversation/agent_groups` and its conversations subresource | Administrator directory with `view=trajectory` |
 
-The existing Web origin accepts `/api/trajectory/` and forwards it to ops through
-`OPS_HTTP_BACKEND` (local default `http://localhost:5016`). Conversation directory
-requests go to ops only with `view=trajectory`; ordinary history and execution
-requests remain on Runtime. Roles, tenant ownership, private-cache headers,
+Web sends trajectory and system configuration requests through Gateway. Gateway
+uses `GATEWAY_OPS_URL` to reach Ops and attaches a request-bound identity signature.
+Conversation directory requests go to Ops only with `view=trajectory`; ordinary
+history and execution keep their existing routing. Roles, tenant ownership, private-cache headers,
 response envelopes and opaque references retain their existing contracts.
 References are process-local; multi-replica deployments need affinity or must
 restart a query when its reference is unavailable.
@@ -53,30 +59,34 @@ When model monitoring is enabled, startup prepares its Elasticsearch mappings
 before reporting ready.
 `GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
 OPS is restricted to its tenant; SU can select any tenant or all tenants. The
-dashboard and configuration action grants are permission contracts. Model monitoring is exposed under `/ops/v1/monitoring/models` when enabled.
-The Web proxy forwards `/api/ops/v1/monitoring/` to Ops on the same origin.
+System configuration endpoints enforce the shared read and update grants in Ops.
+Model monitoring is exposed under `/ops/v1/monitoring/models` when enabled.
+The Gateway forwards `/api/ops/v1/monitoring/` to Ops with a signed session identity.
 
 ## Model monitoring setup
 
-Create an independent PostgreSQL database for Ops and set `OPS_POSTGRES_HOST`,
-`OPS_POSTGRES_PORT`, `OPS_POSTGRES_DB`, `OPS_POSTGRES_USER` and
-`OPS_POSTGRES_PASSWORD`. The migration entry point takes these settings and
-installs the two shared tables in schema `ops`. The SQL uses a separate ledger.
+Monitoring is enabled by default. Normal Compose and Helm deployment creates
+the independent Ops database and applies its versioned migrations automatically;
+no separate database or SQL command is required. Ops uses the existing
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and `NEXENT_POSTGRES_PASSWORD`
+directly. Only the database name differs: the default is `POSTGRES_DB` plus
+`_ops` (`nexent_ops` with the standard configuration). `OPS_POSTGRES_DB` can
+override the name; no separate Ops server or credentials are configured.
 
-```shell
-bash deploy/common/run-ops-sql-migrations.sh
-```
+The shared launcher applies business migrations first in `migrate` mode, then
+creates and migrates Ops storage. `wait` consumers wait for both schemas; the
+Ops process keeps business SQL off and initializes only its own database.
+Concurrent initializers serialize database creation and reuse the migration
+ledger and lock. Existing data is preserved. Initialization failure prevents
+application startup. Names equal to the business database or longer than 63
+UTF-8 bytes are rejected before Ops SQL runs.
 
-From a deployed Compose project, the shared backend image also packages the migration:
-
-```shell
-docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml run --rm --entrypoint bash nexent-ops /opt/nexent/scripts/run-ops-sql-migrations.sh
-```
-
-Apply the migration using a database role with schema creation permissions.
-The runtime role needs access to the two tables and their identity sequence.
-Set `OPS_MONITORING_ENABLED=true` for Ops and for Nexent services producing model
-requests. Producers stage sanitized batches in the Ops database. Ops owns the
+The deployment role needs database creation permission when the target does not
+exist and schema creation permission for migration. Existing databases can be
+managed by a role without database creation permission. Set
+`OPS_MONITORING_ENABLED=false` to skip Ops initialization and collection;
+explicit false remains effective during upgrades. Producers stage sanitized
+batches in the Ops database. Ops owns the
 Elasticsearch mappings, writer and publisher. Give its Elasticsearch identity
 template management and monitoring-index permissions, including document
 deletion on `monitoring-daily-*`. The service uses the
@@ -143,8 +153,8 @@ python -m ops.scripts.backfill_trajectory_summaries
 
 Normal Docker and Kubernetes application selection includes ops. Docker ops
 loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
-logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Its Web
-container receives the corresponding `OPS_HTTP_BACKEND`.
+logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Gateway
+uses the corresponding `GATEWAY_OPS_URL`.
 
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops
@@ -153,10 +163,10 @@ docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/doc
 Standalone Compose joins the existing external `nexent_network`. The shared
 network and environment files must already exist. Kubernetes mounts the logs
 PVC and, when trajectories are enabled, the trajectory PVC plus existing shared
-configuration/secrets. Default health mode keeps its minimal configuration and
-logs-only mount. The normal deployment generator sets Web `config.opsHttpBackend`
-from `OPS_PORT`; direct Helm overrides must set that address consistently with
-the ops Service port. SQL startup stays disabled in ops.
+configuration/secrets. Ops reads its database and signature settings from the
+shared ConfigMap and Secret in both modes. The normal deployment generator
+sets Gateway `opsUrl` from `OPS_PORT`; direct Helm overrides must set that
+address consistently with the Ops Service port. SQL startup stays disabled in ops.
 
 Application, Uvicorn and access logs use `infrastructure.logging`, console and
 rotating persistent files. The file path is `LOG_DIR/ops/nexent_ops.log`; Kubernetes
@@ -164,13 +174,13 @@ uses a per-pod log directory to avoid concurrent rotation.
 
 ## Code boundaries
 
-- `ops_service.py`: launcher.
+- `backend/http/ops_service.py`: launcher.
 - `ops/api/`: HTTP routes and application composition.
 - `ops/services/trajectory/`: query parsing, file retrieval and maintenance orchestration.
 - `ops/db/trajectory/`: authorized catalogs, list/statistics SQL and cleanup configuration.
 - `ops/concurrency.py`, `ops/lifespan.py`: process-owned resources.
 - `management/db/trajectory/`: shared ORM and transactional capture/projection writes.
-- `infrastructure/observability/`: shared file primitives and Runtime capture wiring.
+- `infrastructure/trace/`: shared file primitives and Runtime capture wiring.
 
 Database identity and permission access is reused from management. Resource inventory
 selects metadata fields explicitly and excludes credentials and content.

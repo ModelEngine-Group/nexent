@@ -7,7 +7,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
@@ -72,7 +72,7 @@ def test_cleanup_publishes_expired_pg_only_after_durable_manifest(tmp_path, iden
 def test_lifecycle_allocates_one_id_and_reuses_it_for_capture_even_when_disabled(
     mocker, identity
 ):
-    from infrastructure.observability.trajectory_execution import execution_observer
+    from infrastructure.trace.trajectory_execution import execution_observer
     from nexent.monitor import AgentRunMetadata
 
     repository = mocker.patch(
@@ -396,7 +396,7 @@ def test_tenant_migration_revokes_summaries_and_marks_both_scopes_dirty(mocker):
 
 
 def test_lifecycle_still_registers_latest_request_when_archive_is_unreadable(mocker):
-    from infrastructure.observability.trajectory_execution import execution_observer
+    from infrastructure.trace.trajectory_execution import execution_observer
     from nexent.monitor import AgentRunMetadata
 
     repository = mocker.patch(
@@ -420,7 +420,7 @@ def test_pg_reader_construction_never_opens_or_provisions_the_file_root(mocker):
     mocker.patch.object(environment, "TRAJECTORY_READ_ENABLED", True)
     mocker.patch.object(environment, "REDIS_BACKEND_URL", "redis://test/1")
     provision = mocker.patch(
-        "infrastructure.observability.trajectory_store.TrajectoryFileStore.provision",
+        "infrastructure.trace.trajectory_store.TrajectoryFileStore.provision",
         side_effect=AssertionError("List construction touched storage"),
     )
     service = runtime.get_service()

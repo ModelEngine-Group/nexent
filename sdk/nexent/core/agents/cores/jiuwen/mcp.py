@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig, MCPTool, McpToolCard
 from openjiuwen.core.foundation.tool.mcp.client.streamable_http_client import StreamableHttpClient
 
-from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
 from nexent.core.concurrency import ManagedTaskSpec
@@ -61,9 +61,18 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                 client = _ConfiguredNativeClient(config, parameters.get("httpx_client_factory"))
                 # Connect and disconnect in this owner task: MCP uses task-bound cancel scopes.
                 stack.push_async_callback(client.disconnect, timeout=self.close_timeout_seconds)
-                if not await client.connect(timeout=self.connect_timeout_seconds):
-                    raise MCPConnectionTimeoutError("Jiuwen MCP connection failed")
-                for card in await client.list_tools(timeout=self.connect_timeout_seconds):
+                try:
+                    if not await client.connect(timeout=self.connect_timeout_seconds):
+                        raise MCPConnectionTimeoutError("Jiuwen MCP connection failed")
+                    cards = await client.list_tools(timeout=self.connect_timeout_seconds)
+                except Exception as exc:
+                    failure = MCPConnectionFailure(url=parameters["url"], transport=parameters["transport"])
+                    failure.__cause__ = exc
+                    # Retain the cause before task-bound MCP cleanup can cancel this owner.
+                    with self._lock:
+                        self._startup_error = failure
+                    raise failure from exc
+                for card in cards:
                     # The public saved name may be normalized; the proxy keeps the raw wire name.
                     for name in {card.name, _registered_tool_name(card.name)} - {""}:
                         available[name] = None if name in available else (client, card, parameters["url"])
@@ -161,6 +170,15 @@ class _ConfiguredNativeClient(StreamableHttpClient):
         super().__init__(config)
         self._transport = config.client_type
         self._http_client_factory = http_client_factory
+
+    async def disconnect(self, *, timeout=None):
+        """Let the session owner observe transport failures surfaced by task-group cleanup."""
+        try:
+            await self._exit_stack.aclose()
+        finally:
+            self._session = self._client = self._read = self._write = None
+            self._is_disconnected = True
+        return True
 
     async def connect(self, *, timeout):
         import httpx

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from contracts.constants.environment import JWT_SECRET
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
 from ops.monitoring.model import summarize
 from ops.monitoring.query import (

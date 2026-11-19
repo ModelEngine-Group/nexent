@@ -3,7 +3,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { TOP_P_STEP, validSampling, type SamplingField } from "@/lib/modelSamplingParameters";
 import { Minus, Plus } from "lucide-react";
+import { SamplingInput } from "@/components/model/SamplingInput";
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
@@ -24,6 +26,7 @@ interface SliderStepperProps {
   disabled?: boolean;
   compact?: boolean;
   showFallbackValue?: boolean;
+  samplingField?: SamplingField;
   onChange: (next: number | undefined) => void;
 }
 
@@ -34,16 +37,29 @@ export function SliderStepper({
   label,
   value,
   fallback,
-  min,
+  min: configuredMin,
   max,
-  step,
+  step: configuredStep,
   disabled = false,
   compact = false,
   showFallbackValue = true,
+  samplingField,
   onChange,
 }: SliderStepperProps) {
+  const topP = samplingField === "top_p";
+  const min = topP
+    ? Math.min(max, Math.max(TOP_P_STEP, configuredMin))
+    : configuredMin;
+  const step = topP ? TOP_P_STEP : configuredStep;
+  const invalid =
+    samplingField !== undefined &&
+    !validSampling(samplingField, value ?? (showFallbackValue ? fallback : undefined), {
+      minimum: configuredMin,
+      maximum: max,
+    });
   const display = value ?? fallback;
-  const hasDisplayValue = value !== undefined || showFallbackValue;
+  const hasDisplayValue =
+    !invalid && (value !== undefined || showFallbackValue);
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -52,7 +68,7 @@ export function SliderStepper({
 
   const set = (next: number) => {
     if (disabled || !Number.isFinite(next)) return;
-    onChange(roundStep(clamp(next, min, max), step));
+    onChange(clamp(roundStep(clamp(next, min, max), step), min, max));
   };
 
   const valueFromClientX = (clientX: number) => {
@@ -141,50 +157,62 @@ export function SliderStepper({
         </div>
       </div>
 
-      {/* Compact numeric controls leave more track space in two-column forms. */}
-      <div
-        className={`flex h-8 shrink-0 items-center justify-between rounded border border-[#E6E6E6] bg-white py-[5px] ${compact ? "w-[88px] px-1.5" : "w-[112px] px-2"} ${
-          disabled ? "opacity-50" : ""
-        }`}
-      >
-        <input
-          type="number"
-          aria-label={label}
-          min={min}
-          max={max}
-          step={step}
-          value={value ?? (showFallbackValue ? fallback : "")}
+      {samplingField ? (
+        <SamplingInput
+          field={samplingField}
+          label={label}
+          value={value}
+          inherited={showFallbackValue ? fallback : undefined}
+          schema={{ minimum: configuredMin, maximum: max }}
           disabled={disabled}
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === "") {
-              onChange(undefined);
-            } else {
-              set(Number(raw));
-            }
-          }}
-          className="h-full min-w-0 flex-1 border-0 bg-transparent text-left text-[14px] leading-[22px] text-[#808080] outline-none"
+          className={compact ? "w-24 shrink-0" : "w-32 shrink-0"}
+          onChange={(next) => onChange(next ?? undefined)}
         />
-        <button
-          type="button"
-          aria-label={`${label} −`}
-          onClick={() => set(display - step)}
-          disabled={disabled}
-          className={`flex h-5 shrink-0 items-center justify-center text-[#BDBDBD] disabled:cursor-not-allowed ${compact ? "w-4" : "w-5"}`}
+      ) : (
+        <div
+          className={`flex h-8 shrink-0 items-center justify-between rounded border border-[#E6E6E6] bg-white py-[5px] ${compact ? "w-[88px] px-1.5" : "w-[112px] px-2"} ${
+            disabled ? "opacity-50" : ""
+          }`}
         >
-          <Minus size={12} />
-        </button>
-        <span className="mx-[3px] h-[14px] w-px shrink-0 bg-[#E6E6E6]" />
-        <button
-          type="button"
-          aria-label={`${label} +`}
-          onClick={() => set(display + step)}
-          disabled={disabled}
-          className={`flex h-5 shrink-0 items-center justify-center text-[#424242] disabled:cursor-not-allowed ${compact ? "w-4" : "w-5"}`}
-        >
-          <Plus size={12} />
-        </button>
-      </div>
+          <input
+            type="number"
+            aria-label={label}
+            min={min}
+            max={max}
+            step={step}
+            value={value ?? (showFallbackValue ? fallback : "")}
+            disabled={disabled}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                onChange(undefined);
+              } else {
+                set(Number(raw));
+              }
+            }}
+            className="h-full min-w-0 flex-1 border-0 bg-transparent text-left text-[14px] leading-[22px] text-[#808080] outline-none"
+          />
+          <button
+            type="button"
+            aria-label={`${label} −`}
+            onClick={() => set(display - step)}
+            disabled={disabled}
+            className={`flex h-5 shrink-0 items-center justify-center text-[#BDBDBD] disabled:cursor-not-allowed ${compact ? "w-4" : "w-5"}`}
+          >
+            <Minus size={12} />
+          </button>
+          <span className="mx-[3px] h-[14px] w-px shrink-0 bg-[#E6E6E6]" />
+          <button
+            type="button"
+            aria-label={`${label} +`}
+            onClick={() => set(display + step)}
+            disabled={disabled}
+            className={`flex h-5 shrink-0 items-center justify-center text-[#424242] disabled:cursor-not-allowed ${compact ? "w-4" : "w-5"}`}
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

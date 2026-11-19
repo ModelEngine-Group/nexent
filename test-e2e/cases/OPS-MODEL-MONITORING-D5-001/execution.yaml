@@ -6,6 +6,8 @@ implementations:
   selector: test_ops_database_migration
 acceptance_bindings:
   AC-01: [test_ops_database_migration]
+  AC-02: [test_ops_database_migration]
+  AC-03: [test_ops_database_migration]
 preparation:
   families: []
   anchors: false

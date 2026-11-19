@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+﻿# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression tests for reporting model monitoring coverage and refresh status."""
 
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +10,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.api import application, monitoring
 from permissions.models import CurrentUser
 

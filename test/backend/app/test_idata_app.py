@@ -63,16 +63,16 @@ backend_module = sys.modules.get("backend") or types.ModuleType("backend")
 backend_module.__path__ = [backend_dir]
 backend_database_module = types.ModuleType("backend.database")
 backend_database_module.__path__ = [os.path.join(backend_dir, "database")]
-backend_database_client_module = types.ModuleType("management.db.client")
+backend_database_client_module = types.ModuleType("infrastructure.rdb.client")
 backend_database_client_module.MinioClient = MagicMock()
 backend_module.database = backend_database_module
 backend_database_module.client = backend_database_client_module
 
 sys.modules["backend"] = backend_module
 sys.modules["backend.database"] = backend_database_module
-sys.modules["management.db.client"] = backend_database_client_module
+sys.modules["infrastructure.rdb.client"] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock the storage client factory BEFORE importing any backend modules that depend on it.
 # This prevents MinIO connection attempts during module import.
@@ -95,8 +95,8 @@ def _mock_create_storage_client_from_config(config):
 # Apply the mock to the SDK module where create_storage_client_from_config is defined
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
            side_effect=_mock_create_storage_client_from_config):
-    # Also mock the MinIO client initialization in management.db.client
-    with patch('management.db.client.MinioClient') as MockMinioClient:
+    # Also mock the MinIO client initialization in infrastructure.rdb.client
+    with patch('infrastructure.object_storage.client.MinioClient') as MockMinioClient:
         mock_minio_instance = MagicMock()
         MockMinioClient.return_value = mock_minio_instance
 

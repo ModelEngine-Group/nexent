@@ -1,0 +1,25 @@
+schema_version: '1.0'
+module:
+  id: INFRA-STORAGE
+  name: Infrastructure
+feature:
+  feature_id: SI-STORAGE
+  name: StorageInterface foundation and scoped KV access
+  status: active
+  description: >-
+    Lightweight storage ports, explicit scope and capability checks, a logical
+    record catalog, and the first Redis KV adapter. Application migration and
+    the other default adapters remain separate implementation batches.
+  business_rules:
+  - rule_id: SI-STORAGE-RULE-01
+    description: Contract imports load no vendor drivers or application configuration.
+  - rule_id: SI-STORAGE-RULE-02
+    description: Trusted bindings enforce service, tenant, namespace and capability restrictions.
+  - rule_id: SI-STORAGE-RULE-03
+    description: KV revision and TTL updates are atomic and uncertain writes are not automatically replayed.
+  required_test_stages: []
+  source:
+    notes: >-
+      infrastructure-storage-access-interface SPEC, initial SI-P0/SI-P1 slice.
+      Current unit proof belongs to traditional UT; local Redis verification is
+      recorded separately and is not a formal D3 or full application acceptance.

@@ -4,30 +4,46 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-MODEL-MONITORING-D5-001
   feature_id: OPS-MODEL-MONITORING
-  requirement_ids: [OPS-MODEL-MONITORING-20261116]
+  requirement_ids: [OPS-MODEL-MONITORING-20261116, OPS-AUTOMATIC-INITIALIZATION-20261119]
   business_rule_ids: [OPS-MODEL-MONITORING-RULE-01]
   title: Ops monitoring migration is repeatable and confined to the Ops database
   type: DEPLOYMENT
   priority: P1
   status: active
   automation: automated
-  objective: Verify new installation and repeated migration of independent control storage.
+  objective: Verify automatic creation, repeatable migration and startup ordering of independent control storage through the deployment entrypoint.
   preconditions: [An isolated PostgreSQL server can host separate Nexent and Ops databases]
-  test_data: {databases: Empty Ops database and a separate Nexent database}
+  test_data: {databases: Existing Nexent database and an Ops database that does not yet exist}
   steps:
   - order: 1
-    action: Run the Ops migration against the empty Ops database.
+    action: Launch through start-backend.sh with monitoring and Ops connection overrides omitted and the business database already present.
     expected: Both monitoring control tables exist under the Ops schema.
   - order: 2
     action: Run the same migration again and inspect both databases.
     expected: The Ops schema is unchanged and the Nexent database has no monitoring control tables.
-  expected_results: [Both Ops control tables exist after migration, Reapplying preserves the schema]
+  - order: 3
+    action: Start two initializers concurrently and launch a waiting consumer before initialization completes.
+    expected: Both initializers succeed, existing data is preserved, and the consumer starts only after Ops migrations are applied.
+  - order: 4
+    action: Explicitly disable monitoring, attempt a shared database name, and attempt initialization with a role without database creation permission.
+    expected: Disabled startup creates no Ops storage; invalid or unauthorized initialization fails before application launch.
+  expected_results: [Both Ops control tables exist after migration, Reapplying preserves the schema, Concurrent and waiting starts respect initialization ordering, Disabled and failed initialization preserve isolation and do not start an unready application]
   forbidden_side_effects: [Creating an Ops monitoring table in the Nexent database]
   acceptance:
   - id: AC-01
     description: New setup and repeated migration target the Ops database only.
     steps: [1, 2]
     expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Default deployment creates Ops storage automatically and concurrent startup preserves ordering and existing data.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Explicit disable and initialization failures never create Ops tables in the business database or launch an unready application.
+    steps: [4]
+    expected_results: [4]
     forbidden_side_effects: [1]
   risk_type: DEPLOYMENT
   risk: A migration targets the Nexent business database or changes the Ops schema on reapplication.

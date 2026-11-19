@@ -25,17 +25,16 @@ from contracts.errors.exceptions import (
     TokenExpiredError,
 )
 from contracts.roles import has_any_role, roles_from_record
-from gateway.authentication.auth import authenticate, get_current_user_id
-from infrastructure.formatting import bytes_to_readable
+from management.services.permission.identity.session import authenticate, get_current_user_id
+from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.services.knowledge_base.quota import QuotaService
-from management.services.knowledge_base.service import (
-    ElasticSearchService,
-    get_vector_db_core,
-)
+from management.services.permission.identity.session import authenticate, get_current_user_id
 from permissions.depends import require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.quota_formatting import bytes_to_readable
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 
 logger = logging.getLogger(__name__)
 

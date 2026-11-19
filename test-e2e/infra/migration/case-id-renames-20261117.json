@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "change_id": "NB-ASSET-READINESS-20261117",
+  "source_head": "e9b215b9244a4c6505bf7d646facadd54c4b5d20",
+  "purpose": "Audit-only identity correspondence for the user-requested repair of PR #4351 validation findings; not a runtime alias or a naming exemption. The final-answer duplicate is restored to the canonical identity already recorded in case-id-renames-20261102.json.",
+  "historical_results_rewritten": false,
+  "renames": [
+    {"old_case_id": "NB-OTEL-001", "new_case_id": "NB-OTEL-D3-001", "stage": "D3"}
+  ]
+}

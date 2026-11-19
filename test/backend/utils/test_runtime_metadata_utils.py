@@ -6,7 +6,7 @@ import pytest
 from contracts.errors.exceptions import RuntimeMetadataValidationError
 from contracts.errors.codes import RuntimeMetadataValidationCode
 
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     MAX_MCP_HEADERS_TOTAL_BYTES,
     MAX_MCP_HEADER_VALUE_BYTES,
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
@@ -182,13 +182,13 @@ def test_ut_be_pass_005_accepts_values_at_the_size_limit():
 def test_ut_be_pass_004_blank_header_key_is_never_allowed():
     # The public validator rejects blank keys earlier; the predicate must stay
     # safe on its own for any future caller.
-    from infrastructure.serialization import runtime_metadata as module
+    from contracts import runtime_metadata as module
 
     assert module._is_passthrough_header_allowed("   ") is False
 
 
 def test_validate_runtime_metadata_wraps_serialization_failures(monkeypatch):
-    from infrastructure.serialization import runtime_metadata as module
+    from contracts import runtime_metadata as module
 
     def _raise_type_error(_value):
         raise TypeError("not serializable")
@@ -208,7 +208,7 @@ def test_validate_runtime_metadata_wraps_serialization_failures(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_strip_reserved_fields_removes_underscore_prefixed_top_level_keys():
-    from infrastructure.serialization.runtime_metadata import (
+    from contracts.runtime_metadata import (
         strip_reserved_runtime_metadata_fields,
     )
 
@@ -238,7 +238,7 @@ def test_strip_reserved_fields_removes_underscore_prefixed_top_level_keys():
 
 @pytest.mark.parametrize("metadata", [None, {}, ["a", "b"], "text", 123])
 def test_strip_reserved_fields_is_defensive_on_non_dict_input(metadata):
-    from infrastructure.serialization.runtime_metadata import (
+    from contracts.runtime_metadata import (
         strip_reserved_runtime_metadata_fields,
     )
 
@@ -249,7 +249,7 @@ def test_strip_reserved_fields_keeps_underscore_nested_values():
     """Only TOP-LEVEL keys are transport-reserved.  Nested dicts may legally
     carry underscore-prefixed keys — those belong to the caller's domain and
     must not be touched."""
-    from infrastructure.serialization.runtime_metadata import (
+    from contracts.runtime_metadata import (
         strip_reserved_runtime_metadata_fields,
     )
 

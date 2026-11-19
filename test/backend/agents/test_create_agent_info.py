@@ -176,7 +176,7 @@ utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.services.agent.context'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -194,11 +194,12 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = _create_stub_module(
-    "management.db.client",
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = _create_stub_module(
+    "infrastructure.rdb.client",
     minio_client=MagicMock(),
     postgres_client=MagicMock(),
     db_client=MagicMock(),
@@ -206,9 +207,9 @@ sys.modules['management.db.client'] = _create_stub_module(
     as_dict=MagicMock(),
 )
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()
@@ -315,7 +316,7 @@ sys.modules['management.services.knowledge_base.service'].ElasticSearchService.f
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['management.services.agent.prompt'] = MagicMock()
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
-sys.modules['infrastructure.http.client'] = MagicMock()
+sys.modules['backend.http.client'] = MagicMock()
 sys.modules['management.services.tool.langchain'] = MagicMock()
 sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
@@ -549,9 +550,9 @@ _utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
 sys.modules["utils"] = _utils_pkg
 
 # Mock all utils submodules that create_agent_info.py imports
-_redis_utils_mod = _create_stub_module("infrastructure.redis")
+_redis_utils_mod = _create_stub_module("infrastructure.redis.client")
 _redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
-sys.modules["infrastructure.redis"] = _redis_utils_mod
+sys.modules["infrastructure.redis.client"] = _redis_utils_mod
 setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
 
 _model_name_utils_mod = _create_stub_module("management.services.model.names")

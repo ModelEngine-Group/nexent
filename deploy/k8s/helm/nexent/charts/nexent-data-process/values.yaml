@@ -20,7 +20,7 @@ resources:
 
 config:
   skipProxy: "true"
-  pythonPath: "/opt/backend"
+  pythonPath: "/opt:/opt/backend"
   dockerEnvironment: "false"
 
 service:

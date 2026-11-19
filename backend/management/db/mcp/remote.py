@@ -7,8 +7,8 @@ from sqlalchemy import text
 
 from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import TenantResourceLimitError
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")

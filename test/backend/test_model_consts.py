@@ -147,6 +147,24 @@ def test_manage_model_requests_preserve_capacity_fields(request_type, required_f
     assert {field: dumped[field] for field in capacity_values} == capacity_values
 
 
+@pytest.mark.parametrize(
+    ("request_type", "required"),
+    [
+        (model_consts_model.ModelProbeRequest, {"model_name": "test", "model_type": "llm"}),
+        (model_consts_model.ManageTenantModelCreateRequest, {"tenant_id": "test", "model_name": "test", "model_type": "llm"}),
+        (model_consts_model.ManageTenantModelUpdateRequest, {"tenant_id": "test", "current_display_name": "Test"}),
+    ],
+)
+def test_legacy_sampling_requests_convert_numeric_strings(request_type, required):
+    request = request_type(**required, temperature="0", top_p="0.995")
+    assert request.temperature == 0.0
+    assert request.top_p == 0.995
+    assert request_type(**required, temperature=None, top_p=None).top_p is None
+    for invalid in ({"top_p": "0"}, {"top_p": True}, {"temperature": "2.1"}, {"temperature": "invalid"}):
+        with pytest.raises(ValidationError):
+            request_type(**required, **invalid)
+
+
 def test_capacity_suggestion_response_has_required_fields():
     """Pin ModelCapacitySuggestionResponse schema so a downstream rename
     (e.g. suggested_provider -> canonical_provider) trips a test instead
@@ -636,46 +654,6 @@ def test_process_params():
     assert params.authorization == "Bearer token123"
 
 
-
-
-def test_optimize_prompt_section_request():
-    """Test OptimizePromptSectionRequest"""
-    req = model_consts.OptimizePromptSectionRequest(
-        task_description="Improve prompt",
-        agent_id=1,
-        model_id=2,
-        section_type="duty",
-        section_title="System Prompt",
-        current_content="Old content",
-        feedback="Add more details",
-        mode="insert",
-        start_pos=10,
-        end_pos=20
-    )
-    assert req.section_type == "duty"
-    assert req.start_pos == 10
-    assert req.end_pos == 20
-
-
-def test_bad_case_and_optimize_requests():
-    """Test BadCaseItem and OptimizePromptBadCaseRequest"""
-    item = model_consts.BadCaseItem(
-        question="What is 2+2?",
-        answer="5",
-        label="wrong",
-        reason="Incorrect answer"
-    )
-    assert item.label == "wrong"
-
-    req = model_consts.OptimizePromptBadCaseRequest(
-        agent_id=1,
-        model_id=2,
-        current_content="Current prompt",
-        bad_cases=[item],
-        section_type="duty",
-        section_title="Math"
-    )
-    assert len(req.bad_cases) == 1
 
 
 def test_generate_title_request():

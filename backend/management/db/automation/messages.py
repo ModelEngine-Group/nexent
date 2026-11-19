@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 
 from contracts.conversation import MessageSource
 from management.db.automation.models import AgentAutomationRun
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation import repository as conversation_db
 from management.db.conversation.models import ConversationMessage, ConversationRecord
 from management.utils.audit_fields import add_update_tracking

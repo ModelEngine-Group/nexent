@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from infrastructure.observability.trajectory_store import TrajectoryFileStore
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
 
 
 def test_backend_bootstrap_writes_full_local_agent_model_tool_trace(tmp_path):
@@ -28,7 +28,7 @@ from management.db.trajectory.repository import ExecutionRepository
 patch.object(ExecutionRepository, "begin", return_value=1).start()
 patch.object(ExecutionRepository, "initialize", side_effect=lambda _: nullcontext()).start()
 patch.object(ExecutionRepository, "expire", return_value=None).start()
-from infrastructure.observability.bootstrap import monitoring_manager, local_trajectory_processor
+from infrastructure.trace.bootstrap import monitoring_manager, local_trajectory_processor
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata
 

@@ -44,7 +44,7 @@ from contracts.constants.environment import (
 )
 from contracts.errors.exceptions import AccountConflictError
 from contracts.roles import roles_from_record
-from gateway.authentication.auth import (
+from management.services.permission.identity.session import (
     calculate_expires_at,
     generate_session_jwt,
     require_active_account,
