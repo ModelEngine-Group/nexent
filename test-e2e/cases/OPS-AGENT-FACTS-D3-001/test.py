@@ -39,6 +39,12 @@ from ops.monitoring.store import BATCH, DAY
 pytestmark = [pytest.mark.case_id("OPS-AGENT-FACTS-D3-001"), pytest.mark.stage("D3")]
 
 
+@pytest.fixture(autouse=True)
+def owned_working_directory(tmp_path, monkeypatch):
+    """Keep legacy relative runtime logs inside the case-owned temporary directory."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def first_answer_clock(monkeypatch):
     """Observe real clock reads inside the first answer event without replacing timing."""
@@ -70,11 +76,14 @@ def first_answer_clock(monkeypatch):
 def _assert_first_answer_clock(clock, terminal):
     reads, answers = clock
     run_id = terminal["agent_run_id"]
-    started, answered, ended = reads[run_id]
+    started, answered, *ended = reads[run_id]
     before, after = answers[run_id]
     assert before <= answered <= after
     assert terminal["ttft_ms"] == (answered - started) // 1_000_000
-    assert terminal["duration_ms"] == (ended - started) // 1_000_000
+    if terminal["is_root"]:
+        assert ended == []
+    else:
+        assert terminal["duration_ms"] == (ended[0] - started) // 1_000_000
 
 
 def test_bulk_model_batch_failures_preserve_scoped_status(isolated_monitoring, record_property):
@@ -340,6 +349,12 @@ def model_peer(request):
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             received.append(payload)
+            if getattr(request, "param", None) == "failed":
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": {"message": "controlled", "type": "invalid_request_error"}}).encode())
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -1159,3 +1174,194 @@ async def _verify_real_agent_tokens(client, service, tenant, day, agent_ends, mo
     assert (await client.get(base + "/summary", params=dict(params, tenant_id=tenant + "-other"))).status_code == 403
     return {"unpublished": unpublished, "published": published, "stale": stale, "final": final,
             "parent": parent_usage, "child": child_usage, "trends": trends, "zero": zero}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_peer", ["normal", "failed", "cancelled", "cross_day", "trajectory_off",
+                                      "prepare_failure"], indirect=True)
+async def test_complete_main_timing_matches_raw_trajectory_and_published_queries(
+    isolated_monitoring, model_peer, monkeypatch, tmp_path, record_property, request,
+):
+    """Exercise the real worker, OTLP file writer, ES publication and authorized HTTP reads."""
+    from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+    from infrastructure.trace.trajectory_store import TrajectoryFileStore
+    from management.services.permission.identity import session as auth
+    from nexent.core.concurrency import ManagedThreadSpec
+    from nexent.monitor import get_agent_monitoring_context
+    from nexent.monitor import phase_capture
+    from nexent.monitor.run_timing import RunTiming
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+    from permissions import rbac
+
+    service, tenant = isolated_monitoring
+    base, requests, release = model_peer
+    mode = request.node.callspec.params["model_peer"]
+    enabled = mode != "trajectory_off"
+    directory = tmp_path / "trajectory"
+    TrajectoryFileStore.provision(directory)
+    store = TrajectoryFileStore(directory, authorize=lambda _: None)
+    processor = LocalTrajectoryProcessor(store, get_agent_monitoring_context)
+    threads = ThreadManager("main-timing", {
+        lane: LanePolicy(lane, 2, 3)
+        for lane in ("agent-run", "model-tool-io", "sandbox", "control-io", "background-service")
+    })
+    provider = TracerProvider(sampler=processor.wrap_sampler(ALWAYS_ON), shutdown_on_exit=False)
+    provider.add_span_processor(processor)
+    manager = get_monitoring_manager()
+    monkeypatch.setattr(manager, "_config", MonitoringConfig(
+        enable_telemetry=enabled, provider="local_file", local_span_processor=processor, export_metrics=False,
+    ))
+    monkeypatch.setattr(manager, "_tracer", provider.get_tracer("main-timing"))
+    if mode == "cross_day":
+        instants = iter((1793491199000000000, 1793491200100000000, 1793491200200000000))
+        monkeypatch.setattr(phase_capture, "RunTiming", lambda: RunTiming(utc_clock_ns=lambda: next(instants)))
+
+    @phase_capture.capture_preparation
+    async def prepare():
+        await asyncio.sleep(0.01)
+        return AgentRunInfo(
+            query="Run the controlled main Agent", observer=MessageObserver(),
+            agent_config=AgentConfig(
+                name="root", description="Controlled Agent",
+                model_name="model", agent_core="missing_core" if mode == "prepare_failure" else "smolagents",
+                agent_id=21, version_no=3, tools=[], max_steps=2,
+            ),
+            model_config_list=[ModelConfig(cite_name="model", model_name="model", url=base, api_key="synthetic")],
+            stop_event=Event(), user_id="owner", tenant_id=tenant, conversation_id=123,
+            workspace_run_id=uuid4().hex, history=[],
+        )
+
+    info = await prepare()
+    metadata = AgentRunMetadata(
+        tenant_id=tenant, agent_id=21, user_id=info.user_id, conversation_id=123,
+        monitoring_group_ids=(12, 13),
+    )
+    observations = []
+
+    async def consume():
+        with agent_monitoring_context(metadata):
+            async for _ in agent_run(info, thread_manager=threads):
+                pass
+
+    threads.start()
+    processor.start(threads, ManagedThreadSpec("trajectory-writer", "main-timing", close_hook=processor.request_stop))
+    try:
+        async with runtime.producer_lifespan():
+            sink = get_fact_sink()
+
+            def capture(event):
+                if event["fact_kind"] == "agent":
+                    observations.append(dict(event))
+                sink(event)
+
+            set_fact_sink(capture)
+            worker = asyncio.create_task(consume())
+            try:
+                if mode not in {"failed", "prepare_failure"}:
+                    async with asyncio.timeout(15):
+                        while not requests:
+                            assert not worker.done(), "Worker exited before the model HTTP request"
+                            await asyncio.sleep(0.02)
+                    if mode == "cancelled":
+                        info.cancellation_scope.cancel()
+                    release.set()
+                async with asyncio.timeout(20):
+                    await asyncio.gather(worker, return_exceptions=True)
+                    await asyncio.wrap_future(info.thread_future)
+            except Exception:
+                if mode not in {"failed", "prepare_failure"}:
+                    raise
+            finally:
+                release.set()
+                if not worker.done():
+                    worker.cancel()
+                    await asyncio.gather(worker, return_exceptions=True)
+            assert info.thread_future.done()
+            result = info.run_timing.finish()
+            assert result.run_id == info.workspace_run_id and result.duration_ms >= 10
+            assert processor.force_flush(5000)
+            raw = [
+                span for path in directory.rglob("*.otlp.jsonl") for line in path.read_text().splitlines()
+                for resource in json.loads(line)["resourceSpans"] for scope in resource["scopeSpans"]
+                for span in scope["spans"] if span["name"] == "agent.run"
+            ]
+            if enabled:
+                root, = raw
+                attrs = {item["key"]: next(iter(item["value"].values())) for item in root["attributes"]}
+                assert int(root["startTimeUnixNano"]) == result.started_at_ns
+                assert int(root["endTimeUnixNano"]) == result.ended_at_ns
+                assert int(attrs["nexent.duration_ms"]) == result.duration_ms
+                assert attrs["nexent.agent_run_id"] == info.workspace_run_id
+            else:
+                assert raw == [] and not local_capture_enabled(manager)
+            if mode == "prepare_failure":
+                assert observations == [] and requests == []
+                assert result.execution_started_at is None and info.attempt_outcome == "failed"
+                assert not service.apply_batch(tenant, "agent")
+                record_property("main_timing", json.dumps({"mode": mode, "duration_ms": result.duration_ms,
+                                                         "execution_count": 0, "raw_span": enabled}))
+                return
+            assert len(requests) == 1
+            start, finish = observations
+            assert [item["record_revision"] for item in observations] == [1, 2]
+            for key in ("fact_id", "agent_run_id", "root_run_id", "call_context_id"):
+                assert start[key] == finish[key] == result.run_id
+            assert start["started_at"] == finish["started_at"] == result.started_at.isoformat()
+            assert start["execution_started_at"] == finish["execution_started_at"] == (
+                result.execution_started_at.isoformat()
+            )
+            assert finish["ended_at"] == result.ended_at.isoformat() and finish["duration_ms"] == result.duration_ms
+            outcome = {"failed": "failed", "cancelled": "cancelled"}.get(mode, "succeeded")
+            assert finish["outcome"] == outcome
+            hit = await _apply_and_read(service, tenant)
+            day = result.execution_started_at.date()
+            assert hit["_source"]["duration_ms"] == result.duration_ms
+            assert hit["_source"]["statistic_date"] == day.isoformat()
+            assert hit["_index"] == f"{FACTS}-{day:%Y.%m}"
+            if mode == "cross_day":
+                assert result.started_at.date() == date(2026, 10, 31) and day == date(2026, 11, 1)
+                assert not service.es.indices.exists(index=f"{FACTS}-2026.10")
+            service.tick()
+            original = _published_agent_day(service, tenant, day)
+            _, daily = original
+            assert daily["execution_count"] == daily["duration_sample_count"] == 1
+            assert daily["duration_sum_ms"] == result.duration_ms
+            assert daily["succeeded_count"] == int(outcome == "succeeded")
+            assert daily["failed_count"] == int(outcome == "failed")
+            assert daily["ttft_sample_count"] == int("ttft_ms" in finish)
+            await _submit_and_read(service, tenant, finish)
+            service.tick()
+            assert _published_agent_day(service, tenant, day) == original
+            monkeypatch.setattr(auth, "get_current_user_context", lambda _: ("operator", tenant, "OPS"))
+            monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}})
+            monkeypatch.setattr(rbac, "_INITIALIZED", True)
+            from ops.api import application
+
+            monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+            app = application.create_app()
+            app.state.monitoring = service
+            params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "agent_id": 21,
+                      "group_ids": [12, 13]}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
+                response = await client.get("/ops/v1/monitoring/agents/summary", params=params,
+                                            headers={"Authorization": "Bearer ops"})
+                assert response.status_code == 200
+                metrics = response.json()["data"]
+                assert metrics["execution_count"] == metrics["duration_sample_count"] == 1
+                assert metrics["avg_duration_ms"] == result.duration_ms
+                assert metrics["succeeded_count"] == int(outcome == "succeeded")
+                assert metrics["failed_count"] == int(outcome == "failed")
+                assert metrics["avg_ttft_ms"] == finish.get("ttft_ms")
+            record_property("main_timing", json.dumps({
+                "mode": mode, "run_id": result.run_id, "duration_ms": result.duration_ms,
+                "started_at": start["started_at"], "execution_started_at": start["execution_started_at"],
+                "ended_at": finish["ended_at"], "es_index": hit["_index"], "raw_span": enabled,
+                "query": metrics, "replay_count": 1,
+            }))
+            set_fact_sink(sink)
+    finally:
+        processor.shutdown()
+        provider.shutdown()
+        await threads.shutdown(timeout=8)
+        assert threads.snapshot().active_count == 0

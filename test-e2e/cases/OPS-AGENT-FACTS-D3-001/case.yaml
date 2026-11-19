@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -84,6 +84,12 @@ case:
   - order: 22
     action: Publish controlled no-answer, zero-time and cross-day timing samples alongside the real runs and query the selected dates, groups, Agent and tenant.
     expected: Missing answers yield no samples and a null average, measured zero remains zero, and cross-day averages use combined sums divided by combined sample counts under the existing permission and filter boundary.
+  - order: 23
+    action: Run real main executions through normal, failed, cancelled, midnight and capture-disabled paths using the common complete-lifecycle clock, and publish monitoring results.
+    expected: Enabled raw Agent spans and ES facts consume the same complete start, end and measured duration. Disabled capture still produces the complete monitoring duration. Preparation failures before execution retain the existing no-count behavior.
+  - order: 24
+    action: Compare start/terminal facts and existing statistics, replay terminal facts, and inspect actual execution anchors and child regressions.
+    expected: Identities and complete start remain stable across revisions, statistics and partitions retain actual-execution date ownership, and counts, success results, Tokens, TTFT and child timing retain their contracts.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -100,6 +106,7 @@ case:
   - Agent Token views match attributed published model usage and provider coverage independently of parent execution and publication timing.
   - One scoped PostgreSQL read returns exactly the failed model batch tenants selected by the existing per-tenant predicate, including inclusive dates and legacy batches.
   - First-answer timing is independently measured and published per actual execution, with null missing answers, known zero and weighted cross-day averages.
+  - Main monitoring and raw trajectory share one complete execution measurement without changing counting, actual execution dates or other metric contracts.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -111,6 +118,7 @@ case:
   - Double-counting child usage under the parent, including unassociated model requests, replacing missing usage with zero, or inheriting Agent publication status for Tokens.
   - Per-tenant SQL growth, failures from an unselected tenant or changes to existing Token lag semantics.
   - A TTFT sample from tools, reasoning, fallback text, another Agent execution or replay, or an average of daily averages.
+  - A second main clock or terminal report, a span/monitoring timestamp mismatch, a count from preparation-only failure, a shifted statistic date or a changed child duration boundary.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -162,3 +170,8 @@ case:
     steps: [21, 22]
     expected_results: [15]
     forbidden_side_effects: [10]
+  - id: AC-11
+    description: Complete main timing is shared across raw trajectory and monitoring while preserving actual execution eligibility and all other metric boundaries.
+    steps: [23, 24]
+    expected_results: [16]
+    forbidden_side_effects: [11]

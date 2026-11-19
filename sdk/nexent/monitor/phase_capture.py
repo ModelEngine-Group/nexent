@@ -18,11 +18,13 @@ except ImportError:
 from .duration import duration_attributes
 from .local_content import local_capture_enabled, safe_local_content
 from .preparation_groups import group_memory_preparation
+from .run_timing import RunTiming
 
 
 _MAX_PREPARATION_PHASES = 4096
 _preparation = ContextVar("nexent_preparation_phases", default=None)
 _parent = ContextVar("nexent_preparation_parent", default=None)
+_preparing_run = ContextVar("nexent_preparing_run", default=False)
 
 
 def _manager():
@@ -147,22 +149,32 @@ def capture_preparation(function):
 
     @wraps(function)
     async def captured(*args, **kwargs):
-        if trace is None or not local_capture_enabled(_manager()) or _preparation.get() is not None:
+        if _preparing_run.get():
             return await function(*args, **kwargs)
+        timing = RunTiming()
+        timing.start()
+        preparing_token = _preparing_run.set(True)
         records = []
-        token = _preparation.set(records)
+        capture = trace is not None and local_capture_enabled(_manager())
+        token = _preparation.set(records if capture else None)
         parent_token = _parent.set(None)
         try:
             with trace_phase("agent.prepare"):
                 result = await function(*args, **kwargs)
+            result.run_timing = timing
             try:
-                result.preparation_trace = records
+                if capture:
+                    result.preparation_trace = records
             except Exception:
                 _gap(trace.get_current_span())
             return result
+        except BaseException:
+            timing.finish()
+            raise
         finally:
             _parent.reset(parent_token)
             _preparation.reset(token)
+            _preparing_run.reset(preparing_token)
 
     return captured
 

@@ -14,12 +14,14 @@ from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from nexent.monitor.agent_fact import AgentRunObservation
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
+from nexent.monitor.run_timing import RunTiming
 
 
 @pytest.fixture
 def capture(monkeypatch):
     clock = SimpleNamespace(ms=0)
     events = []
+    timings = {}
     observer = MessageObserver()
     monkeypatch.setattr("nexent.monitor.agent_fact.monotonic_ns", lambda: clock.ms * 1_000_000)
     previous = get_fact_sink()
@@ -32,12 +34,15 @@ def capture(monkeypatch):
                                     monitoring_parent_run_id=None if run_id == "root" else "root")
         with agent_monitoring_context(metadata):
             observation = AgentRunObservation.from_context(metadata)
-            with observation.measure(Event()):
+            timing = RunTiming(run_id=run_id, monotonic_clock_ns=lambda: clock.ms * 1_000_000)
+            timing.start()
+            timings[run_id] = timing
+            with observation.measure(Event(), run_timing=timing if run_id == "root" else None):
                 yield observation
-            observation.report_terminal("completed")
+            observation.report_terminal("completed", timing_result=timing.finish() if run_id == "root" else None)
 
     try:
-        yield SimpleNamespace(clock=clock, events=events, observer=observer, run=run)
+        yield SimpleNamespace(clock=clock, events=events, observer=observer, run=run, timings=timings)
     finally:
         set_fact_sink(previous)
 
@@ -108,7 +113,7 @@ def test_child_answers_do_not_trigger_parent_and_cleanup_or_replay_cannot_change
     c.observer.add_message("root", ProcessType.FINAL_ANSWER, "late cleanup")
     copied.run(c.observer.add_message, "root", ProcessType.FINAL_ANSWER, "late copied context")
     c.observer.get_final_answer()
-    parent.report_terminal("completed")
+    parent.report_terminal("completed", timing_result=c.timings["root"].finish())
     assert c.events[-1] == snapshot
 
 

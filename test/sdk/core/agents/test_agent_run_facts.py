@@ -15,6 +15,7 @@ from nexent.core.utils.observer import MessageObserver
 from nexent.monitor import AgentRunMetadata, MonitoringConfig, agent_monitoring_context, get_monitoring_manager
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
+from nexent.monitor.run_timing import RunTiming
 
 
 @pytest.fixture
@@ -26,7 +27,10 @@ def worker(monkeypatch):
         agent_config=SimpleNamespace(name="root", version_no=3), query="private prompt",
         workspace_run_id="root-run", stop_event=Event(), mcp_host=None,
         observer=MessageObserver(), attempt_outcome=None, run_result=None,
+        model_config_list=[], history=[], minio_files=[],
     )
+    info.run_timing = RunTiming(utc_clock_ns=lambda: 1_795_132_799_000_000_000 + clock.ns,
+                               monotonic_clock_ns=lambda: clock.ns)
     info.cancellation_scope = RunCancellationScope(info.stop_event)
     metadata = AgentRunMetadata(
         tenant_id="tenant", agent_id=21, is_debug=False, monitoring_group_ids=(13, 12),
@@ -69,7 +73,7 @@ def worker(monkeypatch):
         ("stopped", "cancelled", RunTerminated),
     ],
 )
-def test_root_fact_times_adapter_run_and_reports_after_cleanup(worker, attempt_outcome, event_outcome, failure):
+def test_root_fact_uses_complete_shared_timing_and_reports_after_cleanup(worker, attempt_outcome, event_outcome, failure):
     def run():
         worker.advance("run", 350)
         if failure:
@@ -89,7 +93,11 @@ def test_root_fact_times_adapter_run_and_reports_after_cleanup(worker, attempt_o
                              "workspace cleanup", event_outcome]
     start, finish = worker.events
     assert start["record_revision"] == 1 and "duration_ms" not in start
-    assert finish["record_revision"] == 2 and finish["duration_ms"] == 350
+    assert finish["record_revision"] == 2 and finish["duration_ms"] == 1820
+    result = worker.info.run_timing.finish()
+    assert start["started_at"] == result.started_at.isoformat()
+    assert finish["ended_at"] == result.ended_at.isoformat()
+    assert start["execution_started_at"] == result.execution_started_at.isoformat()
     assert finish["outcome"] == event_outcome and finish["ended_at"] >= start["started_at"]
     assert {key: finish[key] for key in start if key not in {"outcome", "record_revision"}} == {
         key: value for key, value in start.items() if key not in {"outcome", "record_revision"}
@@ -97,7 +105,7 @@ def test_root_fact_times_adapter_run_and_reports_after_cleanup(worker, attempt_o
     assert set(start) == {
         "tenant_id", "fact_kind", "fact_id", "call_context_id", "agent_run_id", "root_run_id",
         "agent_id", "agent_version_no", "is_root", "initiator_group_ids",
-        "started_at", "record_revision", "outcome",
+        "started_at", "execution_started_at", "record_revision", "outcome",
     }
     assert start["fact_id"] == start["agent_run_id"] == start["root_run_id"] == "root-run"
     assert start["agent_version_no"] == 3 and start["initiator_group_ids"] == (13, 12)

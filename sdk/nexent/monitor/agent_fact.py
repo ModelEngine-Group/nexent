@@ -9,6 +9,7 @@ from time import monotonic_ns
 
 from .facts import emit_fact, get_fact_sink
 from .monitoring import AgentRunMetadata, get_agent_monitoring_context
+from .run_timing import RunTiming, RunTimingResult
 
 
 _OUTCOMES = {"completed": "succeeded", "failed": "failed", "stopped": "cancelled"}
@@ -74,13 +75,21 @@ class AgentRunObservation:
         return cls(metadata, run_id)
 
     @contextmanager
-    def measure(self, stop_event):
-        """Time the adapter's run call, retaining terminal fields for later reporting."""
+    def measure(self, stop_event, *, run_timing: RunTiming | None = None):
+        """Keep actual-run eligibility and TTFT separate from complete main timing."""
         if stop_event.is_set():
             yield
             return
-        started_at = datetime.now(timezone.utc)
+        if self._identity["is_root"]:
+            if run_timing is None or run_timing.run_id != self._identity["agent_run_id"]:
+                raise ValueError("Main Agent observation requires its shared run timing")
+            started_at = run_timing.start()
+            execution_started_at = run_timing.mark_execution_started()
+        else:
+            started_at = datetime.now(timezone.utc)
         started = {**self._identity, "started_at": started_at.isoformat()}
+        if self._identity["is_root"]:
+            started["execution_started_at"] = execution_started_at.isoformat()
         emit_fact({**started, "record_revision": 1, "outcome": "started"})
         started_ns = monotonic_ns()
         self._started_ns = started_ns
@@ -89,17 +98,26 @@ class AgentRunObservation:
             yield
         finally:
             with self._lock:
-                duration_ms = (monotonic_ns() - started_ns) // 1_000_000
+                duration_ms = (monotonic_ns() - started_ns) // 1_000_000 if not self._identity["is_root"] else None
                 self._started_ns = None
             _active_observation.reset(token)
-            ended_at = max(started_at, datetime.now(timezone.utc))
-            self._terminal = {
-                **started, "record_revision": 2, "ended_at": ended_at.isoformat(), "duration_ms": duration_ms,
-            }
+            self._terminal = {**started, "record_revision": 2}
+            if not self._identity["is_root"]:
+                ended_at = max(started_at, datetime.now(timezone.utc))
+                self._terminal.update(ended_at=ended_at.isoformat(), duration_ms=duration_ms)
             if self._ttft_ms is not None:
                 self._terminal["ttft_ms"] = self._ttft_ms
 
-    def report_terminal(self, attempt_outcome: str | None) -> None:
+    def report_terminal(self, attempt_outcome: str | None, *, timing_result: RunTimingResult | None = None) -> None:
         """Publish the measured execution with the worker's final outcome."""
         if self._terminal is not None:
+            if self._identity["is_root"]:
+                if (timing_result is None or timing_result.run_id != self._identity["agent_run_id"]
+                        or timing_result.started_at.isoformat() != self._terminal["started_at"]
+                        or timing_result.execution_started_at is None
+                        or timing_result.execution_started_at.isoformat() != self._terminal["execution_started_at"]):
+                    raise ValueError("Main Agent terminal requires the same complete timing result")
+                self._terminal.update(
+                    ended_at=timing_result.ended_at.isoformat(), duration_ms=timing_result.duration_ms,
+                )
             emit_fact({**self._terminal, "outcome": _OUTCOMES.get(attempt_outcome, "unknown")})

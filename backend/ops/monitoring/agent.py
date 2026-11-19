@@ -2,9 +2,10 @@
 """Agent execution facts and daily metrics for the shared monitoring pipeline."""
 
 from collections.abc import Iterable
+from datetime import timezone
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, Outcome, stable_key
 
@@ -27,6 +28,14 @@ class AgentFact(Fact):
     agent_version_no: int | None = Field(default=None, ge=0, le=2**31 - 1)
     outcome: Outcome | Literal["timed_out"]
     ttft_ms: int | None = Field(default=None, ge=0, le=MAX_LONG)
+    execution_started_at: AwareDatetime | None = None
+
+    def partition_anchor(self):
+        """Preserve the actual execution's original partition despite earlier preparation."""
+        return (self.execution_started_at or self.started_at).astimezone(timezone.utc)
+
+    def statistic_day(self, zone):
+        return self.partition_anchor().astimezone(zone).date()
 
     @model_validator(mode="after")
     def check_run_identity(self):
@@ -94,6 +103,7 @@ def summarize_agent(rows: Iterable[dict]) -> dict:
 AGENT_MONITORING = MonitoringKind(
     fact_model=AgentFact,
     aggregate=accumulate_agent,
-    fact_fields={"is_root": "boolean", "parent_run_id": "keyword", "agent_version_no": "integer", "ttft_ms": "long"},
+    fact_fields={"is_root": "boolean", "parent_run_id": "keyword", "agent_version_no": "integer", "ttft_ms": "long",
+                 "execution_started_at": "date"},
     daily_fields=dict.fromkeys(COUNTERS + RESULT_COUNTERS + TTFT_COUNTERS, "long"),
 )

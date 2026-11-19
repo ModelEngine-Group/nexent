@@ -25,6 +25,7 @@ def child_run_info(parent, config, scope):
         models.append(binding.model_copy(deep=True))
     return parent.model_copy(update={
         "run_role": "subagent",
+        "run_timing": None,
         "agent_config": config, "model_config_list": models, "query": "",
         "stop_event": scope.stop_event, "cancellation_scope": scope,
         "user_context": deepcopy(parent.user_context), "runtime_metadata": deepcopy(parent.runtime_metadata),
