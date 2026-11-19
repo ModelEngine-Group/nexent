@@ -113,7 +113,7 @@ export default function ResourceCard({
         disabled && "cursor-not-allowed opacity-50",
         className,
         measuredAgent &&
-          "self-start rounded-xl border-[rgba(201,201,201,0.4)] px-[24px] py-[16px]",
+          "rounded-xl border-[rgba(201,201,201,0.4)] px-[24px] py-[16px]",
         measuredMcp &&
           "min-h-[140px] rounded-xl border-0 px-6 py-4 outline outline-1 -outline-offset-1 outline-[#C9C9C9]/40 hover:outline-blue-300",
         measuredMineMcp &&
@@ -275,7 +275,7 @@ export default function ResourceCard({
                   {tags}
                 </div>
               ) : null}
-              <div className={cn("shrink-0", !measuredAgent && "mt-auto")}>
+              <div className="mt-auto shrink-0">
                 {footerLayout === "stacked" ? (
                   <>
                     {meta ? (

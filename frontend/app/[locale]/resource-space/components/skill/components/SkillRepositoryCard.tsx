@@ -77,12 +77,29 @@ export function SkillRepositoryCard({
         ]
       : [];
 
+  const tagChips = tags.map((tag) => (
+    <span
+      key={tag}
+      className={
+        presentation
+          ? "h-5 rounded bg-[rgba(25,25,25,0.05)] px-2 text-xs leading-5 font-normal text-[#393939]"
+          : "rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+      }
+    >
+      {tag}
+    </span>
+  ));
+
   return (
     <ResourceCard
       actionsOnly={presentation?.layout === "list"}
       className="h-full"
       title={listing.name}
-      subtitle={presentation && author ? <span title={author}>{author}</span> : undefined}
+      subtitle={
+        presentation && author ? (
+          <span title={author}>{author}</span>
+        ) : undefined
+      }
       footerLayout="inline"
       icon={
         presentation ? (
@@ -102,21 +119,16 @@ export function SkillRepositoryCard({
         listing.description || t("skillRepository.common.noDescription")
       }
       tags={
-        tags.length > 0 ? (
-          <>
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className={
-                  presentation
-                    ? "h-5 rounded bg-[rgba(25,25,25,0.05)] px-2 text-xs leading-5 font-normal text-[#393939]"
-                    : "rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                }
-              >
-                {tag}
-              </span>
-            ))}
-          </>
+        presentation ? (
+          tags.length > 0 ? (
+            <>{tagChips}</>
+          ) : (
+            // Always reserve the tag row so repository cards keep equal
+            // heights regardless of whether the listing has tags.
+            <div className="h-5" aria-hidden />
+          )
+        ) : tags.length > 0 ? (
+          <>{tagChips}</>
         ) : null
       }
       headerActions={

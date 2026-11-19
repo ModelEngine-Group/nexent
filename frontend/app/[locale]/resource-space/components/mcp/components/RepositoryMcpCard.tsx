@@ -116,7 +116,13 @@ export default function RepositoryMcpCard({
       description={service.description || t("mcpTools.detail.noDescription")}
       tags={
         repositoryCard ? (
-          tags.length > 0 && <AgentCardTags labels={tags} maxVisible={5} />
+          // Always reserve the tag row so repository cards keep equal heights
+          // regardless of whether the service has tags.
+          <div className="h-6">
+            {tags.length > 0 ? (
+              <AgentCardTags labels={tags} maxVisible={5} />
+            ) : null}
+          </div>
         ) : (
           <>
             {!presentation && (
@@ -154,7 +160,9 @@ export default function RepositoryMcpCard({
           <>
             {" "}
             {!presentation && (
-              <span className="block truncate" title={author}>{author}</span>
+              <span className="block truncate" title={author}>
+                {author}
+              </span>
             )}{" "}
             <ResourcePublishedAt value={service.publishedAt} />
             {presentation && (

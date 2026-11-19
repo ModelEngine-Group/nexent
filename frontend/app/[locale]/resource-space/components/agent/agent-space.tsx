@@ -47,7 +47,8 @@ import {
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useRepositoryAgentDetail } from "@/hooks/agentRepository/useRepositoryAgentDetail";
 
-const REPOSITORY_AVATAR_CLASS = "!shrink-0 !rounded !bg-primary/10 !text-primary";
+const REPOSITORY_AVATAR_CLASS =
+  "!shrink-0 !rounded !bg-primary/10 !text-primary";
 
 export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
@@ -94,13 +95,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         : {}),
       ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
     }),
-    [
-      page,
-      pageSize,
-      searchQuery,
-      searchTagPredicates,
-      tagPredicates,
-    ]
+    [page, pageSize, searchQuery, searchTagPredicates, tagPredicates]
   );
   const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } =
     useAgentRepositoryListings(listingParams, active, Boolean(presentation));
@@ -195,6 +190,20 @@ export function AgentSpace({ active }: { active: boolean }) {
           },
         ]
       : [];
+    const tagChips = (
+      <>
+        {tags.length > 0 ? (
+          <AgentCardTags
+            labels={tags.map((tag) => getAgentRepositoryTagLabel(tag, t))}
+          />
+        ) : null}
+        {toolCount > 0 ? (
+          <span className="shrink-0 whitespace-nowrap rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("agentRepository.card.toolCount", { count: toolCount })}
+          </span>
+        ) : null}
+      </>
+    );
 
     return (
       <ResourceCard
@@ -248,24 +257,15 @@ export function AgentSpace({ active }: { active: boolean }) {
           ) : undefined
         }
         tags={
-          tags.length > 0 || toolCount > 0 ? (
-            <div
-              className={
-                presentation
-                  ? "flex h-6 w-full min-w-0 items-center gap-2"
-                  : "flex w-full min-w-0 items-center gap-3"
-              }
-            >
-              {tags.length > 0 ? (
-                <AgentCardTags
-                  labels={tags.map((tag) => getAgentRepositoryTagLabel(tag, t))}
-                />
-              ) : null}
-              {toolCount > 0 ? (
-                <span className="shrink-0 whitespace-nowrap rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                  {t("agentRepository.card.toolCount", { count: toolCount })}
-                </span>
-              ) : null}
+          presentation ? (
+            // Always reserve the tag row so repository cards keep equal
+            // heights regardless of whether the listing has tags.
+            <div className="flex h-6 w-full min-w-0 items-center gap-2">
+              {tagChips}
+            </div>
+          ) : tags.length > 0 || toolCount > 0 ? (
+            <div className="flex w-full min-w-0 items-center gap-3">
+              {tagChips}
             </div>
           ) : undefined
         }
