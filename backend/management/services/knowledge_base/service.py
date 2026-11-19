@@ -21,7 +21,6 @@ from management.services.knowledge_base.common import (
     ALLOWED_CHUNK_FIELDS,
     KnowledgeBaseNeedsModelConfigError,
     _rethrow_or_plain,
-    _update_progress,
     check_knowledge_base_exist_impl,
     get_embedding_model_by_index_name,
     get_vector_db_core,
@@ -34,7 +33,6 @@ from nexent.vector_database.base import VectorDatabaseCore
 
 __all__ = (
     "ALLOWED_CHUNK_FIELDS",
-    "_update_progress",
     "KnowledgeBaseNeedsModelConfigError",
     "get_embedding_model_by_index_name",
     "get_vector_db_core",

@@ -1,6 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import logging
+from threading import Event
+from time import monotonic
+from uuid import uuid4
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -56,7 +60,6 @@ from management.services.knowledge_base.chunk_creation import create_manual_chun
 from management.services.knowledge_base.chunk_update import update_manual_chunk
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
-from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
@@ -65,12 +68,16 @@ from management.services.tag.projection import project_authorized_document_tags
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import InvalidInput
+from nexent.storage.models import OperationContext
+from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from management.services.knowledge_base.documents import index_documents
 from management.services.knowledge_base.summary_settings import configure_summary_schedule
 from nexent.vector_database.base import VectorDatabaseCore
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
+DOCUMENT_INDEX_SECONDS = 180
 
 
 @router.get("/summary_frequency_options")
@@ -594,69 +601,55 @@ def _check_personal_kb_quota_before_indexing(
         ) from exc
 
 
+def _prepare_document_admission(index_name, data, actor, *, context):
+    """Preserve the current edit and PRIVATE quota checks in one managed read task."""
+    context.remaining()
+    require_knowledge_base_edit_permission(index_name, actor.user_id, actor.tenant_id)
+    row = get_knowledge_record({"index_name": index_name})
+    _check_personal_kb_quota_before_indexing(data, row, actor.tenant_id, actor.user_id)
+    context.remaining()
+
+
 @router.post("/{index_name}/documents", response_model=IndexingResponse)
-def create_index_documents(
+async def create_index_documents(
     index_name: str = Path(..., description="Name of the index"),
     data: List[Dict[str, Any]] = Body(..., description="Document List to process"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
     task_id: Optional[str] = Header(None, alias="X-Task-Id", description="Task ID for progress tracking"),
     large_mode: bool = Query(
         False, description="Force large-batch path when current request chunk count is below threshold"
     ),
 ):
-    """
-    Index documents with embeddings, creating the index if it doesn't exist.
-    Accepts a document list from data processing.
-    """
+    """Index documents through AgentOS while retaining the public request contract."""
+    cancelled = Event()
+    context = OperationContext("knowledge-documents-public-" + uuid4().hex,
+                               monotonic() + DOCUMENT_INDEX_SECONDS, cancelled=cancelled)
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-
-        # Get the knowledge base record to retrieve the saved embedding model
-        knowledge_record = get_knowledge_record({"index_name": index_name})
-        saved_embedding_model_id = None
-        if knowledge_record:
-            saved_embedding_model_id = knowledge_record.get("embedding_model_id")
-
-        _check_personal_kb_quota_before_indexing(
-            data,
-            knowledge_record,
-            tenant_id,
-            user_id,
-        )
-
-        # Use the saved model from knowledge base by model_id
-        embedding_model, _ = (
-            get_embedding_model_by_id(tenant_id, saved_embedding_model_id)
-            if saved_embedding_model_id
-            else (None, None)
-        )
-
-        return ElasticSearchService.index_documents(
-            embedding_model=embedding_model,
-            index_name=index_name,
-            data=data,
-            vdb_core=vdb_core,
-            task_id=task_id,
-            large_mode=large_mode,
-            model_id=saved_embedding_model_id,
-            actor=ServicePrincipal(user_id, tenant_id),
-        )
+        actor = ServicePrincipal(user_id, tenant_id)
+        logger.info("knowledge_documents_public index_name=%r task_id=%r large_mode=%s", index_name, task_id, large_mode)
+        async with asyncio.timeout(context.remaining()):
+            await run_blocking("knowledge-documents-admission", _prepare_document_admission, index_name, data, actor,
+                               context=context, lane="control-io", owner="management.knowledge_base")
+            return await index_documents(index_name, data, actor, context=context)
     except AppException:
         raise
     except HTTPException:
         raise
-    except TokenExpiredError as e:
+    except TokenExpiredError as error:
         logger.warning("Session expired")
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Error indexing documents: {error_msg}")
-
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error indexing documents: {error_msg}"
-        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(error)) from error
+    except (TimeoutError, DeadlineExceeded, RuntimeServiceTimeoutError) as error:
+        logger.warning("knowledge_documents_public_timeout operation_id=%s threshold_seconds=%s exception_type=%s",
+                       context.operation_id, DOCUMENT_INDEX_SECONDS, type(error).__name__)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Error indexing documents: {error!s}") from error
+    except Exception as error:
+        logger.error("Error indexing documents: %s", error)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Error indexing documents: {error!s}") from error
+    finally:
+        cancelled.set()
 
 
 @router.get("/{index_name}/files")

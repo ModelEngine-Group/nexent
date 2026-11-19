@@ -319,7 +319,7 @@ KnowledgeBase.search 的内部请求可传 weight_accurate，范围为 0 到 1�
 
 KnowledgeBase.search 的结果必须携带 data_revisions，覆盖每个实际查询的 KB，空结果也保留修订。修订由确认修改 epoch 和当前发布 manifest 共同计算，JSON 对象键按规范十进制 KB ID 解码。Runtime 工具在跨模型合并、外层 rerank 和整体授权检查后，通过只读 StorageInterface 再核对这些修订。期间发生确认更新、删除或活动写入会拒绝整次旧结果，不重做推理和检索。采样、分块浏览与搜索共用 Runtime 的 data_revision 模块。
 
-官方 Agent 的文本种子使用标准文档追加入口。Management 准备正文、文件名和展示字段，以实际安装用户调用 AgentOS，等待全部确认后继续安装。Runtime 按原规则补齐展示 source.id，并为每条文档生成独立物理键。同秒同正文可有相同展示 ID，仍追加为两条物理记录。此前按展示 ID 推断旧 bulk 会覆盖的说明有误，旧 SDK 的 index 动作没有设置 _id。二进制种子继续使用上传、清洗及 File.upload 链路。旧公开 documents 写入入口中的图片处理、KB 集合创建及其他存储旁路仍待迁移。
+官方 Agent 的文本种子使用标准文档追加入口。Management 准备正文、文件名和展示字段，以实际安装用户调用 AgentOS，等待全部确认后继续安装。Runtime 按原规则补齐展示 source.id，并为每条文档生成独立物理键。同秒同正文可有相同展示 ID，仍追加为两条物理记录。此前按展示 ID 推断旧 bulk 会覆盖的说明有误，旧 SDK 的 index 动作没有设置 _id。二进制种子继续使用上传、清洗及 File.upload 链路。公开 documents 已使用相同的标准准备与追加能力，KB 创建也已迁移；列表、检索及其他存储旁路继续整改。
 
 分块创建的内部数据可显式设置 require_embedding=true，要求模型推理成功。模型、修订、维度或向量错误会终止写入，不使用提供的替代向量，也不改存纯正文。原手工创建保留现有默认策略。embedding_input_type=image 要求严格策略、显式模型和内联 base64 图片，Runtime 校验多模态模型后调用 Model.invoke，存储正文仍来自 content。此能力不授权读取任意对象或 URL，也不会为旧 image_url 自动生成可信图片引用。
 
@@ -333,7 +333,7 @@ process_source=UniversalImageExtractor 的记录按原规则处理。普通 embe
 
 成功回执 `KnowledgeDocumentsAppended` 包含 knowledge_id、total_submitted、total_indexed、total_skipped 和独立 chunk_ids。indexed+skipped 必须等于 submitted，物理键数必须等于 indexed，全部跳过时返回空键列表；Management 仅允许图片提取项被跳过。Runtime 复用已有 cancellable_context，在退出时设置本次取消标记，并保留父上下文的截止与取消信号，防止后台读取继续处理后续分块。此同步追加操作保留重发追加语义，File.upload 的文件幂等协议单独保持。
 
-Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 documents 的路由、X-Task-Id 进度及空集合创建语义尚未切换，不能据此认定该公开入口或 data-process 已退役。
+Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 POST /indices/{index_name}/documents 也已切换。原请求体和四字段响应保持，X-Task-Id 只作追踪，进度统一使用新文件任务；large_mode 查询参数继续接受，执行使用 Runtime 的有界批次，不临时调整旧 VDB settings。编辑与 PRIVATE 配额预检保留，并通过 ThreadManager 与标准准备共享180秒父预算。旧配额读取仍待 SI 整改，不能据此认定 data-process 已退役。
 
 Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，使用标准 ensure 初始化集合，再按原字段和默认值准备 source、固定所有 metadata.image_url，最后调用 append_documents。空请求也初始化集合并保留原 0/0 响应。未绑定模型的旧空 KB 显式使用既有 1024 维默认值；已绑定模型要求有效配置维度，不探测或兜底。该服务不创建 SDK 适配器，不进行模型推理，公开路由接线仍需处理旧任务进度。
 
@@ -347,13 +347,13 @@ Model.get 的 qualified_name 使用现有模型名称函数从 Runtime 私有 SI
 
 Runtime 使用现有 KB 状态行中的 collection_setup 作为当前初始化围栏，快照只含操作 ID、真实 actor、资源修订、维度、模型绑定、phase 和 writer_ended。接纳与原文件、分块、删除共用事务锁；活动初始化阻止其他写入、不稳定读取及集合删除。确认完成时清空并推进 epoch，明确未生效的失败释放且不推进 epoch。可能已写入的错误保留 unknown，禁止自动重放；父预算耗尽时不延长记账时间，可能保留 writing 且结束未确认，须显式维护。未启动的初始化不能直接确认成功，其他编辑者不能接管原操作。
 
-部署该能力前须应用 `deploy/sql/migrations/v2.9.0_031_runtime_collection_setup.sql`。迁移仅为已有状态表增加 nullable JSONB 字段及注释，可重复执行，001 至 030 保持不变。公开 documents 路由切换及 P4 未知初始化的维护处理尚待完成。
+部署该能力前须应用 `deploy/sql/migrations/v2.9.0_031_runtime_collection_setup.sql`。迁移仅为已有状态表增加 nullable JSONB 字段及注释，可重复执行，001 至 030 保持不变。P4 未知初始化的维护处理尚待完成。
 
 普通 API、Northbound 和官方安装的新建 KB 已统一使用 Management 的异步创建门面。Management 通过 Model.get 读取模型 ID、版本、类型及配置维度，再通过共用 RecordStore 创建目录，最后以实际用户请求 AgentOS 初始化集合。租户/用户额度及同名检查保留原 PostgreSQL 事务锁；Northbound 在 northbound_service 中适配，公开七字段成功回执保持。ModelMetadata 的 model_name 是原裸名称，display_name or model_name 沿用旧 KB 展示规则，qualified_name 保留 repo/name，供种子 source 使用。Management 不创建模型适配器，不探测维度。
 
-创建请求结果未知、取消或超时时，已提交的目录保留供显式核对，不执行旧的盲目软删回滚，也不自动重试。Runtime 的 collection_setup 继续限制未知集合写入；未到达 Runtime 的已提交目录也由 P4 维护核对。旧 create_knowledge_base 实现已删除，create_index 仍由尚未切换的公开 documents 使用。X-Task-Id 按用户决定保留作追踪，公开 documents 切换后进度统一使用新文件任务，不保留旧任务 ID 查询兼容层。
+创建请求结果未知、取消或超时时，已提交的目录保留供显式核对，不执行旧的盲目软删回滚，也不自动重试。Runtime 的 collection_setup 继续限制未知集合写入；未到达 Runtime 的已提交目录也由 P4 维护核对。旧 class 门面 create_knowledge_base、create_index、index_documents 及 _update_progress 已删除，没有转发别名。X-Task-Id 按用户决定保留作追踪，进度统一使用新文件任务，不新增旧任务 ID 查询兼容层。
 
-旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
+公开 documents 的图片由 Management 授权后通过 StorageInterface 固定对象版本与哈希，Runtime 再读取原始字节。旧 read_document_image 字节门面已移除，pin_document_image 保留实际身份、共享截止和原缺失对象异常。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。其他仍被旧 worker 使用的 Redis 状态方法按剩余调用方继续清退。
 
 ### KnowledgeBase 已登记文件清单
 

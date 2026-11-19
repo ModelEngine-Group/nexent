@@ -26,7 +26,7 @@ async def test_install_stops_after_text_write_failure_without_starting_binary_or
     mocker.patch.object(resolver, "get_embedding_model_by_id", return_value=(SimpleNamespace(model="model"), 2))
     create = mocker.patch.object(creation, "create_knowledge_base", new=AsyncMock(return_value={"id": "actual"}))
     mocker.patch.object(seed_documents, "get_seed_model_name", new=AsyncMock(return_value="model"))
-    legacy = mocker.patch.object(ElasticSearchService, "index_documents")
+    assert not hasattr(ElasticSearchService, "index_documents")
     text = mocker.patch.object(seed_documents, "index_seed_texts", new=AsyncMock(side_effect=error))
     binary = mocker.patch.object(official, "_index_binary_docs", new_callable=AsyncMock)
     with pytest.raises(type(error)) as caught:
@@ -37,4 +37,3 @@ async def test_install_stops_after_text_write_failure_without_starting_binary_or
     assert text.await_args.args[2].user_id == "operator" and text.await_args.args[2].tenant_id == "tenant-a"
     assert text.await_args.kwargs == {"embedding_model_name": "model"}
     binary.assert_not_called()
-    legacy.assert_not_called()

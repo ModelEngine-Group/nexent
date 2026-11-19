@@ -12,42 +12,29 @@ Main features include:
 4. Health check interface
 """
 
-import os
-import time
-from time import monotonic
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
-from fastapi import Body, Depends, Path, Query
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE, PERMISSION_READ
-from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.knowledge_base.repository import (
-    create_knowledge_record,
     get_knowledge_info_by_tenant_id,
     get_knowledge_record,
     update_embedding_model_by_index_name,
     update_knowledge_record,
-    update_last_doc_update_time,
     update_model_name_by_index_name,
 )
 from management.db.model.repository import get_model_by_model_id
-from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
-    _rethrow_or_plain,
-    _update_progress,
-    get_vector_db_core,
     logger,
 )
 from management.services.knowledge_base.files import (
     KnowledgeBaseFileService,
 )
-from management.services.knowledge_base.document_images import read_document_image
 from management.services.knowledge_base.listing import (
     apply_read_only_to_asset_indices_info,
     merge_list_indices_results,
@@ -60,9 +47,7 @@ from management.services.knowledge_base.permission import (
     require_knowledge_base_read_permission,
     resolve_knowledge_base_permission,
 )
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import (
-    get_embedding_model_by_id,
     get_model_descriptor,
 )
 from management.services.permission.asset_owner import postprocess_knowledge_visibility
@@ -74,11 +59,7 @@ from management.utils.serialization import (
     convert_list_to_string,
     convert_string_to_list,
 )
-from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
-from nexent.storage.errors import InvalidInput
-from nexent.storage.models import OperationContext
-from infrastructure.agentos_identity import ServicePrincipal
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 
@@ -99,61 +80,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         """Preview agents affected by deleting the selected knowledge bases."""
         return {"agents": query_knowledge_binding_agents(index_names=index_names, tenant_id=tenant_id)}
 
-
-    @staticmethod
-    def create_index(
-        index_name: str = Path(..., description="Name of the index to create"),
-        embedding_dim: Optional[int] = Query(
-            None, description="Dimension of the embedding vectors"
-        ),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        user_id: Optional[str] = Body(
-            None, description="ID of the user creating the knowledge base"
-        ),
-        tenant_id: Optional[str] = Body(
-            None, description="ID of the tenant creating the knowledge base"
-        ),
-        model_id: Optional[int] = Body(
-            None, description="ID of the embedding model to use"
-        ),
-    ):
-        try:
-            if vdb_core.check_index_exists(index_name):
-                raise Exception(f"Index {index_name} already exists")
-
-            # Get embedding model by model_id if provided
-            if model_id:
-                embedding_model, actual_model_id = get_embedding_model_by_id(
-                    tenant_id, model_id
-                )
-            else:
-                embedding_model, actual_model_id = None, None
-
-            success = vdb_core.create_index(
-                index_name,
-                embedding_dim=embedding_dim
-                or (embedding_model.embedding_dim if embedding_model else 1024),
-            )
-            if not success:
-                raise Exception(f"Failed to create index {index_name}")
-            knowledge_data = {
-                "index_name": index_name,
-                "created_by": user_id,
-                "tenant_id": tenant_id,
-                "embedding_model_name": embedding_model.model
-                if embedding_model
-                else None,
-                "embedding_model_id": actual_model_id,
-            }
-            create_knowledge_record(knowledge_data)
-            return {
-                "status": "success",
-                "message": f"Index {index_name} created successfully",
-            }
-        except AppException:
-            raise
-        except Exception as e:
-            raise Exception(f"Error creating index: {str(e)}")
 
     @staticmethod
     def update_knowledge_base(
@@ -626,220 +552,5 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             response["indices_info"] = stats_info
 
         return response
-
-    @staticmethod
-    def index_documents(
-        embedding_model: EmbeddingAdapter,
-        index_name: str = Path(..., description="Name of the index"),
-        data: List[Dict[str, Any]] = Body(..., description="Document List to process"),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        task_id: Optional[str] = None,
-        model_id: Optional[int] = Body(
-            None, description="ID of the embedding model to use"
-        ),
-        large_mode: bool = False,
-        *,
-        actor: ServicePrincipal,
-    ):
-        """
-        Index documents and create vector embeddings, create index if it doesn't exist
-
-        Args:
-            embedding_model: Optional embedding model to use for generating document vectors
-            index_name: Index name
-            data: List containing document data to be indexed
-            vdb_core: VectorDatabaseCore instance
-            task_id: Optional task ID for progress tracking
-            model_id: Optional model ID for the embedding model
-
-        Returns:
-            IndexingResponse object containing indexing result information
-        """
-        if not isinstance(actor, ServicePrincipal):
-            raise InvalidInput()
-        try:
-            if not index_name:
-                raise Exception("Index name is required")
-
-            # Create index if needed (ElasticSearchCore will handle embedding_dim automatically)
-            if not vdb_core.check_index_exists(index_name):
-                try:
-                    KnowledgeBaseManagementService.create_index(
-                        index_name, vdb_core=vdb_core, model_id=model_id
-                    )
-                    logger.info(f"Created new index {index_name}")
-                except Exception as create_error:
-                    raise Exception(
-                        f"Failed to create index {index_name}: {str(create_error)}"
-                    )
-
-            # Transform indexing request results to documents
-            documents = []
-            image_context = OperationContext("document-images-" + uuid4().hex, monotonic() + 180)
-
-            for idx, item in enumerate(data):
-                # All items should be dictionaries
-                if not isinstance(item, dict):
-                    logger.warning(f"Skipping item {idx} - not a dictionary")
-                    continue
-
-                # Extract metadata
-                metadata = item.get("metadata", {})
-                source = item.get("path_or_url")
-                text = item.get("content", "")
-                source_type = item.get("source_type")
-                file_size = item.get("file_size")
-                file_name = item.get(
-                    "filename",
-                    os.path.basename(source)
-                    if source and source_type == "local"
-                    else "",
-                )
-
-                # Get from metadata
-                title = metadata.get("title", "")
-                language = (
-                    metadata.get("languages", ["null"])[0]
-                    if metadata.get("languages")
-                    else "null"
-                )
-                author = metadata.get("author", "null")
-                date = metadata.get("date", time.strftime("%Y-%m-%d", time.gmtime()))
-                create_time = metadata.get(
-                    "creation_date", time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
-                )
-
-                # Set embedding model name from the embedding model
-                embedding_model_name = ""
-                if embedding_model:
-                    embedding_model_name = embedding_model.model
-
-                # Create document
-                document = {
-                    "title": title,
-                    "filename": file_name,
-                    "path_or_url": source,
-                    "source_type": source_type,
-                    "language": language,
-                    "author": author,
-                    "date": date,
-                    "content": text,
-                    "process_source": metadata.get("process_source", "Unstructured"),
-                    "file_size": file_size,
-                    "create_time": create_time,
-                    "languages": metadata.get("languages", []),
-                    "embedding_model_name": embedding_model_name,
-                }
-
-                image_url = metadata.get("image_url", "")
-                if len(image_url) > 0:
-                    # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)
-                    try:
-                        document["image_bytes"] = read_document_image(image_url, actor, context=image_context)
-                    except Exception as e:
-                        logger.error(f"Failed to fetch file from {image_url}: {e}")
-                        raise
-
-                documents.append(document)
-
-            total_submitted = len(documents)
-            if total_submitted == 0:
-                return {
-                    "success": True,
-                    "message": "No documents to index",
-                    "total_indexed": 0,
-                    "total_submitted": 0,
-                }
-
-            # Index documents (use default batch_size and content_field)
-            # Get chunk_batch from model config
-            # First, get tenant_id from knowledge record
-            knowledge_record = get_knowledge_record({"index_name": index_name})
-            tenant_id = knowledge_record.get("tenant_id") if knowledge_record else None
-
-            if tenant_id:
-                model_type = (
-                    "EMBEDDING_ID"
-                    if embedding_model.model_type == "embedding"
-                    else "MULTI_EMBEDDING_ID"
-                )
-                model_config = tenant_config_manager.get_model_config(
-                    key=model_type, tenant_id=tenant_id
-                )
-                embedding_batch_size = model_config.get("chunk_batch", 10)
-                if embedding_batch_size is None:
-                    embedding_batch_size = 10
-            else:
-                # Fallback to default if tenant_id not found
-                embedding_batch_size = 10
-
-            # Initialize progress tracking if task_id is provided
-            if task_id:
-                try:
-                    redis_service = get_redis_service()
-                    success = redis_service.save_progress_info(
-                        task_id, 0, total_submitted
-                    )
-                    if success:
-                        logger.info(
-                            f"[REDIS PROGRESS] Initialized progress tracking for task {task_id}: 0/{total_submitted}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Failed to initialize progress tracking for task {task_id}"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to initialize progress tracking for task {task_id}: {str(e)}"
-                    )
-
-            try:
-                total_indexed = vdb_core.vectorize_documents(
-                    index_name=index_name,
-                    embedding_model=embedding_model,
-                    documents=documents,
-                    embedding_batch_size=embedding_batch_size,
-                    large_mode=large_mode,
-                    progress_callback=lambda processed, total: (
-                        _update_progress(task_id, processed, total) if task_id else None
-                    ),
-                )
-
-                # Update final progress
-                if task_id:
-                    try:
-                        redis_service = get_redis_service()
-                        success = redis_service.save_progress_info(
-                            task_id, total_indexed, total_submitted
-                        )
-                        if success:
-                            logger.info(
-                                f"[REDIS PROGRESS] Updated final progress for task {task_id}: {total_indexed}/{total_submitted}"
-                            )
-                        else:
-                            logger.warning(
-                                f"[REDIS PROGRESS] Failed to update final progress for task {task_id}"
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}"
-                        )
-
-                # Update last_doc_update_time for auto-summary tracking
-                update_last_doc_update_time(index_name)
-
-                return {
-                    "success": True,
-                    "message": f"Successfully indexed {total_indexed} documents",
-                    "total_indexed": total_indexed,
-                    "total_submitted": total_submitted,
-                }
-            except Exception as e:
-                logger.error(f"Error during indexing: {str(e)}")
-                _rethrow_or_plain(e)
-
-        except Exception as e:
-            logger.error(f"Error indexing documents: {str(e)}")
-            _rethrow_or_plain(e)
 
     DOCUMENT_DELETE_SCOPES = ("source_only", "full")

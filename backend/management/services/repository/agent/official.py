@@ -36,7 +36,7 @@ logger = logging.getLogger("official_agent_service")
 # Tool classes that reference a knowledge base by params.index_names.
 _KB_TOOL_CLASS_NAMES = frozenset({"KnowledgeBaseSearchTool", "DataMateSearchTool"})
 
-# KB seed file suffixes treated as plain text (embedded via index_documents).
+# KB seed file suffixes treated as plain text for standard AgentOS document append.
 _TEXT_DOC_SUFFIXES = frozenset({".md", ".txt", ".markdown"})
 
 

@@ -25,40 +25,7 @@ from management.services.model.resolver import (
     get_embedding_model_by_id,
 )
 from nexent.vector_database.base import VectorDatabaseCore
-from management.services.knowledge_base.task_state import get_redis_service
 from management.services.knowledge_base.providers.configuration import datamate_configuration_url
-
-
-def _update_progress(task_id: str, processed: int, total: int):
-    """Helper function to update progress in Redis"""
-    try:
-        redis_service = get_redis_service()
-
-        # If this task has been marked as cancelled, stop updating progress
-        # and raise an exception so the caller can abort long-running work.
-        if redis_service.is_task_cancelled(task_id):
-            logger.debug(
-                f"[PROGRESS CALLBACK] Task {task_id} is marked as cancelled; "
-                f"stopping further indexing work at {processed}/{total}."
-            )
-            raise RuntimeError(
-                "Indexing cancelled because the task was marked as cancelled."
-            )
-
-        success = redis_service.save_progress_info(task_id, processed, total)
-        if success:
-            percentage = processed * 100 // total if total > 0 else 0
-            logger.debug(
-                f"[PROGRESS CALLBACK] Updated progress for task {task_id}: {processed}/{total} ({percentage}%)"
-            )
-        else:
-            logger.warning(
-                f"[PROGRESS CALLBACK] Failed to save progress for task {task_id}: {processed}/{total}"
-            )
-    except Exception as e:
-        logger.warning(
-            f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}"
-        )
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):

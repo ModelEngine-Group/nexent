@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
-from infrastructure.agentos_identity import ServicePrincipal
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -542,15 +541,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.embedding_model = MagicMock()
         self.mock_vdb_core.embedding_dim = 768
 
-        # Patch get_embedding_model for all tests
-        self.get_embedding_model_patcher = patch(
-            'management.services.knowledge_base.management.get_embedding_model_by_id')
-        self.mock_get_embedding = self.get_embedding_model_patcher.start()
         self.mock_embedding = MagicMock()
         self.mock_embedding.embedding_dim = 768
         self.mock_embedding.model = "test-model"
         self.mock_embedding.model_type = "text"
-        self.mock_get_embedding.return_value = (None, None)
 
         # Patch get_embedding_model_by_id so it returns (None, None) when model_id is None.
         # This is critical because setUp also patches get_model_by_model_id, which would
@@ -590,7 +584,6 @@ class TestElasticSearchService(unittest.TestCase):
 
     def tearDown(self):
         """Clean up resources after each test."""
-        self.get_embedding_model_patcher.stop()
         self.get_embedding_model_by_id_patcher.stop()
         self.get_model_by_id_patcher.stop()
         self.get_rerank_model_patcher.stop()
@@ -599,91 +592,6 @@ class TestElasticSearchService(unittest.TestCase):
         if hasattr(ElasticSearchService, 'semantic_search'):
             del ElasticSearchService.semantic_search
 
-    @patch('management.services.knowledge_base.management.create_knowledge_record')
-    def test_create_index_success(self, mock_create_knowledge):
-        """
-        Test successful index creation.
-
-        This test verifies that:
-        1. The index is created when it doesn't already exist
-        2. The vector index is properly configured with the correct embedding dimension
-        3. A knowledge record is created for the new index
-        4. The method returns a success status
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = False
-        self.mock_vdb_core.create_index.return_value = True
-        mock_create_knowledge.return_value = True
-
-        # Execute
-        result = ElasticSearchService.create_index(
-            index_name="test_index",
-            embedding_dim=768,
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="test_tenant"  # Added explicit tenant_id
-        )
-
-        # Assert
-        self.assertEqual(result["status"], "success")
-        self.mock_vdb_core.check_index_exists.assert_called_once_with(
-            "test_index")
-        self.mock_vdb_core.create_index.assert_called_once_with(
-            "test_index", embedding_dim=768)
-        mock_create_knowledge.assert_called_once()
-        call_kwargs = mock_create_knowledge.call_args[0][0]
-        self.assertIn("embedding_model_name", call_kwargs)
-        self.assertIsNone(call_kwargs["embedding_model_name"])
-        self.assertIsNone(call_kwargs["embedding_model_id"])
-        self.assertEqual(call_kwargs["index_name"], "test_index")
-        self.assertEqual(call_kwargs["created_by"], "test_user")
-        self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
-
-    @patch('management.services.knowledge_base.management.create_knowledge_record')
-    def test_create_index_already_exists(self, mock_create_knowledge):
-        """
-        Test index creation when the index already exists.
-
-        This test verifies that:
-        1. An Exception with status code 500 is raised when the index already exists
-        2. The exception message contains "already exists"
-        3. No knowledge record is created
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = True
-
-        # Execute and Assert
-        with self.assertRaises(Exception) as context:
-            ElasticSearchService.create_index(
-                index_name="test_index",
-                embedding_dim=768,
-                vdb_core=self.mock_vdb_core,
-                user_id="test_user"
-            )
-
-        # Check the exception message
-        self.assertIn("already exists", str(context.exception))
-        mock_create_knowledge.assert_not_called()
-
-    @patch(
-        'management.services.knowledge_base.management.create_knowledge_record',
-        side_effect=AppException("knowledge base limit reached"),
-    )
-    def test_create_index_propagates_app_exception(self, _mock_create_knowledge):
-        """Resource-limit errors from record creation remain structured."""
-        self.mock_vdb_core.check_index_exists.return_value = False
-        self.mock_vdb_core.create_index.return_value = True
-
-        with self.assertRaises(AppException):
-            ElasticSearchService.create_index(
-                index_name="test_index",
-                embedding_dim=768,
-                vdb_core=self.mock_vdb_core,
-                user_id="test_user",
-                tenant_id="test_tenant",
-            )
-
-        self.mock_vdb_core.create_index.assert_called_once()
 
 
 
@@ -692,32 +600,8 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    @patch('management.services.knowledge_base.management.create_knowledge_record')
-    def test_create_index_failure(self, mock_create_knowledge):
-        """
-        Test index creation failure.
 
-        This test verifies that:
-        1. An Exception with status code 500 is raised when index creation fails
-        2. The exception message contains "Failed to create index"
-        3. No knowledge record is created
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = False
-        self.mock_vdb_core.create_index.return_value = False
 
-        # Execute and Assert
-        with self.assertRaises(Exception) as context:
-            ElasticSearchService.create_index(
-                index_name="test_index",
-                embedding_dim=768,
-                vdb_core=self.mock_vdb_core,
-                user_id="test_user",
-                tenant_id="test_tenant"  # Added explicit tenant_id
-            )
-
-        self.assertIn("Failed to create index", str(context.exception))
-        mock_create_knowledge.assert_not_called()
 
     # =============================================================================
     # Tests for create_knowledge_base with embedding_model_name parameter
@@ -1649,260 +1533,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]
                          ["update_time"], "2024-01-15T10:30:00")
 
-    def test_vectorize_documents_success(self):
-        """
-        Test successful document indexing.
 
-        This test verifies that:
-        1. Documents are properly indexed when the index exists
-        2. The indexing operation returns the correct count of indexed documents
-        3. The response contains proper success status and document counts
-        4. Documents with various metadata fields are handled correctly
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 2
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model = "test-model"
-        mock_embedding_model.model_type = "text"
-        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
-                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
-            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
 
-            test_data = [
-                {
-                    "metadata": {
-                        "title": "Test Document",
-                        "languages": ["en"],
-                        "author": "Test Author",
-                        "date": "2023-01-01",
-                        "creation_date": "2023-01-01T12:00:00"
-                    },
-                    "path_or_url": "test_path",
-                    "content": "Test content",
-                    "source_type": "file",
-                    "file_size": 1024,
-                    "filename": "test.txt"
-                },
-                {
-                    "metadata": {
-                        "title": "Test Document 2"
-                    },
-                    "path_or_url": "test_path2",
-                    "content": "Test content 2"
-                }
-            ]
 
-            # Execute
-            result = ElasticSearchService.index_documents(
-                index_name="test_index",
-                data=test_data,
-                vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
 
-            # Assert
-            self.assertTrue(result["success"])
-            self.assertEqual(result["total_indexed"], 2)
-            self.assertEqual(result["total_submitted"], 2)
-            self.mock_vdb_core.vectorize_documents.assert_called_once()
-            _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
-            self.assertEqual(kwargs.get("embedding_batch_size"), 5)
-            self.assertTrue(callable(kwargs.get("progress_callback")))
 
-    def test_index_documents_uses_multi_embedding_config_key(self):
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model = "test-model"
-        mock_embedding_model.model_type = "multimodal"
-
-        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
-                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
-            mock_get_record.return_value = {
-                "tenant_id": identity_constants.DEFAULT_TENANT_ID}
-            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
-
-            result = ElasticSearchService.index_documents(
-                index_name="test_index",
-                data=[{"path_or_url": "p1", "content": "c1", "metadata": {}}],
-                vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-
-            self.assertTrue(result["success"])
-            mock_tenant_cfg.get_model_config.assert_called_once_with(
-                key="MULTI_EMBEDDING_ID", tenant_id=identity_constants.DEFAULT_TENANT_ID
-            )
-
-    def test_index_documents_fetches_image_bytes(self):
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model = "test-model"
-        mock_embedding_model.model_type = "text"
-
-        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
-                patch('management.services.knowledge_base.management.read_document_image') as mock_get_stream, \
-                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
-            mock_get_record.return_value = {
-                "tenant_id": identity_constants.DEFAULT_TENANT_ID}
-            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
-            mock_get_stream.return_value = b"img-bytes"
-
-            data = [
-                {
-                    "metadata": {"image_url": "s3://bucket/img.png", "process_source": "UniversalImageExtractor"},
-                    "path_or_url": "test_path",
-                    "content": "image content",
-                    "source_type": "file",
-                    "file_size": 123,
-                    "filename": "img.png"
-                }
-            ]
-
-            result = ElasticSearchService.index_documents(
-                index_name="test_index",
-                data=data,
-                vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-
-            self.assertTrue(result["success"])
-            _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
-            documents = kwargs.get("documents")
-            self.assertEqual(documents[0]["image_bytes"], b"img-bytes")
-            mock_get_stream.assert_called_once()
-            self.assertEqual(mock_get_stream.call_args.args, ("s3://bucket/img.png", ServicePrincipal("test-user", "tenant-1")))
-
-    def test_vectorize_documents_empty_data(self):
-        """
-        Test document indexing with empty data.
-
-        This test verifies that:
-        1. When no documents are provided, the method handles it gracefully
-        2. No documents are indexed when the data list is empty
-        3. The response correctly indicates success with zero documents
-        """
-        # Setup
-        test_data = []
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model_type = "text"
-
-        # Execute
-        result = ElasticSearchService.index_documents(
-            index_name="test_index",
-            data=test_data,
-            vdb_core=self.mock_vdb_core,
-            embedding_model=mock_embedding_model,
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        # Assert
-        self.assertTrue(result["success"])
-        self.assertEqual(result["total_indexed"], 0)
-        self.assertEqual(result["total_submitted"], 0)
-        self.mock_vdb_core.vectorize_documents.assert_not_called()
-
-    def test_vectorize_documents_create_index(self):
-        """
-        Test document indexing when the index doesn't exist.
-
-        This test verifies that:
-        1. When the index doesn't exist, it's created automatically
-        2. After creating the index, documents are indexed successfully
-        3. The response contains the correct status and document counts
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = False
-        self.mock_vdb_core.create_index.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model_type = "text"
-        test_data = [
-            {
-                "metadata": {"title": "Test"},
-                "path_or_url": "test_path",
-                "content": "Test content"
-            }
-        ]
-
-        # Execute
-        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.create_index') as mock_create_index, \
-                patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
-                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
-            mock_create_index.return_value = {"status": "success"}
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
-            mock_tenant_cfg.get_model_config.return_value = {
-                "chunk_batch": None}
-            result = ElasticSearchService.index_documents(
-                index_name="test_index",
-                data=test_data,
-                vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-
-        # Assert
-        self.assertTrue(result["success"])
-        self.assertEqual(result["total_indexed"], 1)
-        mock_create_index.assert_called_once()
-        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
-        self.assertEqual(kwargs.get("embedding_batch_size"),
-                         10)  # default when None
-        self.assertTrue(callable(kwargs.get("progress_callback")))
-
-    def test_vectorize_documents_indexing_error(self):
-        """
-        Test document indexing when an error occurs during indexing.
-
-        This test verifies that:
-        1. When an error occurs during indexing, an appropriate exception is raised
-        2. The exception has the correct status code (500)
-        3. The exception message contains the original error message
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.side_effect = Exception(
-            "Indexing error")
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model_type = "text"
-        test_data = [
-            {
-                "metadata": {"title": "Test"},
-                "path_or_url": "test_path",
-                "content": "Test content"
-            }
-        ]
-
-        # Execute and Assert
-        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg:
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
-            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 8}
-
-            with self.assertRaises(Exception) as context:
-                ElasticSearchService.index_documents(
-                    index_name="test_index",
-                    data=test_data,
-                    vdb_core=self.mock_vdb_core,
-                    embedding_model=mock_embedding_model,
-                    actor=ServicePrincipal("test-user", "tenant-1"),
-                )
-
-        self.assertIn("Indexing error", str(context.exception))
-        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
-        self.assertEqual(kwargs.get("embedding_batch_size"), 8)
-        self.assertTrue(callable(kwargs.get("progress_callback")))
 
     @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_without_chunks(self, mock_get_files_status):
@@ -2143,64 +1778,6 @@ class TestElasticSearchService(unittest.TestCase):
         })
         self.assertTrue(available)
 
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    def test_index_documents_respects_cancellation_flag(self, mock_get_redis_service, mock_update_last_doc):
-        """
-        Test that index_documents stops indexing when the task is marked as cancelled.
-
-        This test verifies that:
-        1. _update_progress raises when is_task_cancelled returns True
-        2. The exception from vectorize_documents is propagated as an indexing error
-        """
-        # Setup
-        mock_redis_service = MagicMock()
-        # First progress callback call: treat as cancelled immediately
-        mock_redis_service.is_task_cancelled.return_value = True
-        mock_get_redis_service.return_value = mock_redis_service
-
-        # Configure vdb_core
-        self.mock_vdb_core.check_index_exists.return_value = True
-
-        # Make vectorize_documents invoke the progress callback (cancellation branch)
-        def vectorize_side_effect(*args, **kwargs):
-            cb = kwargs.get("progress_callback")
-            if cb:
-                cb(1, 2)  # _update_progress will swallow and log cancellation
-            return 0
-
-        self.mock_vdb_core.vectorize_documents.side_effect = vectorize_side_effect
-
-        # Provide minimal knowledge record for batch size lookup
-        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record:
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
-            with patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg:
-                mock_tenant_cfg.get_model_config.return_value = {
-                    "chunk_batch": 10}
-
-                data = [
-                    {
-                        "path_or_url": "test_path",
-                        "content": "some content",
-                        "source_type": "minio",
-                        "file_size": 123,
-                        "metadata": {},
-                    }
-                ]
-
-                # Execute: no exception should propagate because _update_progress swallows
-                result = ElasticSearchService.index_documents(
-                    embedding_model=self.mock_embedding,
-                    index_name="test_index",
-                    data=data,
-                    vdb_core=self.mock_vdb_core,
-                    task_id="task-123",
-                    actor=ServicePrincipal("test-user", "tenant-1"),
-                )
-
-                self.assertTrue(result["success"])
-                mock_redis_service.is_task_cancelled.assert_called()
-                self.mock_vdb_core.vectorize_documents.assert_called_once()
 
     def test_accurate_search(self):
         """
@@ -3256,62 +2833,6 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="valid query", top_k=10
         )
 
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.management.tenant_config_manager')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    def test_vectorize_documents_success_status_200(self, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
-        """
-        Test vectorize_documents method returns status code 200 on success.
-
-        This test verifies that:
-        1. The vectorize_documents method successfully indexes multiple documents
-        2. The response indicates success and correct document counts
-        3. The method completes without raising exceptions, implying a 200 status code
-        """
-        # Setup
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 3
-        mock_embedding_model = MagicMock()
-        mock_embedding_model.model = "test-model"
-        mock_embedding_model.model_type = "text"
-        mock_get_record.return_value = {"tenant_id": "tenant-1"}
-        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 10}
-
-        test_data = [
-            {
-                "metadata": {"title": "Test1", "languages": ["en"]},
-                "path_or_url": "path1",
-                "content": "Content1"
-            },
-            {
-                "metadata": {"title": "Test2", "languages": ["zh"]},
-                "path_or_url": "path2",
-                "content": "Content2"
-            },
-            {
-                "metadata": {"title": "Test3", "languages": ["fr"]},
-                "path_or_url": "path3",
-                "content": "Content3"
-            }
-        ]
-
-        # Execute
-        result = ElasticSearchService.index_documents(
-            index_name="test_index",
-            data=test_data,
-            vdb_core=self.mock_vdb_core,
-            embedding_model=mock_embedding_model,
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        # Assert
-        self.assertTrue(result["success"])
-        self.assertEqual(result["total_indexed"], 3)
-        self.assertEqual(result["total_submitted"], 3)
-        # Verify successful response status - 200
-        self.assertIsInstance(result, dict)
-        self.assertIn("success", result)
-        self.assertTrue(result["success"])
 
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
@@ -3403,35 +2924,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(hasattr(result, 'client'))
 
 
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    def test_update_progress_success(self, mock_get_redis):
-        """Ensure _update_progress updates Redis progress when not cancelled."""
-        from management.services.knowledge_base.service import _update_progress
 
-        mock_redis = MagicMock()
-        mock_redis.is_task_cancelled.return_value = False
-        mock_redis.save_progress_info.return_value = True
-        mock_get_redis.return_value = mock_redis
-
-        _update_progress("task-1", 5, 10)
-
-        mock_redis.is_task_cancelled.assert_called_once_with("task-1")
-        mock_redis.save_progress_info.assert_called_once_with("task-1", 5, 10)
-
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    def test_update_progress_save_failure(self, mock_get_redis):
-        """_update_progress logs a warning when saving progress fails."""
-        from management.services.knowledge_base.service import _update_progress
-
-        mock_redis = MagicMock()
-        mock_redis.is_task_cancelled.return_value = False
-        mock_redis.save_progress_info.return_value = False
-        mock_get_redis.return_value = mock_redis
-
-        _update_progress("task-2", 1, 2)
-
-        mock_redis.is_task_cancelled.assert_called_once_with("task-2")
-        mock_redis.save_progress_info.assert_called_once_with("task-2", 1, 2)
 
 
 class TestRethrowOrPlain(unittest.TestCase):
@@ -3442,7 +2935,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_vdb_core.embedding_dim = 768
 
         self.get_embedding_model_patcher = patch(
-            'management.services.knowledge_base.management.get_embedding_model_by_id')
+            'management.services.knowledge_base.common.get_embedding_model_by_id')
         self.mock_get_embedding = self.get_embedding_model_patcher.start()
         self.mock_embedding = MagicMock()
         self.mock_embedding.embedding_dim = 768
@@ -3636,100 +3129,8 @@ class TestRethrowOrPlain(unittest.TestCase):
 
 
 
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    def test_index_documents_default_batch_without_tenant(self, mock_get_record, mock_update_last_doc):
-        """index_documents defaults embedding batch size to 10 when tenant is missing."""
-        mock_get_record.return_value = None
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
 
-        data = [{
-            "path_or_url": "p1",
-            "content": "c1",
-            "metadata": {"title": "t1"},
-        }]
-        embedding = MagicMock()
-        embedding.model = "model-x"
 
-        result = ElasticSearchService.index_documents(
-            embedding_model=embedding,
-            index_name="idx",
-            data=data,
-            vdb_core=self.mock_vdb_core,
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        self.assertTrue(result["success"])
-        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
-        self.assertEqual(kwargs["embedding_batch_size"], 10)
-
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.management.tenant_config_manager')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    @patch('management.services.knowledge_base.management.get_redis_service')
-    def test_index_documents_updates_final_progress(self, mock_get_redis, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
-        """index_documents sends final progress update to Redis when task_id is provided."""
-        mock_get_record.return_value = {"tenant_id": "tenant-1"}
-        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
-        mock_redis = MagicMock()
-        mock_get_redis.return_value = mock_redis
-
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 2
-
-        data = [
-            {"path_or_url": "p1", "content": "c1", "metadata": {}},
-            {"path_or_url": "p2", "content": "c2", "metadata": {}},
-        ]
-
-        result = ElasticSearchService.index_documents(
-            embedding_model=self.mock_embedding,
-            index_name="idx",
-            data=data,
-            vdb_core=self.mock_vdb_core,
-            task_id="task-xyz",
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        self.assertTrue(result["success"])
-        mock_redis.save_progress_info.assert_called()
-        last_call = mock_redis.save_progress_info.call_args_list[-1]
-        self.assertEqual(last_call[0], ("task-xyz", 2, 2))
-
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    @patch('management.services.knowledge_base.management.get_redis_service')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    @patch('management.services.knowledge_base.management.tenant_config_manager')
-    def test_index_documents_progress_init_and_final_errors(self, mock_tenant_cfg, mock_get_record, mock_get_redis, mock_update_last_doc):
-        """index_documents should continue when progress save fails during init and final updates."""
-        mock_get_record.return_value = {"tenant_id": "tenant-1"}
-        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
-
-        mock_redis = MagicMock()
-        # First call (init) raises, second call (final) raises
-        mock_redis.save_progress_info.side_effect = [
-            Exception("init fail"), Exception("final fail")]
-        mock_redis.is_task_cancelled.return_value = False
-        mock_get_redis.return_value = mock_redis
-
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-
-        data = [{"path_or_url": "p1", "content": "c1", "metadata": {}}]
-
-        result = ElasticSearchService.index_documents(
-            embedding_model=self.mock_embedding,
-            index_name="idx",
-            data=data,
-            vdb_core=self.mock_vdb_core,
-            task_id="task-err",
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        self.assertTrue(result["success"])
-        # two attempts to save progress (init and final)
-        self.assertEqual(mock_redis.save_progress_info.call_count, 2)
 
     @patch('management.services.knowledge_base.files.read_knowledge_files')
     def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
@@ -4169,7 +3570,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         # Patch get_embedding_model for tests that might use it indirectly
         self.get_embedding_model_patcher = patch(
-            'management.services.knowledge_base.management.get_embedding_model_by_id')
+            'management.services.knowledge_base.common.get_embedding_model_by_id')
         self.mock_get_embedding = self.get_embedding_model_patcher.start()
 
         # Patch get_rerank_model
@@ -4803,25 +4204,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.embedding_dim = 768
 
     # Tests for _update_progress (lines 54-80)
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    def test_update_progress_save_failure(self, mock_get_redis):
-        """Test _update_progress when save_progress_info returns False (line 69-76)."""
-        from management.services.knowledge_base.service import _update_progress
-        mock_redis = MagicMock()
-        mock_redis.is_task_cancelled.return_value = False
-        mock_redis.save_progress_info.return_value = False
-        mock_get_redis.return_value = mock_redis
-        # Should not raise, just logs warning
-        _update_progress("task-1", 5, 10)
-        mock_redis.save_progress_info.assert_called_once_with("task-1", 5, 10)
 
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    def test_update_progress_redis_exception(self, mock_get_redis):
-        """Test _update_progress when get_redis_service raises (line 77-79)."""
-        from management.services.knowledge_base.service import _update_progress
-        mock_get_redis.side_effect = Exception("Redis connection failed")
-        # Should not raise, just logs warning
-        _update_progress("task-1", 5, 10)
 
 
     # Tests for index_documents - non-dict item skip (lines 1087-1089)
@@ -4829,31 +4212,6 @@ class TestCoverageImprovement(unittest.TestCase):
     # The actual code path for skipping is covered by the document transformation logic.
 
     # Tests for index_documents - progress save returns False (lines 1169-1170)
-    @patch('management.services.knowledge_base.management.get_redis_service')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    def test_index_documents_progress_init_save_failure(self, mock_update, mock_get_record, mock_get_redis):
-        """Test index_documents handles save_progress_info returning False (lines 1169-1170)."""
-        mock_get_record.return_value = {"tenant_id": "tenant-1"}
-        mock_redis = MagicMock()
-        mock_redis.save_progress_info.return_value = False  # Simulates save failure
-        mock_get_redis.return_value = mock_redis
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-        mock_embedding = MagicMock()
-        mock_embedding.model = "test-model"
-
-        result = ElasticSearchService.index_documents(
-            embedding_model=mock_embedding,
-            index_name="test-index",
-            data=[{"content": "test"}],
-            vdb_core=self.mock_vdb_core,
-            task_id="task-123",
-            actor=ServicePrincipal("test-user", "tenant-1"),
-        )
-
-        # Should complete successfully despite progress save failure
-        self.assertTrue(result["success"])
 
     # Tests for list_files - file count exception (lines 1264-1267)
     @pytest.mark.asyncio
@@ -5038,27 +4396,6 @@ class TestCoverageImprovement(unittest.TestCase):
 
 
     # Tests for create_index - no model_id provided (line 572)
-    @patch('management.services.knowledge_base.management.create_knowledge_record')
-    def test_create_index_no_model_id(self, mock_create_record):
-        """Test create_index when model_id is None (line 572)."""
-        mock_create_record.return_value = {"index_name": "test-index"}
-        self.mock_vdb_core.check_index_exists.return_value = False
-        self.mock_vdb_core.create_index.return_value = True
-
-        result = ElasticSearchService.create_index(
-            index_name="test-index",
-            embedding_dim=512,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-1",
-            model_id=None,
-        )
-
-        self.assertEqual(result["status"], "success")
-        mock_create_record.assert_called_once()
-        call_kwargs = mock_create_record.call_args[0][0]
-        self.assertIsNone(call_kwargs["embedding_model_name"])
-        self.assertIsNone(call_kwargs["embedding_model_id"])
 
     # Tests for delete_index - list_files exception (lines 818-820)
 
@@ -5130,39 +4467,8 @@ class TestCoverageImprovement(unittest.TestCase):
     # validated by other tests in TestElasticSearchService class.
 
     # Tests for index_documents - empty index_name (line 1070)
-    def test_index_documents_empty_index_name(self):
-        """Test index_documents raises when index_name is empty (line 1070)."""
-        mock_embedding = MagicMock()
-        mock_embedding.model = "test-model"
-
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.index_documents(
-                embedding_model=mock_embedding,
-                index_name="",  # Empty index name
-                data=[{"content": "test"}],
-                vdb_core=self.mock_vdb_core,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-        self.assertIn("Index name is required", str(ctx.exception))
 
     # Tests for index_documents - index creation exception (lines 1078-1079)
-    @patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.create_index')
-    def test_index_documents_index_creation_failure(self, mock_create_index):
-        """Test index_documents handles exception from create_index (lines 1078-1079)."""
-        mock_create_index.side_effect = Exception("Index creation failed")
-        self.mock_vdb_core.check_index_exists.return_value = False
-        mock_embedding = MagicMock()
-        mock_embedding.model = "test-model"
-
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.index_documents(
-                embedding_model=mock_embedding,
-                index_name="new-index",
-                data=[{"content": "test"}],
-                vdb_core=self.mock_vdb_core,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-        self.assertIn("Failed to create index", str(ctx.exception))
 
     # Tests for list_files - msearch response error (lines 1401-1403)
     @pytest.mark.asyncio
@@ -5510,69 +4816,8 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
     # Tests for index_documents - skip non-dict items (lines 1156-1158)
-    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
-    def test_index_documents_skips_non_dict_items(self, mock_update_last_doc):
-        """Test index_documents skips non-dictionary items in data list (lines 1156-1158)."""
-        mock_embedding = MagicMock()
-        mock_embedding.model = "test-model"
-        mock_embedding.model_type = "text"
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-
-        with patch('management.services.knowledge_base.management.get_knowledge_record',
-                   return_value={"tenant_id": "tenant-1"}), \
-                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tcm:
-            mock_tcm.get_model_config.return_value = {"chunk_batch": 10}
-            result = ElasticSearchService.index_documents(
-                embedding_model=mock_embedding,
-                index_name="test-index",
-                data=[
-                    "not a dictionary",  # Should be skipped
-                    {"content": "valid document"},
-                    None,  # Should be skipped
-                ],
-                vdb_core=self.mock_vdb_core,
-                actor=ServicePrincipal("test-user", "tenant-1"),
-            )
-
-        self.assertTrue(result["success"])
-        # vectorize_documents should only be called with 1 document (the valid dict)
-        call_args = self.mock_vdb_core.vectorize_documents.call_args
-        documents_passed = call_args.kwargs["documents"]
-        self.assertEqual(len(documents_passed), 1)
 
     # Tests for index_documents - image bytes fetch exception and raise (lines 1206-1214)
-    @patch('management.services.knowledge_base.management.read_document_image')
-    def test_index_documents_image_fetch_exception_and_raise(self, mock_get_file):
-        """Test index_documents logs and re-raises exception when fetching image bytes fails (lines 1206-1214)."""
-        mock_embedding = MagicMock()
-        mock_embedding.model = "test-model"
-        mock_embedding.model_type = "text"
-        self.mock_vdb_core.check_index_exists.return_value = True
-        self.mock_vdb_core.vectorize_documents.return_value = 1
-        mock_get_file.side_effect = Exception("MinIO unavailable")
-
-        with patch('management.services.knowledge_base.management.get_knowledge_record',
-                   return_value={"tenant_id": "tenant-1"}), \
-                patch('management.services.knowledge_base.management.tenant_config_manager.get_model_config',
-                      return_value={"chunk_batch": 10}), \
-                patch('management.services.knowledge_base.management.logger') as mock_logger:
-            with self.assertRaises(Exception) as ctx:
-                ElasticSearchService.index_documents(
-                    embedding_model=mock_embedding,
-                    index_name="test-index",
-                    data=[{
-                        "content": "test",
-                        "path_or_url": "s3://bucket/image.png",
-                        "source_type": "minio",
-                        "metadata": {"image_url": "s3://bucket/image.png"}
-                    }],
-                    vdb_core=self.mock_vdb_core,
-                    actor=ServicePrincipal("test-user", "tenant-1"),
-                )
-            self.assertIn("MinIO unavailable", str(ctx.exception))
-            # Error should be logged before re-raising
-            mock_logger.error.assert_called()
 
     # Tests for list_files - file_size exception (lines 1382-1386)
     @pytest.mark.asyncio
