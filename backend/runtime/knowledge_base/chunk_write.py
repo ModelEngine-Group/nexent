@@ -7,6 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.agentos_knowledge import KnowledgeChunksGrant
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from contracts.knowledge_chunk_mutation import (
     ChunkCreateData,
@@ -72,7 +73,8 @@ class ChunkMutationService:
         )
         if (
             not isinstance(grant, ChunkMutationGrant)
-            or grant.resource_tenant_id != actor.tenant_id
+            or grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}
+            or grant.resource_tenant_id != actor.tenant_id and intent.operation != "delete"
             or any(
                 getattr(grant, field) != getattr(intent, field)
                 for field in ("knowledge_id", "chunk_id", "operation")
@@ -102,7 +104,7 @@ class ChunkMutationService:
                 scope.system
                 or scope.resource_prefix
                 or scope.service_role != "runtime"
-                or scope.tenant_id != actor.tenant_id
+                or scope.tenant_id != grant.resource_tenant_id
                 or scope.actor_id != actor.user_id
             ):
                 raise ScopeDenied()
@@ -231,11 +233,14 @@ class ChunkMutationService:
         try:
             async with asyncio.timeout(threshold):
                 grant = await self._grant(payload, actor)
-                with self.records(actor, context=context) as records:
+                namespace = {} if grant.resource_tenant_id == actor.tenant_id else {
+                    "resource_tenant_id": grant.resource_tenant_id
+                }
+                with self.records(actor, context=context, **namespace) as records:
                     journal = ChunkMutationAdmission(records, payload.knowledge_id)
                     scope = records.scope
                     if (
-                        scope.tenant_id != actor.tenant_id
+                        scope.tenant_id != grant.resource_tenant_id
                         or scope.actor_id != actor.user_id
                     ):
                         raise ScopeDenied()
@@ -257,7 +262,7 @@ class ChunkMutationService:
                         def execute():
                             context.remaining()
                             with self.maintenance_ports(
-                                actor, grant.collection, context=context
+                                actor, grant.collection, context=context, **namespace
                             ) as vectors:
                                 result = ChunkMutationExecutor(
                                     journal, vectors, grant.collection

@@ -3759,39 +3759,7 @@ class TestElasticSearchService(unittest.TestCase):
             "kb-index", "chunk-1", ANY
         )
 
-    def test_delete_chunk_success(self):
-        """
-        Test delete_chunk returns success when vdb_core.delete_chunk is True.
-        """
-        self.mock_vdb_core.delete_chunk.return_value = True
 
-        result = ElasticSearchService.delete_chunk(
-            index_name="kb-index",
-            chunk_id="chunk-1",
-            vdb_core=self.mock_vdb_core,
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-        self.mock_vdb_core.delete_chunk.assert_called_once_with(
-            "kb-index", "chunk-1"
-        )
-
-    def test_delete_chunk_not_found_raises_value_error(self):
-        """
-        Test delete_chunk raises ValueError when vdb_core.delete_chunk returns False.
-        """
-        self.mock_vdb_core.delete_chunk.return_value = False
-
-        with self.assertRaises(Exception) as exc:
-            ElasticSearchService.delete_chunk(
-                index_name="kb-index",
-                chunk_id="missing",
-                vdb_core=self.mock_vdb_core,
-            )
-
-        self.assertIn(
-            "Error deleting chunk: Chunk missing not found in index kb-index", str(exc.exception))
 
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
@@ -5799,16 +5767,6 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("ES error", str(ctx.exception))
 
     # Tests for delete_chunk exception (lines 1923-1926)
-    def test_delete_chunk_exception(self):
-        """Test delete_chunk handles exception from vdb_core (lines 1923-1926)."""
-        self.mock_vdb_core.delete_chunk.side_effect = Exception("ES error")
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.delete_chunk(
-                index_name="test-index",
-                chunk_id="chunk-1",
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertIn("ES error", str(ctx.exception))
 
     # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (line 1955, 1962)
     @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')

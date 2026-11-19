@@ -50,6 +50,7 @@ from management.services.knowledge_base.service import (
 from management.services.knowledge_base.deletion_public import with_cleanup_summary
 from management.services.knowledge_base.file_reader import read_document_error
 from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
+from management.services.knowledge_base.chunk_deletion import delete_manual_chunk
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 from management.services.model.resolver import get_embedding_model_by_id
@@ -910,26 +911,24 @@ def update_chunk(
 
 
 @router.delete("/{index_name}/chunk/{chunk_id}")
-def delete_chunk(
+async def delete_chunk(
     index_name: str = Path(..., description=INTERNAL_INDEX_NAME_DESC),
     chunk_id: str = Path(..., description="Chunk identifier"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Delete a chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-        result = ElasticSearchService.delete_chunk(
-            index_name=index_name,
-            chunk_id=chunk_id,
-            vdb_core=vdb_core,
-        )
+        result = await delete_manual_chunk(index_name, chunk_id, ServicePrincipal(user_id, tenant_id))
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except HTTPException:
         raise
+    except ScopeDenied:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="No permission to modify this knowledge base") from None
+    except DeadlineExceeded:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error deleting chunk: storage operation timed out") from None
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))

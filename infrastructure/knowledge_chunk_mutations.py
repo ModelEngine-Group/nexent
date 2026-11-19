@@ -3,7 +3,9 @@
 
 from contextlib import contextmanager
 
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_mutation import CHANGES, STATES
+from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
 
 from infrastructure.knowledge_vectors import (
@@ -15,10 +17,13 @@ from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
 
 
 @contextmanager
-def knowledge_chunk_mutation_ports(actor, *, context):
+def knowledge_chunk_mutation_ports(actor, *, context, resource_tenant_id=None):
+    tenant = actor.tenant_id if resource_tenant_id is None else resource_tenant_id
+    if tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+        raise ScopeDenied()
     engine, records = record_engine(context), None
     try:
-        scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {CHANGES, STATES})
+        scope = StorageScope("runtime", tenant, actor.user_id, {CHANGES, STATES})
         records = bind_knowledge_lifecycle(scope, engine, mode="mutation")
         yield records
     finally:
@@ -38,9 +43,9 @@ def knowledge_creation_vector_ports(actor, collection, dimensions, *, context):
 
 
 @contextmanager
-def knowledge_chunk_vector_ports(actor, collection, *, context):
+def knowledge_chunk_vector_ports(actor, collection, *, context, resource_tenant_id=None):
     context.remaining()
-    vectors = bind_knowledge_chunk_vectors(actor, collection)
+    vectors = bind_knowledge_chunk_vectors(actor, collection, resource_tenant_id=resource_tenant_id)
     try:
         yield vectors
     finally:

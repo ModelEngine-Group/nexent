@@ -1607,7 +1607,7 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_chunk") as mock_delete:
+            patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
         mock_delete.return_value = expected_response
@@ -1624,29 +1624,17 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
 
 @pytest.mark.asyncio
 async def test_delete_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
-    """Read-only users must not be able to delete chunks."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.utils.knowledge_permission.ElasticSearchService.require_knowledge_base_edit_permission",
-                side_effect=PermissionError("No permission to modify this knowledge base"),
-            ) as mock_require_permission, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_chunk") as mock_delete:
-
-        response = client.delete(
-            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
-            headers=auth_data["auth_header"],
-        )
-
+    """SI edit authorization failures retain the public forbidden response."""
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
+               return_value=(auth_data["user_id"], auth_data["tenant_id"])), patch(
+        "management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock,
+        side_effect=ScopeDenied(),
+    ) as mock_delete:
+        response = client.delete(f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+                                 headers=auth_data["auth_header"])
         assert response.status_code == 403
         assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_require_permission.assert_called_once_with(
-            index_name=auth_data["index_name"],
-            user_id=auth_data["user_id"],
-            tenant_id=auth_data["tenant_id"],
-        )
-        mock_delete.assert_not_called()
+        mock_delete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1658,7 +1646,7 @@ async def test_delete_chunk_not_found(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_chunk") as mock_delete:
+            patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         mock_delete.side_effect = ValueError("Chunk not found")
 
@@ -1681,7 +1669,7 @@ async def test_delete_chunk_exception(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_chunk") as mock_delete:
+            patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         mock_delete.side_effect = Exception("Delete failed")
 

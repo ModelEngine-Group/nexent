@@ -358,33 +358,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             )
             raise Exception(f"Error updating chunk: {exc}")
 
-    @staticmethod
-    def delete_chunk(
-        index_name: str,
-        chunk_id: str,
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-    ):
-        """
-        Delete a chunk document by id.
-        """
-        try:
-            deleted = vdb_core.delete_chunk(index_name, chunk_id)
-            if not deleted:
-                raise ValueError(f"Chunk {chunk_id} not found in index {index_name}")
-            return {
-                "status": "success",
-                "message": f"Chunk {chunk_id} deleted successfully",
-                "chunk_id": chunk_id,
-            }
-        except Exception as exc:
-            logger.error(
-                "Error deleting chunk %s in index %s: %s",
-                chunk_id,
-                index_name,
-                exc,
-                exc_info=True,
-            )
-            raise Exception(f"Error deleting chunk: {exc}")
 
     @staticmethod
     def search_hybrid(
