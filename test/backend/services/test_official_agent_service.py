@@ -900,10 +900,18 @@ async def test_install_mcp_servers_raises_on_same_name_different_url():
 
 # ---------------------------------------------------------------------------
 # _create_knowledge_bases
+
+
+@pytest.fixture(autouse=True)
+def seed_text_writer():
+    module = types.ModuleType("management.services.knowledge_base.seed_documents")
+    module.index_seed_texts = AsyncMock()
+    with patch.dict(sys.modules, {module.__name__: module}):
+        yield module.index_seed_texts
 # ---------------------------------------------------------------------------
 
 
-async def test_create_knowledge_bases_creates_and_indexes():
+async def test_create_knowledge_bases_creates_and_indexes(seed_text_writer):
     bundle = _make_bundle(name="research", has_knowledge=True)
     fake_kb_db = types.ModuleType("management.db.knowledge_base.repository")
     fake_kb_db.get_knowledge_record = MagicMock(return_value=None)
@@ -950,19 +958,14 @@ async def test_create_knowledge_bases_creates_and_indexes():
             ingroup_permission="READ_ONLY",
             group_ids=[],
         )
-    fake_vdb.ElasticSearchService.index_documents.assert_called_once()
-    call = fake_vdb.ElasticSearchService.index_documents.call_args
-    assert call.kwargs["index_name"] == "42-abc"
-    assert call.kwargs["model_id"] == 5
-    assert call.kwargs["data"] == [
-        {
-            "content": "hi",
-            "path_or_url": "a.md",
-            "source_type": "local",
-            "filename": "a.md",
-            "metadata": {"title": "a.md"},
-        }
-    ]
+    fake_vdb.ElasticSearchService.index_documents.assert_not_called()
+    seed_text_writer.assert_awaited_once()
+    call = seed_text_writer.await_args
+    assert call.args[0] == "42-abc"
+    assert [(doc.content, doc.file_name) for doc in call.args[1]] == [("hi", "a.md")]
+    assert call.args[2].user_id == "u" and call.args[2].tenant_id == "tenant-1"
+    assert call.kwargs["embedding_model_name"] == fake_vdb.get_embedding_model_by_id.return_value[0].model
+
 
 
 async def test_create_knowledge_bases_reuses_existing():

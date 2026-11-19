@@ -319,6 +319,8 @@ KnowledgeBase.search 的内部请求可传 weight_accurate，范围为 0 到 1�
 
 KnowledgeBase.search 的结果必须携带 data_revisions，覆盖每个实际查询的 KB，空结果也保留修订。修订由确认修改 epoch 和当前发布 manifest 共同计算，JSON 对象键按规范十进制 KB ID 解码。Runtime 工具在跨模型合并、外层 rerank 和整体授权检查后，通过只读 StorageInterface 再核对这些修订。期间发生确认更新、删除或活动写入会拒绝整次旧结果，不重做推理和检索。采样、分块浏览与搜索共用 Runtime 的 data_revision 模块。
 
+官方 Agent 的文本种子复用分块创建入口。Management 准备原正文、文件名、展示字段和旧分块 ID，以实际安装用户调用 AgentOS，等待每次 Runtime 写入完成后继续安装。模型调用和向量写入都在 Runtime；同秒同正文保留旧 ID 覆盖语义。二进制种子继续使用上传、清洗及 File.upload 链路。旧公开 documents 写入入口中的图片处理、KB 集合创建及其他存储旁路仍待迁移。
+
 ### KnowledgeBase 已登记文件清单
 
 `KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。

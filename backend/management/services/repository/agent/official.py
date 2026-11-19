@@ -571,6 +571,8 @@ async def _create_knowledge_bases(
     from management.services.model.resolver import (
         get_embedding_model_by_id,
     )
+    from management.services.knowledge_base.seed_documents import index_seed_texts
+    from infrastructure.agentos_identity import ServicePrincipal
 
     vdb_core = get_vector_db_core()
     embedding_model, _ = get_embedding_model_by_id(tenant_id, embedding_model_id)
@@ -665,22 +667,9 @@ async def _create_knowledge_bases(
             text_docs = [doc for doc in kb.documents if doc.content]
             file_docs = [doc for doc in kb.documents if doc.file_path]
             if text_docs:
-                data = [
-                    {
-                        "content": doc.content,
-                        "path_or_url": doc.file_name,
-                        "source_type": "local",
-                        "filename": doc.file_name,
-                        "metadata": {"title": doc.file_name},
-                    }
-                    for doc in text_docs
-                ]
-                ElasticSearchService.index_documents(
-                    embedding_model=embedding_model,
-                    index_name=actual_index,
-                    data=data,
-                    vdb_core=vdb_core,
-                    model_id=embedding_model_id,
+                await index_seed_texts(
+                    actual_index, text_docs, ServicePrincipal(user_id, tenant_id),
+                    embedding_model_name=embedding_model.model,
                 )
                 logger.info(
                     "Indexed %d text seed document(s) into knowledge base '%s'",
