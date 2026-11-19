@@ -11,7 +11,7 @@ import tempfile
 import types
 import importlib.machinery
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock, call
 from unittest.mock import patch as _patch
 
 import pytest
@@ -152,7 +152,9 @@ class _XlrdProxy(types.ModuleType):
 if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
     sys.modules["xlrd"] = _XlrdProxy()
 
-_tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
+_tmp_root = os.path.abspath(
+    os.environ.get("NEXENT_PYTEST_TMPDIR") or os.path.join(_test_root, "..", ".pytest-tmp")
+)
 os.makedirs(_tmp_root, exist_ok=True)
 os.environ.setdefault("TMP", _tmp_root)
 os.environ.setdefault("TEMP", _tmp_root)
@@ -194,6 +196,9 @@ class _PatchProxy:
 
 
 class _MiniMocker:
+    Mock = Mock
+    call = call
+
     def __init__(self):
         self._patchers = []
         self.patch = _PatchProxy(self)

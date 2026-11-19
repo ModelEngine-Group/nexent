@@ -3,13 +3,13 @@
 
 import httpx
 import pytest
-from fastapi import APIRouter
 
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
 from gateway.security.context import trusted_identity
 from gateway.security.identity import IDENTITY_HEADER, sign_identity
 from ops.api import application as ops_application
+from ops.api import system_configurations
 
 SECRET = "gateway-ops-boundary-test-key"
 ACTOR = {"kind": "session", "user_id": "user-1", "tenant_id": "tenant-1", "roles": ["USER"]}
@@ -21,8 +21,6 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
     monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: SECRET)
     monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: SECRET)
     monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
-    # Exercise forwarding and authentication without running configuration business logic.
-    monkeypatch.setattr(ops_application, "system_configuration_router", APIRouter())
     ops = ops_application.create_app()
 
     @ops.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH"])
@@ -47,9 +45,6 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
         async with edge.router.lifespan_context(edge):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=edge), base_url="http://edge") as client:
                 for method, path in (
-                    ("GET", "/api/system_configurations"),
-                    ("PATCH", "/api/system_configurations"),
-                    ("POST", "/api/system_configurations/recommendations"),
                     ("GET", "/api/trajectory/records"),
                     ("POST", "/api/trajectory/cleanup"),
                     ("PUT", "/api/trajectory/cleanup/schedule"),
@@ -72,3 +67,53 @@ async def test_ops_verifies_the_forwarded_identity_and_keeps_directory_routing(m
         token = sign_identity(ACTOR, "ops", "GET", path, b"view=trajectory", key=SECRET)
         assert (await ops_client.get(path, headers={IDENTITY_HEADER: token})).status_code == 401
         assert (await ops_client.get("/health/live")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_gateway_reaches_real_system_configuration_routes(monkeypatch, mocker):
+    monkeypatch.setattr("gateway.downstream.middleware.enabled", lambda: True)
+    monkeypatch.setattr("gateway.downstream.middleware.signing_key", lambda: SECRET)
+    monkeypatch.setattr("gateway.downstream.identity.signing_key", lambda: SECRET)
+    monkeypatch.setattr(ops_application, "trajectory_enabled", lambda: False)
+
+    async def resolve(request, **kwargs):
+        return {**ACTOR, "roles": ["SU"]}
+
+    monkeypatch.setattr("gateway.application.resolve_identity", resolve)
+    monkeypatch.setattr(
+        "permissions.operations.has_permission",
+        lambda roles, permission: "SU" in roles and permission.startswith("ops.configuration:"),
+    )
+
+    async def inline(_manager, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(system_configurations, "run_system_configuration_io", inline)
+    load = mocker.patch.object(system_configurations, "list_system_configurations", return_value=[])
+    save = mocker.patch.object(system_configurations, "save_system_configurations", return_value={"changed": 1})
+    ops = ops_application.create_app()
+    ops.state.thread_manager = object()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ops), base_url="http://ops") as ops_client:
+        async def forward(request):
+            assert request.url.host == "ops"
+            return await ops_client.send(request, stream=True)
+
+        edge = create_gateway_app(
+            settings=GatewaySettings(signing_secret=SECRET, ops_url="http://ops"),
+            transport=httpx.MockTransport(forward), identity_lookup=resolve,
+        )
+        async with edge.router.lifespan_context(edge):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=edge), base_url="http://edge") as client:
+                path = "/api/system_configurations"
+                result = await client.get(path)
+                assert result.status_code == 200, result.text
+                assert result.json() == {"items": [], "total": 0}
+                changes = {"MAX_TENANT_COUNT": 5}
+                result = await client.patch(path, json={"changes": changes})
+                assert result.status_code == 200, result.text
+                assert result.json() == {"saved": True, "changed": 1}
+                result = await client.post(f"{path}/recommendations", json={"key": "MAX_TENANT_COUNT"})
+                assert result.status_code == 400, result.text
+                assert result.json()["detail"]["code"] == "RECOMMENDATION_UNAVAILABLE"
+                load.assert_called_once_with()
+                save.assert_called_once_with(changes, actor=ACTOR["user_id"])

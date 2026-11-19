@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 from contracts.agent_prompt import normalize_imported_agent_prompt
 
 
@@ -87,7 +87,7 @@ def test_external_import_consolidates_old_bundle_once_and_exports_only_prompt():
 
 @pytest.mark.asyncio
 async def test_verified_draft_context_exposes_only_the_unified_prompt(mocker):
-    from services import nl2agent_service
+    from management.services.agent import nl2agent as nl2agent_service
 
     mocker.patch.object(nl2agent_service, "_load_verified_nl2agent_state", return_value=({
         "prompt": "Complete prompt",

@@ -54,6 +54,16 @@ async def test_batch_projection_preserves_transaction_arguments_and_canonical_an
     values["mark_failed"].assert_not_called()
 
 
+
+@pytest.mark.asyncio
+async def test_batch_projection_passes_server_run_id_to_transaction():
+    values = parameters()
+    values["projection_run_id"] = "a" * 32
+
+    assert await finalize_assistant_projection(**values) == ("completed", False, "answer")
+    assert values["persist_batch"].call_args.kwargs["projection_run_id"] == "a" * 32
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fallback_fails", [False, True])
 async def test_batch_failure_marks_outcome_before_status_fallback(fallback_fails):

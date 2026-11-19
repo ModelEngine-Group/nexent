@@ -2,6 +2,7 @@
 import pytest
 import httpx
 
+from infrastructure import ind_aidp_images
 from management.services.knowledge_base.providers import aidp as ind_aidp_service
 
 
@@ -59,11 +60,11 @@ async def test_image_fetch_uses_resolved_instance_credentials(monkeypatch):
         return real_async_client(**kwargs)
 
     monkeypatch.setattr(ind_aidp_service.httpx, "AsyncClient", client_factory)
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
     monkeypatch.setattr(
         ind_aidp_service,
         "_resolve_image_credentials",
-        lambda _: ("https://independent-aidp.example", "instance-secret", "aidp", "kb/image.png"),
+        lambda _, actor: ("https://independent-aidp.example", "instance-secret", "aidp", "kb/image.png"),
     )
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=1,
@@ -74,7 +75,8 @@ async def test_image_fetch_uses_resolved_instance_credentials(monkeypatch):
     )
     image_ref = builder("kb/image.png").rsplit("/", 1)[-1]
 
-    content, content_type = await ind_aidp_service.fetch_ind_aidp_image_impl(image_ref)
+    content, content_type, cache_control = await ind_aidp_service.fetch_ind_aidp_image_impl(image_ref)
+    assert cache_control == "private, max-age=3600"
 
     assert content == b"png-bytes"
     assert content_type == "image/png"
@@ -82,7 +84,7 @@ async def test_image_fetch_uses_resolved_instance_credentials(monkeypatch):
 
 
 def test_image_ref_is_signed_and_does_not_contain_api_key(monkeypatch):
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=10,
         tool_id=20,
@@ -102,7 +104,7 @@ def test_image_ref_is_signed_and_does_not_contain_api_key(monkeypatch):
 
 
 def test_tampered_image_ref_is_rejected(monkeypatch):
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=1,
         tool_id=2,
@@ -277,9 +279,9 @@ async def test_list_non_object_response(monkeypatch):
 
 
 def test_sign_requires_signing_key(monkeypatch):
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "")
     with pytest.raises(ind_aidp_service.IndependentAidpServiceError, match="not configured"):
-        ind_aidp_service._sign("payload")
+        ind_aidp_images._sign("payload")
 
 
 def test_image_path_empty_and_query_rejected():
@@ -297,7 +299,7 @@ def test_image_path_strips_known_tenant_prefix():
 
 
 def test_decode_ref_rejects_missing_required_fields(monkeypatch):
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
     payload = {
         "agent_id": 1,
         "tool_id": 2,
@@ -306,10 +308,10 @@ def test_decode_ref_rejects_missing_required_fields(monkeypatch):
         "aidp_tenant_id": "aidp",
         # image_path intentionally missing
     }
-    encoded = ind_aidp_service._b64encode(
+    encoded = ind_aidp_images._b64encode(
         __import__("json").dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     )
-    ref = f"{encoded}.{ind_aidp_service._sign(encoded)}"
+    ref = f"{encoded}.{ind_aidp_images._sign(encoded)}"
 
     with pytest.raises(ind_aidp_service.IndependentAidpServiceError, match="Invalid"):
         ind_aidp_service._decode_image_ref(ref)
@@ -399,11 +401,11 @@ def test_resolve_credentials_tenant_mismatch(monkeypatch):
 
 
 def _make_image_ref(monkeypatch):
-    monkeypatch.setattr(ind_aidp_service, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "signing-secret")
     monkeypatch.setattr(
         ind_aidp_service,
         "_resolve_image_credentials",
-        lambda _: ("https://independent-aidp.example", "secret", "aidp", "kb/a.png"),
+        lambda _, actor: ("https://independent-aidp.example", "secret", "aidp", "kb/a.png"),
     )
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=1, tool_id=2, tenant_id="tenant-a", version_no=0, aidp_tenant_id="aidp"

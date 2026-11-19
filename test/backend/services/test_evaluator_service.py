@@ -13,9 +13,12 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
@@ -57,21 +60,6 @@ def _mk_mod(name: str, **attrs) -> types.ModuleType:
 
 
 def _install_stubs():
-    class _ErrorCode:
-        COMMON_VALIDATION_ERROR = "000502"
-        COMMON_RESOURCE_NOT_FOUND = "000501"
-
-    class _AppException(Exception):
-        def __init__(self, code, message: str = "", extra=None):
-            super().__init__(message)
-            self.code = code
-            self.message = message
-            self.extra = extra
-
-    _consts = _register_package("consts")
-    _consts.error_code = _mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
-    _consts.exceptions = _mk_mod("contracts.errors.exceptions", AppException=_AppException)
-
     _db = _register_package("database")
     _db.evaluator_db = _mk_mod(
         "management.db.evaluation.evaluator", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
@@ -90,7 +78,7 @@ def _install_stubs():
         format_agent_profile_context=MagicMock(name="format_agent_profile_context"),
     )
     _mk_mod(
-        "management.services.model.invocation", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
+        "management.clients.model", invoke_chat_prompt=AsyncMock(name="invoke_chat_prompt")
     )
     _mk_mod(
         "management.services.agent.prompt", get_prompt_template=MagicMock(name="get_prompt_template")
@@ -117,10 +105,7 @@ def _install_stubs():
     prompts = sys.modules["nexent.core.prompts"]
     prompts.load_prompt = load_test_prompt
     prompts.render_prompt_text = render_test_prompt
-    return _ErrorCode, _AppException
-
-
-_ERROR_CODE, _APP_EXC = _install_stubs()
+_install_stubs()
 
 
 @pytest.fixture
@@ -132,7 +117,7 @@ def bundle():
     code_val = MagicMock(name="validate_code_evaluator")
     profile = MagicMock(name="fetch_agent_profile")
     fmt_profile = MagicMock(name="format_agent_profile_context")
-    llm = MagicMock(name="call_llm_for_system_prompt")
+    llm = AsyncMock(name="invoke_chat_prompt")
     tmpl = MagicMock(name="load_prompt")
 
     for n, m in db_impls.items():
@@ -140,7 +125,7 @@ def bundle():
     sys.modules["management.services.evaluation.runs"].validate_code_evaluator = code_val
     sys.modules["management.services.agent.profile"].fetch_agent_profile = profile
     sys.modules["management.services.agent.profile"].format_agent_profile_context = fmt_profile
-    sys.modules["management.services.model.invocation"].call_llm_for_system_prompt = llm
+    sys.modules["management.clients.model"].invoke_chat_prompt = llm
     sys.modules["management.services.agent.prompt"].get_prompt_template = tmpl
 
     if MODULE_UNDER_TEST in sys.modules:
@@ -169,15 +154,15 @@ def bundle():
     b.fmt_profile = fmt_profile
     b.llm = llm
     b.tmpl = tmpl
-    b.ErrorCode = _ERROR_CODE
-    b.AppException = _APP_EXC
+    b.ErrorCode = ErrorCode
+    b.AppException = AppException
     return b
 
 
 def _exc_code(bundle, fn, *args, **kwargs):
     with pytest.raises(bundle.AppException) as exc:
         fn(*args, **kwargs)
-    return exc.value.code
+    return exc.value.error_code
 
 
 # ---------------------------------------------------------------------------
@@ -347,10 +332,11 @@ class TestValidateEvaluatorFields:
 
 
 class TestGenerateEvaluatorByLlm:
-    def test_success_llm(self, bundle):
+    @pytest.mark.asyncio
+    async def test_success_llm(self, bundle):
         bundle.tmpl.return_value = {"SYSTEM_PROMPT": "sys"}
         bundle.llm.return_value = '{"name": "n", "evaluator_type": "llm", "prompt": "p"}'
-        out = bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7)
+        out = await bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7, user_id="actor")
         assert out["name"] == "n" and out["evaluator_type"] == "llm"
         assert out["prompt"] == "p"
         assert out["code"] is None
@@ -362,26 +348,30 @@ class TestGenerateEvaluatorByLlm:
             {"name": "actual", "type": "string", "required": True},
         ]
         bundle.tmpl.assert_not_called()
-        bundle.llm.assert_called_once()
+        bundle.llm.assert_awaited_once()
+        assert bundle.llm.await_args.kwargs["user_id"] == "actor"
         assert bundle.llm.call_args.kwargs["model_id"] == 7
         assert bundle.llm.call_args.kwargs["tenant_id"] == "t1"
         assert len(bundle.llm.call_args.kwargs["system_prompt"]) > 50
         assert "desc" in bundle.llm.call_args.kwargs["user_prompt"]
 
-    def test_success_code_with_agent(self, bundle):
+    @pytest.mark.asyncio
+    async def test_success_code_with_agent(self, bundle):
         bundle.tmpl.return_value = {"SYSTEM_PROMPT": "sys"}
         bundle.profile.return_value = {"name": "a"}
         bundle.fmt_profile.return_value = "profile"
         bundle.llm.return_value = '{"name": "n", "evaluator_type": "code", "code": "x"}'
-        out = bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7, agent_id=3)
+        out = await bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7, agent_id=3, user_id="actor")
         assert out["code"] == "x" and out["prompt"] is None
         assert "profile" in bundle.llm.call_args.kwargs["user_prompt"]
 
-    def test_llm_call_failure(self, bundle):
+    @pytest.mark.asyncio
+    async def test_llm_call_failure(self, bundle):
         bundle.tmpl.return_value = {"SYSTEM_PROMPT": "sys"}
         bundle.llm.side_effect = RuntimeError("boom")
-        code = _exc_code(bundle, bundle.mod.generate_evaluator_by_llm_impl, "desc", "t1", 7)
-        assert code == bundle.ErrorCode.COMMON_VALIDATION_ERROR
+        with pytest.raises(bundle.AppException) as exc:
+            await bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7, user_id="actor")
+        assert exc.value.error_code == bundle.ErrorCode.COMMON_VALIDATION_ERROR
 
 
 # ---------------------------------------------------------------------------

@@ -7,9 +7,9 @@ from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_par
 
 
 def merge_agent_model_parameters(profile, entry):
-    """Read a current/historical entry at the boundary, then apply canonical values."""
-    from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry, profile=profile))
+    from nexent.core.model_service.profiles.runtime_parameters import merge_agent_parameters
+
+    return merge_agent_parameters(profile, entry)
 
 
 def _apply_agent_parameters(profile, entry):
@@ -25,28 +25,13 @@ def _apply_agent_parameters(profile, entry):
 
 
 def merge_runtime_model_parameters(profile, entry, preferences):
-    """Validate each explicit layer, then merge without any legacy-format round trip."""
-    from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-    from management.services.conversation.model_preferences import merge_model_preferences
+    from contracts.errors.exceptions import ModelOutletValidationError
+    from nexent.core.model_service.profiles.runtime_parameters import merge_agent_parameters, merge_runtime_parameters
 
-    if not isinstance(preferences, dict):
-        from contracts.errors.exceptions import ModelOutletValidationError
-        raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-    canonical = read_agent_parameter_entry(entry, profile=profile)
-    from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
-    from nexent.core.models.sampling import without_unset_sampling
-    preferences = without_unset_sampling(without_outlet_token_limits(preferences))
-    agent_view = _apply_agent_parameters(profile, canonical)
+    merge_agent_parameters(profile, entry)
     try:
-        session_view = merge_model_preferences(agent_view, preferences)
-        # Session-disabled dependencies are inherited Agent values, not explicit session input.
-        inherited = {key: value for key, value in canonical["parameter_values"].items()
-                     if key in session_view.parameter_values}
-        combined = {**canonical, "parameter_values": {**inherited, **preferences}}
-        # Reapply to the original outlet so re-enabling can restore its inherited defaults.
-        return _apply_agent_parameters(profile, combined)
+        return merge_runtime_parameters(profile, entry, preferences)
     except ParameterValidationError as error:
-        from contracts.errors.exceptions import ModelOutletValidationError
         raise ModelOutletValidationError(error.category, error.path) from None
 
 

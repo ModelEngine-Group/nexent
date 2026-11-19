@@ -374,6 +374,10 @@ render_yaml_literal_file() {
 sql_files_checksum() {
   local payload=""
   local file rel checksum
+  if [ -f "$SQL_INIT_FILE" ]; then
+    checksum="$(deployment_sha256_file "$SQL_INIT_FILE")"
+    payload="init.sql:${checksum}"$'\n'
+  fi
   if [ -d "$DEPLOY_ROOT/sql/migrations" ]; then
     while IFS= read -r file; do
       [ -n "$file" ] || continue
@@ -387,19 +391,16 @@ sql_files_checksum() {
 
 render_infrastructure_runtime_values() {
   local output_file="$1"
-  if [ ! -f "$SQL_INIT_FILE" ]; then
-    echo "Error: SQL init file not found: $SQL_INIT_FILE"
-    exit 1
-  fi
+  printf '{}\n' > "$output_file"
+}
 
-  {
-    echo "global:"
-    echo "  rolloutChecksums:"
-    printf '    sql: %s\n' "$(yaml_quote "$(deployment_sha256_file "$SQL_INIT_FILE")")"
-    echo "nexent-infrastructure-common:"
-    echo "  sqlFiles:"
-    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
-  } > "$output_file"
+effective_northbound_api_server() {
+  local gateway_url="http://nexent-gateway:5013/api"
+  local configured="${NORTHBOUND_API_SERVER:-$gateway_url}"
+  case "$configured" in
+    http://nexent-northbound:5013/api) printf '%s' "$gateway_url" ;;
+    *) printf '%s' "$configured" ;;
+  esac
 }
 
 render_k8s_runtime_config_values() {
@@ -423,6 +424,7 @@ render_k8s_runtime_config_values() {
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "nexent-common:"
     echo "  sqlFiles:"
+    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
     echo "    migrations:"
     while IFS= read -r file; do
       [ -n "$file" ] || continue
@@ -437,7 +439,7 @@ render_k8s_runtime_config_values() {
     printf '      user: %s\n' "$(yaml_quote "${POSTGRES_USER:-root}")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
-    printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-gateway:5013/api")")"
+    printf '      northboundServer: %s\n' "$(yaml_quote "$(effective_northbound_api_server)")"
     # These inputs also supply defaults for runtime state and worker concurrency.
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
@@ -1229,7 +1231,7 @@ render_runtime_secret_values() {
     fi
 
     env_checksum="$(deployment_env_values_checksum)"
-    env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
+    env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|northbound=$(effective_northbound_api_server)|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
     sql_checksum="$(sql_files_checksum)"
 
     {
