@@ -166,8 +166,8 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     cleanup = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.services.agent.workspace_cleanup",
-        _module("management.services.agent.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
+        "services.workspace_cleanup_service",
+        _module("services.workspace_cleanup_service", cleanup_orphaned_agent_workspaces=cleanup),
     )
     shutdown_streams = AsyncMock(return_value=[])
     shutdown_creators = AsyncMock(return_value=0)
