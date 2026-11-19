@@ -15,9 +15,10 @@ from management.services.agent.service import run_agent_stream, stop_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
+from management.services.permission.identity.session import get_current_user_info, get_current_user_id
+from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from management.services.conversation.creator_execution import start_creation_turn
-from gateway.authentication.auth import get_current_user_info, get_current_user_id
-from gateway.authentication.auth import verify_internal_runtime_jwt
+from management.services.agent.lifecycle import AgentRunAlreadyActiveError
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -152,6 +153,7 @@ async def nl2agent_run_api(
     http_request: Request,
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_agent_create_permission),
+    resume: bool = Query(False),
 ):
     """Run the shared NL2Agent with the same history path in every UI entrypoint."""
     if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
@@ -165,9 +167,16 @@ async def nl2agent_run_api(
                 identity=AuthenticatedIdentity(user_id, tenant_id), authorization=authorization,
                 system_ref=ref,
             ),
+            resume=resume,
         )
         return StreamingResponse(stream, media_type="text/event-stream",
-                                 headers={"conversation_id": str(conversation_id)})
+                                 headers={"conversation_id": str(conversation_id),
+                                     **({"run_id": nl2agent_request.__dict__["_creator_generation"]}
+                                        if "_creator_generation" in nl2agent_request.__dict__ else {})})
+    except AgentRunAlreadyActiveError as exc:
+        raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
     except PermissionError as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except WorkbenchError as exc:
@@ -211,12 +220,14 @@ async def nl2agent_run_api(
 
 
 @agent_runtime_router.get("/stop/{run_id}")
-async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None)):
+async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None),
+                         generation: Optional[str] = Query(None)):
     """
     Stop an agent run by conversation ID or ephemeral debug run ID.
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
+    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id,
+                            **({"expected_generation": generation} if generation else {}))
 
 
 @agent_runtime_router.post(

@@ -19,7 +19,7 @@ from contracts.constants.environment import (
 )
 from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
 from contracts.roles import roles_from_record
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from management.db.identity.role_permission import check_role_permission
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.memory import dreaming as memory_dreaming_db
@@ -32,6 +32,7 @@ from management.services.memory.dreaming.service import (
     DreamingRunError,
     get_memory_dreaming_service,
 )
+from management.services.permission.identity.session import get_current_user_id
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])

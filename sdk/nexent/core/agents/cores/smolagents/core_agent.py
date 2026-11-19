@@ -604,7 +604,10 @@ class CoreAgent(CodeAgent):
         self._consecutive_clarification_errors = 0
         self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
-        if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
+        from nexent.core.agents.contracts.identity import root_clarification_allowed
+
+        if (kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action"
+                and root_clarification_allowed()):
             occupied = {
                 tool.name for tool in [*kwargs.get("tools", []), *kwargs.get("managed_agents", [])]
             }
@@ -1777,7 +1780,7 @@ Additional Args:
             ):
                 from nexent.core.agents.sandbox.execution import _execute_with_tool_context
 
-                code_output = _execute_with_tool_context(self.python_executor, code_action)
+                code_output = _execute_with_tool_context(self.python_executor, code_action, trace_execution=True)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
                     "logs": getattr(code_output, "logs", ""),
@@ -2152,7 +2155,12 @@ Additional Args:
             self.current_plan = None
             self.current_step_index = 0
 
-        while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
+        while (
+            not returned_final_answer
+            and self.step_number <= max_steps
+            and not self.stop_event.is_set()
+            and getattr(self.observer, "turn_complete", False) is not True
+        ):
             step_start_time = time.time()
             interrupted = False
 
@@ -2420,7 +2428,11 @@ Additional Args:
                 final_answer_source="user_stop",
             )
 
-        if not returned_final_answer and not self.stop_event.is_set() and self.step_number == max_steps + 1:
+        if (
+            not returned_final_answer and not self.stop_event.is_set()
+            and getattr(self.observer, "turn_complete", False) is not True
+            and self.step_number == max_steps + 1
+        ):
             max_steps_data = json.dumps({
                 "completedSteps": self.step_number - 1,
                 "maxSteps": max_steps,

@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-GATEWAY-PACKAGE-20261031
+  change_type: refactor
+  title: Make Gateway a self-contained service package and Python launcher
+  description: Move backend authentication adapters into Management, consolidate
+    bearer parsing and API-key lookup, isolate pure signature contracts from service
+    configuration, and run the independent image through gateway_service.py.
+  affected_features:
+    existing: [GW-AUTH, AUTH-LOCAL, F-013]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001, UT-BE-001, UT-BE-002, UT-BE-006, AUTH-LOCAL-D2-001, AUTH-LOCAL-D5-001]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Preserve external credential and signed service contracts;
+    existing local protocol proof is reused. Package/configuration regressions and
+    minimal-source startup checks add distinct traditional and image evidence.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve native session, API-key, OAuth/CAS and downstream identity behavior.
+    - Parse bearer credentials once and avoid duplicate API-key database lookups.
+    - Gateway imports only its package, standard library and declared dependencies.
+    - Pure service signatures require explicit keys without environment or context.
+    - Validate isolated Gateway configuration and Python service startup parameters.
+    - Compose and Helm use the same launcher and health port as the image.
+    reason: Reuse existing authentication and real protocol tests, updating lookup
+      sites after relocation, and strengthen isolation/configuration/image checks.
+    test_selectors:
+    - test/backend/utils/test_auth_utils.py
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/gateway/test_central_authentication.py
+    - test/backend/gateway/test_edge.py
+    - test/backend/gateway/test_configuration.py
+    - test/backend/management/test_authentication_lookup.py
+    - test/backend/deploy/test_gateway_image.py

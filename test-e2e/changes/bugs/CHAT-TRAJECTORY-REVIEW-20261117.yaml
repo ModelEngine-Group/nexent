@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-REVIEW-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-REVIEW-20261117
+  title: 修复轨迹统计争用、清理续跑和跨实例引用
+  description: 移除业务事务中的全局统计写入，清理使用非阻塞会话锁并保存未删除位置，Redis共享引用及列表快照。
+  observed_behavior: 不同租户创建会话争用全局统计行；清理等待锁超过预算且101个过期文件可能遗漏；跨OPS实例续读引用失效。
+  expected_behavior: 业务事务只更新租户版本，全局后台刷新；锁忙及时让出且批次不漏删；同一Redis及共享轨迹目录的OPS实例可继续分页和正文读取。
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: UT缺少跨缓存实例及删除上限游标回归；RETENTION已有101文件证明但重开从头清理，未沿next_turn续跑；QUERY只测单进程缓存重建。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-TRAJECTORY-LOAD-D5-001]
+    added: []
+    modified: [CHAT-TRAJECTORY-QUERY-D2-001, CHAT-TRAJECTORY-RETENTION-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 不同租户变更只写各自统计行，重复占位不写版本，全局快照到期仍刷新且失败保留旧结果。
+    - 清理所有会话锁非阻塞，100/101/1000/1001边界及截止时间、锁忙、删除失败均保存续跑位置。
+    - Redis跨实例引用与列表快照可用；固定TTL、权限绑定、淘汰预算、状态副本及不可用错误保持。
+    reason: 局部状态与错误加强传统UT；HTTP跨服务实例用现有QUERY证明，真实文件跨进程风险加强RETENTION，不新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_summary_lifecycle.py
+    - test/backend/services/trajectory/test_statistics_refresh.py
+    - test/backend/services/trajectory/test_cleanup.py
+    - test/backend/utils/test_trajectory_cleanup_progress.py
+    - test/backend/services/trajectory/test_redis_cache.py
+    - test/backend/services/trajectory/test_pg_pages.py
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: 基线375d20c03，PR4348人工检视；按用户要求排除旧grafana/zipkin配置兼容。SPEC沿用chat-local-file-trajectory/design.md与task.md，责任域runtime。QUERY的TestClient/线程/文件使用原夹具回收；新增Redis使用独占内存协议替身，仅证明HTTP及Lua逻辑，不冒充真实多Pod验收。RETENTION独占文件、子进程及锁由原fixture释放；保持blocked状态，完整PG/调度验收仍暂缓。LOAD原有真实PG/负载证明仍blocked；Redis真实部署及PostgreSQL并发需隔离服务，不能由UT替代。

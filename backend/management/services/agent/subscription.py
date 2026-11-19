@@ -7,6 +7,7 @@ import json
 from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
+from management.services.agent.replay import subscribe_shared_checkpoint
 from copy import (
     deepcopy,
 )
@@ -89,17 +90,15 @@ from management.services.knowledge_base.scope import (
     prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
-from management.services.agent.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
@@ -221,6 +220,8 @@ async def run_agent_stream(
         # need a transient identifier for lifecycle operations such as stop.
         agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
 
+    # Preserve the submitted query before adding model-only runtime context.
+    user_query = agent_request.query
     # Inject current time in the user's timezone so the LLM can answer
     # time-related questions correctly. The SDK strips this prefix before
     # sending AGENT_NEW_RUN to the frontend, so the user message display
@@ -689,6 +690,17 @@ async def run_agent_stream(
             if runtime_state_service.enabled and is_remote_running:
 
                 async def redis_channel_stream():
+                    checkpoint = await runtime_state_service.read_replay_checkpoint_async(
+                        resolved_user_id, agent_request.conversation_id,
+                    )
+                    if checkpoint:
+                        yield STREAM_STATUS_EVENT
+                        yield _resume_status_chunk(len(checkpoint["entries"]))
+                        async for chunk in subscribe_shared_checkpoint(
+                            runtime_state_service, resolved_user_id, agent_request.conversation_id, checkpoint,
+                        ):
+                            yield chunk
+                        return
                     replay_events = (
                         await runtime_state_service.read_stream_events_async(
                             user_id=resolved_user_id,
@@ -778,15 +790,14 @@ async def run_agent_stream(
             yield STREAM_STATUS_EVENT
             yield _resume_status_chunk(replay_chunk_count)
 
-            # Use subscribe_with_history(0) to replay ALL chunks from the buffer
-            # This ensures no chunks are lost even if frontend disconnected during streaming
-            # The frontend skips all chunks until replay_chunk_count is reached
-            async for chunk in channel.subscribe_with_history(0):
+            # Replay rendering checkpoints independently of the bounded raw tail.
+            # Reconnection rebuilds the answer before consuming newer suffixes.
+            async for chunk in channel.subscribe_with_history(0, include_replay_checkpoint=True):
                 yield chunk
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield _resume_completed_chunk()
+            yield _resume_completed_chunk(channel.completion_status or "failed")
 
         return StreamingResponse(
             channel_stream(),
@@ -898,9 +909,11 @@ async def run_agent_stream(
         )
 
     try:
+        stream_generation = uuid.uuid4().hex
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
+            generation=stream_generation,
         )
 
         if not agent_request.is_debug and not skip_user_save:
@@ -916,6 +929,7 @@ async def run_agent_stream(
             resolved_user_id,
             resolved_tenant_id,
             language,
+            user_query=user_query,
             extra_metadata={
                 "skip_user_save": skip_user_save,
                 "has_override_user_id": user_id is not None,
@@ -931,6 +945,7 @@ async def run_agent_stream(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
             )
+            channel.generation = stream_generation
     except Exception:
         deferred_run.cancel()
         runtime_thread_manager.cancel(

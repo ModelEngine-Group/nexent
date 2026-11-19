@@ -4,7 +4,7 @@
 from fastapi import HTTPException, Request
 
 from contracts.errors.exceptions import TokenExpiredError, UnauthorizedError
-from gateway.authentication.auth import get_current_user_context
+from management.services.permission.identity.session import get_current_user_context
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
 from permissions.tenant_scope import resolve_tenant_scope

@@ -132,7 +132,7 @@ def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
         ToolConfig(name='plain_tool', class_name='PlainTool', source='local', params={}),
     ]
     mocker.patch.object(c.factory, 'create_tool', side_effect=[tool, plain_tool])
-    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
+    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _, *, observer=None: tool)
     result = c.factory.create_single_agent(c.config)
     assert result is c.core.return_value
     assert c.factory.workspace_mapping is None
@@ -188,7 +188,7 @@ def test_deferred_local_fallback_clears_mapping_and_warns(construction, mocker):
     tool.name = 'read'
     c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})]
     mocker.patch.object(c.factory, 'create_tool', return_value=tool)
-    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
+    mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _, *, observer=None: tool)
     mocker.patch.object(c.factory, '_push_file_workspace_to_sandbox')
     mocker.patch.object(c.factory, '_initialize_sandbox_workspaces')
     release = mocker.patch.object(sandbox, 'cleanup_executor')

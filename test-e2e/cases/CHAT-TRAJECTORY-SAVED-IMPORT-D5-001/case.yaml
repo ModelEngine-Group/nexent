@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-SAVED-IMPORT-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  business_rule_ids:
+  - TRJ-RULE-012
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-saved-imports/proposal.md
+    acceptance_criteria:
+    - AC-SI-001
+    - AC-SI-002
+    - AC-SI-005
+    - AC-SI-006
+  title: 持久导入拒绝路径攻击并在存储故障后恢复
+  objective: 持久导入拒绝路径攻击并在存储故障后恢复
+  preconditions:
+  - 独占临时存储根、受控管理员身份和可执行产品；runtime责任域，不依赖生产源会话或模型服务。
+  - 资源由Case持有，测试结束关闭ThreadManager、文件及浏览器，删除独占测试文件。
+  test_data:
+    profile: mock
+    corpus:
+    - 原生多轮Unicode ZIP
+    - 相同ZIP重复上传、两名同租户用户及跨租户SU
+    - 非法包与受控存储故障
+  steps:
+  - order: 1
+    action: 构造路径或链接攻击、越权访问和磁盘写入故障。
+    expected: 不越过可信用户目录、不改源文件、不发布失败记录，错误无内部路径。
+  - order: 2
+    action: 写入或删除途中中断，之后重新列表和上传。
+    expected: 隐藏暂存不进入列表，遗留文件在互斥下回收，后续合法导入和删除成功。
+  - order: 3
+    action: 并发保存相同包、读取与删除独立记录，结束后检查资源。
+    expected: 每次保存独立UUID，无覆盖及跨用户内容，句柄和受管线程释放。
+  expected_results:
+  - 不越过可信用户目录、不改源文件、不发布失败记录，错误无内部路径。
+  - 隐藏暂存不进入列表，遗留文件在互斥下回收，后续合法导入和删除成功。
+  - 每次保存独立UUID，无覆盖及跨用户内容，句柄和受管线程释放。
+  forbidden_side_effects:
+  - 不得访问其他用户导入记录、修改原采集数据、数据库业务记录或调用模型工具。
+  - 不得将包内路径用于持久文件定位；无效ZIP不得执行代码、请求来源资源或触发模型工具。
+  risk_type: SECURITY
+  risk: 持久文件越权、未发布记录泄漏与中断遗留
+  condition:
+  - 独占真实本地文件存储与受控故障。
+  metrics:
+  - 越权返回、残留可见记录、源文件变化、资源释放。
+  thresholds:
+  - 越权及失败可见记录为0；恢复后上传删除成功，受控文件和线程释放。
+  recovery_expectations:
+  - 解除故障后重新上传成功，遗留暂存清理且原数据不变。
+  acceptance:
+  - id: AC-01
+    description: 不越过可信用户目录、不改源文件、不发布失败记录，错误无内部路径。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 隐藏暂存不进入列表，遗留文件在互斥下回收，后续合法导入和删除成功。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 每次保存独立UUID，无覆盖及跨用户内容，句柄和受管线程释放。
+    steps:
+    - 3
+    expected_results:
+    - 3

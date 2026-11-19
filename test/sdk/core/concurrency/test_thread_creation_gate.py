@@ -12,7 +12,7 @@ SCAN_ROOTS = (REPO_ROOT / "backend", REPO_ROOT / "sdk" / "nexent")
 # Data Process owns an independent lifecycle and is deferred to its own SPEC.
 DEFERRED_PREFIXES = (
     "backend/data_process/",
-    "backend/data_process_service.py",
+    "backend/http/data_process_service.py",
     "backend/data_process/services/tasks.py",
     "backend/management/services/knowledge_base/scheduler.py",
 )

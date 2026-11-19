@@ -39,7 +39,7 @@ from contracts.memory import (
     UpdateMemoryRequest,
 )
 from contracts.roles import has_any_role, roles_from_record
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.context import get_memory_context_service
 from management.services.memory.records import (
@@ -47,6 +47,7 @@ from management.services.memory.records import (
     get_memory_record_service,
 )
 from management.services.memory.retrieval import get_memory_retrieval_service
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("memory_record_app")
 logger.setLevel(logging.INFO)

@@ -9,6 +9,8 @@ acceptance_bindings:
   AC-01:
   - test_runtime_output_roundtrip
   - test_clarification_terminal_history_before_and_after_submission
+  AC-02:
+  - test_failure_diagnostics_roundtrip
 preparation:
   families: []
   anchors: false

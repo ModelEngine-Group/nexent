@@ -37,6 +37,9 @@ class AgentCoreAdapter(ABC):
     def close(self) -> None:
         """Release only resources owned by this adapter; must be idempotent."""
 
+    def record_failure(self, error: BaseException, *, phase: str = "execution") -> None:
+        """Optionally retain a normalized failure before close emits the terminal result."""
+
 
 class ModelOutputProtocolExhaustedError(Exception):
     """Terminal failure after the runtime exhausts protocol repair attempts."""

@@ -297,6 +297,22 @@ class WorkspaceResources:
 
 
     def _initialize_sandbox_workspaces(self, executors: Optional[List[Any]] = None) -> None:
+        """Trace actual workspace setup without recording host filesystem paths."""
+        from nexent.monitor.phase_capture import trace_phase
+
+        candidates = self._sandbox_executors if executors is None else executors
+        if not self.workspace_path or not any(
+            getattr(executor, "_nexent_backend", None) != "local" and (
+                getattr(executor, "_nexent_backend", None) == "docker"
+                or getattr(executor, "container", None) is not None
+            ) for executor in candidates
+        ):
+            return
+        with trace_phase("agent.sandbox.workspace") as phase:
+            self._initialize_sandbox_workspaces_impl(executors)
+            phase.set_output({"ready": True})
+
+    def _initialize_sandbox_workspaces_impl(self, executors: Optional[List[Any]] = None) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
         if not self.workspace_path:
             return

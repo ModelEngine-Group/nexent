@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import _build_otlp_headers, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -28,6 +28,11 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
+# Downstream verification settings; Gateway owns its upstream configuration.
+# Staged compatibility flag; shipped deployment and the standalone image enable it.
+GATEWAY_AUTH_ENABLED = _require_choice(os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower(), ('true', 'false'), 'GATEWAY_AUTH_ENABLED must be true or false') == 'true'
+GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
+GATEWAY_SERVICE_URL = os.getenv('GATEWAY_SERVICE_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv('TABLE_TRANSFORMER_MODEL_PATH')
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv('UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH')
@@ -186,6 +191,8 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').l
 
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = validate_deployment_version(os.getenv('DEPLOYMENT_VERSION', 'full'))
+# Retired speed mode is rejected by validate_deployment_version above.
+IS_SPEED_MODE = False
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv('ENABLE_AIDP_KNOWLEDGE', 'false').lower() in ('true', '1', 'yes', 'on')
@@ -222,6 +229,7 @@ RUNTIME_STREAM_TTL_SECONDS = int(os.getenv('RUNTIME_STREAM_TTL_SECONDS', '86400'
 RUNTIME_STREAM_MAX_LEN = int(os.getenv('RUNTIME_STREAM_MAX_LEN', '10000'))
 RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(os.getenv('RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES', str(8 * 1024 * 1024)))
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv('RUNTIME_RUN_TTL_SECONDS', '86400'))
+RUNTIME_CREATOR_LEASE_SECONDS = int(os.getenv('RUNTIME_CREATOR_LEASE_SECONDS', '30'))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv('RUNTIME_CANCEL_TTL_SECONDS', '86400'))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv('RUNTIME_COMPLETED_TTL_SECONDS', '300'))
 RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv('RUNTIME_CANCEL_POLL_INTERVAL_SECONDS', '1.0'))
@@ -240,9 +248,6 @@ RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(os.getenv('RUNTIME_MCP_CLOSE_TIMEOUT_S
 _VALIDATED_RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = _require_positive(RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, 'RUNTIME_MCP_TOOL_TIMEOUT_SECONDS must be greater than zero')
 _VALIDATED_RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = _require_positive(RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, 'RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS must be greater than zero')
 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(os.getenv('RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS', '30'))
-NORTHBOUND_CONTROL_THREAD_MAX_WORKERS = int(os.getenv('NORTHBOUND_CONTROL_THREAD_MAX_WORKERS', '8'))
-NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE = int(os.getenv('NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE', '64'))
-NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = float(os.getenv('NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS', '15'))
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv('NORTHBOUND_IDEMPOTENCY_TTL_SECONDS', '600'))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv('NORTHBOUND_RATE_LIMIT_ENABLED', 'true').lower() == 'true'
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv('NORTHBOUND_RATE_LIMIT_PER_MINUTE', '120'))
@@ -361,8 +366,9 @@ _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIR
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
+
 # Telemetry and Monitoring Configuration (OTLP Protocol)
-MONITORING_PROVIDER = os.getenv('MONITORING_PROVIDER', '')
+MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
 ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or 'false').lower() == 'true'
 OTEL_SERVICE_NAME_RAW = os.getenv('OTEL_SERVICE_NAME')
@@ -381,7 +387,7 @@ OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION = os.getenv('OTEL_EXPORTER_OTLP_LA
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
 LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', '')
 OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv('OTEL_EXPORTER_OTLP_METRICS_ENABLED')
-OTEL_EXPORTER_OTLP_METRICS_ENABLED = (OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true'
+OTEL_EXPORTER_OTLP_METRICS_ENABLED = ((OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or 'true').lower() == 'true' and MONITORING_PROVIDER != 'local_file')
 MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv('MONITORING_INSTRUMENT_REQUESTS')
 MONITORING_INSTRUMENT_REQUESTS = (MONITORING_INSTRUMENT_REQUESTS_RAW or 'false').lower() == 'true'
 MONITORING_FASTAPI_INCLUDED_URLS = os.getenv('MONITORING_FASTAPI_INCLUDED_URLS', '')
@@ -397,6 +403,25 @@ MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv('MONITORING_DASHBOARD_ALLOWED_ROL
 MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summary')
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
+TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
+TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
+TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
+# ZIP exchange budgets shared by temporary and saved trajectory imports.
+TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES', 33554432)
+TRAJECTORY_EXCHANGE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_META_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_META_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_META_BYTES', 8388608)
+TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_FILES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_FILES'), 'TRAJECTORY_EXCHANGE_MAX_FILES', 10000)
+TRAJECTORY_EXCHANGE_SECONDS = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_SECONDS'), 'TRAJECTORY_EXCHANGE_SECONDS', 30)
+TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR') or '/mnt/nexent-data/trajectory'
+TRAJECTORY_STORAGE_MODE = _require_choice(os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower(), ('single_node', 'shared_directory'), 'TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
+TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)
+TRAJECTORY_FLUSH_INTERVAL_MS = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_INTERVAL_MS'), 'TRAJECTORY_FLUSH_INTERVAL_MS', 200)
+TRAJECTORY_FLUSH_BYTES = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_BYTES'), 'TRAJECTORY_FLUSH_BYTES', 262144)
+TRAJECTORY_QUEUE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUEUE_MAX_BYTES'), 'TRAJECTORY_QUEUE_MAX_BYTES', 268435456)
+TRAJECTORY_RUN_QUEUE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_RUN_QUEUE_MAX_BYTES'), 'TRAJECTORY_RUN_QUEUE_MAX_BYTES', 16777216)
+TRAJECTORY_CLEANUP_ENABLED = os.getenv('TRAJECTORY_CLEANUP_ENABLED', 'true').lower() == 'true'
+TRAJECTORY_CLEANUP_INTERVAL_SECONDS = parse_positive_int(os.getenv('TRAJECTORY_CLEANUP_INTERVAL_SECONDS'), 'TRAJECTORY_CLEANUP_INTERVAL_SECONDS', 3600)
 TELEMETRY_SAMPLE_RATE_RAW = os.getenv('TELEMETRY_SAMPLE_RATE')
 TELEMETRY_SAMPLE_RATE = float(TELEMETRY_SAMPLE_RATE_RAW or '1.0')
 
@@ -418,7 +443,7 @@ APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 # Agent Sandbox Configuration
 # =============================================================================
 NEXENT_TOOL_FASTPATH_ENABLED = os.getenv('NEXENT_TOOL_FASTPATH_ENABLED', 'true').strip().lower() == 'true'
-NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys((item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip())))
+NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip()))
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv('NEXENT_SANDBOX_DEFAULT_LEVEL', 'local').lower()
 # Default sandbox isolation level: local / docker / wasm.
 #    Default 'local' preserves backward-compatibility for existing deployments.

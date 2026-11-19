@@ -29,6 +29,8 @@ from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCap
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
+from runtime.executions import AgentRunAlreadyActiveError
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -62,15 +64,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Apply patches before importing any app modules (similar to test_config_app.py)
 patches = [
     # Mock database sessions
-    patch('management.db.client.get_db_session', return_value=Mock())
+    patch('infrastructure.rdb.client.get_db_session', return_value=Mock())
 ]
 
 for p in patches:
@@ -116,6 +118,8 @@ monitoring_stub.get_monitoring_manager = lambda: monitoring_manager_mock
 monitoring_stub.monitoring_manager = monitoring_manager_mock
 monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
+monitoring_stub.AgentRunMetadata = AgentRunMetadata
+monitoring_stub.agent_monitoring_context = agent_monitoring_context
 
 # Mock all external dependencies that agent_app.py imports
 # These must be in sys.modules BEFORE we import management.api.agent.agent
@@ -125,25 +129,27 @@ sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
-sys.modules['management.db.client'] = MagicMock()
+sys.modules['infrastructure.rdb.client'] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
 
 sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
-sys.modules['gateway.authentication.auth'] = MagicMock()
-sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
+sys.modules['management.services.permission.identity.session'] = MagicMock()
+sys.modules['management.services.permission.identity.session'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
-sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
+sys.modules['infrastructure.trace.bootstrap'] = MagicMock()
+sys.modules['infrastructure.trace.bootstrap'].monitoring_manager = monitoring_manager_mock
+sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
+sys.modules['management.services.agent.lifecycle'].AgentRunAlreadyActiveError = AgentRunAlreadyActiveError
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
@@ -162,7 +168,7 @@ for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.mod
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 
 
@@ -335,14 +341,15 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
 
 
 @pytest.fixture(autouse=True)
-def creator_history_boundary(mocker):
+def creator_history_boundary(mocker, monkeypatch):
     mocker.patch("permissions.resource_access.get_current_user_context", return_value=("test_user", "test_tenant", ("DEV",)))
     from contracts.agent import SystemAgentRef
     from management.services.conversation import creator_execution
     mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))
     mocker.patch.object(creator_execution, "authorize_target", side_effect=lambda target, *_: target)
     mocker.patch.object(creator_execution, "prepare_creation_history", return_value=(42, 1))
-    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=lambda stream, **_: stream)
+    from test.common.creator_runtime_boundary import isolate_creator_runtime
+    return isolate_creator_runtime(monkeypatch, creator_execution)
 
 
 @pytest.mark.asyncio
@@ -372,6 +379,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -394,7 +402,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
 
 @pytest.mark.asyncio
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
-    mocker, mock_auth_header
+    mocker, mock_auth_header, creator_history_boundary
 ):
     mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
@@ -417,10 +425,6 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     prepare = mocker.patch(
         "management.services.conversation.creator_execution.prepare_creation_history", return_value=(42, 1)
     )
-    persist = mocker.patch(
-        "management.services.conversation.creator_execution.persist_creation_stream",
-        side_effect=lambda stream, **kwargs: stream,
-    )
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
             query="Build a weather agent",
@@ -434,13 +438,21 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
     assert response.headers["conversation_id"] == "42"
     assert prepare.call_args.kwargs["agent_id"] == 77
     assert prepare.call_args.kwargs["target"] == {"type": "agent", "id": 17}
     chunks = [chunk async for chunk in response.body_iterator]
     assert chunks
-    assert persist.call_args.kwargs["assistant_index"] == 1
+    assistant = creator_history_boundary.save.call_args.args[0]
+    assert assistant.role == "assistant" and assistant.message_idx == 1
+    assert creator_history_boundary.save.call_args.kwargs["status"] == "streaming"
+    creator_history_boundary.checkpoint.assert_called_once()
+    assert creator_history_boundary.checkpoint.call_args.kwargs == {
+        "message_id": 101, "conversation_id": 42, "user_id": "user-a",
+    }
+    creator_history_boundary.launch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -606,6 +618,7 @@ async def test_nl2agent_editor_run_uses_persistent_history(
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
+        resume=False,
     )
 
     chunks = [chunk async for chunk in response.body_iterator]
@@ -645,6 +658,7 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer invalid-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 401
@@ -672,6 +686,7 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == 500
@@ -718,6 +733,7 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
             ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
+            resume=False,
         )
 
     assert exc_info.value.status_code == expected_status

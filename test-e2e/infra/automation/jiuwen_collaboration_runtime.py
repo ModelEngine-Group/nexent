@@ -52,7 +52,19 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
             core = parent_core if key == "parent" else child_core
             first = len(state[key]) == 1
             call = first and key == "parent"
-            if call and core == "jiuwen" and protocol == "native":
+            if fault == "missing_information" and key == "child":
+                content, calls = "MISSING_INPUT: birth date", []
+                if core == "smolagents":
+                    content = '<final_answer>' + content + '</final_answer>'
+            elif fault == "missing_information" and key == "parent" and not first:
+                form = {"questions": [{"id": "birth", "type": "text", "title": "Please provide your birth date", "required": True}]}
+                if core == "jiuwen" and protocol == "native":
+                    content = ""
+                    calls = [{"id": "parent-clarify", "type": "function", "function": {
+                        "name": "ask_user", "arguments": json.dumps(form)}}]
+                else:
+                    content, calls = '<code>ask_user(questions=' + repr(form["questions"]) + ')</code>', []
+            elif call and core == "jiuwen" and protocol == "native":
                 content = ""
                 calls = [{"id": "call-child", "type": "function", "function": {
                     "name": "delegate", "arguments": json.dumps({"task": "CHILD_TASK_ONLY"})}}]

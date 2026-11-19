@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
+from management.configuration.runtime import get_config_snapshot
 from contracts.clarification import ClarificationResponse, normalize_form
 from contracts.constants.constants import (
     ASSET_OWNER_ROLE,
@@ -16,10 +17,6 @@ from contracts.constants.constants import (
     DEFAULT_TENANT_ID,
     HISTORY_SUMMARY_UNIT_TYPE,
     MESSAGE_ROLE,
-)
-from contracts.constants.environment import (
-    MAX_CONVERSATION_TURNS,
-    MAX_CONVERSATIONS_PER_USER,
 )
 from contracts.conversation import (
     ConversationHistory,
@@ -41,7 +38,7 @@ from contracts.errors.exceptions import (
     WorkbenchError,
 )
 from contracts.roles import has_any_role, roles_from_record
-from management.db.client import db_client, get_db_session
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.conversation.branch_titles import build_branch_title as _build_branch_title
 from management.db.conversation.classification import (
     executor_system_key,
@@ -59,7 +56,7 @@ from management.db.models import (
     UserTenant,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 
 def load_execution_result_content(
@@ -165,14 +162,15 @@ def _enforce_user_conversation_limit(session, user_id: Optional[str]) -> None:
         ConversationRecord.delete_flag == "N",
     )
     conversation_count = int(session.scalar(statement) or 0)
-    if conversation_count >= MAX_CONVERSATIONS_PER_USER:
+    limit = get_config_snapshot().get("MAX_CONVERSATIONS_PER_USER")
+    if conversation_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation history limit reached: maximum {MAX_CONVERSATIONS_PER_USER} conversations per user",
+            f"Conversation history limit reached: maximum {limit} conversations per user",
             details={
                 "resource": "conversations",
                 "scope": "user",
-                "limit": MAX_CONVERSATIONS_PER_USER,
+                "limit": limit,
                 "current_count": conversation_count,
             },
         )
@@ -197,14 +195,15 @@ def _enforce_conversation_turn_limit(
         ConversationMessage.delete_flag == "N",
     )
     turn_count = int(session.scalar(statement) or 0)
-    if turn_count >= MAX_CONVERSATION_TURNS:
+    limit = get_config_snapshot().get("MAX_CONVERSATION_TURNS")
+    if turn_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation turn limit reached: maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            f"Conversation turn limit reached: maximum {limit} turns per conversation",
             details={
                 "resource": "conversation_turns",
                 "scope": "conversation",
-                "limit": MAX_CONVERSATION_TURNS,
+                "limit": limit,
                 "current_count": turn_count,
             },
         )
@@ -281,6 +280,8 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
+        from management.db.trajectory.repository import seed_conversation
+        seed_conversation(session, record.conversation_id, user_id, agent_id)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -1257,6 +1258,48 @@ def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
         ]
 
 
+def checkpoint_creator_message(
+    message_id: int, conversation_id: int, user_id: str,
+    units: List[Dict[str, Any]], content: str, status: str = "streaming",
+) -> None:
+    """Append an owned creator checkpoint and its status in one transaction."""
+    if status not in {"streaming", "completed", "failed", "stopped"}:
+        raise ValueError("Invalid creator checkpoint status")
+    with get_db_session() as session:
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update())
+        if owned is None:
+            raise ValueError("Conversation does not exist or is not accessible")
+        parent = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_role == "assistant",
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.delete_flag == "N",
+        ).with_for_update())
+        if parent is None or parent.status != "streaming":
+            raise ValueError("Creator message is not an owned active stream")
+        if units:
+            session.execute(insert(ConversationMessageUnit), [add_creation_tracking({
+                "message_id": message_id, "conversation_id": conversation_id,
+                "unit_index": unit["unit_index"], "unit_type": unit["unit_type"],
+                "unit_content": unit["unit_content"], "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"), "delete_flag": "N",
+            }, user_id) for unit in units])
+        session.execute(update(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+        ).values(**add_update_tracking({
+            "message_content": content, "status": status,
+            "update_time": func.current_timestamp(),
+        }, user_id)))
+        if status != "streaming":
+            _touch_conversation_activity(session, conversation_id, user_id)
+
+
 def update_conversation_message_content(message_id: int, content: str, user_id: Optional[str] = None) -> None:
     """
     Update the message_content field of a conversation message.
@@ -1931,7 +1974,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for updated_by field
+        user_id: Conversation owner and updated_by value
 
     Returns:
         bool: Whether the operation was successful
@@ -1951,7 +1994,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+        if user_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount == 0:
+            return False
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
         message_stmt = (
@@ -2040,6 +2090,9 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .values(update_data)
         )
 
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, owned_ids, user_id)
+
         # 2. Mark related messages as deleted
         session.execute(
             update(ConversationMessage)
@@ -2099,6 +2152,9 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .where(ConversationRecord.conversation_id.in_(conv_ids), ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
         session.execute(

@@ -23,10 +23,10 @@ class MockModule(mock.MagicMock):
 
 _MOCKED_MODULE_NAMES = (
     "database",
-    "management.db.client",
+    "infrastructure.rdb.client",
     "management.db.model.repository",
     "utils",
-    "gateway.authentication.auth",
+    "management.services.permission.identity.session",
     "management.services.configuration.tenant.settings",
     "utils.memory_utils",
     "management.services.model.names",
@@ -55,14 +55,15 @@ _SAVED_MODULES = {
 
 # Mock required modules before any imports occur
 sys.modules['database'] = MockModule()
-sys.modules['management.db.client'] = MockModule()
+sys.modules['infrastructure.rdb.client'] = MockModule()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['gateway.authentication.auth'] = MockModule()
+sys.modules['management.services.permission.identity.session'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['management.services.model.names'] = MockModule()

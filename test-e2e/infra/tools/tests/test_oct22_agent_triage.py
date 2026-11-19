@@ -215,7 +215,7 @@ async def test_fault_model_reaches_inference_only_after_catalog_admission(monkey
 
 def test_northbound_trace_poll_waits_for_runtime_batch(monkeypatch, tmp_path):
     import importlib.util
-    case = Path(__file__).resolve().parents[3] / 'cases/NB-OTEL-001/test.py'
+    case = Path(__file__).resolve().parents[3] / 'cases/NB-OTEL-D3-001/test.py'
     spec = importlib.util.spec_from_file_location('nb_trace_polling', case)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

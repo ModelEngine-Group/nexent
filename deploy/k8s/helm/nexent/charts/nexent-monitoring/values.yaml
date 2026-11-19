@@ -4,7 +4,7 @@ global:
   namespace: nexent
 
 # Matches deployment monitoring provider names:
-# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+# local_file, otlp, phoenix, langfuse, langsmith.
 provider: otlp
 
 images:
@@ -15,18 +15,6 @@ images:
   phoenix:
     repository: arizephoenix/phoenix
     tag: "15"
-    pullPolicy: IfNotPresent
-  tempo:
-    repository: grafana/tempo
-    tag: "2.10.5"
-    pullPolicy: IfNotPresent
-  grafana:
-    repository: grafana/grafana
-    tag: "12.4"
-    pullPolicy: IfNotPresent
-  zipkin:
-    repository: openzipkin/zipkin
-    tag: latest
     pullPolicy: IfNotPresent
   langfuseWeb:
     repository: docker.io/langfuse/langfuse
@@ -83,35 +71,6 @@ phoenix:
     grpcPort: 4317
   storage:
     size: 10Gi
-
-grafana:
-  enabled: false
-  adminUser: admin
-  adminPassword: nexent@4321
-  defaultLanguage: zh-Hans
-  service:
-    type: NodePort
-    port: 3002
-    nodePort: 30002
-  storage:
-    size: 5Gi
-
-tempo:
-  enabled: false
-  service:
-    type: ClusterIP
-    port: 3200
-    otlpGrpcPort: 4317
-    otlpHttpPort: 4318
-  storage:
-    size: 10Gi
-
-zipkin:
-  enabled: false
-  service:
-    type: NodePort
-    port: 9411
-    nodePort: 30011
 
 langfuse:
   enabled: false

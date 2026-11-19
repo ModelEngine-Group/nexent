@@ -2,7 +2,7 @@
 
 """Tests for FastAPI authentication and permission dependencies."""
 
-import gateway.authentication.auth as depends_dependencies
+import management.services.permission.identity.session as depends_dependencies
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
@@ -11,7 +11,7 @@ import permissions.depends as depends
 
 def test_authenticate_uses_authorization_header(mocker, monkeypatch):
     mocker.patch(
-        "gateway.authentication.auth.get_current_user_context",
+        "management.services.permission.identity.session.get_current_user_context",
         return_value=("user-1", "tenant-1", "USER"),
     )
 
@@ -24,7 +24,7 @@ def test_authenticate_uses_authorization_header(mocker, monkeypatch):
 
 def test_authenticate_uses_bearer_credentials_when_header_is_missing(mocker, monkeypatch):
     get_context = mocker.patch(
-        "gateway.authentication.auth.get_current_user_context",
+        "management.services.permission.identity.session.get_current_user_context",
         return_value=("user-1", "tenant-1", "DEV"),
     )
     credentials = HTTPAuthorizationCredentials(
@@ -46,7 +46,7 @@ def test_authenticate_rejects_missing_token_outside_speed_mode(monkeypatch):
 
 
 def test_authenticate_does_not_restore_retired_anonymous_identity(mocker):
-    get_context = mocker.patch("gateway.authentication.auth.get_current_user_context")
+    get_context = mocker.patch("management.services.permission.identity.session.get_current_user_context")
     with pytest.raises(HTTPException) as error:
         depends_dependencies.authenticate(None, None)
     assert error.value.status_code == 401

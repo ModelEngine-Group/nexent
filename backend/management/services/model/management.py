@@ -8,7 +8,7 @@ from nexent.core.models.sampling import resolve_sampling
 
 from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from contracts.errors.exceptions import ModelProviderError
+from contracts.errors.exceptions import ModelOutletValidationError, ModelProviderError
 from contracts.model import ModelConnectStatusEnum
 from contracts.model import _infer_model_type_from_name
 from contracts.constants.constants import DASHSCOPE_BASE_URL, DASHSCOPE_REALTIME_BASE_URL, MODEL_ENGINE_URL_MARKER, SILICON_BASE_URL, TOKENPONY_BASE_URL
@@ -102,8 +102,21 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     model_data["max_tokens"] = max_output
 
 
+def _validate_configured_sampling(model_data):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
+
+    try:
+        validate_sampling_parameters(model_data)
+        custom = (model_data.get("extra_params") or {}).get("__custom__")
+        if isinstance(custom, dict):
+            validate_sampling_parameters(custom)
+    except ParameterValidationError as error:
+        raise ModelOutletValidationError(error.category, error.path) from None
+
+
 def _create_model_configuration(model_data, user_id, tenant_id):
     """All LLM configuration writers persist the same resolved format."""
+    _validate_configured_sampling(model_data)
     if model_data.get("model_type") in {"llm", "chat"}:
         from management.services.model.outlet_legacy import create_legacy_llm_outlet
 
@@ -113,6 +126,7 @@ def _create_model_configuration(model_data, user_id, tenant_id):
 
 def _update_model_configuration(record, changes, user_id, tenant_id, *, scope_update=False):
     """Do not allow legacy configuration writes to replace resolved JSON."""
+    _validate_configured_sampling(changes)
     if record is None:
         raise LookupError("MODEL_OUTLET_NOT_FOUND")
     if record.get("model_type") in {"llm", "chat"}:
