@@ -55,7 +55,6 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
     from types import SimpleNamespace
 
     from management.services.file import service
-    from management.services.knowledge_base import storage
 
     record = {
         "file_id": "a" * 32,
@@ -69,14 +68,14 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
         bucket_name="files",
         ingroup_permission="EDIT",
     )
-    mocker.patch.object(storage, "resolve_storage_context", return_value=context)
+    mocker.patch.object(service, "resolve_upload_context", new=AsyncMock(return_value=context))
     quota = Mock()
-    quota.check_hard_limit.return_value = {}
+    quota.before = AsyncMock(return_value={})
     mocker.patch.dict(
         sys.modules,
         {
-            "management.services.knowledge_base.quota": SimpleNamespace(
-                QuotaService=Mock(return_value=quota)
+            "management.services.file.upload_quota": SimpleNamespace(
+                UploadQuota=Mock(return_value=quota)
             )
         },
     )
@@ -104,12 +103,6 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
         "upload_to_minio",
         new=AsyncMock(return_value=[upload_result]),
     )
-    mocker.patch.object(service, "get_vector_db_core")
-    mocker.patch.object(
-        service.ElasticSearchService,
-        "list_files",
-        new=AsyncMock(return_value={"files": []}),
-    )
     transition = mocker.patch.object(
         service, "transition_file_record", return_value=None
     )
@@ -133,9 +126,8 @@ async def test_unknown_or_cancelled_batch_never_publishes_success(mocker, outcom
 @pytest.mark.parametrize('folder', ['knowledge_base', None])
 async def test_deleted_or_missing_knowledge_cannot_fall_through_to_unowned_upload(mocker, folder):
     from management.services.file import service
-    from management.services.knowledge_base import storage
 
-    mocker.patch.object(storage, 'resolve_storage_context', return_value=None)
+    mocker.patch.object(service, 'resolve_upload_context', new=AsyncMock(return_value=None))
     mocker.patch.object(service, '_validate_knowledge_file_sizes', new=AsyncMock())
     mocker.patch.object(service, 'resolve_minio_upload_folder', return_value='knowledge_base')
     admit = mocker.patch.object(service, 'admit_knowledge_uploads', new=AsyncMock())
@@ -145,3 +137,16 @@ async def test_deleted_or_missing_knowledge_cannot_fall_through_to_unowned_uploa
                                         index_name='deleted-kb', user_id='user-a', uploader_tenant_id='tenant-a')
     admit.assert_not_called()
     upload.assert_not_called()
+
+
+async def test_unmatched_index_in_generic_folder_keeps_generic_upload_path(mocker):
+    from management.services.file import service
+
+    mocker.patch.object(service, 'resolve_upload_context', new=AsyncMock(return_value=None))
+    mocker.patch.object(service, 'resolve_minio_upload_folder', return_value='attachments/u')
+    admit = mocker.patch.object(service, 'admit_knowledge_uploads', new=AsyncMock())
+    upload = mocker.patch.object(service, 'upload_to_minio', new=AsyncMock(return_value=[]))
+    await service.upload_files_impl('minio', [Mock(filename='attachment.txt')], folder='attachments',
+                                   index_name='missing', user_id='u', uploader_tenant_id='t')
+    admit.assert_not_awaited()
+    upload.assert_awaited_once()

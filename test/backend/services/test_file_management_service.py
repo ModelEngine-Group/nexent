@@ -78,7 +78,6 @@ sys.modules['management.services.knowledge_base.service'] = vdb_stub
 setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('management.services.knowledge_base.storage')
-knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
 knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
@@ -140,6 +139,7 @@ def setup_patches():
         patch_import_context('management.services.file.service.get_file_size_from_minio', MagicMock(return_value=0)),
         patch_import_context('management.services.file.service.upload_dir',
               Path("/test/uploads")),
+        patch_import_context('management.services.file.service.resolve_upload_context', new_callable=AsyncMock, return_value=None),
         patch_import_context('management.services.file.service.invalidate_usage_cache', MagicMock()),
         patch_import_context('management.services.file.service.logger', MagicMock())
     ]
@@ -159,11 +159,11 @@ def setup_patches():
 def reset_knowledge_storage_stub():
     """Keep generic MinIO tests outside KB accounting unless they opt in."""
     file_management_service.invalidate_usage_cache.reset_mock()
-    knowledge_storage_stub.resolve_storage_context.reset_mock(
+    file_management_service.resolve_upload_context.reset_mock(
         return_value=True,
         side_effect=True,
     )
-    knowledge_storage_stub.resolve_storage_context.return_value = None
+    file_management_service.resolve_upload_context.return_value = None
     knowledge_storage_stub.commit_uploaded_object.reset_mock(
         return_value=True,
         side_effect=True,
@@ -454,7 +454,7 @@ class TestUploadFilesImpl:
             current["status"] = kwargs.get("status", current.get("status"))
             return dict(current)
 
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=minio_results)), \
@@ -642,7 +642,7 @@ class TestUploadFilesImpl:
 
         quota_module = types.ModuleType("management.services.file.upload_quota")
         quota_module.UploadQuota = FakeQuota
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition) as transition_record, \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
@@ -678,7 +678,7 @@ class TestUploadFilesImpl:
             bucket_name="bucket-1",
             ingroup_permission="SHARED",
         )
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads",
                       side_effect=RuntimeError("lifecycle table unavailable")), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock:
@@ -710,13 +710,13 @@ class TestUploadFilesImpl:
         record = {"file_id": "fid-a", "object_name": "folder/a.txt", "status": "UPLOADING"}
 
         monkeypatch.setitem(sys.modules, "management.services.file.upload_quota", quota_module)
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
                 patch_import_context("management.services.file.service.transition_file_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt"}
                 ])):
-            result = await upload_files_impl(destination="minio", file=uploads, folder="folder", user_id="user-1", uploader_tenant_id=context.tenant_id)
+            result = await upload_files_impl(destination="minio", file=uploads, folder="folder", user_id="user-1", uploader_tenant_id=context.tenant_id, index_name=context.index_name)
 
         assert result[1] == ["folder/a.txt"]
         specs = create_records.call_args.args[0]
@@ -730,11 +730,11 @@ class TestUploadFilesImpl:
         context = SimpleNamespace(
             tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1"
         )
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[]), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock:
             with pytest.raises(RuntimeError, match="incomplete result"):
-                await upload_files_impl(destination="minio", file=[upload], folder="folder", user_id="user-1", uploader_tenant_id=context.tenant_id)
+                await upload_files_impl(destination="minio", file=[upload], folder="folder", user_id="user-1", uploader_tenant_id=context.tenant_id, index_name=context.index_name)
 
         upload_mock.assert_not_awaited()
 
@@ -779,7 +779,7 @@ class TestUploadFilesImpl:
 
         quota_module = types.ModuleType("management.services.file.upload_quota")
         quota_module.UploadQuota = FakeQuota
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
@@ -830,7 +830,7 @@ class TestUploadFilesImpl:
 
         quota_module = types.ModuleType("management.services.file.upload_quota")
         quota_module.UploadQuota = FakeQuota
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
                 patch_import_context("management.services.file.service.transition_file_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock, \
@@ -872,7 +872,7 @@ class TestUploadFilesImpl:
 
         quota_module = types.ModuleType("management.services.file.upload_quota")
         quota_module.UploadQuota = FakeQuota
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
                 patch_import_context("management.services.file.service.transition_file_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(side_effect=[
@@ -887,7 +887,7 @@ class TestUploadFilesImpl:
             assert transition.call_args_list[0].kwargs["error_message"] is None
             assert result[0] == ["Failed to upload broken.txt: read failed"]
 
-        with patch_import_object_context(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+        with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[{"file_id": "fid-commit", "object_name": "folder/commit.txt", "status": "UPLOADING"}]), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=[
                     {"file_id": "fid-commit", "status": "UPLOADED"},
@@ -1577,7 +1577,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
         quota_service.before.return_value = {"stage": "pre"}
         quota_service.after.return_value = {"stage": "post"}
@@ -1624,7 +1624,7 @@ class TestUploadQuotaEnforcement:
             bucket_name="bucket",
             ingroup_permission="PRIVATE",
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
         quota_error = AppException(
             ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
@@ -1664,7 +1664,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
 
         monkeypatch.setitem(
@@ -1695,7 +1695,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
 
         monkeypatch.setitem(
@@ -1723,7 +1723,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
 
         monkeypatch.setitem(
@@ -1752,7 +1752,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
         quota_error = QuotaExceededError("quota exceeded")
         quota_service.before.side_effect = quota_error
@@ -1808,7 +1808,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
         failure = RuntimeError("post-check failed")
         quota_service.after.side_effect = failure
@@ -1860,7 +1860,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(
             tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
         )
-        knowledge_storage_stub.resolve_storage_context.return_value = context
+        file_management_service.resolve_upload_context.return_value = context
         quota_service = MagicMock(before=AsyncMock(), after=AsyncMock())
 
         monkeypatch.setitem(

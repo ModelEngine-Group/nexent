@@ -14,7 +14,6 @@ get_committed_bytes_by_kb = storage_service.get_committed_bytes_by_kb
 get_committed_source_bytes_by_paths = storage_service.get_committed_source_bytes_by_paths
 get_tenant_committed_source_bytes = storage_service.get_tenant_committed_source_bytes
 release_storage_charge = storage_service.release_storage_charge
-resolve_storage_context = storage_service.resolve_storage_context
 resolve_storage_reference = storage_service.resolve_storage_reference
 resolve_storage_object_knowledge = storage_service.resolve_storage_object_knowledge
 resolve_storage_object_access = storage_service.resolve_storage_object_access
@@ -22,13 +21,6 @@ resolve_storage_object_access = storage_service.resolve_storage_object_access
 
 @pytest.fixture(autouse=True)
 def default_bucket(monkeypatch):
-    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
-    monkeypatch.setattr(source_reference, "MINIO_DEFAULT_BUCKET", "test-bucket")
-
-
-@pytest.fixture(autouse=True)
-def default_bucket(monkeypatch):
-    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
     monkeypatch.setattr(source_reference, "MINIO_DEFAULT_BUCKET", "test-bucket")
 
 
@@ -40,67 +32,6 @@ def storage_context():
         index_name="kb-a",
         bucket_name="test-bucket",
     )
-
-
-def test_resolve_storage_context_requires_tenant_owned_kb():
-    with patch.object(
-        storage_service,
-        "get_knowledge_record",
-        return_value={
-            "tenant_id": "tenant-a",
-            "knowledge_id": 7,
-            "index_name": "kb-a",
-        },
-    ) as get_record:
-        result = resolve_storage_context("kb-a", "tenant-a")
-
-    assert result == KnowledgeStorageContext(
-        tenant_id="tenant-a",
-        knowledge_id=7,
-        index_name="kb-a",
-        bucket_name=storage_service.MINIO_DEFAULT_BUCKET,
-    )
-    get_record.assert_called_once_with({
-        "index_name": "kb-a",
-        "tenant_id": "tenant-a",
-    })
-
-
-@pytest.mark.parametrize(
-    ("index_name", "tenant_id", "record"),
-    [
-        (None, "tenant-a", None),
-        ("kb-a", None, None),
-        ("kb-a", "tenant-a", {}),
-        ("kb-a", "tenant-a", {"tenant_id": "tenant-b", "knowledge_id": 7}),
-        ("kb-a", "tenant-a", {"tenant_id": "tenant-a", "knowledge_id": None}),
-    ],
-)
-def test_resolve_storage_context_excludes_non_kb_and_cross_tenant(
-    index_name,
-    tenant_id,
-    record,
-):
-    with patch.object(
-        storage_service,
-        "get_knowledge_record",
-        return_value=record,
-    ) as get_record:
-        assert resolve_storage_context(index_name, tenant_id) is None
-
-    if not index_name or not tenant_id:
-        get_record.assert_not_called()
-
-
-def test_resolve_storage_context_requires_configured_bucket(monkeypatch):
-    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", None)
-    with patch.object(
-        storage_service,
-        "get_knowledge_record",
-        return_value={"tenant_id": "tenant-a", "knowledge_id": 7},
-    ):
-        with pytest.raises(RuntimeError, match="default bucket"):
-            resolve_storage_context("kb-a", "tenant-a")
 
 
 def test_storage_usage_wrappers_normalize_values():
@@ -149,10 +80,10 @@ def test_get_committed_source_bytes_by_paths_batches_by_bucket():
 @pytest.mark.parametrize(
     ("path_or_url", "expected"),
     [
-        ("knowledge_base/a.pdf", (storage_service.MINIO_DEFAULT_BUCKET, "knowledge_base/a.pdf")),
+        ("knowledge_base/a.pdf", ("test-bucket", "knowledge_base/a.pdf")),
         (
             "attachments/asset_owner/user-a/a.pdf",
-            (storage_service.MINIO_DEFAULT_BUCKET, "attachments/asset_owner/user-a/a.pdf"),
+            ("test-bucket", "attachments/asset_owner/user-a/a.pdf"),
         ),
         ("s3://other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),
         ("/other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),

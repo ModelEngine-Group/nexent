@@ -46,6 +46,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.file.preview import build_preview_pdf_object_key
 from management.services.file.source_upload import upload_knowledge_source
 from management.services.file.upload_admission import admit_knowledge_uploads
+from management.services.file.upload_context import resolve_upload_context
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
@@ -314,9 +315,10 @@ async def upload_files_impl(
         actual_folder = resolve_minio_upload_folder(
             folder, user_id, uploader_tenant_id)
 
-        from management.services.knowledge_base.storage import resolve_storage_context
+        from infrastructure.agentos_identity import ServicePrincipal
 
-        storage_context = resolve_storage_context(index_name, uploader_tenant_id)
+        storage_context = (await resolve_upload_context(index_name, ServicePrincipal(user_id, uploader_tenant_id))
+                           if index_name and uploader_tenant_id else None)
         if index_name and _is_knowledge_base_upload(folder, index_name) and storage_context is None:
             raise ScopeDenied()
         if lifecycle_file_ids is not None:

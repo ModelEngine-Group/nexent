@@ -3,7 +3,7 @@
 
 This module is the service boundary between upload lifecycle handling and the
 durable MinIO source-object ledger. Generic MinIO uploads must not call these
-helpers unless :func:`resolve_storage_context` returns a valid tenant-owned KB.
+helpers unless upload-context resolution identifies a valid tenant-owned KB.
 """
 
 import logging
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
 from contracts.constants.constants import PERMISSION_EDIT
-from contracts.constants.environment import MINIO_DEFAULT_BUCKET
 from management.db.file.attachment import delete_file
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
@@ -179,39 +178,6 @@ def get_committed_source_bytes_by_paths(
         )
         for path, reference in references.items()
     }
-
-
-def resolve_storage_context(
-    index_name: Optional[str],
-    uploader_tenant_id: Optional[str],
-) -> Optional[KnowledgeStorageContext]:
-    """Resolve a KB only when the index belongs to the uploader's tenant."""
-    if not index_name or not uploader_tenant_id:
-        return None
-
-    knowledge = get_knowledge_record({
-        "index_name": index_name,
-        "tenant_id": uploader_tenant_id,
-    })
-    if not knowledge:
-        return None
-
-    knowledge_id = knowledge.get("knowledge_id")
-    owner_tenant_id = knowledge.get("tenant_id")
-    if knowledge_id is None or owner_tenant_id != uploader_tenant_id:
-        return None
-
-    bucket_name = MINIO_DEFAULT_BUCKET
-    if not bucket_name:
-        raise RuntimeError("MinIO default bucket is not configured")
-
-    return KnowledgeStorageContext(
-        tenant_id=uploader_tenant_id,
-        knowledge_id=int(knowledge_id),
-        index_name=index_name,
-        bucket_name=bucket_name,
-        ingroup_permission=knowledge.get("ingroup_permission"),
-    )
 
 
 def get_committed_bytes_by_kb(
