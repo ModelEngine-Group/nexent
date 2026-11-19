@@ -3,7 +3,7 @@
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from contracts.knowledge import ProcessParams
 from contracts.constants.constants import CONFIG_SERVICE_NAME
-from management.utils.file_http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
+from management.api.file.http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
 import base64
 import logging
 import re
@@ -33,7 +33,7 @@ from management.services.file.service import (
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
 from management.services.knowledge_base.ingestion import trigger_data_process
-from infrastructure.ingestion.errors import classify_ingestion_exception
+from contracts.errors.ingestion import classify_ingestion_exception
 
 
 logger = logging.getLogger("file_management_app")

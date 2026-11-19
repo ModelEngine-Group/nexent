@@ -39,8 +39,8 @@ from management.services.permission.identity.session import (
     require_active_account,
     resolve_tenant_id_from_user_tenant_record,
 )
-from gateway.security.passwords import hash_password, verify_password
-from management.db.client import get_db_session
+from management.utils.account_passwords import hash_password, verify_password
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import (
     change_password,
     create_account,
@@ -82,7 +82,7 @@ from management.services.permission.identity.registration import (
 )
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 

@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func, outerjoin
 
 from contracts.roles import invitation_roles
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantInvitationCode, TenantInvitationRecord
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 from management.utils.serialization import convert_list_to_string
 
 

@@ -813,6 +813,8 @@ function handleNorthboundProxy(pathname, req, res) {
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
 
+
+
   // 1. 认证接口单独处理
   if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
     forwardAuthRequest(req, res, HTTP_BACKEND);

@@ -5,7 +5,7 @@ from management.services.permission.identity import northbound as northbound_aut
 
 
 def test_api_key_authentication_queries_credential_and_account_once(monkeypatch):
-    from infrastructure.service_identity.gateway import identity_context
+    from gateway.downstream.identity import identity_context
 
     calls = []
 
@@ -15,14 +15,11 @@ def test_api_key_authentication_queries_credential_and_account_once(monkeypatch)
 
     def account(user):
         calls.append(("account", user))
-        return {"account_status": "active"}
-
-    membership = {"tenant_id": "t1", "role": "DEV"}
+        return {"delete_flag": "N"}
 
     monkeypatch.setattr(northbound_auth, "get_token_by_access_key", key_record)
     monkeypatch.setattr(northbound_auth, "require_active_account", account)
-    monkeypatch.setattr(northbound_auth, "get_user_tenant_by_user_id", lambda user: membership)
-    monkeypatch.setattr(northbound_auth, "roles_from_record", lambda record: [record.get("role", "DEV")])
+    monkeypatch.setattr(northbound_auth, "get_user_tenant_by_user_id", lambda user: {"tenant_id": "t1"})
     token = identity_context.set(None)
     try:
         principal = northbound_auth.authenticate_api_key("Bearer fixture-key")

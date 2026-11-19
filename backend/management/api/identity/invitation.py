@@ -12,6 +12,21 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
+from contracts.errors.exceptions import (
+    DuplicateError,
+    ForbiddenError,
+    NotFoundException,
+    UnauthorizedError,
+    ValidationError,
+)
+from contracts.identity import (
+    InvitationCreateRequest,
+    InvitationListRequest,
+    InvitationUpdateRequest,
+)
+from management.services.permission.identity.session import get_current_user_id
+from management.utils.managed_read import managed_read
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.invitations import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,

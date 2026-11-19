@@ -12,12 +12,12 @@ from fastapi import FastAPI
 
 from contracts.constants import environment
 from gateway import application
-from gateway.application import create_gateway_app
+from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from infrastructure.service_identity.gateway import (
+from gateway.downstream.identity import (
     IDENTITY_HEADER, IdentityError, identity_context, sign_identity, verify_identity, verify_lookup,
 )
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from gateway.downstream.middleware import GatewayIdentityMiddleware
 
 KEY = "local-central-auth-fixture-not-for-deployment"
 
@@ -74,6 +74,7 @@ async def test_logout_transfers_verified_identity_and_preserves_idempotency(auth
 def auth_config(monkeypatch):
     monkeypatch.setattr(environment, "JWT_SECRET", KEY)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", KEY)
+    monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
     monkeypatch.setattr(application, "load_settings", lambda: GatewaySettings(jwt_secret=environment.JWT_SECRET,
                         jwt_issuer=environment.JWT_ISSUER, signing_secret=environment.GATEWAY_SIGNING_SECRET))
 
@@ -103,7 +104,7 @@ async def test_gateway_overwrites_spoofed_identity_and_resolves_current_state(au
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers={"Authorization": "bearer\t" + session(), IDENTITY_HEADER: "spoofed"})
+            response = await client.post("/api/users/list", headers={"Authorization": "bearer\t" + session(), IDENTITY_HEADER: "spoofed"})
             assert response.status_code == 200 and response.json()["user_id"] == "u1"
             response = await client.get("/nb/v1/agents", headers={"Authorization": "opaque-key"})
             assert response.status_code == 200 and response.json()["user_id"] == "key-user"
@@ -128,7 +129,7 @@ async def test_rejected_credentials_never_reach_lookup_or_business(auth_config, 
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers=headers)
+            response = await client.post("/api/users/list", headers=headers)
     assert response.status_code == 401
     assert calls == []
 
@@ -145,7 +146,7 @@ async def test_identity_rejection_or_unavailability_never_reaches_business(auth_
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers={"Authorization": "Bearer " + session()})
+            response = await client.post("/api/users/list", headers={"Authorization": "Bearer " + session()})
     assert response.status_code == expected
     assert "secret" not in response.text
     assert calls == ["/api/internal/identity/resolve"]
@@ -196,7 +197,7 @@ async def test_login_and_cors_preflight_require_no_existing_user(auth_config):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.post("/api/user/signin")
             assert response.status_code == 200
-            response = await client.options("/api/private", headers={"origin": "https://web.test", "access-control-request-method": "POST"})
+            response = await client.options("/api/user/signin", headers={"origin": "https://web.test", "access-control-request-method": "POST"})
             assert response.status_code == 200
     assert len(seen) == 1
 

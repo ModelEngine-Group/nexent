@@ -41,8 +41,8 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 
 # Stub Elasticsearch service module to avoid initializing real client during import
 services_stub = types.ModuleType('services')
@@ -76,6 +76,9 @@ knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
 knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
+knowledge_storage_stub.get_committed_bytes_by_kb = MagicMock(return_value=0)
+knowledge_storage_stub.get_committed_source_bytes_by_paths = MagicMock(return_value=0)
+knowledge_storage_stub.get_tenant_committed_source_bytes = MagicMock(return_value=0)
 sys.modules['management.services.knowledge_base.storage'] = knowledge_storage_stub
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
 
@@ -115,7 +118,7 @@ list_files_impl = file_management_service.list_files_impl
 def setup_patches():
     """Setup global patches for the test module"""
     patches = [
-        patch('management.db.client.db_client', MagicMock()),
+        patch('infrastructure.rdb.client.db_client', MagicMock()),
         patch('management.db.file.attachment.minio_client', minio_mock),
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
         patch('management.db.file.attachment.get_file_url', MagicMock()),
@@ -154,6 +157,18 @@ def reset_knowledge_storage_stub():
         side_effect=True,
     )
     knowledge_storage_stub.resolve_storage_context.return_value = None
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        file_management_service,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(),
+    )
+    knowledge_storage_stub.resolve_storage_context.return_value = None
     knowledge_storage_stub.commit_uploaded_object.reset_mock(
         return_value=True,
         side_effect=True,
@@ -190,19 +205,31 @@ class TestUploadFilesImpl:
 
         assert await _get_upload_size(fallback_upload) == 3
 
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 2)
-        oversized_upload = MagicMock(size=3, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(
+            file_management_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=2),
+        )
+        oversized_upload = MagicMock(size=2 * 1024 * 1024 + 1, filename="large.pdf")
         with pytest.raises(AppException) as exc_info:
             await _validate_knowledge_file_sizes([None, oversized_upload])
 
         assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
-        assert exc_info.value.details["limit_bytes"] == 2
+        assert exc_info.value.details["limit_bytes"] == 2 * 1024 * 1024
 
     @pytest.mark.asyncio
     async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
         """Local knowledge-base uploads reject oversized files before save_upload_file."""
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
-        oversized_upload = MagicMock(size=2, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(
+            file_management_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=1),
+        )
+        oversized_upload = MagicMock(size=1024 * 1024 + 1, filename="large.pdf")
         save_upload = AsyncMock(return_value=True)
 
         with patch_import_object_context(file_management_service, "save_upload_file", save_upload):

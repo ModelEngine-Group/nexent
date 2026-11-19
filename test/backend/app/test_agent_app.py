@@ -29,6 +29,7 @@ from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCap
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -62,15 +63,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Apply patches before importing any app modules (similar to test_config_app.py)
 patches = [
     # Mock database sessions
-    patch('management.db.client.get_db_session', return_value=Mock())
+    patch('infrastructure.rdb.client.get_db_session', return_value=Mock())
 ]
 
 for p in patches:
@@ -116,6 +117,8 @@ monitoring_stub.get_monitoring_manager = lambda: monitoring_manager_mock
 monitoring_stub.monitoring_manager = monitoring_manager_mock
 monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
+monitoring_stub.AgentRunMetadata = AgentRunMetadata
+monitoring_stub.agent_monitoring_context = agent_monitoring_context
 
 # Mock all external dependencies that agent_app.py imports
 # These must be in sys.modules BEFORE we import management.api.agent.agent
@@ -125,11 +128,12 @@ sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
-sys.modules['management.db.client'] = MagicMock()
+sys.modules['infrastructure.rdb.client'] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
@@ -139,9 +143,9 @@ sys.modules['management.services.permission.identity.session'] = MagicMock()
 sys.modules['management.services.permission.identity.session'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
-sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
+sys.modules['infrastructure.trace.bootstrap'] = MagicMock()
+sys.modules['infrastructure.trace.bootstrap'].monitoring_manager = monitoring_manager_mock
+sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
@@ -162,7 +166,7 @@ for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.mod
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 
 

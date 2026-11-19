@@ -59,7 +59,7 @@ def _binding(method, path, query):
 
 
 def sign_identity(identity, audience, method, path, query, *, key=None):
-    if audience not in {"management", "runtime", "mcp"}:
+    if audience not in {"management", "runtime", "mcp", "ops"}:
         raise IdentityError("Unknown identity audience")
     if identity is None and not is_public_request(method, path):
         raise IdentityError("Identity is required")

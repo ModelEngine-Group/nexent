@@ -8,6 +8,9 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
+from contracts.memory import ActivateVersionRequest, CreateVersionRequest
+from contracts.roles import has_any_role, roles_from_record
+from management.services.permission.identity.session import get_current_user_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.long_term import (
     LongTermMemoryConflict, LongTermMemoryError, get_memory_long_term_service,

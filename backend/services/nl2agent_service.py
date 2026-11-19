@@ -33,7 +33,8 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN
+from management.configuration.runtime import get_config_snapshot
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
@@ -44,7 +45,7 @@ from management.db.skill.repository import query_enabled_skill_instances
 from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
 from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -68,7 +69,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
@@ -1555,7 +1556,7 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        mcp_request_timeout_seconds=get_config_snapshot().get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,

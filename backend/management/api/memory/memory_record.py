@@ -33,6 +33,13 @@ from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from contracts.memory import (
+    CreateMemoryRequest,
+    SearchMemoryRequest,
+    UpdateMemoryRequest,
+)
+from contracts.roles import has_any_role, roles_from_record
+from management.services.permission.identity.session import get_current_user_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.context import get_memory_context_service
 from management.services.memory.records import (
@@ -41,7 +48,6 @@ from management.services.memory.records import (
 )
 from management.services.memory.retrieval import get_memory_retrieval_service
 from management.services.permission.identity.session import get_current_user_id
-
 
 logger = logging.getLogger("memory_record_app")
 logger.setLevel(logging.INFO)

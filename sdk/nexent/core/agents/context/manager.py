@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional, Sequence
 
 from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
 
+from nexent.monitor.run_capture import capture_context_assembly, capture_current_context_input
+
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
@@ -132,6 +134,7 @@ class ContextManager:
             request_system_messages=request_system_messages, request_tail_messages=request_tail_messages,
         )
 
+    @capture_context_assembly
     def assemble_context_items(
         self,
         *,
@@ -171,6 +174,10 @@ class ContextManager:
         purpose_stable = [*purpose_stable, *request_system_messages]
         purpose_dynamic = [*purpose_dynamic, *request_tail_messages]
         canonical_tools = self._canonical_tools(tools or ())
+        capture_current_context_input({
+            "items": items, "system_messages": purpose_stable,
+            "tail_messages": purpose_dynamic, "tools": canonical_tools,
+        })
         raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
         final_items = list(items)
         history_triggered = False

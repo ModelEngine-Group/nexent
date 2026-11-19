@@ -1,60 +1,29 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.codes import ErrorCode
+from management.services.permission.identity.session import extract_bearer_token
+
+import logging
 from http import HTTPStatus
 from typing import Optional
 
+from contracts.errors.exceptions import AccountConflictError
 from dotenv import load_dotenv
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from contracts.constants.constants import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import (
-    AccountConflictError,
-    AppException,
-    IncorrectInviteCodeException,
-    NoInviteCodeException,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    UserRegistrationException,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
-from contracts.identity import (
-    UpdatePasswordRequest,
-    UserSignInRequest,
-    UserSignUpRequest,
-)
-from contracts.roles import has_any_role
-from management.db.identity.cas_session import (
-    revoke_cas_session_by_session_id,
-)
-from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.authentication import (
-    check_auth_service_health,
-    create_token,
-    delete_token,
-    get_provider_username,
-    get_user_info,
-    list_tokens_by_user,
-    refresh_user_token,
-    signin_user,
-    signup_user_with_invitation,
-    update_password,
-)
-from management.services.permission.identity.cas import (
-    CasAuthenticationError,
-    build_logout_url,
-)
-from management.services.permission.identity.session import (
-    extract_bearer_token,
-    extract_session_id_from_authorization,
-    get_current_user_context,
-    get_current_user_id,
-    get_session_by_authorization,
-    validate_token,
-)
+from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
+from management.services.permission.identity.session import validate_token, get_session_by_authorization, extract_session_id_from_authorization, get_current_user_context, get_current_user_id, extract_bearer_token
+from management.services.permission.identity.authentication import check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, get_user_info, create_token, list_tokens_by_user, delete_token, update_password, get_provider_username
 from management.services.permission.identity.users import delete_user_and_cleanup
+from management.services.monitor.audit import record_security_event
+from contracts.errors.exceptions import AccountConflictError, AppException, IncorrectInviteCodeException, NoInviteCodeException, TenantResourceLimitError, UnauthorizedError, UserRegistrationException, ValidationError, tenant_resource_limit_error_payload
+from contracts.identity import UpdatePasswordRequest, UserSignInRequest, UserSignUpRequest
+from contracts.roles import has_any_role
+from management.db.identity.cas_session import revoke_cas_session_by_session_id
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)

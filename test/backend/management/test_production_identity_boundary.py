@@ -5,7 +5,7 @@ import pytest
 
 from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
-from infrastructure.service_identity.context import identity_context
+from gateway.security.context import identity_context
 from management.services.permission.identity import northbound as api_key, session as session
 
 
@@ -18,7 +18,7 @@ def test_enabled_downstream_requires_gateway_principal_before_credential_lookup(
         calls.append(args)
         raise TokenExpiredError("Legacy external verification was invoked")
 
-    monkeypatch.setattr(session, "_decode_jwt_token", forbidden, raising=False)
+    monkeypatch.setattr(session, "_decode_jwt_token", forbidden)
     monkeypatch.setattr(api_key, "get_user_and_tenant_by_access_key", forbidden)
     token = identity_context.set(None)
     try:
@@ -39,9 +39,8 @@ def test_enabled_downstream_consumes_verified_principal_without_external_checks(
     def forbidden(*args):
         pytest.fail("Verified request attempted external credential validation")
 
-    monkeypatch.setattr(session, "_decode_jwt_token", forbidden, raising=False)
+    monkeypatch.setattr(session, "_decode_jwt_token", forbidden)
     monkeypatch.setattr(api_key, "get_user_and_tenant_by_access_key", forbidden)
-    # Gateway-mode roles are normalized to a tuple by roles_from_record.
     token = identity_context.set({"user_id": "u1", "tenant_id": "t1", "kind": kind,
                                   "role": "USER", "language": "zh", "token_id": 7})
     try:

@@ -9,8 +9,8 @@ from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECOND
 from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
 from nexent.core.concurrency import ManagerState, get_default_thread_manager
 from management import recovery as startup_recovery_service
-from management.services.agent.run_state import runtime_state_service
-from infrastructure.concurrency import config_thread_manager
+from infrastructure.redis.run_state import runtime_state_service
+from management.thread_management import config_thread_manager
 
 
 @pytest.mark.asyncio

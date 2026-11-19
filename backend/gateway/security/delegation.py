@@ -9,7 +9,7 @@ from gateway.security.credentials import resolve_identity
 from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_identity, verify_delegation
 
 
-async def delegate_mcp(request, client, management_url, *, settings):
+async def delegate_mcp(request, *, settings, identity_lookup=None):
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
@@ -33,5 +33,5 @@ async def delegate_mcp(request, client, management_url, *, settings):
     connection = Request({"type": "http", "method": "POST", "scheme": "http",
                           "path": "/api/_delegated/session", "query_string": b"",
                           "headers": [(b"authorization", authorization_bytes)]})
-    principal = await resolve_identity(connection, client, management_url, settings=settings)
+    principal = await resolve_identity(connection, settings=settings, identity_lookup=identity_lookup)
     return {"identity_token": sign_identity(principal, "mcp", method, path, query, key=settings.signing_key())}

@@ -156,6 +156,12 @@ class NexentAgent(AgentResources):
         ):
             raise ValueError("Model configuration does not match its outlet snapshot")
         scope = self.cancellation_scope if self.cancellation_scope is not None else RunCancellationScope(self.stop_event)
+        if model_config.extra_body:
+            from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+
+            profile = LegacyInvocationOptions(
+                {}, custom_overrides=model_config.extra_body
+            ).resolve(profile)
         return LegacyChatModel.from_profile(
             profile, model_config.api_key, http_headers=model_config.http_headers,
             observer=self.observer, cancellation_scope=scope,
@@ -224,6 +230,7 @@ class NexentAgent(AgentResources):
                     _wrap_tool_with_monitoring(
                         self.create_tool(tool_config),
                         agent_config.name,
+                        observer=self.observer,
                     )
                     for tool_config in tool_configs
                 ]
@@ -363,7 +370,7 @@ class NexentAgent(AgentResources):
                         if group is not None and getattr(group, "_closed", False):
                             _sandbox_tree_context.pop("session_container_group", None)
 
-                def create_executor():
+                def build_executor():
                     python_executor = None
                     script_runner = None
                     with _sandbox_tree_context["initialization_lock"]:
@@ -532,6 +539,25 @@ class NexentAgent(AgentResources):
                                 finally:
                                     release_executor(python_executor)
                             raise
+
+                def create_executor():
+                    from nexent.monitor.phase_capture import trace_phase
+
+                    with trace_phase(
+                        "agent.sandbox.initialize",
+                        input_value={
+                            "level": self.sandbox_config.level.value,
+                            "scope": self.sandbox_config.scope.value,
+                        },
+                        attributes={"agent.name": agent_config.name},
+                    ) as phase:
+                        executor = build_executor()
+                        backend = getattr(executor, "_nexent_backend", "unknown")
+                        phase.set_output({
+                            "backend": backend,
+                            "fallback": backend == "local" and self.sandbox_config.level != SandboxLevel.LOCAL,
+                        })
+                        return executor
 
                 if deferred:
                     from nexent.core.agents.cores.smolagents.tool_fastpath import (

@@ -82,7 +82,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
 
     from management.services.permission.identity import northbound as northbound_auth
     from management.db import models
-    from management.db.client import db_client
+    from infrastructure.rdb.client import db_client
 
     sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     with disposable_database() as dsn:
@@ -279,8 +279,8 @@ def test_banned_account_excluded_with_original_active_association_and_su_preflig
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from management.cli.account import bootstrap_super_admin
-    from management.db.client import db_client
+    from infrastructure.security.account_cli import bootstrap_super_admin
+    from infrastructure.rdb.client import db_client
 
     old, new = historical_user(), historical_user()
     old["banned_until"] = "2999-01-01T00:00:00Z"

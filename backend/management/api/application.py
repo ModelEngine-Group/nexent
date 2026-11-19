@@ -12,7 +12,7 @@ from contracts.constants.environment import (
     ENABLE_AIDP_KNOWLEDGE,
     RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
-from infrastructure.concurrency import config_thread_manager
+from management.thread_management import config_thread_manager
 from management.api.a2a.a2a_client import router as a2a_client_router
 from management.api.a2a.a2a_server import router as a2a_server_router
 from management.api.agent.agent import agent_config_router as agent_router
@@ -60,7 +60,6 @@ from management.api.memory.memory_record import router as memory_record_router
 from management.api.model.model_managment import router as model_manager_router
 from management.api.monitoring.monitoring import router as monitoring_router
 from management.api.notification.notification import router as notification_router
-from management.api.prompt.prompt import router as prompt_router
 from management.api.skill.skill import router as skill_router
 from management.api.skill.skill_repository import skill_repository_router
 from management.api.tag.tag_management import router as tag_management_router
@@ -78,7 +77,7 @@ from management.services.evaluation.maintenance import (
 )
 from management.services.memory.dreaming.scheduler import dreaming_scheduler
 from management.services.model.outlet_migration import migrate_legacy_outlets
-from management.utils.app_factory import create_app
+from backend.http.server.app_factory import create_app
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
@@ -103,7 +102,6 @@ async def recover_config_tasks_on_startup():
         recover_config_tasks,
     )
     start_eval_maintenance(config_thread_manager)
-    await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
 
 
 async def validate_external_service_configuration():
@@ -124,32 +122,33 @@ async def stop_dreaming_scheduler():
 
 @asynccontextmanager
 async def config_lifespan(_app):
-    # One Management manager owns ordinary and Northbound requests and recovery
-    # (gateway architecture: the Northbound business app runs in-process here).
-    if config_thread_manager.state is ManagerState.CREATED:
-        config_thread_manager.start()
-    set_default_thread_manager(config_thread_manager)
-    try:
-
-        migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
-        logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
-        await recover_config_tasks_on_startup()
-        await validate_external_service_configuration()
-        await start_dreaming_scheduler()
-        async with northbound_lifespan(_app):
+    # One Management manager owns ordinary and Northbound requests and recovery.
+    async with northbound_lifespan(_app):
+        maintenance_started = False
+        dreaming_started = False
+        try:
+            migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
+            logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
+            await recover_config_tasks_on_startup()
+            maintenance_started = True
+            await validate_external_service_configuration()
+            dreaming_started = True
+            await start_dreaming_scheduler()
             yield
-    finally:
-        # Preserve the scheduler's existing graceful shutdown behavior. Task
-        # state recovery remains exclusively in the startup path above.
-        await stop_dreaming_scheduler()
-
-        stop_eval_maintenance()
+        finally:
+            try:
+                if dreaming_started:
+                    await stop_dreaming_scheduler()
+            finally:
+                if maintenance_started:
+                    stop_eval_maintenance()
 
 
 app = create_app(
     title="Nexent Config API",
     description="Configuration APIs",
     lifespan=config_lifespan,
+    enable_monitoring=True,
     gateway_identity_audience="management",
 )
 if hasattr(app, "state"):
@@ -184,7 +183,6 @@ app.include_router(oauth_router)
 app.include_router(cas_router)
 
 app.include_router(summary_router)
-app.include_router(prompt_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)
@@ -222,14 +220,5 @@ app.include_router(tag_management_router)
 app.include_router(northbound_router)
 app.include_router(a2a_router)
 app.include_router(gateway_identity_router)
-
-# Northbound capability gates (hand-written per the northbound exposure design)
-# and the manifest reconciliation that keeps northbound.yaml honest.
-from management.api.northbound_gates import nb_capability_routers  # noqa: E402
-from management.utils.northbound_manifest import reconcile_northbound_manifest  # noqa: E402
-
-for _nb_router in nb_capability_routers():
-    app.include_router(_nb_router)
-reconcile_northbound_manifest(app)
 
 app.include_router(ops_access_router)

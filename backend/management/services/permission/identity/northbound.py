@@ -22,12 +22,13 @@ from contracts.errors.exceptions import (
     TokenExpiredError,
     UnauthorizedError,
 )
+from fastapi import HTTPException, Request
 from contracts.roles import roles_from_record
 from management.services.permission.identity.credentials import (
     extract_bearer_token,
     require_active_account,
 )
-from gateway.security.signatures import (
+from management.services.permission.identity.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )
@@ -148,14 +149,7 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     membership = get_user_tenant_by_user_id(user_id)
     if not membership or not membership.get("tenant_id"):
         raise TokenExpiredError("No active tenant relationship for this access key")
-    roles = roles_from_record(membership)
-    if not roles:
-        raise TokenExpiredError("No active roles for this account")
-    return {
-        "user_id": user_id,
-        "tenant_id": membership["tenant_id"],
-        "token_id": record.get("token_id"),
-    }
+    return {"user_id": user_id, "tenant_id": membership["tenant_id"], "token_id": record.get("token_id")}
 
 
 def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None:
@@ -192,7 +186,8 @@ def authenticate_api_key(authorization: Optional[str], request=None) -> Authenti
     identity = _gateway_identity("api_key")
     if identity is not None:
         return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
-                                     role=identity.get("role", ""), language=identity.get("language", "zh"),
+                                     role=identity.get("role", ""), roles=roles_from_record(identity),
+                                     language=identity.get("language", "zh"),
                                      token_id=identity.get("token_id"), kind=CredentialKind.API_KEY)
     try:
         resolved = get_user_and_tenant_by_access_key(extract_bearer_token(authorization))

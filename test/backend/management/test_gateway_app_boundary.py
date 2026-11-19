@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 
 from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
-from infrastructure.service_identity import internal_tokens
-from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity
-from management.utils.app_factory import create_app
+from gateway.downstream import internal_tokens
+from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity
+from backend.http.server.app_factory import create_app
 
 
 def test_application_factory_enforces_gateway_identity_and_preserves_health(monkeypatch):

@@ -31,10 +31,10 @@ from management.services.conversation.agent_history import (
     list_agent_groups,
 )
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info
-from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from contracts.clarification import ClarificationResponse
 from contracts.errors.exceptions import UnauthorizedError
 from management.services.conversation.creation_mode import confirm_creation_mode
+
 
 router = APIRouter(prefix="/conversation")
 
@@ -63,14 +63,21 @@ def confirm_creation_mode_endpoint(
 
 @router.get("/agent_groups", response_model=ConversationResponse)
 async def list_agent_groups_endpoint(
+    request: Request,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
     include_agent_id: list[int] = Query(default=[]),
     include_other: bool = False,
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return paginated Agent-chat groups and pinned groups outside the page."""
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         if len(include_agent_id) > 100 or any(agent_id <= 0 for agent_id in include_agent_id):
@@ -102,13 +109,20 @@ async def list_agent_groups_endpoint(
 
 @router.get("/agent_groups/{group_key}/conversations", response_model=ConversationResponse)
 async def list_agent_group_conversations_endpoint(
+    request: Request,
     group_key: str,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return a paginated Agent-chat history group without message bodies."""
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, _ = get_current_user_id(authorization)
         data = list_agent_group_conversations(user_id, group_key, limit, cursor, search)

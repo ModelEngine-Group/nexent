@@ -111,13 +111,14 @@ from management.services.model.profiles import (
 from management.services.model.reasoning import (
     get_model_reasoning_capability,
 )
-from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
-from contracts.errors.exceptions import DuplicateError, ModelOutletConflictError, ModelOutletValidationError
-from management.services.monitor.audit import record_security_event
-from management.utils.app_factory import ModelCredentialRoute
-from nexent.core.concurrency import run_blocking
+from management.services.permission.identity.session import authenticate, get_current_user_id
 from permissions.depends import require
 from permissions.models import CurrentUser
+from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
+from nexent.core.concurrency import run_blocking
+from management.db.model.repository import get_model_by_model_id
+from management.services.monitor.audit import record_security_event
+from backend.http.server.app_factory import ModelCredentialRoute
 from permissions.resource_access import INVENTORY_READ, require_inventory_scope
 from permissions.tenant_scope import resolve_tenant_scope
 

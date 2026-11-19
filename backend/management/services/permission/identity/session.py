@@ -13,9 +13,9 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
+from gateway.security import token_codec
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from gateway.security import token_codec
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
@@ -49,18 +49,14 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from infrastructure.service_identity.internal_tokens import (
+from gateway.downstream.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE,
     INTERNAL_RUNTIME_JWT_TTL_SECONDS,
     generate_internal_runtime_jwt,
 )
-from management.services.permission.identity.credentials import (
-    extract_bearer_token,
-    require_active_account,
-)
-from gateway.security.signatures import (
+from management.services.permission.identity.signatures import (
     TIMESTAMP_VALIDITY_WINDOW,
     calculate_hmac_signature,
     validate_timestamp,
@@ -75,7 +71,7 @@ logger = logging.getLogger(__name__)
 
 
 def _gateway_identity(kind="session"):
-    from infrastructure.service_identity.gateway import IdentityError, enabled, trusted_identity
+    from gateway.downstream.identity import IdentityError, enabled, trusted_identity
 
     try:
         identity = trusted_identity(kind)
@@ -167,6 +163,16 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
         raise TokenExpiredError("JWT verification is not configured")
 
     return token_codec.decode_lifetime(token, key=JWT_SECRET)
+
+
+def require_active_account(user_id: str) -> dict:
+    """Reject deleted identities before any business authorization."""
+    from management.db.identity.account import get_account
+
+    account = get_account(user_id)
+    if not account or account["delete_flag"] != "N":
+        raise TokenExpiredError("Account is unavailable")
+    return account
 
 
 def _decode_jwt_token(authorization: str) -> dict:
@@ -304,14 +310,16 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
 def get_current_user_context(
     authorization: Optional[str] = None,
 ) -> tuple[str, str, tuple[str, ...]]:
-    """Read current membership roles on every authenticated request."""
+    """Consume verified Gateway roles or resolve membership in the disabled adapter."""
     identity = _gateway_identity()
     if identity is not None:
-        return (
-            identity["user_id"],
-            identity["tenant_id"],
-            roles_from_record(identity),
-        )
+        try:
+            roles = roles_from_record(identity)
+        except ValueError as exc:
+            raise TokenExpiredError("User roles are unavailable") from exc
+        if not roles:
+            raise TokenExpiredError("User role not found")
+        return identity["user_id"], identity["tenant_id"], roles
     user_id, tenant_id = get_current_user_id(authorization)
 
 
@@ -326,11 +334,8 @@ def get_current_user_context(
     if not user_role:
         raise TokenExpiredError("User role not found")
 
-    return (
-        user_id,
-        resolve_tenant_id_from_user_tenant_record(user_tenant_record),
-        user_role,
-    )
+    current_tenant = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
+    return user_id, current_tenant, user_role
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +408,13 @@ def get_current_user_info(
 
 def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
     """Apply gateway identity policy and return the existing user response shape."""
+    from types import SimpleNamespace
 
     try:
         identity = _gateway_identity()
         if identity is not None:
             return True, SimpleNamespace(id=identity["user_id"], email=identity.get("email", ""),
-                                         user_metadata={"role": identity.get("role", "")})
+                                         user_metadata={"role": identity.get("role", ""), "roles": list(roles_from_record(identity))})
         user_id, _ = get_current_user_id(token)
         account = require_active_account(user_id)
         membership = get_user_tenant_by_user_id(user_id)
@@ -441,9 +447,19 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     return principal.user_id, principal.tenant_id
 
 
+def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Translate the shared bearer syntax failure into the backend domain error."""
+    from gateway.downstream.identity import IdentityError, bearer_token
+
+    try:
+        return bearer_token(authorization)
+    except IdentityError as exc:
+        raise TokenExpiredError("Invalid authorization header") from exc
+
+
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Compatibility export of the common service-token verifier."""
-    from infrastructure.service_identity.internal_tokens import verify_internal_runtime_jwt as verify
+    from gateway.downstream.internal_tokens import verify_internal_runtime_jwt as verify
 
     return verify(authorization, secret=JWT_SECRET)
 
@@ -497,9 +513,14 @@ def authenticate_identity(
     kind = CredentialKind(kind)
     identity = _gateway_identity(kind.value)
     if identity is not None:
-        return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
-                                     role=identity.get("role", ""), language=identity.get("language", "zh"),
-                                     token_id=identity.get("token_id"), kind=kind)
+        roles = roles_from_record(identity)
+        if require_role and not roles:
+            raise TokenExpiredError("User role not found")
+        return AuthenticatedIdentity(
+            identity["user_id"], identity["tenant_id"],
+            role=primary_role(roles) if roles else "", roles=roles,
+            language=identity.get("language", "zh"), token_id=identity.get("token_id"), kind=kind,
+        )
 
     if kind == CredentialKind.SESSION:
         if require_role:
@@ -535,7 +556,7 @@ def authenticate(
     header_token = authorization
     if not header_token and _credentials:
         header_token = _credentials.credentials
-    if not header_token:
+    if not header_token and _gateway_identity() is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     principal = authenticate_identity(header_token, require_role=True)
     return CurrentUser(

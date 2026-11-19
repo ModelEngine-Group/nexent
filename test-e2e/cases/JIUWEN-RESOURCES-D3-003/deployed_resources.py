@@ -13,9 +13,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from management.db.client import get_db_session, minio_client
+from infrastructure.rdb.client import get_db_session, minio_client
 from management.db.models import AgentInfo, AgentRelation, ConversationRecord
-from gateway.authentication.auth import (
+from management.services.permission.identity.session import (
     generate_session_jwt,
 )
 

@@ -7,17 +7,18 @@ import sys
 
 
 from contracts.errors.exceptions import AccountConflictError
+from management.configuration.runtime import load_system_configuration
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import (
         create_account,
         get_account_by_email,
         lock_account_keys,
     )
     from management.db.identity.user_tenant import insert_user_tenant
-    from gateway.security.passwords import hash_password
+    from management.utils.account_passwords import hash_password
     from sqlalchemy import select
     from management.db.models import UserTenant
 
@@ -52,7 +53,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             )
         ).first():
             raise AccountConflictError(
-                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
+                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate.sh --apply against this PostgreSQL database first"
             )
         # Historical inactive associations intentionally have no local account.
         # Only an available account can reserve the current SU identity.
@@ -67,6 +68,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             raise ValueError(
                 "Password must contain uppercase, lowercase and digit and be at least 8 characters"
             )
+        load_system_configuration()
         account = create_account(email, hash_password(password), db_session=session)
         insert_user_tenant(
             account["user_id"], "", "SU", email, created_by="system", db_session=session

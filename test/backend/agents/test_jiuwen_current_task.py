@@ -13,6 +13,13 @@ from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 
 @pytest.mark.parametrize("core,current_upload", [("jiuwen", False), ("jiuwen", True), ("smolagents", False)])
 async def test_current_query_preserves_history_without_reactivating_uploads(mocker, core, current_upload):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    mocker.patch.object(
+        service,
+        "get_config_snapshot",
+        return_value=system_config_snapshot(),
+    )
     old_file = {"name": "old-image.png", "url": "s3://nexent/attachments/old-image.png"}
     new_file = {"name": "new-image.png", "url": "s3://nexent/attachments/new-image.png"}
     history = [HistoryItem(role="user", content="Analyze the original image", minio_files=[old_file]),

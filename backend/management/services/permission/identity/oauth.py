@@ -41,12 +41,9 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from management.services.permission.identity.session import (
-    calculate_expires_at,
-    generate_session_jwt,
-)
-from gateway.security.passwords import hash_password
-from management.db.client import get_db_session
+from management.services.permission.identity.session import calculate_expires_at, generate_session_jwt
+from management.utils.account_passwords import hash_password
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import create_account, get_account_by_email
 from management.db.identity.oauth_account import (
     delete_oauth_account,

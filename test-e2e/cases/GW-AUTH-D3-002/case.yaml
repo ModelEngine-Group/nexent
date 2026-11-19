@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: GW-AUTH-D3-002
+  feature_id: GW-AUTH
+  requirement_ids:
+  - GW-AUTH
+  business_rule_ids:
+  - GW-AUTH-RULE-04
+  title: Gateway explicit exposure across Management Runtime and Northbound forwarding
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove live Gateway network routing keeps ordinary and Northbound APIs
+    available while rejecting undeclared method/path/transport before upstream work.
+  preconditions:
+  - Loopback sockets and installed backend Python dependencies available.
+  test_data:
+    profile: mock
+    upstreams: Actual loopback HTTP/SSE/WS recording applications; authentication
+      disabled only to isolate exposure and transport. Separate GW-AUTH-D3-001 proves
+      authenticated signatures.
+  steps:
+  - order: 1
+    action: Start Gateway and separate Management/Runtime recording servers; invoke
+      declared ordinary Management HTTP and Runtime streaming APIs plus declared Northbound
+      API.
+    expected: Each request reaches the intended upstream with body and repeated query
+      preserved; Runtime SSE arrives incrementally.
+  - order: 2
+    action: Call unknown route, method mismatch, reserved internal endpoint and unregistered
+      WebSocket; then exercise a declared Runtime WebSocket.
+    expected: Rejected requests never invoke either upstream; declared WebSocket preserves
+      subprotocol and binary frames.
+  - order: 3
+    action: Stop all temporary servers and observe transport close.
+    expected: No relay or server thread remains.
+  expected_results:
+  - Ordinary Management and Runtime forwarding and Northbound entry coexist on Gateway.
+  - Only declared method/path/transport is callable; private and undeclared requests
+    never reach upstream.
+  - Streaming/WebSocket transports and temporary resources close correctly.
+  forbidden_side_effects:
+  - Unlisted or reserved requests must not invoke downstream business handlers.
+  - Verification must not touch production credentials/storage or leak server threads.
+  integration_boundary:
+  - Actual Gateway -> actual loopback Management/Runtime recording HTTP/SSE/WS servers;
+    business/model execution excluded.
+  observations:
+  - HTTP status, target origin, exact invocation list, request body/query, streamed
+    chunk and WS payload/subprotocol.
+  cleanup:
+  - Close HTTP/WS clients and stop/join local servers.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 90
+  acceptance:
+  - id: AC-01
+    description: Declared ordinary and northbound routes forward to their fixed upstreams.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects: []
+  - id: AC-02
+    description: Unknown method/path/transport and reserved interfaces are denied
+      before upstream.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Streaming and WS complete without residual resources.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 2

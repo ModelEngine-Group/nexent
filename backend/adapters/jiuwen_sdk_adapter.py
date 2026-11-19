@@ -11,8 +11,7 @@ For versions before 0.1.18, this module works around circular imports by:
 Native versions use their real packages so the Agent Core can coexist with
 prompt optimization in the same service process.
 
-The adapters/__init__.py wraps the import in try/except so the server
-starts even when openjiuwen is not installed.
+The prompt and evaluation services handle an unavailable SDK at the import boundary.
 """
 import asyncio
 import importlib.abc
@@ -228,7 +227,7 @@ def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
 
 logger = logging.getLogger("jiuwen_adapter")
 
-from adapters.exception import JiuwenSDKError
+from contracts.errors.capabilities import JiuwenSDKError
 
 
 # ----------------------------------------------------------------------
@@ -486,7 +485,7 @@ class JiuwenSDKAdapter:
     Jiuwen SDK 调用适配器
 
     封装 Jiuwen SDK 的所有调用，内部不处理降级，
-    失败时抛出 JiuwenSDKError，由上层 PromptOptimizationService 决定是否降级
+    Raises JiuwenSDKError when optimization fails.
     """
 
     def __init__(self, model_id: int, tenant_id: str):

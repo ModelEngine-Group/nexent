@@ -20,15 +20,16 @@ from contracts.errors.exceptions import (
     tenant_resource_limit_error_payload,
 )
 from contracts.identity import UserListRequest, UserUpdateRequest
+from management.services.permission.identity.session import (
+    extract_session_id_from_authorization,
+    get_current_user_context,
+    get_current_user_id,
+)
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.permission.identity.session import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.roles import assignable_roles
-from management.services.permission.identity.users import (
-    delete_user_and_cleanup,
-    get_users_for_requester,
-    update_user_for_requester,
-)
+from management.services.permission.identity.users import delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 from permissions.role_assignment import check_managed_target
 
 logger = logging.getLogger("user_app")
@@ -125,6 +126,8 @@ async def update_user_endpoint(
             requester_tenant_id=requester_tenant_id,
             requester_role=requester_role,
         )
+
+        logger.info("User account updated")
 
         record_security_event(
             "user_update",

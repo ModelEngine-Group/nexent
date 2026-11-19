@@ -15,8 +15,9 @@ def test_flat_service_exclusions_match_remaining_scope():
         "nl2agent_service.py", "workspace_cleanup_service.py",
     }
     assert not list((BACKEND / "utils").glob("*.py"))
-    # gateway/api was relocated into management (see test_gateway_layout.py);
-    # only runtime keeps a flat api package.
+    assert not (BACKEND / "gateway/api").exists()
+    assert (BACKEND / "gateway/application.py").is_file()
+    assert (BACKEND / "management/api/northbound.py").is_file()
     assert (BACKEND / "runtime/api/__init__.py").is_file()
 
 

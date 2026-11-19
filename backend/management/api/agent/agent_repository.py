@@ -18,6 +18,8 @@ from contracts.agent import AgentRepositoryListingCreateRequest
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.skill import SkillResolution
 from contracts.tag import TagAssignmentFilter
+from management.services.permission.identity.session import get_current_user_context, get_current_user_id
+from management.services.monitor.audit import record_security_event
 from management.services.repository.agent.listing import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,

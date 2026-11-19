@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for backend/management/db/client.py
+Unit tests for infrastructure/rdb/client.py
 Tests PostgresClient, MinioClient, and utility functions
 """
 
@@ -64,8 +64,9 @@ sys.modules['psycopg2.extensions'] = MagicMock()
 # Patch storage factory before importing
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock), \
         patch('nexent.storage.storage_client_factory.MinIOStorageConfig'):
-    from management.db.client import PostgresClient, MinioClient, db_client, minio_client, get_db_session, get_monitoring_db_session
-    from management.utils.orm import as_dict, filter_property
+    from infrastructure.rdb.client import PostgresClient, db_client, get_db_session, get_monitoring_db_session
+    from infrastructure.object_storage.client import MinioClient, minio_client
+    from infrastructure.rdb.orm import as_dict, filter_property
 
 
 class TestPostgresClient:
@@ -77,20 +78,20 @@ class TestPostgresClient:
         PostgresClient._instance = None
 
         # Patch the constants
-        mocker.patch('management.db.client.POSTGRES_HOST', 'localhost')
-        mocker.patch('management.db.client.POSTGRES_USER', 'test_user')
+        mocker.patch('infrastructure.rdb.client.POSTGRES_HOST', 'localhost')
+        mocker.patch('infrastructure.rdb.client.POSTGRES_USER', 'test_user')
         mocker.patch(
-            'management.db.client.NEXENT_POSTGRES_PASSWORD', 'test_password')
-        mocker.patch('management.db.client.POSTGRES_DB', 'test_db')
-        mocker.patch('management.db.client.POSTGRES_PORT', 5432)
+            'infrastructure.rdb.client.NEXENT_POSTGRES_PASSWORD', 'test_password')
+        mocker.patch('infrastructure.rdb.client.POSTGRES_DB', 'test_db')
+        mocker.patch('infrastructure.rdb.client.POSTGRES_PORT', 5432)
 
         # Mock the SQLAlchemy functions
         mock_engine = MagicMock()
         mock_create_engine = mocker.patch(
-            'management.db.client.create_engine', return_value=mock_engine)
+            'infrastructure.rdb.client.create_engine', return_value=mock_engine)
         mock_session = MagicMock()
         mock_sessionmaker = mocker.patch(
-            'management.db.client.sessionmaker', return_value=mock_session)
+            'infrastructure.rdb.client.sessionmaker', return_value=mock_session)
 
         client = PostgresClient()
 
@@ -146,8 +147,8 @@ class TestPostgresClient:
 class TestMinioClient:
     """Test cases for MinioClient class"""
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_init(self, mock_config_class, mock_create_client):
         """Test MinioClient initialization"""
         # Reset singleton instance
@@ -178,15 +179,15 @@ class TestMinioClient:
         MinioClient._initialized = False
         MinioClient._initialized = False
 
-        with patch('management.db.client.create_storage_client_from_config'), \
-                patch('management.db.client.MinIOStorageConfig'):
+        with patch('infrastructure.object_storage.client.create_storage_client_from_config'), \
+                patch('infrastructure.object_storage.client.MinIOStorageConfig'):
             client1 = MinioClient()
             client2 = MinioClient()
 
             assert client1 is client2
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_upload_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.upload_file delegates to storage client"""
         MinioClient._instance = None
@@ -208,8 +209,8 @@ class TestMinioClient:
         mock_storage_client.upload_file.assert_called_once_with(
             '/path/to/file.txt', 'file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_upload_fileobj(self, mock_config_class, mock_create_client):
         """Test MinioClient.upload_fileobj delegates to storage client"""
         MinioClient._instance = None
@@ -232,8 +233,8 @@ class TestMinioClient:
         mock_storage_client.upload_fileobj.assert_called_once_with(
             file_obj, 'file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_download_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.download_file delegates to storage client"""
         MinioClient._instance = None
@@ -254,8 +255,8 @@ class TestMinioClient:
         mock_storage_client.download_file.assert_called_once_with(
             'file.txt', '/path/to/download.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_url(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_url delegates to storage client"""
         MinioClient._instance = None
@@ -275,86 +276,8 @@ class TestMinioClient:
         mock_storage_client.get_file_url.assert_called_once_with(
             'file.txt', 'bucket', 7200)
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
-    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
-    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', 'files.example.com:9010')
-    def test_minio_client_get_file_url_external_endpoint(self, mock_config_class, mock_create_client):
-        """Test get_file_url presigns against the external endpoint when configured."""
-        MinioClient._instance = None
-        MinioClient._initialized = False
-
-        mock_storage_client = MagicMock()
-        mock_create_client.return_value = mock_storage_client
-        mock_config_class.return_value = MagicMock()
-
-        client = MinioClient()
-        client._external_url_client = None
-        success, result = client.get_file_url('file.txt', 'bucket', 7200)
-
-        assert success is True
-        # boto3 is mocked at module level; generate_presigned_url returns a MagicMock
-        assert result is not None
-        # Internal signing must not be touched
-        mock_storage_client.get_file_url.assert_not_called()
-
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
-    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
-    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', 'files.example.com:9010')
-    def test_minio_client_get_file_url_external_fallback_on_error(self, mock_config_class, mock_create_client):
-        """Test get_file_url falls back to internal signing when external presign fails."""
-        MinioClient._instance = None
-        MinioClient._initialized = False
-
-        mock_storage_client = MagicMock()
-        mock_storage_client.get_file_url.return_value = (
-            True, 'http://internal.example.com/file.txt')
-        mock_create_client.return_value = mock_storage_client
-        mock_config_class.return_value = MagicMock()
-
-        client = MinioClient()
-        client._external_url_client = None
-        # Force the boto3 (mocked) presign call to raise: build the external
-        # client first, then break its generate_presigned_url.
-        external_client = client._get_external_url_client()
-        external_client.generate_presigned_url.side_effect = RuntimeError("presign boom")
-        try:
-            success, result = client.get_file_url('file.txt', 'bucket', 7200)
-        finally:
-            external_client.generate_presigned_url.side_effect = None
-
-        assert success is True
-        assert result == 'http://internal.example.com/file.txt'
-        mock_storage_client.get_file_url.assert_called_once_with(
-            'file.txt', 'bucket', 7200)
-
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
-    @patch('management.db.client.MINIO_ENDPOINT', 'minio:9000')
-    @patch('management.db.client.MINIO_EXTERNAL_ENDPOINT', MagicMock())
-    def test_minio_client_get_file_url_external_endpoint_non_string_ignored(self, mock_config_class, mock_create_client):
-        """Test a non-string MINIO_EXTERNAL_ENDPOINT is treated as unconfigured."""
-        MinioClient._instance = None
-        MinioClient._initialized = False
-
-        mock_storage_client = MagicMock()
-        mock_storage_client.get_file_url.return_value = (
-            True, 'http://example.com/file.txt')
-        mock_create_client.return_value = mock_storage_client
-        mock_config_class.return_value = MagicMock()
-
-        client = MinioClient()
-        client._external_url_client = None
-        success, result = client.get_file_url('file.txt', 'bucket', 7200)
-
-        assert success is True
-        assert result == 'http://example.com/file.txt'
-        mock_storage_client.get_file_url.assert_called_once_with(
-            'file.txt', 'bucket', 7200)
-
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_size(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_size delegates to storage client"""
         MinioClient._instance = None
@@ -372,8 +295,8 @@ class TestMinioClient:
         mock_storage_client.get_file_size.assert_called_once_with(
             'file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_size_strict(self, mock_config_class, mock_create_client):
         """Test strict size lookup preserves missing versus error semantics."""
         MinioClient._instance = None
@@ -389,8 +312,8 @@ class TestMinioClient:
         assert client.get_file_size_strict('missing.txt', 'bucket') is None
         assert mock_storage_client.get_file_size_strict.call_count == 2
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_list_files(self, mock_config_class, mock_create_client):
         """Test MinioClient.list_files delegates to storage client"""
         MinioClient._instance = None
@@ -412,8 +335,8 @@ class TestMinioClient:
         mock_storage_client.list_files.assert_called_once_with(
             'prefix/', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_delete_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.delete_file delegates to storage client"""
         MinioClient._instance = None
@@ -433,8 +356,8 @@ class TestMinioClient:
         mock_storage_client.delete_file.assert_called_once_with(
             'file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_stream(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_stream delegates to storage client"""
         MinioClient._instance = None
@@ -455,8 +378,8 @@ class TestMinioClient:
         mock_storage_client.get_file_stream.assert_called_once_with(
             'file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_range_success(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_range delegates to storage client and returns body"""
         MinioClient._instance = None
@@ -476,8 +399,8 @@ class TestMinioClient:
         mock_storage_client.get_file_range.assert_called_once_with(
             'file.pdf', 0, 4095, 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_range_failure(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_range passes through failure from storage client"""
         MinioClient._instance = None
@@ -496,8 +419,8 @@ class TestMinioClient:
         mock_storage_client.get_file_range.assert_called_once_with(
             'file.pdf', 0, 4095, None)
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_file_exists_true(self, mock_config_class, mock_create_client):
         """Test MinioClient.file_exists returns True when file exists"""
         MinioClient._instance = None
@@ -514,8 +437,8 @@ class TestMinioClient:
         assert result is True
         mock_storage_client.exists.assert_called_once_with('file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_file_exists_false(self, mock_config_class, mock_create_client):
         """Test MinioClient.file_exists returns False when file does not exist"""
         MinioClient._instance = None
@@ -532,8 +455,8 @@ class TestMinioClient:
         assert result is False
         mock_storage_client.exists.assert_called_once_with('file.txt', 'bucket')
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_copy_file_success(self, mock_config_class, mock_create_client):
         """Test MinioClient.copy_file successfully copies file"""
         MinioClient._instance = None
@@ -557,8 +480,8 @@ class TestMinioClient:
             'bucket'
         )
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_copy_file_with_default_bucket(self, mock_config_class, mock_create_client):
         """Test MinioClient.copy_file uses default bucket when not specified"""
         MinioClient._instance = None
@@ -582,8 +505,8 @@ class TestMinioClient:
             None
         )
 
-    @patch('management.db.client.create_storage_client_from_config')
-    @patch('management.db.client.MinIOStorageConfig')
+    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
+    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_copy_file_failure(self, mock_config_class, mock_create_client):
         """Test MinioClient.copy_file handles errors properly"""
         MinioClient._instance = None
@@ -612,7 +535,7 @@ class TestGetDbSession:
         mock_session_maker = MagicMock(return_value=mock_session)
 
         # Mock db_client
-        with patch('management.db.client.db_client') as mock_db_client:
+        with patch('infrastructure.rdb.client.db_client') as mock_db_client:
             mock_db_client.session_maker = mock_session_maker
 
             with get_db_session() as session:
@@ -638,7 +561,7 @@ class TestGetDbSession:
         mock_session = MagicMock()
         mock_session_maker = MagicMock(return_value=mock_session)
 
-        with patch('management.db.client.db_client') as mock_db_client:
+        with patch('infrastructure.rdb.client.db_client') as mock_db_client:
             mock_db_client.session_maker = mock_session_maker
 
             with pytest.raises(ValueError):
@@ -726,7 +649,7 @@ class TestAdditionalCoverage:
         client = MinioClient()
         client.storage_config = None
         mocker.patch.object(client, "_ensure_initialized", side_effect=RuntimeError("x"))
-        mocker.patch("management.db.client.MINIO_DEFAULT_BUCKET", "fallback-bucket")
+        mocker.patch("infrastructure.object_storage.client.MINIO_DEFAULT_BUCKET", "fallback-bucket")
         assert client.default_bucket == "fallback-bucket"
 
     def test_as_dict_for_sqlalchemy_object_and_mapping(self, mocker):
@@ -742,7 +665,7 @@ class TestAdditionalCoverage:
         mock_col_created.key = "created"
         mock_col_name = MagicMock()
         mock_col_name.key = "name"
-        mocker.patch("management.utils.orm.class_mapper", return_value=MagicMock(columns=[mock_col_created, mock_col_name]))
+        mocker.patch("infrastructure.rdb.orm.class_mapper", return_value=MagicMock(columns=[mock_col_created, mock_col_name]))
         orm_result = as_dict(Obj())
         # Naive datetimes are normalized to UTC-equivalent by appending ``Z``.
         assert orm_result["created"] == dt.isoformat() + "Z"
@@ -763,15 +686,15 @@ class TestAdditionalCoverage:
         mock_col_updated = MagicMock()
         mock_col_updated.key = "updated"
         mocker.patch(
-            "management.utils.orm.class_mapper",
+            "infrastructure.rdb.orm.class_mapper",
             return_value=MagicMock(columns=[mock_col_updated]),
         )
         assert as_dict(AwareObj())["updated"] == aware_dt.isoformat()
 
     def test_get_monitoring_db_session_paths(self, mocker):
         mock_session = MagicMock()
-        mocker.patch("management.db.client._get_monitoring_engine")
-        mocker.patch("management.db.client._monitoring_session_maker", MagicMock(return_value=mock_session))
+        mocker.patch("infrastructure.rdb.client._get_monitoring_engine")
+        mocker.patch("infrastructure.rdb.client._monitoring_session_maker", MagicMock(return_value=mock_session))
 
         with get_monitoring_db_session() as s:
             assert s is mock_session

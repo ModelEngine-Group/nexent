@@ -54,14 +54,13 @@ from management.services.knowledge_base.status import get_all_files_status
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
+from management.services.file.service import check_file_access
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.services.tag.library import TagManagementService
-from management.services.tag.projection import (
-    project_authorized_document_tags,
-)
-from management.utils.knowledge_permission import (
-    require_knowledge_base_edit_permission,
-    require_knowledge_base_read_permission,
-)
+from management.services.tag.projection import project_authorized_document_tags
+from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
 

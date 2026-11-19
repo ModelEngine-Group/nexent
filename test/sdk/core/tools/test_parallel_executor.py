@@ -1,11 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import contextvars
 import time
 from unittest.mock import patch
 
 import pytest
 
-from sdk.nexent.core.tools.parallel_executor import _parallel_executor, ParallelExecutorTool
-
+from sdk.nexent.core.tools.parallel_executor import (
+    ParallelExecutorTool,
+    _parallel_executor,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -210,9 +214,18 @@ class TestParallelExecutorTool:
             tool.forward(tasks=[], timeout=30)
             execute.assert_called_with([], timeout=30, max_workers=4)
 
-    @pytest.mark.parametrize("timeout", [0, -1, True, 1.5])
+    def test_fractional_configured_default_timeout(self):
+        tool = ParallelExecutorTool(default_timeout_seconds=0.25)
+        assert tool.inputs["timeout"]["default"] == 0.25
+        assert tool.inputs["timeout"]["type"] == "number"
+
+        result = tool.forward(tasks=[(_slow, {"seconds": 0.5})])
+
+        assert result == ["[task-0] Timed out after 0.25s."]
+
+    @pytest.mark.parametrize("timeout", [0, -1, True, "1.5", None, float("nan"), float("inf")])
     def test_invalid_configured_default_timeout(self, timeout):
-        with pytest.raises(ValueError, match="positive integer"):
+        with pytest.raises(ValueError, match="finite positive number"):
             ParallelExecutorTool(default_timeout_seconds=timeout)
 
     def test_forward_delegates_to_parallel_executor(self):

@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
+  title: SU同步全租户定时清理，手动清理明确选择租户
+  description: 全租户设置确认后事务保存；手动清理与游标限定所选租户。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - SU全租户权限、默认/混合值、原子保存及失败传播；OPS仅本租户。
+    - 手动清理目标租户、候选范围、游标不可跨租户复用及撤权拒绝。
+    - 前端SU确认/取消及失败保留、手动租户选择和续批固定，OPS保持。
+    reason: 沿用清理服务/仓库UT和前端组件证明局部合同，真实HTTP/浏览器边界复用D2/D4。
+    test_selectors:
+    - test/backend/services/trajectory/test_cleanup_schedule.py
+    - test/backend/services/trajectory/test_cleanup_schedule_repository.py
+    - test/backend/services/trajectory/test_cleanup.py
+    - frontend/tests/component/trajectorySchedule.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: SPEC changes/chat-trajectory-cleanup-scope；runtime责任域和自包含preparation保持；完整PG及部署/浏览器验收继续暂缓。

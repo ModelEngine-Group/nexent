@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Tests for management.services.northbound.service module.
+Tests for management.services.northbound module.
 
 This module tests the northbound-facing service layer functions including:
 - Streaming chat (start/stop)
@@ -120,17 +120,19 @@ consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
-db_client_mod = types.ModuleType("management.db.client")
+db_client_mod = types.ModuleType("infrastructure.rdb.client")
 db_client_mod.get_db_session = MagicMock()
 db_client_mod.as_dict = MagicMock()
-sys.modules["management.db.client"] = db_client_mod
+sys.modules["infrastructure.rdb.client"] = db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = db_client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 db_package = types.ModuleType("database")
 db_package.client = db_client_mod
@@ -189,13 +191,13 @@ services_package = types.ModuleType("services")
 services_package.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/services")]
 
 # Mock runtime_state_service
-runtime_state_service_mod = types.ModuleType("management.services.agent.run_state")
+runtime_state_service_mod = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_service_mod.runtime_state_service = MagicMock()
 runtime_state_service_mod.runtime_state_service.enabled = False
 runtime_state_service_mod.runtime_state_service.acquire_idempotency_async = AsyncMock(return_value=True)
 runtime_state_service_mod.runtime_state_service.release_idempotency_async = AsyncMock()
 runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = AsyncMock(return_value=1)
-sys.modules["management.services.agent.run_state"] = runtime_state_service_mod
+sys.modules["infrastructure.redis.run_state"] = runtime_state_service_mod
 
 # Mock agent_service
 agent_service_mod = types.ModuleType("management.services.agent.service")
@@ -208,7 +210,7 @@ runtime_proxy_mod.forward_agent_run = AsyncMock()
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 
-thread_lifecycle_mod = types.ModuleType("infrastructure.concurrency")
+thread_lifecycle_mod = types.ModuleType("management.thread_management")
 thread_lifecycle_mod.config_thread_manager = MagicMock()
 
 
@@ -219,7 +221,7 @@ async def _run_managed_test_task(_lane, _spec, func, *args, **kwargs):
 thread_lifecycle_mod.config_thread_manager.run = AsyncMock(
     side_effect=_run_managed_test_task
 )
-sys.modules["infrastructure.concurrency"] = thread_lifecycle_mod
+sys.modules["management.thread_management"] = thread_lifecycle_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("management.services.conversation.service")
@@ -295,7 +297,7 @@ consts_model_mod.ToolParamsRequest = ToolParamsRequestStub
 install_business_contract_stubs(consts_model_mod)
 
 # Now import the module under test
-from management.services.northbound import service as ns
+from management.services import northbound as ns
 
 
 class MockNorthboundContext:
@@ -1787,7 +1789,7 @@ class TestStopChatErrorHandling:
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
         with patch(
-            "management.services.northbound.service.forward_agent_stop",
+            "management.services.northbound.forward_agent_stop",
             new_callable=AsyncMock,
             return_value={"message": "stopped"},
         ):
@@ -1921,7 +1923,7 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_parse_s3_url_error(self):
         """Test that parse_s3_url ValueError is converted to ValueError."""
-        with patch("management.services.northbound.service.parse_s3_url", side_effect=ValueError("Parse error")):
+        with patch("management.services.northbound.parse_s3_url", side_effect=ValueError("Parse error")):
             with pytest.raises(ValueError) as exc_info:
                 ns._normalize_northbound_attachments(
                     ["s3://bucket/file.txt"],
@@ -1932,8 +1934,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_permission_error_invalid_url(self):
         """Test that PermissionError with invalid URL is converted to ValueError."""
-        with patch("management.services.northbound.service.parse_s3_url", return_value=("bucket", "path/file.txt")), \
-                patch("management.services.northbound.service.validate_urls_access",
+        with patch("management.services.northbound.parse_s3_url", return_value=("bucket", "path/file.txt")), \
+                patch("management.services.northbound.validate_urls_access",
                       side_effect=PermissionError("Invalid S3 URL format: bad")):
             with pytest.raises(ValueError) as exc_info:
                 ns._normalize_northbound_attachments(
@@ -1974,7 +1976,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_permission_denied(self):
         """Test that a generic PermissionError is re-raised as-is."""
         with patch(
-            "management.services.northbound.service.validate_urls_access",
+            "management.services.northbound.validate_urls_access",
             side_effect=PermissionError("Access denied: You don't have permission to access this file")
         ):
             with pytest.raises(PermissionError) as exc_info:
@@ -1983,12 +1985,12 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_s3_url_success(self):
         """Test successful normalization of an s3:// URL with assertions on collaborator calls."""
-        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.service.get_file_url", return_value={
+        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url, \
-                patch("management.services.northbound.service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2016,12 +2018,12 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_no_presigned_url(self):
         """Test that presigned_url is omitted when get_file_url returns no url."""
-        with patch("management.services.northbound.service.validate_urls_access"), \
-                patch("management.services.northbound.service.get_file_url", return_value={
+        with patch("management.services.northbound.validate_urls_access"), \
+                patch("management.services.northbound.get_file_url", return_value={
                     "success": True,
                     "url": None
                 }), \
-                patch("management.services.northbound.service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2031,8 +2033,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_relative_path(self):
         """Test support for attachments/xxx.md relative path format."""
-        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.service.get_file_url", return_value={
+        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2063,8 +2065,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_nexent_path(self):
         """Test support for nexent/xxx.md path format."""
-        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.service.get_file_url", return_value={
+        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2095,8 +2097,8 @@ class TestNormalizeAttachmentsErrorHandling:
 
     def test_normalize_attachments_absolute_path(self):
         """Test support for /nexent/xxx.md absolute path format."""
-        with patch("management.services.northbound.service.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.service.get_file_url", return_value={
+        with patch("management.services.northbound.validate_urls_access") as mock_validate, \
+                patch("management.services.northbound.get_file_url", return_value={
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url:
@@ -2207,10 +2209,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file.filename = "report.pdf"
 
         with patch(
-            "management.services.northbound.service.resolve_minio_upload_folder",
+            "management.services.northbound.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.service.upload_to_minio",
+            "management.services.northbound.upload_to_minio",
             AsyncMock(return_value=[{
                 "success": True,
                 "file_name": "report.pdf",
@@ -2257,10 +2259,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file.filename = "report.pdf"
 
         with patch(
-            "management.services.northbound.service.resolve_minio_upload_folder",
+            "management.services.northbound.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.service.upload_to_minio",
+            "management.services.northbound.upload_to_minio",
             AsyncMock(return_value=[{
                 "success": False,
                 "file_name": "report.pdf",
@@ -2286,10 +2288,10 @@ class TestNorthboundFileDescriptorAndUpload:
         mock_file2.filename = "image.png"
 
         with patch(
-            "management.services.northbound.service.resolve_minio_upload_folder",
+            "management.services.northbound.resolve_minio_upload_folder",
             return_value="attachments/user123"
         ), patch(
-            "management.services.northbound.service.upload_to_minio",
+            "management.services.northbound.upload_to_minio",
             AsyncMock(return_value=[
                 {
                     "success": True,

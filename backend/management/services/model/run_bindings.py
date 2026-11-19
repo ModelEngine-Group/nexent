@@ -5,7 +5,8 @@
 import logging
 from typing import Any, Dict, Optional
 
-from contracts.constants.environment import LLM_INCLUDE_LOGPROBS, MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
+from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
+from management.configuration.runtime import get_config_snapshot
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -102,7 +103,7 @@ def create_model_config_from_record(record, tenant_id=None):
 async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = [create_model_config_from_record(record) for record in records if record.get("model_id") is None or record.get("profile_schema_version") is not None]
-    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
+    extra_body = {"logprobs": True} if get_config_snapshot().get("LLM_INCLUDE_LOGPROBS") else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -116,8 +117,15 @@ async def create_model_config_list(tenant_id):
         return model_list
     main_snapshot = restore_model_snapshot(main_model_config, tenant_id)
     if main_snapshot is not None:
-        model_list.extend(_resolved_model_config(main_model_config, main_snapshot, cite_name=alias)
-                          for alias in ("main_model", "sub_model"))
+        model_list.extend(
+            _resolved_model_config(
+                main_model_config,
+                main_snapshot,
+                cite_name=alias,
+                extra_body=extra_body,
+            )
+            for alias in ("main_model", "sub_model")
+        )
     else:
         main_prompt_cache = resolve_prompt_cache_profile(main_model_config.get("model_factory"))
         for alias in ("main_model", "sub_model"):
@@ -134,7 +142,7 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
-def _resolved_model_config(record, snapshot, cite_name=None):
+def _resolved_model_config(record, snapshot, cite_name=None, extra_body=None):
     """Map one frozen outlet into the existing Agent configuration contract."""
     from management.services.model.outlet_projection import project_saved_outlet
 
@@ -160,4 +168,5 @@ def _resolved_model_config(record, snapshot, cite_name=None):
         tokenizer_family=snapshot.context_configuration.tokenizer_family,
         capacity_source=snapshot.context_configuration.capacity_source,
         capability_profile_version=snapshot.context_configuration.capability_profile_version,
+        extra_body=extra_body,
     )

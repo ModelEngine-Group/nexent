@@ -1,7 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authoritative account, membership and credential-state lookup for Gateway."""
 
-from infrastructure.service_identity.gateway import IdentityError
+from gateway.downstream.identity import IdentityError
+from contracts.roles import roles_from_record, primary_role
 
 
 def resolve_gateway_identity(query: dict) -> dict:
@@ -9,7 +10,7 @@ def resolve_gateway_identity(query: dict) -> dict:
     from management.db.identity.token import get_token_by_access_key
     from management.db.identity.user_tenant import get_user_tenant_by_user_id
     from management.db.identity.cas_session import is_cas_session_active
-    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID
+    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     kind = query.get("kind")
     token_id = None
@@ -25,7 +26,7 @@ def resolve_gateway_identity(query: dict) -> dict:
     if not isinstance(user_id, str) or not user_id:
         raise IdentityError("Missing account")
     account = get_account(user_id)
-    if not account or account.get("delete_flag", "N") != "N":
+    if not account or account.get("delete_flag") != "N":
         raise IdentityError("Account is unavailable")
     if kind == "session":
         if type(query.get("token_version")) is not int or query["token_version"] != account.get("token_version"):
@@ -35,12 +36,18 @@ def resolve_gateway_identity(query: dict) -> dict:
     membership = get_user_tenant_by_user_id(user_id)
     if not membership or membership.get("delete_flag") == "Y":
         raise IdentityError("No active membership")
-    role = str(membership.get("user_role") or "").upper()
+    try:
+        roles = roles_from_record(account)
+        role = primary_role(roles) if roles else ""
+    except ValueError:
+        raise IdentityError("Invalid account roles") from None
     tenant_id = membership.get("tenant_id")
     if kind == "session" and role == ASSET_OWNER_ROLE and not tenant_id:
         tenant_id = ASSET_OWNER_TENANT_ID
+    if kind == "session" and role == "SU" and not tenant_id:
+        tenant_id = DEFAULT_TENANT_ID
     if not tenant_id or not role:
         raise IdentityError("No active membership")
-    return {"user_id": user_id, "tenant_id": tenant_id, "role": role, "token_id": token_id,
+    return {"user_id": user_id, "tenant_id": tenant_id, "role": role, "roles": list(roles), "token_id": token_id,
             "kind": kind, "language": query.get("language", "zh"), "email": account.get("email", ""),
             "session_id": query.get("session_id") if kind == "session" else None}

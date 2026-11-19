@@ -16,6 +16,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 import pytest
 from unittest.mock import MagicMock
 
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.mcp import remote
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(remote, "get_config_snapshot", lambda: system_config_snapshot())
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -56,14 +64,16 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models
 db_models_mock = MagicMock()
@@ -190,7 +200,12 @@ def test_create_mcp_record_rejects_tenant_limit(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("management.db.mcp.remote._MCP_SERVICE_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        "management.db.mcp.remote.get_config_snapshot",
+        lambda: system_config_snapshot(MAX_MCP_SERVICES_PER_TENANT=1),
+    )
 
     class LimitReached(Exception):
         def __init__(self, message, **kwargs):

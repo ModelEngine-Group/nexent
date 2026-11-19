@@ -32,7 +32,12 @@ async def test_model_list_skips_failed_rows_and_restores_default_aliases(monkeyp
     monkeypatch.setattr(model_bindings, 'restore_model_snapshot', Mock(return_value=snapshot))
     monkeypatch.setattr(model_bindings, 'create_model_config_from_record', Mock(return_value='selected'))
     monkeypatch.setattr(model_bindings.tenant_config_manager, 'get_model_config', Mock(return_value=record))
-    monkeypatch.setattr(model_bindings, '_resolved_model_config', Mock(side_effect=lambda row, snap, cite_name=None: cite_name))
+    monkeypatch.setattr(model_bindings, 'get_config_snapshot', Mock(return_value={'LLM_INCLUDE_LOGPROBS': False}))
+    monkeypatch.setattr(
+        model_bindings,
+        '_resolved_model_config',
+        Mock(side_effect=lambda row, snap, cite_name=None, extra_body=None: cite_name),
+    )
     result = await model_bindings.create_model_config_list('tenant')
     assert result == ['selected', 'main_model', 'sub_model']
     model_bindings.create_model_config_from_record.assert_called_once_with(record)
@@ -128,6 +133,7 @@ async def test_failed_default_does_not_supply_legacy_aliases(monkeypatch):
     monkeypatch.setattr(model_bindings, "get_model_records", Mock(return_value=[selected]))
     monkeypatch.setattr(model_bindings, "create_model_config_from_record", Mock(return_value="selected"))
     monkeypatch.setattr(model_bindings.tenant_config_manager, "get_model_config", Mock(return_value={"model_id": 99, "profile_schema_version": None}))
+    monkeypatch.setattr(model_bindings, "get_config_snapshot", Mock(return_value={"LLM_INCLUDE_LOGPROBS": False}))
     restore = Mock(side_effect=AssertionError("failed default must not be restored"))
     monkeypatch.setattr(model_bindings, "restore_model_snapshot", restore)
     assert await model_bindings.create_model_config_list("tenant") == ["selected"]
@@ -142,6 +148,11 @@ async def test_missing_selected_snapshot_raises_domain_error_during_actual_confi
     from contracts.errors.exceptions import RunModelControlsError
 
     original = legacy.create_agent_config
+    monkeypatch.setattr(
+        legacy.preparation_compiler,
+        "get_config_snapshot",
+        Mock(return_value={"RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS": 120}),
+    )
     monkeypatch.setattr(legacy, "create_agent_config", partial(original,
         override_model_id=123 if explicit else None, runtime_model_records={}))
     with pytest.raises(RunModelControlsError) as caught:

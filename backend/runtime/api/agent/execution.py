@@ -15,9 +15,10 @@ from management.services.agent.service import run_agent_stream, stop_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
+from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
+from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from management.services.conversation.creator_execution import start_creation_turn
-from management.services.permission.identity.session import verify_internal_runtime_jwt
 
 agent_runtime_router = APIRouter(prefix="/agent")
 

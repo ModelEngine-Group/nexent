@@ -23,7 +23,7 @@ sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 # ---------------------------------------------------------------------------
 # Pre-mock heavy dependencies BEFORE importing the module under test.
 # This avoids side-effects such as Minio/S3 network calls that are triggered
-# during import time of management.db.client when auth_utils is imported.
+# during import time of infrastructure.rdb.client when auth_utils is imported.
 # ---------------------------------------------------------------------------
 
 # Stub `nexent.storage.*` modules early so unittest.mock.patch does not import the real
@@ -50,12 +50,12 @@ sys.modules["nexent.storage"] = _nexent_storage_mod
 sys.modules["nexent.storage.storage_client_factory"] = _nexent_storage_factory_mod
 sys.modules["nexent.storage.minio_config"] = _nexent_minio_config_mod
 
-# Stub `management.db.client` early so patch() can resolve the target even when
+# Stub `infrastructure.rdb.client` early so patch() can resolve the target even when
 # backend/ and backend/database/ are namespace packages (no __init__.py).
 _backend_mod = sys.modules.get("backend") or types.ModuleType("backend")
 _backend_mod.__path__ = [str(Path(__file__).resolve().parents[3] / "backend")]
 _backend_database_mod = types.ModuleType("backend.database")
-_backend_database_client_mod = types.ModuleType("management.db.client")
+_backend_database_client_mod = types.ModuleType("infrastructure.rdb.client")
 _backend_database_client_mod.MinioClient = MagicMock()
 
 _backend_mod.database = _backend_database_mod
@@ -63,9 +63,9 @@ _backend_database_mod.client = _backend_database_client_mod
 
 sys.modules["backend"] = _backend_mod
 sys.modules["backend.database"] = _backend_database_mod
-sys.modules["management.db.client"] = _backend_database_client_mod
+sys.modules["infrastructure.rdb.client"] = _backend_database_client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -73,7 +73,10 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+object_storage_stub = types.ModuleType("infrastructure.object_storage.client")
+object_storage_stub.MinioClient = MagicMock(return_value=minio_client_mock)
+object_storage_stub.minio_client = minio_client_mock
+sys.modules[object_storage_stub.__name__] = object_storage_stub
 
 # Stub out the database package hierarchy expected by auth_utils
 sys.modules['database'] = MagicMock()
@@ -82,9 +85,9 @@ sys.modules['database'] = MagicMock()
 mock_minio_class = MagicMock()
 mock_minio_class.return_value = MagicMock()
 
-# Provide a lightweight module for management.db.client with the attributes used
+# Provide a lightweight module for infrastructure.rdb.client with the attributes used
 # by auth_utils so that any direct attribute access works as expected.
-db_client_stub = types.ModuleType("management.db.client")
+db_client_stub = types.ModuleType("infrastructure.rdb.client")
 db_client_stub.MinioClient = mock_minio_class
 db_client_stub.get_db_session = MagicMock()
 db_client_stub.as_dict = MagicMock()
@@ -94,11 +97,11 @@ mock_minio_instance = MagicMock()
 db_client_stub.minio_client = mock_minio_instance
 db_client_stub.db_client = MagicMock()
 
-sys.modules['management.db.client'] = db_client_stub
+sys.modules['infrastructure.rdb.client'] = db_client_stub
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Stub management.db.identity.user_tenant to avoid real DB interactions
 sys.modules['management.db.identity.user_tenant'] = MagicMock(
@@ -943,6 +946,15 @@ class TestResolveTenantIdFromUserTenantRecord:
 
 
 class TestGetCurrentUserContext:
+    def test_trusted_gateway_preserves_all_roles_without_querying_membership(self, monkeypatch):
+        monkeypatch.setattr(au, "_gateway_identity", lambda *args: {
+            "user_id": "user-1", "tenant_id": "tenant-1", "roles": ["DEV", "OPS"],
+        })
+        def forbidden(uid):
+            raise AssertionError("Trusted identity was queried again")
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", forbidden)
+        assert au.get_current_user_context(None) == ("user-1", "tenant-1", ("DEV", "OPS"))
+
     """Tests for authenticated tenant and role resolution."""
 
     def test_returns_normalized_role_and_tenant(self, monkeypatch):
@@ -1061,6 +1073,8 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def active_local_account(monkeypatch):
+    # These units exercise the explicitly disabled-boundary session adapter.
+    monkeypatch.setattr("gateway.downstream.identity.enabled", lambda: False)
     # Credential/account-state integration is proved separately by native auth tests.
     # These legacy helpers are exercised with the deployed Gateway boundary disabled.
     from infrastructure.service_identity import gateway as gateway_boundary

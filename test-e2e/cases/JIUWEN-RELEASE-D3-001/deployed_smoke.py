@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 import httpx
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ConversationMessage, ModelRecord, UserTenant
 from nexent.core.agents.cores.smolagents import agent as nexent_agent
 from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig, ToolConfig

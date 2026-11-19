@@ -12,16 +12,14 @@ from contracts.errors.exceptions import (
     AgentDraftEditError, AppException, ForbiddenError, ResourceBindingError, SkillException, UnauthorizedError,
 )
 from contracts.skill import InstallSkillsRequest, SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
+from management.services.permission.identity.session import get_current_user_id
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.asset_owner import can_view_skill
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
-from management.services.skill.transfer import (
-    get_official_skills_with_status,
-    install_skills_from_zip_for_tenant,
-    update_skill_list,
-)
+from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 from management.utils.managed_read import managed_read
 from permissions.resource_access import resource_read_tenant
 
