@@ -88,6 +88,12 @@ export default function ResourceCard({
   const actionsInFooter =
     measuredSkill && repositoryView && footerLayout === "inline";
   const titleId = `resource-card-title-${useId()}`;
+  // Full-width opening brackets (【（《 etc.) carry a built-in left side
+  // bearing, so their ink starts right of the text box origin and the
+  // title looks indented against the subtitle line. Pull the ink back
+  // to keep the visible left edge identical across leading characters.
+  const titleStartsWithFullWidthBracket =
+    typeof title === "string" && /^[【（《「『〔［｛]/.test(title);
   const isInteractive = onClick !== undefined;
   const actionClassName = isInteractive
     ? "pointer-events-auto relative z-10"
@@ -178,7 +184,8 @@ export default function ResourceCard({
                       measuredMcp ||
                       measuredMineMcp ||
                       measuredSkill) &&
-                      "font-['HarmonyOS_Sans_SC',sans-serif] font-medium leading-6 tracking-normal text-[#191919]"
+                      "font-['HarmonyOS_Sans_SC',sans-serif] font-medium leading-6 tracking-normal text-[#191919]",
+                    titleStartsWithFullWidthBracket && "-ml-[0.2em]"
                   )}
                 >
                   {title}
