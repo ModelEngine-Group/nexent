@@ -120,10 +120,10 @@ class KnowledgeCollectionMetadataService:
                     raise Unavailable(operation_id=context.operation_id) from error
         return KnowledgeCollectionsDescribed(items=result)
 
-    async def describe(self, request, actor, *, context=None):
-        if type(request) is not KnowledgeCollectionsDescribe:
+    async def _describe(self, request, actor, schema, *, context=None):
+        if type(request) is not schema:
             raise InvalidInput()
-        request = KnowledgeCollectionsDescribe.model_validate(request.model_dump())
+        request = schema.model_validate(request.model_dump())
         context = context or OperationContext('knowledge-collection-describe-' + uuid4().hex, monotonic() + self.seconds)
         context, cancelled = cancellable_context(context)
         try:
@@ -141,3 +141,6 @@ class KnowledgeCollectionMetadataService:
             raise DeadlineExceeded(operation_id=context.operation_id) from error
         finally:
             cancelled.set()
+
+    async def describe(self, request, actor, *, context=None):
+        return await self._describe(request,actor,KnowledgeCollectionsDescribe,context=context)

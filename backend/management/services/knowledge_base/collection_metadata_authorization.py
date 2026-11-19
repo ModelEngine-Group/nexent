@@ -11,6 +11,7 @@ from contracts.roles import has_any_role, roles_from_record
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
+from management.services.knowledge_base.quota_authorization import quota_identity_roles
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from permissions.dac import ResourceAccessControl
@@ -32,6 +33,8 @@ def _scope(port, actor):
 
 
 def metadata_identity(identity, permissions, actor, view, *, context):
+    if view == 'usage':
+        return {}, quota_identity_roles(identity,actor,context=context), []
     _scope(identity, actor); _scope(permissions, actor)
     member, groups = KnowledgeFileAuthorization(identity, user_id=actor.user_id).identity(context=context)
     if member.get('tenant_id') != actor.tenant_id:
@@ -50,6 +53,8 @@ def metadata_identity(identity, permissions, actor, view, *, context):
 
 
 def metadata_permission(row, actor, roles, groups, view):
+    if view == 'usage':
+        return 'READ_ONLY' if row['tenant_id'] == actor.tenant_id or has_any_role(roles, {'SU','ASSET_OWNER'}) else None
     if view == 'inventory':
         return 'READ_ONLY' if row['tenant_id'] == actor.tenant_id else None
     access = ResourceAccessControl.check(Resource(resource_type='knowledge_base', resource_id=row['index_name'],
@@ -68,7 +73,8 @@ def authorize_collection_metadata(request, actor, *, context, ports=collection_m
     context.remaining()
     with ports(actor, context=context) as (identity, permissions, resources):
         _, roles, groups = metadata_identity(identity, permissions, actor, request.view, context=context)
-        records = resources(cross_tenant=has_any_role(roles, {'SU'}))
+        records = resources(cross_tenant=has_any_role(roles, {'SU'})
+                            or request.view == 'usage' and has_any_role(roles, {'ASSET_OWNER'}))
         _scope(records, actor)
         page = records.query(METADATA, RecordQuery(where=Comparison('knowledge_id', 'in', request.knowledge_ids)),
                              PageRequest(limit=len(request.knowledge_ids)), context=context)
@@ -84,7 +90,7 @@ def authorize_collection_metadata(request, actor, *, context, ports=collection_m
                 raise ScopeDenied()
             grants.append(KnowledgeCollectionGrant(knowledge_id=key, collection=row['index_name'],
                 resource_tenant_id=row['tenant_id'], revision=knowledge_search_revision(row),
-                embedding_model_id=row['embedding_model_id'] if type(row['embedding_model_id']) is int
+                embedding_model_id=row['embedding_model_id'] if request.view != 'usage' and type(row['embedding_model_id']) is int
                 and row['embedding_model_id'] > 0 else None))
         if len({(g.resource_tenant_id, g.collection) for g in grants}) != len(grants):
             raise ScopeDenied()

@@ -109,6 +109,13 @@ class KnowledgeService:
 
         return await KnowledgeCollectionMetadataService(self.client).describe(payload, actor, context=context)
 
+    async def collection_usage(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.collection_usage import (
+            KnowledgeCollectionUsageService,
+        )
+
+        return await KnowledgeCollectionUsageService(self.client).describe(payload,actor,context=context)
+
     async def inspect_base_deletion(self, payload, actor, *, context=None):
         return await KnowledgeBaseDeletionService(self.client).inspect(payload, actor, context=context)
 

@@ -52,7 +52,7 @@ class KnowledgeCollectionStatus(KnowledgeCollectionLookup):
 
 
 class KnowledgeCollectionsAuthorization(KnowledgeSearchAuthorization):
-    view: Literal['resources', 'inventory'] = 'resources'
+    view: Literal['resources', 'inventory', 'usage'] = 'resources'
 
 
 class KnowledgeCollectionsGrant(Contract):
@@ -66,9 +66,8 @@ class KnowledgeCollectionsGrant(Contract):
         return self
 
 
-class KnowledgeCollectionsDescribe(KnowledgeCollectionsAuthorization):
+class PinnedKnowledgeCollections(KnowledgeCollectionsAuthorization):
     expected_revisions: dict[int, str] = Field(min_length=1, max_length=100)
-    include_statistics: bool = False
 
     @model_validator(mode='after')
     def pinned_resources(self):
@@ -77,6 +76,44 @@ class KnowledgeCollectionsDescribe(KnowledgeCollectionsAuthorization):
             for value in self.expected_revisions.values()
         ):
             raise ValueError('Expected a SHA256 revision for every metadata resource')
+        return self
+
+
+class KnowledgeCollectionsDescribe(PinnedKnowledgeCollections):
+    view: Literal['resources', 'inventory'] = 'resources'
+    include_statistics: bool = False
+
+
+class KnowledgeCollectionsUsage(PinnedKnowledgeCollections):
+    view: Literal['usage'] = 'usage'
+
+
+class KnowledgeUsageMetrics(Contract):
+    record_count: int = Field(ge=0)
+    size_bytes: int = Field(ge=0)
+    source_count: int = Field(ge=0)
+
+
+class KnowledgeCollectionUsage(KnowledgeCollectionLookup):
+    present: bool
+    statistics: KnowledgeUsageMetrics | None = None
+    statistics_error: Literal['unavailable', 'conflict', 'not_found', 'unsupported', 'invalid_input'] | None = None
+
+    @model_validator(mode='after')
+    def consistent_statistics(self):
+        if (not self.present and (self.statistics is not None or self.statistics_error is not None)
+            or self.present and (self.statistics is None) == (self.statistics_error is None)):
+            raise ValueError('Usage requires either statistics or an explicit error for an existing collection')
+        return self
+
+
+class KnowledgeCollectionsUsageResult(Contract):
+    items: list[KnowledgeCollectionUsage] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode='after')
+    def distinct_knowledge(self):
+        if len({item.knowledge_id for item in self.items}) != len(self.items):
+            raise ValueError('Expected distinct collection usage')
         return self
 
 

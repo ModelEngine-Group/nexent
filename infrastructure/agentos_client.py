@@ -71,6 +71,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribed,
     KnowledgeCollectionsGrant,
     KnowledgeCollectionStatus,
+    KnowledgeCollectionsUsageResult,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
 from contracts.knowledge_sources import KnowledgeSourcesResult
@@ -90,6 +91,7 @@ _MODEL_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
 _KNOWLEDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
 _KNOWLEDGE_DEADLINE_SECONDS = 10.0
 _KNOWLEDGE_SEARCH_DEADLINE_SECONDS = 180.0
+_COLLECTION_USAGE_DEADLINE_SECONDS = 40.0
 _TOOL_DEADLINE_SECONDS = 600.0
 logger = logging.getLogger(__name__)
 _HOP_HEADERS = {
@@ -147,6 +149,11 @@ class AgentOSClient:
         return await self._knowledge_request(KnowledgeOperation.DESCRIBE_COLLECTIONS, payload,
                                              user_id, tenant_id, KnowledgeCollectionsDescribed)
 
+    async def knowledge_collection_usage(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.COLLECTION_USAGE,payload,
+                                             user_id,tenant_id,KnowledgeCollectionsUsageResult,
+                                             deadline_seconds=_COLLECTION_USAGE_DEADLINE_SECONDS)
+
     async def ensure_knowledge_collection(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.ENSURE_COLLECTION, payload, user_id, tenant_id, KnowledgeCollectionEnsured)
 
@@ -198,15 +205,16 @@ class AgentOSClient:
     async def inspect_knowledge_base(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.INSPECT_BASE, payload, user_id, tenant_id, KnowledgeBaseState)
 
-    async def _knowledge_request(self, operation, payload, user_id, tenant_id, schema):
+    async def _knowledge_request(self, operation, payload, user_id, tenant_id, schema, *, deadline_seconds=None):
+        seconds = _KNOWLEDGE_SEARCH_DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds
         try:
-            async with asyncio.timeout(_KNOWLEDGE_SEARCH_DEADLINE_SECONDS):
+            async with asyncio.timeout(seconds):
                 result = await self._post_json(operation, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
                 return self._validate_result(schema, result)
         except (TimeoutError, RuntimeServiceTimeoutError) as error:
             name = operation.name.lower()
             logger.warning("agentos_knowledge_%s_timeout phase=request threshold_seconds=%s exception_type=%s",
-                           name, _KNOWLEDGE_SEARCH_DEADLINE_SECONDS, type(error).__name__)
+                           name, seconds, type(error).__name__)
             raise RuntimeServiceTimeoutError(f"AgentOS knowledge {name} timed out") from error
 
     async def upload_knowledge_file(self, payload, user_id, tenant_id):

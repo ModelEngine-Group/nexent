@@ -8,7 +8,11 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.knowledge import KEY_TENANT_HARD_LIMIT_BYTES
-from contracts.roles import has_any_role, roles_from_record
+from contracts.roles import has_any_role
+from management.services.knowledge_base.quota_authorization import (
+    quota_identity_roles,
+    require_quota_scope,
+)
 from management.services.knowledge_base.quota_rules import (
     allocation_summary,
     hard_limit_values,
@@ -27,38 +31,8 @@ class TenantQuotaReader:
     def __init__(self, *, ports=tenant_quota_read_ports):
         self.ports = ports
 
-    @staticmethod
-    def _scope(port, actor, tenant):
-        scope = port.scope
-        if (
-            scope.service_role != "management"
-            or scope.system
-            or scope.resource_prefix
-            or scope.tenant_id != tenant
-            or scope.actor_id != actor.user_id
-        ):
-            raise ScopeDenied()
-
     def _authorize(self, identity, actor, tenant, context):
-        self._scope(identity, actor, actor.tenant_id)
-        rows = []
-        for dataset in ("cleanse_memberships", "cleanse_accounts"):
-            page = identity.query(
-                dataset,
-                RecordQuery(where=Comparison("user_id", "eq", actor.user_id)),
-                PageRequest(limit=2),
-                context=context,
-            )
-            if len(page.items) != 1 or page.next_cursor:
-                raise ScopeDenied()
-            rows.append(page.items[0])
-        member, account = rows
-        if member.get("tenant_id") != actor.tenant_id:
-            raise ScopeDenied()
-        try:
-            roles = roles_from_record(account)
-        except ValueError as error:
-            raise ScopeDenied() from error
+        roles = quota_identity_roles(identity, actor, context=context)
         if tenant != actor.tenant_id and not has_any_role(roles, {"SU", "ASSET_OWNER"}):
             raise ScopeDenied()
 
@@ -67,7 +41,7 @@ class TenantQuotaReader:
         with self.ports(actor, context=context) as (identity, open_records):
             self._authorize(identity, actor, tenant, context)
             records = open_records(tenant)
-            self._scope(records, actor, tenant)
+            require_quota_scope(records, actor, tenant)
 
             def config(key):
                 page = records.query(

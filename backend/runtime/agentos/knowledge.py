@@ -21,6 +21,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionEnsure,
     KnowledgeCollectionLookup,
     KnowledgeCollectionsDescribe,
+    KnowledgeCollectionsUsage,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppend
 from contracts.knowledge_sources import KnowledgeSources
@@ -74,6 +75,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.DESCRIBE_COLLECTIONS.value, include_in_schema=False)
     async def describe_collections(request: Request):
         return await dispatch(request, KnowledgeCollectionsDescribe, service.describe_collections, 200)
+
+    @router.post(KnowledgeOperation.COLLECTION_USAGE.value, include_in_schema=False)
+    async def collection_usage(request: Request):
+        return await dispatch(request, KnowledgeCollectionsUsage, service.collection_usage, 200)
 
     @router.post(KnowledgeOperation.APPEND_DOCUMENTS.value, include_in_schema=False)
     async def append_documents(request: Request):

@@ -445,3 +445,12 @@ Management 可调用 `AgentOSClient.list_knowledge_sources(KnowledgeSources(...)
 响应 `KnowledgeSourcesResult` 包含 knowledge_id、revision、present 和 sources。每项包含唯一 source_key、chunk_count，以及代表记录的 path_or_url、filename、file_size、create_time，后四项保留原JSON类型。缺物理集合返回present=false及空sources，读取错误显式报告。排序为物理分组count降序、key升序，最多1000组；这些计数不证明文件已发布或清理完成。当前默认30秒覆盖两次授权与受管I/O，超时504并停止后续读取，无重试。
 
 Infrastructure 的中立 `VectorStore.group` 负责命名空间条件、有限路径分组和样本投影。Runtime只冻结源展示字段，不把查询DSL传给外部调用者。公开 files、Northbound、上传重命名和本地标签资源证明已统一调用 Management 的 list_knowledge_files，源摘要只经此标准接口获取，不构造 VDB。Management 合并 SI 生命周期记录，通过精确只读 ObjectStore.stat 补读大小和源可用性，保留 chunks=[]。旧 include_chunks/msearch 列表及无人调用的异步读取包装已删除。普通接口的文档标签已由 Management 通过只读 RecordStore 装配，保持当前调用者租户隔离、原库绑定和排序规则；标签查询受10秒截止控制，展示失败保留原空 tags 行为。标签读取不新增 AgentOS 接口。
+
+
+### KnowledgeBase 集合用量
+
+`AgentOSClient.knowledge_collection_usage(KnowledgeCollectionsUsage(...), user_id, tenant_id)` 调用 `POST /internal/agentos/v1/knowledge/bases/collections/usage`，传 knowledge_ids 和 expected_revisions，最多100个资源。Runtime 通过原集合元数据回调的固定 `usage` 用途复查当前身份与资源映射，grant不绑定模型。原describe接口仍仅支持resources/inventory。
+
+响应 `KnowledgeCollectionsUsageResult.items` 保持请求顺序，每项给出knowledge_id、expected_revision、present。已有集合的statistics仅含record_count、source_count、size_bytes，或给出有限statistics_error；缺集合返回present=false，不附统计或错误。它不返回模型、源路径、正文、维度或provider细节。计数是物理观测，源文件配额仍以Management的COMMITTED ledger为准。
+
+该用途允许实际用户统计本租户全量KB，包含他人的PRIVATE KB；foreign仍只允许SU/ASSET_OWNER。它不授予正文、文件源或执行权限，普通读接口继续各自DAC。默认Runtime总预算30秒，客户端总截止40秒，不重试，客户端超时会关闭请求传输。Management公开配额usage/缓存和旧ES调用尚在迁移。
