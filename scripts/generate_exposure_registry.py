@@ -19,15 +19,8 @@ section, so the snapshot can never drift from the gate code:
   are **preserved as-is**: this generator owns the capability-gate section,
   it does not rewrite history.
 
-Fail-fast checks (all exit non-zero, all are commit-time — drift dies at
-the pull request, never at runtime):
-
-1. duplicate capability ids or duplicate method+path rows;
-2. an ``audit=True`` gate whose signature lacks the ``audit_hook`` dependency
-   (declared-but-missing audit is a review regression, not a warning);
-3. a declared gate route that collides with a preserved legacy row;
-4. the emitted file must parse and pass the same structural rules the
-   Gateway loader enforces (valid_path, converter support).
+Fail-fast at commit time: duplicate ids or rows, audit=True without the
+audit_hook dependency, collisions with preserved rows, forbidden path forms.
 
 Usage:
     python scripts/generate_exposure_registry.py            # regenerate
@@ -107,8 +100,7 @@ def _collect_gate_rows():
             if meta is None:
                 continue  # a gate without a declaration cannot be exposed
             capability = meta.capability_id
-            # Newer FastAPI embeds the router prefix into route.path already;
-            # only prepend when it is missing to stay prefix-invariant.
+            # route.path may already embed the router prefix.
             path = route.path if route.path.startswith(prefix) else prefix + route.path
             owner = _gate_service(route.endpoint.__module__)
             for method in sorted(route.methods - {"HEAD"}):
@@ -186,8 +178,7 @@ def main() -> int:
         return r["route_id"] == expected and "northbound_gates" in r.get("source", "")
 
     kept = [r for r in existing_rows if not _is_gate_row(r)]
-    # Collision checks run against the *preserved* rows only: our own rows
-    # from a previous run are excluded, so regeneration is idempotent.
+    # Check collisions against preserved rows only (idempotent regeneration).
     known_keys = {(r["method"], r["path"]): r["route_id"] for r in kept}
 
     gate_rows = _collect_gate_rows()

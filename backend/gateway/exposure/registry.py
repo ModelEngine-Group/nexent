@@ -104,8 +104,7 @@ def default_registry():
     if excluded:
         kept, removed = [], []
         for row in document["routes"]:
-            # capability ids exist on generated gate rows; a raw path match
-            # keeps the env usable for any northbound row
+            # match by capability_id, or raw path for non-gate rows
             if row.get("capability_id") in excluded or row["path"] in excluded:
                 removed.append(row["path"])
             else:
@@ -119,7 +118,7 @@ def default_registry():
                 len(removed),
                 ", ".join(sorted(set(removed))),
             )
-        # spelling aid: warn on ids that matched nothing (fail-visible, not fatal)
+        # warn on ids that matched nothing
         import difflib
         import logging
 

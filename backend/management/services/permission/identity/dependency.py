@@ -2,23 +2,11 @@
 
 """The single identity dependency for internal and northbound routes.
 
-One declaration replaces the four historical authentication spellings
-(manual ``await``, ``Header`` pass-through, self-wrapping helpers and
-``Depends``):
+    ctx: AuthenticatedIdentity = Depends(unified_identity)
 
-    async def delete_conversation(
-        conversation_id: int,
-        ctx: AuthenticatedIdentity = Depends(unified_identity),
-    ) -> dict:
-        ...
-
-The credential kind follows the same rule the gateway uses: a ``/nb`` path is
-an API-Key caller, everything else is a browser session. That single rule makes
-a route clone-able: the identical declaration resolves the partner credential
-on the northbound clone and the session on the internal route.
-
-Accounting comes for free: an API-Key request is recorded here, so business
-code never participates in usage accounting.
+The credential kind follows the gateway rule: ``/nb`` paths are API-Key
+callers, everything else a browser session. API-Key calls are usage
+accounted here, so business code never participates in accounting.
 """
 
 import logging
@@ -54,14 +42,8 @@ async def unified_identity(
     request: Request,
     authorization: Optional[str] = Header(None),
 ) -> AuthenticatedIdentity:
-    """Resolve the request principal through the single supported identity path.
-
-    The Gateway already verified the credential and bound the identity to the
-    request; ``authenticate_identity`` consumes that identity first and only
-    falls back to legacy self-verification when the gateway did not run.
-
-    Imports stay inside the function so importing the exposure mechanism does
-    not pull the credential, database and token stacks at module load.
+    """Resolve the principal via the gateway-bound identity, with a legacy
+    self-verification fallback. Late imports keep module load light.
     """
     from management.services.permission.identity.northbound import record_api_key_usage
     from management.services.permission.identity.session import authenticate_identity

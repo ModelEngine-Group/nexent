@@ -2,19 +2,10 @@
 
 """Route-level policy dependencies for the northbound gates.
 
-Two symmetric helpers, one per cross-cutting concern of the exposure design:
-
-* ``get_envelope`` — the two-state success envelope, injected as a dependency
-  and resolved from the request path so the same handler shape serves both
-  entrypoints with each one's published contract (§5.4).
-* ``audit_hook(capability_id)`` — records one security-audit entry for action
-  capabilities, including denied attempts, before any business work runs.
-  Best effort: an audit failure never blocks the request (§5.5).
-
-Usage accounting needs no gate-side declaration: ``unified_identity`` already
-accounts every authenticated API-Key call (fail-open), and chat-family routes
-keep their in-business accounting via the shared exclusion table — usage is
-never double-counted (§5.5).
+``northbound_envelope_factory`` builds the {message, data, requestId} success
+envelope; ``audit_hook(capability_id)`` records one security-audit entry for
+action capabilities, including denied attempts, fail-open. Usage accounting
+is inherited from ``unified_identity`` (API-Key calls, fail-open).
 """
 
 import logging
@@ -35,12 +26,7 @@ DENIED_STATUS_CODES = frozenset({401, 403})
 
 
 def northbound_envelope_factory(request: Request) -> Callable[[Any], Dict[str, Any]]:
-    """Return the envelope callable bound to this request's correlation id.
-
-    The northbound contract is ``{message, data, requestId}``; ``requestId``
-    comes from the request so a partner can correlate an error with the
-    server-side log of the same call.
-    """
+    """Envelope callable bound to this request's requestId."""
 
     def envelope(data: Any = None, message: str = "success") -> Dict[str, Any]:
         return northbound_envelope(data, get_request_id(request), message)
@@ -49,16 +35,11 @@ def northbound_envelope_factory(request: Request) -> Callable[[Any], Dict[str, A
 
 
 def audit_hook(capability_id: str):
-    """Build the route-level audit dependency for one action capability.
+    """Audit dependency for one action capability.
 
-    The hook runs after authentication and before the business function, so a
-    denied attempt (401/403) is recorded even though the business never ran —
-    which key probed which resource is the most valuable part of the trail.
-
-    The dependency returns an ``audit_recorder`` callable instead of recording
-    immediately: the gate handler passes it to ``record_outcome`` after the
-    business call, which stamps success or denied on the same entry. Both the
-    attempted write and the outcome write are fail-open.
+    Returns a recorder the handler calls with the outcome after the
+    business run, so denied attempts (401/403) leave a trail even though
+    the business never executed. Fail-open.
     """
 
     async def audit_recorder(

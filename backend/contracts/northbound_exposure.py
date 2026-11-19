@@ -2,38 +2,16 @@
 
 """Declarative northbound exposure annotation for service-side gates.
 
-A northbound gate declares its exposure facts where it lives — on the gate
-function itself. The annotation is inert at service runtime: importing the
-gate module changes nothing about how the service behaves. The single
-consumer is the offline generator
-(``scripts/generate_exposure_registry.py``), which scans gate modules,
-collects the declared capabilities, and compiles them into the Gateway
-exposure snapshot (``backend/gateway/exposure/registry.json``).
-
-Why an annotation instead of a sidecar manifest: path, methods and upstream
-are already facts of the gate code (router prefix + decorator + module
-location). The annotation only adds what code cannot express — the stable
-capability id, whether the action is audited, whether it is serving yet
-(dark launch) and the credential policy. Keeping the declaration on the
-gate removes the manifest↔code reconciliation surface entirely: a gate
-cannot drift from its declaration because they are one artefact.
+The annotation is inert at service runtime; the only consumer is the
+offline generator (``scripts/generate_exposure_registry.py``), which
+compiles the declarations into the Gateway exposure snapshot
+(``backend/gateway/exposure/registry.json``).
 
 Fields:
-    capability_id  Stable ``domain.action`` id (contract level, never
-                    renamed after release). The generator derives the
-                    deterministic route_id from it and the emergency
-                    exclusion env var addresses capabilities by this id.
-    audit          True for action capabilities: the gate signature must
-                    carry ``Depends(audit_hook(...))`` and the generator
-                    fails when it does not (declared-but-missing audit is
-                    a review regression, not a warning).
-    enabled        False = declared but not serving (dark launch): the
-                    gate code exists, the generator emits no registry row,
-                    the Gateway returns 404 indistinguishable from
-                    nonexistent.
-    auth           ``key`` (default) requires an API-Key credential,
-                    ``public`` maps to the anonymous credential policy
-                    (protocol endpoints such as agent-card discovery).
+    capability_id  Stable ``domain.action`` id; also the emergency-exclusion key.
+    audit          Action capability: the signature must carry audit_hook (checked).
+    enabled        False = dark launch: no registry row, gateway 404.
+    auth           ``key`` (default) or ``public`` (anonymous, e.g. agent-card).
 """
 
 from typing import Any, Callable, Optional
@@ -48,11 +26,10 @@ def nb_exposed(
     enabled: bool = True,
     auth: str = "key",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Mark a northbound gate with its exposure declaration.
+    """Attach the declaration to the gate; return the function unchanged.
 
-    Inert at runtime: only attaches :data:`nb_capability` metadata to the
-    decorated function and preserves its signature. The offline generator
-    reads the metadata; services never do.
+    Wrapping would break FastAPI's Depends resolution, which inspects the
+    endpoint signature. Only the generator reads the metadata.
     """
     if not capability_id or "." not in capability_id:
         raise ValueError(
@@ -67,9 +44,7 @@ def nb_exposed(
                 f"nb_exposed: {func.__module__}.{func.__qualname__} is already declared "
                 f"as {func.nb_capability.capability_id!r}"
             )
-        # Attach and return the original function untouched: FastAPI inspects
-        # the endpoint signature to resolve Depends(...), so any wrapper would
-        # strip the dependency chain. The annotation must stay inert.
+        # No wrapper: FastAPI resolves Depends from the original signature.
         func.nb_capability = NbCapability(  # type: ignore[attr-defined]
             capability_id=capability_id, audit=audit, enabled=enabled, auth=auth
         )
@@ -97,12 +72,7 @@ class NbCapability:
 
 
 def iter_declared_capabilities(router) -> list:
-    """Collect (declaration, route) pairs from a northbound gate router.
-
-    Yields every API route whose endpoint carries ``nb_capability``
-    metadata, preserving route order. Used by tests and the offline
-    generator's runtime-free verification helpers.
-    """
+    """Yield (declaration, route) for every route carrying the annotation."""
     pairs = []
     for route in router.routes:
         endpoint = getattr(route, "endpoint", None)
@@ -113,12 +83,7 @@ def iter_declared_capabilities(router) -> list:
 
 
 def gate_has_audit_dependency(func: Callable[..., Any]) -> bool:
-    """Best-effort static check that an audited gate actually audits.
-
-    Checks the decorated function's source signature for an ``audit``
-    keyword with a ``Depends(audit_hook(...))`` default — the review the
-    generator enforces for ``audit=True`` declarations.
-    """
+    """Whether the signature carries a Depends(audit_hook(...)) parameter."""
     import inspect
 
     try:

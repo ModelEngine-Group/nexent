@@ -65,9 +65,6 @@ async def nb_get_automation(
     return envelope(data)
 
 
-# ── Dark action gates: present in code, serving only after the reviewed ──
-# ── enabled=False declaration flips to True (regenerate the snapshot then) ──
-
 @nb_automation_router.post("/{task_id}/pause")
 @nb_exposed("automations.pause", audit=True, enabled=False)
 async def nb_pause_automation(

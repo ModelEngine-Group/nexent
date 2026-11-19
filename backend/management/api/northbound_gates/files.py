@@ -69,8 +69,7 @@ async def nb_get_storage_file(
     into the three-field error body (403 for foreign objects, 404 for
     missing ones in both modes).
     """
-    # Imported here so the gate module does not pull the MinIO stack at import
-    # time and stubbed test apps keep working.
+    # Late import: keeps the MinIO stack out of module import time.
     from management.services.file.access import check_file_access
     from management.services.file.service import get_file_stream_impl, get_file_url_impl
     from management.api.file.http import _build_object_etag, build_content_disposition_header
@@ -88,7 +87,7 @@ async def nb_get_storage_file(
         download_filename = filename
         if not download_filename:
             download_filename = object_name.split("/")[-1] if "/" in object_name else object_name
-        # Stream responses are envelope-exempt: pass the bytes through.
+        # Streams are envelope-exempt.
         return StreamingResponse(
             file_stream,
             media_type=content_type,
@@ -99,10 +98,7 @@ async def nb_get_storage_file(
             },
         )
 
-    # ignore mode: file information through the northbound envelope.
-    # Presigning never contacts storage, so absence must be checked here or a
-    # missing object would return 200 with a dead URL (same criterion as the
-    # stream branch: strict size lookup distinguishes missing from denied).
+    # Presigning skips storage, so check existence here to avoid 200 + dead URL.
     from management.db.file.attachment import get_file_size_from_minio_strict
 
     if get_file_size_from_minio_strict(object_name) is None:
